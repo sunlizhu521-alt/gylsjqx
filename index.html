@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>数据处理中心</title>
+  <meta name="description" content="本地运行的数据处理工具箱，支持 Excel、CSV、JSON 清洗、匹配、合并、比对和图表生成。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark">D</span>
+      <div>
+        <strong>数据处理中心</strong>
+        <span>本地文件处理工具台</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="icon-button" id="themeToggle" title="切换主题" aria-label="切换主题">
+        <span class="theme-icon">◐</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <span class="sidebar-label">工具</span>
+        <nav class="tool-list" id="toolList"></nav>
+      </div>
+      <div class="sidebar-note">
+        <strong>隐私模式</strong>
+        <span>文件只在浏览器内存中处理，不上传服务器。</span>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <div class="workspace-header">
+        <div>
+          <p class="eyebrow">Excel / CSV / JSON</p>
+          <h1 id="toolTitle">智能匹配</h1>
+          <p id="toolDesc">根据关键列把源表字段填入目标表。</p>
+        </div>
+        <div class="status-strip">
+          <span id="activeFileCount">0 个文件</span>
+          <span id="activeRowCount">0 行数据</span>
+        </div>
+      </div>
+
+      <div class="tool-panel" id="toolPanel"></div>
+
+      <section class="result-layout">
+        <div class="result-card">
+          <div class="result-header">
+            <div>
+              <h2>数据预览</h2>
+              <span id="previewMeta">等待上传文件</span>
+            </div>
+            <button class="secondary-button" id="downloadResult" disabled>下载结果</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="previewTable"></table>
+          </div>
+        </div>
+        <div class="result-card chart-card" id="chartCard">
+          <div class="result-header">
+            <div>
+              <h2>图表</h2>
+              <span>选择图表工具后生成</span>
+            </div>
+            <button class="secondary-button" id="downloadChart" disabled>保存图片</button>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="chartCanvas"></canvas>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <div class="toast-area" id="toastArea"></div>
+
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

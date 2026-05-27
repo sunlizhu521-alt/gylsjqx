@@ -1,0 +1,830 @@
+const tools = [
+  { id: 'match', icon: '⇄', title: '智能匹配', desc: '根据关键列把源表字段填入目标表。' },
+  { id: 'convert', icon: '↔', title: '格式转换', desc: 'Excel、CSV、JSON 互相转换。' },
+  { id: 'clean', icon: '✓', title: '数据清洗', desc: '去空格、去空行、去重、规整文本。' },
+  { id: 'merge', icon: '▦', title: '报表合并', desc: '多个文件或多个 Sheet 纵向合并。' },
+  { id: 'diff', icon: '≠', title: '数据比对', desc: '按主键识别新增、删除、修改。' },
+  { id: 'mask', icon: '◩', title: '敏感脱敏', desc: '手机号、身份证、姓名、邮箱快速遮蔽。' },
+  { id: 'split', icon: '÷', title: '数据拆分', desc: '按列值或固定行数拆成多个文件。' },
+  { id: 'formula', icon: 'ƒ', title: '派生列', desc: '用公式生成新字段，例如 [单价] * [数量]。' },
+  { id: 'pivot', icon: '∑', title: '分组汇总', desc: '按维度做求和、计数、平均、最大、最小。' },
+  { id: 'chart', icon: '▥', title: '图表生成', desc: '基于字段自动聚合并绘制图表。' },
+];
+
+const app = {
+  activeTool: 'match',
+  files: {},
+  result: null,
+  resultName: '处理结果.xlsx',
+  resultType: 'xlsx',
+  chart: null,
+};
+
+const $ = (id) => document.getElementById(id);
+
+document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
+  renderToolList();
+  switchTool('match');
+  $('downloadResult').addEventListener('click', downloadResult);
+  $('downloadChart').addEventListener('click', downloadChart);
+});
+
+function initTheme() {
+  const saved = localStorage.getItem('dpc-theme');
+  if (saved === 'dark') document.documentElement.dataset.theme = 'dark';
+  $('themeToggle').addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'dark' ? '' : 'dark';
+    if (next) document.documentElement.dataset.theme = next;
+    else delete document.documentElement.dataset.theme;
+    localStorage.setItem('dpc-theme', next || 'light');
+  });
+}
+
+function renderToolList() {
+  $('toolList').innerHTML = tools.map(tool => `
+    <button class="tool-tab" data-tool="${tool.id}">
+      <span class="tab-icon">${tool.icon}</span>
+      <span>${tool.title}</span>
+    </button>
+  `).join('');
+  document.querySelectorAll('.tool-tab').forEach(button => {
+    button.addEventListener('click', () => switchTool(button.dataset.tool));
+  });
+}
+
+function switchTool(id) {
+  app.activeTool = id;
+  app.files = {};
+  clearResult();
+  const tool = tools.find(item => item.id === id);
+  $('toolTitle').textContent = tool.title;
+  $('toolDesc').textContent = tool.desc;
+  document.querySelectorAll('.tool-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tool === id));
+  $('chartCard').classList.toggle('hidden', id !== 'chart');
+  renderToolPanel(id);
+  updateStatus();
+}
+
+function renderToolPanel(id) {
+  const renderers = {
+    match: renderMatchPanel,
+    convert: renderConvertPanel,
+    clean: renderCleanPanel,
+    merge: renderMergePanel,
+    diff: renderDiffPanel,
+    mask: renderMaskPanel,
+    split: renderSplitPanel,
+    formula: renderFormulaPanel,
+    pivot: renderPivotPanel,
+    chart: renderChartPanel,
+  };
+  $('toolPanel').innerHTML = `<div class="tool-grid">${renderers[id]()}</div>`;
+  bindUploads();
+  bindActions(id);
+}
+
+function fileDropHTML(key, label, accept = '.xlsx,.xls,.csv,.json', multiple = false) {
+  return `
+    <label class="file-drop" data-upload="${key}">
+      <span>
+        <strong>${label}</strong>
+        拖拽文件到这里，或 <em>点击选择</em>
+        <span class="file-name" id="${key}Name">未选择文件</span>
+      </span>
+      <input type="file" data-input="${key}" accept="${accept}" ${multiple ? 'multiple' : ''} />
+    </label>
+  `;
+}
+
+function renderMatchPanel() {
+  return `
+    ${fileDropHTML('source', '源数据表')}
+    ${fileDropHTML('target', '目标数据表')}
+    ${sheetField('sourceSheet', '源表 Sheet')}
+    ${sheetField('targetSheet', '目标表 Sheet')}
+    ${selectField('sourceKey', '源表匹配列')}
+    ${selectField('targetKey', '目标表匹配列')}
+    ${selectField('sourceFill', '源表填充列')}
+    ${selectField('targetFill', '目标表写入列')}
+    <div class="button-row"><button class="primary-button" id="runAction">执行匹配</button></div>
+  `;
+}
+
+function renderConvertPanel() {
+  return `
+    ${fileDropHTML('main', '上传待转换文件', '.xlsx,.xls,.csv,.json')}
+    ${sheetField('mainSheet', '选择 Sheet')}
+    <label class="field"><span>目标格式</span><select id="targetFormat"><option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV (.csv)</option><option value="json">JSON (.json)</option></select></label>
+    <div class="button-row"><button class="primary-button" id="runAction">转换并下载</button></div>
+  `;
+}
+
+function renderCleanPanel() {
+  return `
+    ${fileDropHTML('main', '上传待清洗文件', '.xlsx,.xls,.csv')}
+    ${sheetField('mainSheet', '选择 Sheet')}
+    <label class="field"><span>清洗规则</span><select id="cleanRules" multiple size="5"><option value="trim" selected>去除首尾空格</option><option value="blankRows" selected>删除空行</option><option value="duplicateRows">删除重复行</option><option value="spaces">合并多余空格</option><option value="newlines">去除换行符</option></select></label>
+    <div class="button-row"><button class="primary-button" id="runAction">执行清洗</button></div>
+  `;
+}
+
+function renderMergePanel() {
+  return `
+    ${fileDropHTML('many', '上传多个表格', '.xlsx,.xls,.csv', true)}
+    <label class="field"><span>合并方式</span><select id="mergeMode"><option value="first">每个文件第一个 Sheet</option><option value="all">合并所有 Sheet</option></select></label>
+    <label class="field"><span>文件来源列</span><select id="mergeSource"><option value="yes">添加来源列</option><option value="no">不添加</option></select></label>
+    <div class="button-row"><button class="primary-button" id="runAction">执行合并</button></div>
+  `;
+}
+
+function renderDiffPanel() {
+  return `
+    ${fileDropHTML('old', '旧版数据')}
+    ${fileDropHTML('fresh', '新版数据')}
+    ${sheetField('oldSheet', '旧版 Sheet')}
+    ${sheetField('freshSheet', '新版 Sheet')}
+    ${selectField('diffKey', '主键列')}
+    <div class="button-row"><button class="primary-button" id="runAction">执行比对</button></div>
+  `;
+}
+
+function renderMaskPanel() {
+  return `
+    ${fileDropHTML('main', '上传待脱敏文件', '.xlsx,.xls,.csv')}
+    ${sheetField('mainSheet', '选择 Sheet')}
+    ${selectField('maskColumn', '脱敏字段')}
+    <label class="field"><span>脱敏类型</span><select id="maskType"><option value="phone">手机号</option><option value="idcard">身份证</option><option value="name">姓名</option><option value="email">邮箱</option><option value="keepFirst">仅保留首字符</option></select></label>
+    <div class="button-row"><button class="primary-button" id="runAction">一键脱敏</button></div>
+  `;
+}
+
+function renderSplitPanel() {
+  return `
+    ${fileDropHTML('main', '上传待拆分文件', '.xlsx,.xls,.csv')}
+    ${sheetField('mainSheet', '选择 Sheet')}
+    <label class="field"><span>拆分方式</span><select id="splitMode"><option value="column">按列值拆分</option><option value="rows">按固定行数拆分</option></select></label>
+    ${selectField('splitColumn', '拆分依据列')}
+    <label class="field"><span>每个文件最大行数</span><input id="splitRows" type="number" min="1" value="1000" /></label>
+    <div class="button-row"><button class="primary-button" id="runAction">拆分并打包</button></div>
+  `;
+}
+
+function renderFormulaPanel() {
+  return `
+    ${fileDropHTML('main', '上传待计算文件', '.xlsx,.xls,.csv')}
+    ${sheetField('mainSheet', '选择 Sheet')}
+    <label class="field"><span>新列名称</span><input id="formulaName" value="新派生列" /></label>
+    <label class="field wide"><span>计算公式</span><input id="formulaExpr" placeholder="例如：[单价] * [数量]，或 [省份] + [城市]" /></label>
+    <div class="button-row"><button class="primary-button" id="runAction">生成派生列</button></div>
+  `;
+}
+
+function renderPivotPanel() {
+  return `
+    ${fileDropHTML('main', '上传待汇总文件', '.xlsx,.xls,.csv')}
+    ${sheetField('mainSheet', '选择 Sheet')}
+    ${selectField('groupColumn', '分组列')}
+    ${selectField('valueColumn', '数值列')}
+    <label class="field"><span>聚合方式</span><select id="aggType"><option value="sum">求和</option><option value="count">计数</option><option value="avg">平均值</option><option value="max">最大值</option><option value="min">最小值</option></select></label>
+    <div class="button-row"><button class="primary-button" id="runAction">生成汇总表</button></div>
+  `;
+}
+
+function renderChartPanel() {
+  return `
+    ${fileDropHTML('main', '上传图表数据', '.xlsx,.xls,.csv')}
+    ${sheetField('mainSheet', '选择 Sheet')}
+    <label class="field"><span>图表类型</span><select id="chartType"><option value="bar">柱状图</option><option value="line">折线图</option><option value="pie">饼图</option><option value="doughnut">环形图</option></select></label>
+    ${selectField('xColumn', '分类列')}
+    ${selectField('yColumn', '数值列')}
+    <div class="button-row"><button class="primary-button" id="runAction">生成图表</button></div>
+  `;
+}
+
+function sheetField(id, label) {
+  return `<label class="field"><span>${label}</span><select id="${id}"></select></label>`;
+}
+
+function selectField(id, label) {
+  return `<label class="field"><span>${label}</span><select id="${id}"></select></label>`;
+}
+
+function bindUploads() {
+  document.querySelectorAll('[data-upload]').forEach(zone => {
+    const key = zone.dataset.upload;
+    const input = zone.querySelector('input');
+    zone.addEventListener('dragover', event => {
+      event.preventDefault();
+      zone.classList.add('drag');
+    });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+    zone.addEventListener('drop', event => {
+      event.preventDefault();
+      zone.classList.remove('drag');
+      if (event.dataTransfer.files.length) handleFiles(key, Array.from(event.dataTransfer.files));
+    });
+    input.addEventListener('change', () => {
+      if (input.files.length) handleFiles(key, Array.from(input.files));
+      input.value = '';
+    });
+  });
+}
+
+function bindActions(id) {
+  const button = $('runAction');
+  if (!button) return;
+  const handlers = {
+    match: runMatch,
+    convert: runConvert,
+    clean: runClean,
+    merge: runMerge,
+    diff: runDiff,
+    mask: runMask,
+    split: runSplit,
+    formula: runFormula,
+    pivot: runPivot,
+    chart: runChart,
+  };
+  button.addEventListener('click', handlers[id]);
+}
+
+async function handleFiles(key, files) {
+  try {
+    const loaded = [];
+    for (const file of files) {
+      loaded.push(await loadFile(file));
+    }
+    app.files[key] = key === 'many' ? loaded : loaded[0];
+    $(key + 'Name').textContent = files.map(file => file.name).join('、');
+    updateDependentFields();
+    previewCurrentInput();
+    updateStatus();
+    toast(`已读取 ${files.length} 个文件`, 'success');
+  } catch (error) {
+    toast(`文件读取失败：${error.message}`, 'error');
+  }
+}
+
+async function loadFile(file) {
+  if (file.name.toLowerCase().endsWith('.json')) {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const rows = Array.isArray(data) ? data : [data];
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'JSON');
+    return { file, workbook: wb };
+  }
+  const data = await file.arrayBuffer();
+  const workbook = XLSX.read(new Uint8Array(data), { type: 'array' });
+  return { file, workbook };
+}
+
+function updateDependentFields() {
+  const f = app.files;
+  fillSheets('sourceSheet', f.source);
+  fillSheets('targetSheet', f.target);
+  fillSheets('mainSheet', f.main);
+  fillSheets('oldSheet', f.old);
+  fillSheets('freshSheet', f.fresh);
+  refreshColumns();
+  ['sourceSheet', 'targetSheet', 'mainSheet', 'oldSheet', 'freshSheet'].forEach(id => {
+    const el = $(id);
+    if (el) el.onchange = () => {
+      refreshColumns();
+      previewCurrentInput();
+    };
+  });
+}
+
+function fillSheets(id, item) {
+  const el = $(id);
+  if (!el) return;
+  const sheets = item ? item.workbook.SheetNames : [];
+  el.innerHTML = sheets.map(name => `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+}
+
+function refreshColumns() {
+  const tool = app.activeTool;
+  if (tool === 'match') {
+    fillColumns('sourceKey', app.files.source, $('sourceSheet')?.value);
+    fillColumns('sourceFill', app.files.source, $('sourceSheet')?.value);
+    fillColumns('targetKey', app.files.target, $('targetSheet')?.value);
+    fillColumns('targetFill', app.files.target, $('targetSheet')?.value);
+  }
+  if (['convert', 'clean', 'mask', 'split', 'formula', 'pivot', 'chart'].includes(tool)) {
+    const item = app.files.main;
+    const sheet = $('mainSheet')?.value;
+    ['maskColumn', 'splitColumn', 'groupColumn', 'valueColumn', 'xColumn', 'yColumn'].forEach(id => fillColumns(id, item, sheet));
+  }
+  if (tool === 'diff') {
+    fillColumns('diffKey', app.files.fresh || app.files.old, $('freshSheet')?.value || $('oldSheet')?.value);
+  }
+}
+
+function fillColumns(id, item, sheetName) {
+  const el = $(id);
+  if (!el) return;
+  const headers = item && sheetName ? getHeaders(item.workbook, sheetName) : [];
+  el.innerHTML = headers.map(name => `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+}
+
+function previewCurrentInput() {
+  let item = app.files.main || app.files.target || app.files.fresh || app.files.source || app.files.old;
+  if (!item && Array.isArray(app.files.many)) item = app.files.many[0];
+  if (!item) return renderTable([], []);
+  const sheet = resolveSheet(item, $('mainSheet')?.value || $('targetSheet')?.value || $('freshSheet')?.value || $('sourceSheet')?.value || $('oldSheet')?.value);
+  const data = getRows(item.workbook, sheet);
+  renderTable(getHeaders(item.workbook, sheet), data);
+  $('previewMeta').textContent = `${item.file.name} / ${sheet} / ${data.length} 行`;
+  $('activeRowCount').textContent = `${data.length} 行数据`;
+}
+
+function requireFile(key, label) {
+  const item = app.files[key];
+  if (!item || (Array.isArray(item) && item.length === 0)) {
+    toast(`请先上传${label}`, 'error');
+    throw new Error('missing file');
+  }
+  return item;
+}
+
+function runMatch() {
+  try {
+    const source = requireFile('source', '源数据表');
+    const target = requireFile('target', '目标数据表');
+    const srcSheet = $('sourceSheet').value;
+    const tgtSheet = $('targetSheet').value;
+    const srcKey = $('sourceKey').value;
+    const tgtKey = $('targetKey').value;
+    const srcFill = $('sourceFill').value;
+    const tgtFill = $('targetFill').value;
+    const sourceRows = getRows(source.workbook, srcSheet);
+    const targetRows = getRows(target.workbook, tgtSheet).map(row => ({ ...row }));
+    const index = new Map(sourceRows.map(row => [String(row[srcKey] ?? '').trim(), row]));
+    let matched = 0;
+    targetRows.forEach(row => {
+      const found = index.get(String(row[tgtKey] ?? '').trim());
+      if (found) {
+        row[tgtFill] = found[srcFill] ?? '';
+        matched += 1;
+      }
+    });
+    setWorkbookResult(targetRows, [...new Set([...getHeaders(target.workbook, tgtSheet), tgtFill])], `${baseName(target.file.name)}_匹配结果.xlsx`);
+    toast(`匹配完成：${matched}/${targetRows.length} 行命中`, 'success');
+  } catch (_) {}
+}
+
+function runConvert() {
+  try {
+    const item = requireFile('main', '待转换文件');
+    const sheet = $('mainSheet').value;
+    const format = $('targetFormat').value;
+    const ws = item.workbook.Sheets[sheet];
+    if (format === 'csv') {
+      setRawResult('\ufeff' + XLSX.utils.sheet_to_csv(ws), `${baseName(item.file.name)}.csv`, 'csv');
+    } else if (format === 'json') {
+      setRawResult(JSON.stringify(XLSX.utils.sheet_to_json(ws, { defval: '' }), null, 2), `${baseName(item.file.name)}.json`, 'json');
+    } else {
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, sheet);
+      setWorkbookObjectResult(wb, `${baseName(item.file.name)}.xlsx`);
+    }
+    renderTable(getHeaders(item.workbook, sheet), getRows(item.workbook, sheet));
+    toast('转换结果已准备好', 'success');
+  } catch (_) {}
+}
+
+function runClean() {
+  try {
+    const item = requireFile('main', '待清洗文件');
+    const sheet = $('mainSheet').value;
+    const headers = getHeaders(item.workbook, sheet);
+    const rules = Array.from($('cleanRules').selectedOptions).map(opt => opt.value);
+    let rows = getRows(item.workbook, sheet).map(row => {
+      const next = {};
+      headers.forEach(header => {
+        let value = row[header];
+        if (typeof value === 'string') {
+          if (rules.includes('trim')) value = value.trim();
+          if (rules.includes('spaces')) value = value.replace(/\s+/g, ' ');
+          if (rules.includes('newlines')) value = value.replace(/[\r\n]+/g, ' ');
+        }
+        next[header] = value ?? '';
+      });
+      return next;
+    });
+    if (rules.includes('blankRows')) rows = rows.filter(row => headers.some(header => String(row[header] ?? '').trim() !== ''));
+    if (rules.includes('duplicateRows')) {
+      const seen = new Set();
+      rows = rows.filter(row => {
+        const key = JSON.stringify(headers.map(header => row[header]));
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+    setWorkbookResult(rows, headers, `${baseName(item.file.name)}_清洗结果.xlsx`);
+    toast(`清洗完成：剩余 ${rows.length} 行`, 'success');
+  } catch (_) {}
+}
+
+async function runMerge() {
+  try {
+    const items = requireFile('many', '多个表格');
+    const mode = $('mergeMode').value;
+    const addSource = $('mergeSource').value === 'yes';
+    const rows = [];
+    items.forEach(item => {
+      const sheets = mode === 'all' ? item.workbook.SheetNames : [item.workbook.SheetNames[0]];
+      sheets.forEach(sheet => {
+        getRows(item.workbook, sheet).forEach(row => {
+          rows.push(addSource ? { 来源文件: item.file.name, 来源Sheet: sheet, ...row } : row);
+        });
+      });
+    });
+    const headers = collectHeaders(rows);
+    setWorkbookResult(rows, headers, '合并结果.xlsx');
+    toast(`合并完成：${items.length} 个文件，${rows.length} 行`, 'success');
+  } catch (_) {}
+}
+
+function runDiff() {
+  try {
+    const oldItem = requireFile('old', '旧版数据');
+    const freshItem = requireFile('fresh', '新版数据');
+    const oldSheet = $('oldSheet').value;
+    const freshSheet = $('freshSheet').value;
+    const key = $('diffKey').value;
+    const oldRows = getRows(oldItem.workbook, oldSheet);
+    const freshRows = getRows(freshItem.workbook, freshSheet);
+    const headers = [...new Set([...getHeaders(oldItem.workbook, oldSheet), ...getHeaders(freshItem.workbook, freshSheet)])];
+    const oldIndex = new Map(oldRows.map(row => [String(row[key] ?? ''), row]));
+    const freshIndex = new Map(freshRows.map(row => [String(row[key] ?? ''), row]));
+    const result = [];
+    freshRows.forEach(row => {
+      const oldRow = oldIndex.get(String(row[key] ?? ''));
+      if (!oldRow) {
+        result.push({ 差异类型: '新增', ...row });
+        return;
+      }
+      const changed = headers.some(header => String(row[header] ?? '') !== String(oldRow[header] ?? ''));
+      if (changed) result.push({ 差异类型: '修改', ...row });
+    });
+    oldRows.forEach(row => {
+      if (!freshIndex.has(String(row[key] ?? ''))) result.push({ 差异类型: '删除', ...row });
+    });
+    setWorkbookResult(result, ['差异类型', ...headers], '差异报告.xlsx');
+    renderTable(['差异类型', ...headers], result, row => {
+      if (row.差异类型 === '新增') return 'row-added';
+      if (row.差异类型 === '删除') return 'row-removed';
+      if (row.差异类型 === '修改') return 'row-changed';
+      return '';
+    });
+    toast(`比对完成：发现 ${result.length} 条差异`, 'success');
+  } catch (_) {}
+}
+
+function runMask() {
+  try {
+    const item = requireFile('main', '待脱敏文件');
+    const sheet = $('mainSheet').value;
+    const col = $('maskColumn').value;
+    const type = $('maskType').value;
+    const headers = getHeaders(item.workbook, sheet);
+    const rows = getRows(item.workbook, sheet).map(row => ({ ...row, [col]: maskValue(row[col], type) }));
+    setWorkbookResult(rows, headers, `${baseName(item.file.name)}_脱敏结果.xlsx`);
+    toast('脱敏完成', 'success');
+  } catch (_) {}
+}
+
+async function runSplit() {
+  try {
+    const item = requireFile('main', '待拆分文件');
+    if (typeof JSZip === 'undefined') {
+      toast('JSZip 加载失败，无法打包', 'error');
+      return;
+    }
+    const sheet = $('mainSheet').value;
+    const headers = getHeaders(item.workbook, sheet);
+    const rows = getRows(item.workbook, sheet);
+    const zip = new JSZip();
+    const chunks = {};
+    if ($('splitMode').value === 'column') {
+      const col = $('splitColumn').value;
+      rows.forEach(row => {
+        const key = sanitizeFileName(String(row[col] || '空值'));
+        if (!chunks[key]) chunks[key] = [];
+        chunks[key].push(row);
+      });
+    } else {
+      const size = Math.max(1, Number($('splitRows').value) || 1000);
+      rows.forEach((row, index) => {
+        const key = `第${Math.floor(index / size) + 1}批`;
+        if (!chunks[key]) chunks[key] = [];
+        chunks[key].push(row);
+      });
+    }
+    Object.entries(chunks).forEach(([name, chunkRows]) => {
+      const wb = rowsToWorkbook(chunkRows, headers, '数据');
+      const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      zip.file(`${name}.xlsx`, out);
+    });
+    const blob = await zip.generateAsync({ type: 'blob' });
+    app.result = blob;
+    app.resultName = `${baseName(item.file.name)}_拆分结果.zip`;
+    app.resultType = 'zip';
+    $('downloadResult').disabled = false;
+    renderTable(headers, rows);
+    $('previewMeta').textContent = `已拆分为 ${Object.keys(chunks).length} 个文件`;
+    toast(`拆分完成：${Object.keys(chunks).length} 个文件`, 'success');
+  } catch (_) {}
+}
+
+function runFormula() {
+  try {
+    const item = requireFile('main', '待计算文件');
+    const sheet = $('mainSheet').value;
+    const headers = getHeaders(item.workbook, sheet);
+    const name = $('formulaName').value.trim() || '新派生列';
+    const expr = $('formulaExpr').value.trim();
+    if (!expr) {
+      toast('请输入计算公式', 'error');
+      return;
+    }
+    const rows = getRows(item.workbook, sheet).map(row => {
+      const next = { ...row };
+      next[name] = evaluateFormula(row, headers, expr);
+      return next;
+    });
+    setWorkbookResult(rows, [...new Set([...headers, name])], `${baseName(item.file.name)}_派生列.xlsx`);
+    toast('派生列生成完成', 'success');
+  } catch (_) {}
+}
+
+function runPivot() {
+  try {
+    const item = requireFile('main', '待汇总文件');
+    const sheet = $('mainSheet').value;
+    const groupCol = $('groupColumn').value;
+    const valueCol = $('valueColumn').value;
+    const agg = $('aggType').value;
+    const groups = {};
+    getRows(item.workbook, sheet).forEach(row => {
+      const key = String(row[groupCol] || '空值').trim();
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(row);
+    });
+    const metric = `${valueCol}_${aggLabel(agg)}`;
+    const rows = Object.entries(groups).map(([key, groupRows]) => {
+      const nums = groupRows.map(row => Number(row[valueCol])).filter(num => !Number.isNaN(num));
+      return { [groupCol]: key, [metric]: aggregate(nums, groupRows.length, agg) };
+    }).sort((a, b) => String(a[groupCol]).localeCompare(String(b[groupCol]), 'zh-CN'));
+    setWorkbookResult(rows, [groupCol, metric], `${baseName(item.file.name)}_分组汇总.xlsx`);
+    toast(`汇总完成：${rows.length} 个分组`, 'success');
+  } catch (_) {}
+}
+
+function runChart() {
+  try {
+    const item = requireFile('main', '图表数据');
+    if (typeof Chart === 'undefined') {
+      toast('Chart.js 加载失败，无法生成图表', 'error');
+      return;
+    }
+    const sheet = $('mainSheet').value;
+    const xCol = $('xColumn').value;
+    const yCol = $('yColumn').value;
+    const chartType = $('chartType').value;
+    const summary = {};
+    getRows(item.workbook, sheet).forEach(row => {
+      const label = String(row[xCol] || '未分类').trim();
+      const value = Number(row[yCol]);
+      summary[label] = (summary[label] || 0) + (Number.isNaN(value) ? 0 : value);
+    });
+    const top = Object.entries(summary)
+      .map(([label, value]) => ({ label, value: Number(value.toFixed(2)) }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 30);
+    if (app.chart) app.chart.destroy();
+    app.chart = new Chart($('chartCanvas'), {
+      type: chartType,
+      data: {
+        labels: top.map(item => item.label),
+        datasets: [{
+          label: `${yCol} 汇总`,
+          data: top.map(item => item.value),
+          backgroundColor: chartType === 'bar' || chartType === 'line' ? 'rgba(37, 99, 235, .72)' : palette(top.length),
+          borderColor: chartType === 'line' ? '#2563eb' : '#fff',
+          borderWidth: 2,
+          tension: .25,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: chartType === 'pie' || chartType === 'doughnut' } },
+      },
+    });
+    $('downloadChart').disabled = false;
+    renderTable([xCol, yCol], top.map(item => ({ [xCol]: item.label, [yCol]: item.value })));
+    $('previewMeta').textContent = `图表数据：${top.length} 个分类`;
+    toast('图表已生成', 'success');
+  } catch (_) {}
+}
+
+function setWorkbookResult(rows, headers, filename) {
+  setWorkbookObjectResult(rowsToWorkbook(rows, headers, '结果'), filename);
+  renderTable(headers, rows);
+  $('previewMeta').textContent = `${rows.length} 行 / ${headers.length} 列`;
+  $('activeRowCount').textContent = `${rows.length} 行数据`;
+}
+
+function setWorkbookObjectResult(wb, filename) {
+  app.result = wb;
+  app.resultName = filename;
+  app.resultType = 'xlsx';
+  $('downloadResult').disabled = false;
+}
+
+function setRawResult(content, filename, type) {
+  app.result = content;
+  app.resultName = filename;
+  app.resultType = type;
+  $('downloadResult').disabled = false;
+}
+
+function clearResult() {
+  app.result = null;
+  app.resultName = '处理结果.xlsx';
+  app.resultType = 'xlsx';
+  $('downloadResult').disabled = true;
+  $('downloadChart').disabled = true;
+  $('previewTable').innerHTML = '';
+  $('previewMeta').textContent = '等待上传文件';
+  if (app.chart) {
+    app.chart.destroy();
+    app.chart = null;
+  }
+}
+
+function downloadResult() {
+  if (!app.result) return;
+  if (app.resultType === 'xlsx') {
+    XLSX.writeFile(app.result, app.resultName);
+    return;
+  }
+  const blob = app.result instanceof Blob
+    ? app.result
+    : new Blob([app.result], { type: app.resultType === 'json' ? 'application/json' : 'text/plain;charset=utf-8' });
+  downloadBlob(blob, app.resultName);
+}
+
+function downloadChart() {
+  const canvas = $('chartCanvas');
+  downloadBlob(dataURLToBlob(canvas.toDataURL('image/png')), '数据图表.png');
+}
+
+function renderTable(headers, rows, rowClassFn) {
+  const visibleRows = rows.slice(0, 300);
+  if (!headers.length) {
+    $('previewTable').innerHTML = '<tbody><tr><td>暂无数据</td></tr></tbody>';
+    return;
+  }
+  const head = `<thead><tr><th>#</th>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>`;
+  const body = visibleRows.map((row, index) => `
+    <tr class="${rowClassFn ? rowClassFn(row) : ''}">
+      <td>${index + 1}</td>
+      ${headers.map(header => `<td title="${escapeAttr(String(row[header] ?? ''))}">${escapeHtml(String(row[header] ?? ''))}</td>`).join('')}
+    </tr>
+  `).join('');
+  $('previewTable').innerHTML = `${head}<tbody>${body || '<tr><td colspan="99">暂无数据</td></tr>'}</tbody>`;
+}
+
+function getRows(wb, sheetName) {
+  return XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
+}
+
+function getHeaders(wb, sheetName) {
+  const ws = wb.Sheets[sheetName];
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+  const headers = [];
+  for (let c = range.s.c; c <= range.e.c; c += 1) {
+    const cell = ws[XLSX.utils.encode_cell({ r: range.s.r, c })];
+    headers.push(cell ? String(cell.v) : `列${c + 1}`);
+  }
+  return headers;
+}
+
+function rowsToWorkbook(rows, headers, sheetName) {
+  const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  return wb;
+}
+
+function resolveSheet(item, sheet) {
+  return sheet && item.workbook.SheetNames.includes(sheet) ? sheet : item.workbook.SheetNames[0];
+}
+
+function updateStatus() {
+  const count = Object.values(app.files).reduce((sum, item) => sum + (Array.isArray(item) ? item.length : item ? 1 : 0), 0);
+  $('activeFileCount').textContent = `${count} 个文件`;
+  if (!count) $('activeRowCount').textContent = '0 行数据';
+}
+
+function collectHeaders(rows) {
+  const set = new Set();
+  rows.forEach(row => Object.keys(row).forEach(key => set.add(key)));
+  return Array.from(set);
+}
+
+function evaluateFormula(row, headers, expr) {
+  let code = expr;
+  headers.forEach(header => {
+    const value = row[header] ?? '';
+    const replacement = typeof value === 'number' ? String(value) : JSON.stringify(String(value));
+    code = code.split(`[${header}]`).join(replacement);
+  });
+  try {
+    return Function(`"use strict"; return (${code});`)();
+  } catch (_) {
+    return '计算出错';
+  }
+}
+
+function maskValue(value, type) {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  if (type === 'phone') return text.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2');
+  if (type === 'idcard') return text.length >= 15 ? `${text.slice(0, 6)}********${text.slice(-4)}` : '****';
+  if (type === 'name') return text.length <= 1 ? '*' : `${text[0]}${'*'.repeat(Math.max(1, text.length - 1))}`;
+  if (type === 'email') return text.replace(/^(.).+(@.+)$/, '$1***$2');
+  return `${text[0]}${'*'.repeat(Math.max(1, text.length - 1))}`;
+}
+
+function aggregate(nums, rowCount, agg) {
+  if (agg === 'count') return rowCount;
+  if (!nums.length) return 0;
+  if (agg === 'sum') return round(nums.reduce((a, b) => a + b, 0));
+  if (agg === 'avg') return round(nums.reduce((a, b) => a + b, 0) / nums.length);
+  if (agg === 'max') return Math.max(...nums);
+  if (agg === 'min') return Math.min(...nums);
+  return 0;
+}
+
+function aggLabel(agg) {
+  return { sum: '求和', count: '计数', avg: '平均值', max: '最大值', min: '最小值' }[agg];
+}
+
+function palette(count) {
+  const colors = ['#2563eb', '#0f9f6e', '#d97706', '#0891b2', '#7c3aed', '#db2777', '#dc2626', '#475569'];
+  return Array.from({ length: count }, (_, index) => colors[index % colors.length]);
+}
+
+function round(value) {
+  return Number(value.toFixed(2));
+}
+
+function baseName(name) {
+  return name.replace(/\.[^.]+$/, '');
+}
+
+function sanitizeFileName(name) {
+  return name.trim().replace(/[\\/:*?"<>|\s]+/g, '_') || '空值';
+}
+
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function dataURLToBlob(dataURL) {
+  const [meta, data] = dataURL.split(',');
+  const mime = meta.match(/:(.*?);/)[1];
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value);
+}
+
+function toast(message, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = message;
+  $('toastArea').appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
