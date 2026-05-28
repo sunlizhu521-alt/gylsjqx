@@ -197,9 +197,15 @@ function renderComparePanel() {
   return `
     ${fileDropHTML('main', '上传待对比文件', '.xlsx,.xls,.csv')}
     ${sheetField('mainSheet', '选择 Sheet')}
-    <label class="field"><span>对比方式</span><select id="compareMode"><option value="row">按行对比：每一行选出最大/最小</option><option value="column">按列统计：每列统计最大/最小</option></select></label>
+    <label class="field control-card"><span>表头所在行</span><input id="compareHeaderRow" type="number" min="1" value="1" /></label>
+    <label class="field control-card"><span>对比方式</span><select id="compareMode"><option value="both">同时输出最大值和最小值</option><option value="max">只输出最大值</option><option value="min">只输出最小值</option></select></label>
     ${multiSelectField('compareColumns', '选择参与对比的多列')}
-    <div class="button-row"><button class="primary-button" id="runAction">生成对比结果</button></div>
+    <div class="button-row">
+      <button class="ghost-button" id="applyHeaderRow" type="button">应用表头行</button>
+      <button class="secondary-button" id="previewCompare" type="button">数据预览</button>
+      <button class="secondary-button" id="clearCompareColumns" type="button">清除选择列</button>
+      <button class="primary-button" id="runAction">生成对比结果</button>
+    </div>
   `;
 }
 
@@ -264,6 +270,24 @@ function bindActions(id) {
     chart: runChart,
   };
   button.addEventListener('click', handlers[id]);
+  if (id === 'compare') bindCompareControls();
+}
+
+function bindCompareControls() {
+  $('applyHeaderRow')?.addEventListener('click', () => {
+    refreshColumns();
+    previewCompareData();
+  });
+  $('previewCompare')?.addEventListener('click', previewCompareData);
+  $('clearCompareColumns')?.addEventListener('click', () => {
+    const el = $('compareColumns');
+    if (!el) return;
+    Array.from(el.options).forEach(option => { option.selected = false; });
+    toast('已清除参与对比列', 'success');
+  });
+  $('compareHeaderRow')?.addEventListener('change', () => {
+    refreshColumns();
+  });
 }
 
 async function handleFiles(key, files) {
@@ -330,10 +354,14 @@ function refreshColumns() {
     fillColumns('targetKey', app.files.target, $('targetSheet')?.value);
     fillColumns('targetFill', app.files.target, $('targetSheet')?.value);
   }
-  if (['convert', 'clean', 'mask', 'split', 'formula', 'pivot', 'compare', 'chart'].includes(tool)) {
+  if (tool === 'compare') {
+    fillCompareColumns();
+    return;
+  }
+  if (['convert', 'clean', 'mask', 'split', 'formula', 'pivot', 'chart'].includes(tool)) {
     const item = app.files.main;
     const sheet = $('mainSheet')?.value;
-    ['maskColumn', 'splitColumn', 'groupColumn', 'valueColumn', 'compareColumns', 'xColumn', 'yColumn'].forEach(id => fillColumns(id, item, sheet));
+    ['maskColumn', 'splitColumn', 'groupColumn', 'valueColumn', 'xColumn', 'yColumn'].forEach(id => fillColumns(id, item, sheet));
   }
   if (tool === 'diff') {
     fillColumns('diffKey', app.files.fresh || app.files.old, $('freshSheet')?.value || $('oldSheet')?.value);
@@ -344,10 +372,23 @@ function fillColumns(id, item, sheetName) {
   const el = $(id);
   if (!el) return;
   const headers = item && sheetName ? getHeaders(item.workbook, sheetName) : [];
-  el.innerHTML = headers.map(name => `<option value="${escapeAttr(name)}" ${id === 'compareColumns' ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('');
+  el.innerHTML = headers.map(name => `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+}
+
+function fillCompareColumns() {
+  const el = $('compareColumns');
+  if (!el) return;
+  const item = app.files.main;
+  const sheet = $('mainSheet')?.value;
+  const headers = item && sheet ? getCompareHeaders(item.workbook, sheet) : [];
+  el.innerHTML = headers.map(name => `<option value="${escapeAttr(name)}" selected>${escapeHtml(name)}</option>`).join('');
 }
 
 function previewCurrentInput() {
+  if (app.activeTool === 'compare') {
+    previewCompareData();
+    return;
+  }
   let item = app.files.main || app.files.target || app.files.fresh || app.files.source || app.files.old;
   if (!item && Array.isArray(app.files.many)) item = app.files.many[0];
   if (!item) return renderTable([], []);
@@ -356,6 +397,16 @@ function previewCurrentInput() {
   renderTable(getHeaders(item.workbook, sheet), data);
   $('previewMeta').textContent = `${item.file.name} / ${sheet} / ${data.length} 行`;
   $('activeRowCount').textContent = `${data.length} 行数据`;
+}
+
+function previewCompareData() {
+  const item = app.files.main;
+  const sheet = $('mainSheet')?.value;
+  if (!item || !sheet) return renderTable([], []);
+  const { headers, rows } = getCompareTable(item.workbook, sheet);
+  renderTable(headers, rows);
+  $('previewMeta').textContent = `${item.file.name} / ${sheet} / 表头第 ${getCompareHeaderRow()} 行 / ${rows.length} 行`;
+  $('activeRowCount').textContent = `${rows.length} 行数据`;
 }
 
 function requireFile(key, label) {
@@ -607,34 +658,11 @@ function runCompare() {
   try {
     const item = requireFile('main', '待对比文件');
     const sheet = $('mainSheet').value;
-    const headers = getHeaders(item.workbook, sheet);
+    const { headers, rows: sourceRows } = getCompareTable(item.workbook, sheet);
     const selectedColumns = getSelectedValues('compareColumns');
     const mode = $('compareMode').value;
     if (selectedColumns.length < 2) {
       toast('请至少选择 2 列参与对比', 'error');
-      return;
-    }
-
-    const sourceRows = getRows(item.workbook, sheet);
-    if (mode === 'column') {
-      const rows = selectedColumns.map(column => {
-        const values = sourceRows
-          .map((row, index) => ({ rowNumber: index + 2, value: normalizeNumber(row[column]) }))
-          .filter(item => item.value !== null);
-        const maxItem = values.reduce((best, current) => !best || current.value > best.value ? current : best, null);
-        const minItem = values.reduce((best, current) => !best || current.value < best.value ? current : best, null);
-        return {
-          对比列: column,
-          有效数字数量: values.length,
-          最大值: maxItem ? maxItem.value : '',
-          最大值所在行: maxItem ? maxItem.rowNumber : '',
-          最小值: minItem ? minItem.value : '',
-          最小值所在行: minItem ? minItem.rowNumber : '',
-        };
-      });
-      const resultHeaders = ['对比列', '有效数字数量', '最大值', '最大值所在行', '最小值', '最小值所在行'];
-      setWorkbookResult(rows, resultHeaders, `${baseName(item.file.name)}_多列对比统计.xlsx`);
-      toast(`列统计完成：已对比 ${selectedColumns.length} 列`, 'success');
       return;
     }
 
@@ -646,14 +674,17 @@ function runCompare() {
       const minItem = values.reduce((best, current) => !best || current.value < best.value ? current : best, null);
       return {
         ...row,
-        最大值: maxItem ? maxItem.value : '',
-        最大值来源列: maxItem ? maxItem.column : '',
-        最小值: minItem ? minItem.value : '',
-        最小值来源列: minItem ? minItem.column : '',
+        ...(mode !== 'min' ? { 最大值: maxItem ? maxItem.value : '', 最大值来源列: maxItem ? maxItem.column : '' } : {}),
+        ...(mode !== 'max' ? { 最小值: minItem ? minItem.value : '', 最小值来源列: minItem ? minItem.column : '' } : {}),
         参与对比列数: values.length,
       };
     });
-    const resultHeaders = [...headers, '最大值', '最大值来源列', '最小值', '最小值来源列', '参与对比列数'];
+    const resultHeaders = [
+      ...headers,
+      ...(mode !== 'min' ? ['最大值', '最大值来源列'] : []),
+      ...(mode !== 'max' ? ['最小值', '最小值来源列'] : []),
+      '参与对比列数'
+    ];
     setWorkbookResult(rows, resultHeaders, `${baseName(item.file.name)}_多列对比结果.xlsx`);
     toast(`按行对比完成：${rows.length} 行，${selectedColumns.length} 列`, 'success');
   } catch (_) {}
@@ -779,6 +810,30 @@ function getRows(wb, sheetName) {
   return XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
 }
 
+function getCompareHeaderRow() {
+  const value = Number($('compareHeaderRow')?.value || 1);
+  return Math.max(1, Math.floor(value || 1));
+}
+
+function getCompareTable(wb, sheetName) {
+  const ws = wb.Sheets[sheetName];
+  const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  const headerIndex = Math.min(getCompareHeaderRow() - 1, Math.max(0, rawRows.length - 1));
+  const headers = normalizeHeaders(rawRows[headerIndex] || []);
+  const rows = rawRows.slice(headerIndex + 1).map(raw => {
+    const row = {};
+    headers.forEach((header, index) => {
+      row[header] = raw[index] ?? '';
+    });
+    return row;
+  });
+  return { headers, rows };
+}
+
+function getCompareHeaders(wb, sheetName) {
+  return getCompareTable(wb, sheetName).headers;
+}
+
 function getHeaders(wb, sheetName) {
   const ws = wb.Sheets[sheetName];
   const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
@@ -788,6 +843,16 @@ function getHeaders(wb, sheetName) {
     headers.push(cell ? String(cell.v) : `列${c + 1}`);
   }
   return headers;
+}
+
+function normalizeHeaders(rawHeaders) {
+  const used = new Map();
+  return rawHeaders.map((value, index) => {
+    const base = String(value ?? '').trim() || `列${index + 1}`;
+    const count = used.get(base) || 0;
+    used.set(base, count + 1);
+    return count === 0 ? base : `${base}_${count + 1}`;
+  });
 }
 
 function rowsToWorkbook(rows, headers, sheetName) {
