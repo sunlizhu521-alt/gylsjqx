@@ -196,7 +196,7 @@ function renderPivotPanel() {
 function renderComparePanel() {
   return `
     ${fileDropHTML('main', '上传待对比文件', '.xlsx,.xls,.csv')}
-    ${sheetField('mainSheet', '选择 Sheet')}
+    <label class="field control-card"><span>选择 Sheet</span><select id="mainSheet"></select></label>
     <label class="field control-card"><span>表头所在行</span><input id="compareHeaderRow" type="number" min="1" value="1" /></label>
     <label class="field control-card"><span>对比方式</span><select id="compareMode"><option value="both">同时输出最大值和最小值</option><option value="max">只输出最大值</option><option value="min">只输出最小值</option></select></label>
     ${multiSelectField('compareColumns', '选择参与对比的多列')}
