@@ -63,6 +63,7 @@ function switchTool(id) {
   $('toolDesc').textContent = tool.desc;
   document.querySelectorAll('.tool-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tool === id));
   $('chartCard').classList.toggle('hidden', id !== 'chart');
+  document.querySelector('.result-layout').classList.toggle('single', id !== 'chart');
   renderToolPanel(id);
   updateStatus();
 }
@@ -195,13 +196,23 @@ function renderPivotPanel() {
 
 function renderComparePanel() {
   return `
-    ${fileDropHTML('main', '上传待对比文件', '.xlsx,.xls,.csv')}
-    <label class="field control-card"><span>选择 Sheet</span><select id="mainSheet"></select></label>
-    <label class="field control-card"><span>表头所在行</span><input id="compareHeaderRow" type="number" min="1" value="1" /></label>
-    <label class="field control-card"><span>对比方式</span><select id="compareMode"><option value="both">同时输出最大值和最小值</option><option value="max">只输出最大值</option><option value="min">只输出最小值</option></select></label>
-    ${multiSelectField('compareColumns', '选择参与对比的多列')}
-    <div class="button-row">
+    <label class="file-drop compare-upload" data-upload="main">
+      <span>
+        <strong>上传待对比文件</strong>
+        拖拽文件到这里，或 <em>点击选择</em>
+        <span class="file-name" id="mainName">未选择文件</span>
+      </span>
+      <input type="file" data-input="main" accept=".xlsx,.xls,.csv" />
+    </label>
+    <label class="field control-card compare-control"><span>选择 Sheet</span><select id="mainSheet"></select></label>
+    <label class="field control-card compare-control"><span>表头所在行</span><input id="compareHeaderRow" type="number" min="1" value="1" /></label>
+    <label class="field control-card compare-control"><span>对比方式</span><select id="compareMode"><option value="both">同时输出最大值和最小值</option><option value="max">只输出最大值</option><option value="min">只输出最小值</option></select></label>
+    <div class="field control-card compare-control compare-apply">
+      <span>表头设置</span>
       <button class="ghost-button" id="applyHeaderRow" type="button">应用表头行</button>
+    </div>
+    <label class="field compare-columns"><span>选择参与对比的多列</span><select id="compareColumns" multiple size="8"></select></label>
+    <div class="button-row compare-actions">
       <button class="secondary-button" id="previewCompare" type="button">数据预览</button>
       <button class="secondary-button" id="clearCompareColumns" type="button">清除选择列</button>
       <button class="primary-button" id="runAction">生成对比结果</button>

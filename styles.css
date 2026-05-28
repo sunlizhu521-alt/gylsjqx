@@ -402,6 +402,36 @@ button {
   box-shadow: var(--shadow-soft);
 }
 
+.compare-upload {
+  grid-column: 1 / -1;
+  min-height: 112px;
+}
+
+.compare-control {
+  grid-column: span 3;
+  align-self: stretch;
+}
+
+.compare-apply {
+  align-content: end;
+}
+
+.compare-apply .ghost-button {
+  width: 100%;
+}
+
+.compare-columns {
+  grid-column: 1 / -1;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, var(--indigo-soft), transparent 42%),
+    linear-gradient(225deg, var(--mint-soft), transparent 38%),
+    color-mix(in srgb, var(--surface-solid) 68%, var(--surface-2));
+  box-shadow: var(--shadow-soft);
+}
+
 .field.wide {
   grid-column: span 6;
 }
@@ -542,11 +572,25 @@ button {
   padding-top: 2px;
 }
 
+.compare-actions {
+  justify-content: flex-start;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, var(--blue-soft), transparent 45%),
+    color-mix(in srgb, var(--surface-solid) 70%, var(--surface-2));
+}
+
 .result-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
   gap: 14px;
   align-items: start;
+}
+
+.result-layout.single {
+  grid-template-columns: 1fr;
 }
 
 .result-card {
@@ -715,6 +759,7 @@ button {
 
   .field,
   .field.wide,
+  .compare-control,
   .file-drop {
     grid-column: 1 / -1;
   }
