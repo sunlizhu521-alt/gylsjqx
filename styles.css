@@ -432,6 +432,49 @@ button {
   box-shadow: var(--shadow-soft);
 }
 
+.compare-column-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.compare-column-option {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .45), transparent),
+    color-mix(in srgb, var(--surface-solid) 74%, var(--surface-2));
+  color: var(--text);
+  font-size: .82rem;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .45) inset;
+}
+
+.compare-column-option:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.compare-column-option input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--blue);
+}
+
+.compare-column-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
 .field.wide {
   grid-column: span 6;
 }

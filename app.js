@@ -211,7 +211,10 @@ function renderComparePanel() {
       <span>表头设置</span>
       <button class="ghost-button" id="applyHeaderRow" type="button">应用表头行</button>
     </div>
-    <label class="field compare-columns"><span>选择参与对比的多列（Ctrl 可多选）</span><select id="compareColumns" multiple size="8"></select></label>
+    <div class="field compare-columns">
+      <span>选择参与对比的多列</span>
+      <div class="compare-column-grid" id="compareColumns"></div>
+    </div>
     <div class="button-row compare-actions">
       <button class="secondary-button" id="previewCompare" type="button">数据预览</button>
       <button class="secondary-button" id="clearCompareColumns" type="button">清除选择列</button>
@@ -293,7 +296,7 @@ function bindCompareControls() {
   $('clearCompareColumns')?.addEventListener('click', () => {
     const el = $('compareColumns');
     if (!el) return;
-    Array.from(el.options).forEach(option => { option.selected = false; });
+    el.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = false; });
     toast('已清除参与对比列', 'success');
   });
   $('compareHeaderRow')?.addEventListener('change', () => {
@@ -392,7 +395,12 @@ function fillCompareColumns() {
   const item = app.files.main;
   const sheet = $('mainSheet')?.value;
   const headers = item && sheet ? getCompareHeaders(item.workbook, sheet) : [];
-  el.innerHTML = headers.map(name => `<option value="${escapeAttr(name)}" selected>${escapeHtml(name)}</option>`).join('');
+  el.innerHTML = headers.map((name, index) => `
+    <label class="compare-column-option" title="${escapeAttr(name)}">
+      <input type="checkbox" value="${escapeAttr(name)}" checked />
+      <span>${escapeHtml(name)}</span>
+    </label>
+  `).join('');
 }
 
 function previewCurrentInput() {
@@ -892,6 +900,9 @@ function collectHeaders(rows) {
 function getSelectedValues(id) {
   const el = $(id);
   if (!el) return [];
+  if (!('selectedOptions' in el)) {
+    return Array.from(el.querySelectorAll('input[type="checkbox"]:checked')).map(input => input.value);
+  }
   return Array.from(el.selectedOptions).map(option => option.value);
 }
 
