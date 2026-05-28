@@ -204,12 +204,14 @@ function renderComparePanel() {
       </span>
       <input type="file" data-input="main" accept=".xlsx,.xls,.csv" />
     </label>
-    <label class="field control-card compare-control"><span>选择 Sheet</span><select id="mainSheet"></select></label>
-    <label class="field control-card compare-control"><span>表头所在行</span><input id="compareHeaderRow" type="number" min="1" value="1" /></label>
-    <label class="field control-card compare-control"><span>对比方式</span><select id="compareMode"><option value="both">同时输出最大值和最小值</option><option value="max">只输出最大值</option><option value="min">只输出最小值</option></select></label>
-    <div class="field control-card compare-control compare-apply">
-      <span>表头设置</span>
-      <button class="ghost-button" id="applyHeaderRow" type="button">应用表头行</button>
+    <div class="compare-settings-row">
+      <label class="field control-card compare-control"><span>选择 Sheet</span><select id="mainSheet"></select></label>
+      <label class="field control-card compare-control"><span>表头所在行</span><input id="compareHeaderRow" type="number" min="1" value="1" /></label>
+      <label class="field control-card compare-control"><span>对比方式</span><select id="compareMode"><option value="both">同时输出最大值和最小值</option><option value="max">只输出最大值</option><option value="min">只输出最小值</option></select></label>
+      <div class="field control-card compare-control compare-apply">
+        <span>表头设置</span>
+        <button class="ghost-button" id="applyHeaderRow" type="button">应用表头行</button>
+      </div>
     </div>
     <div class="field compare-columns">
       <span>选择参与对比的多列</span>

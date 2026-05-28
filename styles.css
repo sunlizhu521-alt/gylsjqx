@@ -407,8 +407,16 @@ button {
   min-height: 112px;
 }
 
+.compare-settings-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
 .compare-control {
-  grid-column: span 3;
+  grid-column: auto;
   align-self: stretch;
 }
 
@@ -844,5 +852,9 @@ button {
   .compare-control,
   .file-drop {
     grid-column: 1 / -1;
+  }
+
+  .compare-settings-row {
+    grid-template-columns: 1fr;
   }
 }
