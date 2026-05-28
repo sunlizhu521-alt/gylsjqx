@@ -211,7 +211,7 @@ function renderComparePanel() {
       <span>表头设置</span>
       <button class="ghost-button" id="applyHeaderRow" type="button">应用表头行</button>
     </div>
-    <label class="field compare-columns"><span>选择参与对比的多列</span><select id="compareColumns" multiple size="8"></select></label>
+    <label class="field compare-columns"><span>选择参与对比的多列（Ctrl 可多选）</span><select id="compareColumns" multiple size="8"></select></label>
     <div class="button-row compare-actions">
       <button class="secondary-button" id="previewCompare" type="button">数据预览</button>
       <button class="secondary-button" id="clearCompareColumns" type="button">清除选择列</button>
