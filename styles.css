@@ -672,6 +672,142 @@ button {
     color-mix(in srgb, var(--surface-solid) 70%, var(--surface-2));
 }
 
+.merge-upload-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.merge-file-drop {
+  grid-column: auto;
+  min-height: 120px;
+}
+
+.merge-configs {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.merge-slot-card {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, var(--cyan-soft), transparent 45%),
+    color-mix(in srgb, var(--surface-solid) 72%, var(--surface-2));
+  box-shadow: var(--shadow-soft);
+  padding: 12px;
+}
+
+.merge-slot-card.empty {
+  min-height: 120px;
+  display: grid;
+  align-content: center;
+  color: var(--muted);
+}
+
+.merge-slot-card h3 {
+  margin: 0;
+  font-size: .95rem;
+}
+
+.merge-slot-card p,
+.merge-slot-head span,
+.merge-map-field span {
+  color: var(--muted);
+  font-size: .78rem;
+}
+
+.merge-slot-head {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.merge-map-field {
+  display: grid;
+  gap: 5px;
+}
+
+.merge-map-field select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface-solid) 72%, var(--surface-2));
+  color: var(--text);
+  padding: 6px 10px;
+}
+
+.merge-sheet-list {
+  display: grid;
+  gap: 10px;
+}
+
+.merge-sheet-block {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, .32);
+}
+
+.merge-sheet-toggle,
+.merge-column-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.merge-sheet-toggle {
+  font-weight: 750;
+  color: var(--text);
+}
+
+.merge-sheet-toggle input,
+.merge-column-option input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--blue);
+  flex: 0 0 auto;
+}
+
+.merge-column-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+}
+
+.merge-column-option {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-solid) 70%, transparent);
+  font-size: .78rem;
+  font-weight: 650;
+}
+
+.merge-column-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.merge-actions {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, var(--green-soft), transparent 45%),
+    color-mix(in srgb, var(--surface-solid) 70%, var(--surface-2));
+}
+
 .result-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
@@ -855,6 +991,11 @@ button {
   }
 
   .compare-settings-row {
+    grid-template-columns: 1fr;
+  }
+
+  .merge-upload-row,
+  .merge-configs {
     grid-template-columns: 1fr;
   }
 }

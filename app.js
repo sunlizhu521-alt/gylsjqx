@@ -134,10 +134,29 @@ function renderCleanPanel() {
 
 function renderMergePanel() {
   return `
-    ${fileDropHTML('many', '上传多个表格', '.xlsx,.xls,.csv', true)}
-    <label class="field"><span>合并方式</span><select id="mergeMode"><option value="first">每个文件第一个 Sheet</option><option value="all">合并所有 Sheet</option></select></label>
-    <label class="field"><span>文件来源列</span><select id="mergeSource"><option value="yes">添加来源列</option><option value="no">不添加</option></select></label>
-    <div class="button-row"><button class="primary-button" id="runAction">执行合并</button></div>
+    <div class="merge-upload-row">
+      ${mergeUploadHTML('merge1', '上传表格 1')}
+      ${mergeUploadHTML('merge2', '上传表格 2')}
+      ${mergeUploadHTML('merge3', '上传表格 3')}
+    </div>
+    <div class="merge-configs" id="mergeConfigs"></div>
+    <div class="button-row merge-actions">
+      <button class="secondary-button" id="previewMerge" type="button">数据预览</button>
+      <button class="primary-button" id="runAction">生成合并结果</button>
+    </div>
+  `;
+}
+
+function mergeUploadHTML(key, label) {
+  return `
+    <label class="file-drop merge-file-drop" data-upload="${key}">
+      <span>
+        <strong>${label}</strong>
+        每个框上传 1 个文件
+        <span class="file-name" id="${key}Name">未选择文件</span>
+      </span>
+      <input type="file" data-input="${key}" accept=".xlsx,.xls,.csv" />
+    </label>
   `;
 }
 
@@ -286,7 +305,17 @@ function bindActions(id) {
     chart: runChart,
   };
   button.addEventListener('click', handlers[id]);
+  if (id === 'merge') bindMergeControls();
   if (id === 'compare') bindCompareControls();
+}
+
+function bindMergeControls() {
+  $('previewMerge')?.addEventListener('click', previewMergeResult);
+  $('mergeConfigs')?.addEventListener('change', event => {
+    if (event.target.matches('[data-merge-sheet]')) {
+      updateMergeConfig();
+    }
+  });
 }
 
 function bindCompareControls() {
@@ -345,6 +374,7 @@ function updateDependentFields() {
   fillSheets('mainSheet', f.main);
   fillSheets('oldSheet', f.old);
   fillSheets('freshSheet', f.fresh);
+  if (app.activeTool === 'merge') updateMergeConfig();
   refreshColumns();
   ['sourceSheet', 'targetSheet', 'mainSheet', 'oldSheet', 'freshSheet'].forEach(id => {
     const el = $(id);
@@ -405,7 +435,102 @@ function fillCompareColumns() {
   `).join('');
 }
 
+function updateMergeConfig() {
+  const container = $('mergeConfigs');
+  if (!container) return;
+  const slots = getMergeSlots();
+  container.innerHTML = slots.map(slot => renderMergeSlotConfig(slot)).join('');
+}
+
+function getMergeSlots() {
+  return ['merge1', 'merge2', 'merge3'].map((key, index) => ({
+    key,
+    index: index + 1,
+    item: app.files[key],
+  }));
+}
+
+function renderMergeSlotConfig(slot) {
+  if (!slot.item) {
+    return `
+      <section class="merge-slot-card empty">
+        <h3>表格 ${slot.index}</h3>
+        <p>上传文件后，可在这里选择 Sheet、列和映射列。</p>
+      </section>
+    `;
+  }
+
+  const sheets = slot.item.workbook.SheetNames;
+  const selectedSheets = getMergeSelectedSheets(slot.key, sheets);
+  const headerOptions = collectMergeHeaders(slot.item, selectedSheets);
+  const selectedMap = document.querySelector(`[data-merge-map="${slot.key}"]`)?.value || '';
+  const sheetBlocks = sheets.map(sheet => {
+    const checked = selectedSheets.includes(sheet);
+    const headers = getHeaders(slot.item.workbook, sheet);
+    const selectedColumns = getMergeSelectedColumns(slot.key, sheet, headers);
+    return `
+      <div class="merge-sheet-block">
+        <label class="merge-sheet-toggle">
+          <input type="checkbox" data-merge-sheet="${slot.key}" value="${escapeAttr(sheet)}" ${checked ? 'checked' : ''} />
+          <span>${escapeHtml(sheet)}</span>
+        </label>
+        ${checked ? `
+          <div class="merge-column-grid">
+            ${headers.map(header => `
+              <label class="merge-column-option" title="${escapeAttr(header)}">
+                <input type="checkbox" data-merge-column="${slot.key}" data-sheet="${escapeAttr(sheet)}" value="${escapeAttr(header)}" ${selectedColumns.includes(header) ? 'checked' : ''} />
+                <span>${escapeHtml(header)}</span>
+              </label>
+            `).join('')}
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <section class="merge-slot-card">
+      <div class="merge-slot-head">
+        <div>
+          <h3>表格 ${slot.index}</h3>
+          <span>${escapeHtml(slot.item.file.name)}</span>
+        </div>
+        <label class="merge-map-field">
+          <span>映射列（表头内容）</span>
+          <select data-merge-map="${slot.key}">
+            <option value="">不设置映射列</option>
+            ${headerOptions.map(header => `<option value="${escapeAttr(header)}" ${header === selectedMap ? 'selected' : ''}>${escapeHtml(header)}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+      <div class="merge-sheet-list">${sheetBlocks}</div>
+    </section>
+  `;
+}
+
+function getMergeSelectedSheets(slotKey, fallbackSheets) {
+  const checked = Array.from(document.querySelectorAll(`[data-merge-sheet="${slotKey}"]:checked`)).map(input => input.value);
+  return checked.length ? checked : fallbackSheets;
+}
+
+function getMergeSelectedColumns(slotKey, sheetName, fallbackColumns) {
+  const existing = Array.from(document.querySelectorAll(`[data-merge-column="${slotKey}"]`))
+    .filter(input => input.dataset.sheet === sheetName);
+  if (!existing.length) return fallbackColumns;
+  return existing.filter(input => input.checked).map(input => input.value);
+}
+
+function collectMergeHeaders(item, sheetNames) {
+  const set = new Set();
+  sheetNames.forEach(sheet => getHeaders(item.workbook, sheet).forEach(header => set.add(header)));
+  return Array.from(set);
+}
+
 function previewCurrentInput() {
+  if (app.activeTool === 'merge') {
+    previewMergeResult();
+    return;
+  }
   if (app.activeTool === 'compare') {
     previewCompareData();
     return;
@@ -521,22 +646,60 @@ function runClean() {
 
 async function runMerge() {
   try {
-    const items = requireFile('many', '多个表格');
-    const mode = $('mergeMode').value;
-    const addSource = $('mergeSource').value === 'yes';
-    const rows = [];
-    items.forEach(item => {
-      const sheets = mode === 'all' ? item.workbook.SheetNames : [item.workbook.SheetNames[0]];
-      sheets.forEach(sheet => {
-        getRows(item.workbook, sheet).forEach(row => {
-          rows.push(addSource ? { 来源文件: item.file.name, 来源Sheet: sheet, ...row } : row);
+    const rows = buildMergeRows();
+    if (!rows.length) {
+      toast('请至少上传 1 个文件，并选择需要合并的 Sheet 和列', 'error');
+      return;
+    }
+    const headers = collectHeaders(rows);
+    setWorkbookResult(rows, headers, '报表合并结果.xlsx');
+    toast(`合并完成：${rows.length} 行`, 'success');
+  } catch (_) {}
+}
+
+function previewMergeResult() {
+  try {
+    const rows = buildMergeRows();
+    if (!rows.length) {
+      toast('暂无可预览数据，请先上传并选择 Sheet / 列', 'error');
+      return;
+    }
+    const headers = collectHeaders(rows);
+    renderTable(headers, rows);
+    $('previewMeta').textContent = `最终合并表 / ${rows.length} 行 / ${headers.length} 列`;
+    $('activeRowCount').textContent = `${rows.length} 行数据`;
+  } catch (_) {}
+}
+
+function buildMergeRows() {
+  const output = [];
+  getMergeSlots().forEach(slot => {
+    if (!slot.item) return;
+    const selectedSheets = Array.from(document.querySelectorAll(`[data-merge-sheet="${slot.key}"]:checked`)).map(input => input.value);
+    const mapColumn = document.querySelector(`[data-merge-map="${slot.key}"]`)?.value || '';
+    selectedSheets.forEach(sheet => {
+      const selectedColumns = Array.from(document.querySelectorAll(`[data-merge-column="${slot.key}"]:checked`))
+        .filter(input => input.dataset.sheet === sheet)
+        .map(input => input.value);
+      if (!selectedColumns.length) return;
+      getRows(slot.item.workbook, sheet).forEach(row => {
+        const next = {
+          来源表: `表格 ${slot.index}`,
+          来源文件: slot.item.file.name,
+          来源Sheet: sheet,
+        };
+        if (mapColumn) {
+          next.映射列 = mapColumn;
+          next.映射值 = row[mapColumn] ?? '';
+        }
+        selectedColumns.forEach(column => {
+          next[column] = row[column] ?? '';
         });
+        output.push(next);
       });
     });
-    const headers = collectHeaders(rows);
-    setWorkbookResult(rows, headers, '合并结果.xlsx');
-    toast(`合并完成：${items.length} 个文件，${rows.length} 行`, 'success');
-  } catch (_) {}
+  });
+  return output;
 }
 
 function runDiff() {
