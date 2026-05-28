@@ -434,17 +434,17 @@ button {
 
 .compare-column-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
   width: 100%;
 }
 
 .compare-column-option {
   min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  min-height: 42px;
+  display: block;
+  position: relative;
+  padding: 10px 12px 10px 40px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background:
@@ -462,16 +462,55 @@ button {
   background: var(--accent-soft);
 }
 
-.compare-column-option input {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  accent-color: var(--blue);
+.compare-column-option input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.compare-column-option::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface-solid);
+  transform: translateY(-50%);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .08);
+}
+
+.compare-column-option:has(input:checked) {
+  border-color: color-mix(in srgb, var(--blue) 52%, var(--line));
+  background:
+    linear-gradient(135deg, var(--blue-soft), var(--indigo-soft)),
+    color-mix(in srgb, var(--surface-solid) 78%, var(--surface-2));
+}
+
+.compare-column-option:has(input:checked)::before {
+  border-color: var(--blue);
+  background: var(--blue);
+}
+
+.compare-column-option:has(input:checked)::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  width: 5px;
+  height: 10px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-58%) rotate(45deg);
 }
 
 .compare-column-option span {
+  display: block;
   min-width: 0;
-  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
   line-height: 1.35;
 }
 
