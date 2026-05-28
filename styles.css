@@ -280,6 +280,7 @@ button {
 .tool-tab[data-tool="split"] { --tool-color: var(--pink); }
 .tool-tab[data-tool="formula"] { --tool-color: var(--indigo); }
 .tool-tab[data-tool="pivot"] { --tool-color: var(--green); }
+.tool-tab[data-tool="compare"] { --tool-color: var(--purple); }
 .tool-tab[data-tool="chart"] { --tool-color: var(--yellow); }
 
 .tool-tab.active::before {
@@ -422,6 +423,22 @@ button {
 .field textarea {
   min-height: 74px;
   resize: vertical;
+}
+
+.field select[multiple] {
+  min-height: 154px;
+  padding: 6px;
+}
+
+.field select[multiple] option {
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 3px;
+}
+
+.field select[multiple] option:checked {
+  background: linear-gradient(135deg, var(--blue), var(--indigo));
+  color: #fff;
 }
 
 .field input:focus,

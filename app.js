@@ -8,6 +8,7 @@ const tools = [
   { id: 'split', icon: '÷', title: '数据拆分', desc: '按列值或固定行数拆成多个文件。' },
   { id: 'formula', icon: 'ƒ', title: '派生列', desc: '用公式生成新字段，例如 [单价] * [数量]。' },
   { id: 'pivot', icon: '∑', title: '分组汇总', desc: '按维度做求和、计数、平均、最大、最小。' },
+  { id: 'compare', icon: '⌁', title: '多列对比', desc: '选择多列数据，按行或按列找最大值、最小值。' },
   { id: 'chart', icon: '▥', title: '图表生成', desc: '基于字段自动聚合并绘制图表。' },
 ];
 
@@ -77,6 +78,7 @@ function renderToolPanel(id) {
     split: renderSplitPanel,
     formula: renderFormulaPanel,
     pivot: renderPivotPanel,
+    compare: renderComparePanel,
     chart: renderChartPanel,
   };
   $('toolPanel').innerHTML = `<div class="tool-grid">${renderers[id]()}</div>`;
@@ -191,6 +193,16 @@ function renderPivotPanel() {
   `;
 }
 
+function renderComparePanel() {
+  return `
+    ${fileDropHTML('main', '上传待对比文件', '.xlsx,.xls,.csv')}
+    ${sheetField('mainSheet', '选择 Sheet')}
+    <label class="field"><span>对比方式</span><select id="compareMode"><option value="row">按行对比：每一行选出最大/最小</option><option value="column">按列统计：每列统计最大/最小</option></select></label>
+    ${multiSelectField('compareColumns', '选择参与对比的多列')}
+    <div class="button-row"><button class="primary-button" id="runAction">生成对比结果</button></div>
+  `;
+}
+
 function renderChartPanel() {
   return `
     ${fileDropHTML('main', '上传图表数据', '.xlsx,.xls,.csv')}
@@ -208,6 +220,10 @@ function sheetField(id, label) {
 
 function selectField(id, label) {
   return `<label class="field"><span>${label}</span><select id="${id}"></select></label>`;
+}
+
+function multiSelectField(id, label) {
+  return `<label class="field wide"><span>${label}</span><select id="${id}" multiple size="8"></select></label>`;
 }
 
 function bindUploads() {
@@ -244,6 +260,7 @@ function bindActions(id) {
     split: runSplit,
     formula: runFormula,
     pivot: runPivot,
+    compare: runCompare,
     chart: runChart,
   };
   button.addEventListener('click', handlers[id]);
@@ -313,10 +330,10 @@ function refreshColumns() {
     fillColumns('targetKey', app.files.target, $('targetSheet')?.value);
     fillColumns('targetFill', app.files.target, $('targetSheet')?.value);
   }
-  if (['convert', 'clean', 'mask', 'split', 'formula', 'pivot', 'chart'].includes(tool)) {
+  if (['convert', 'clean', 'mask', 'split', 'formula', 'pivot', 'compare', 'chart'].includes(tool)) {
     const item = app.files.main;
     const sheet = $('mainSheet')?.value;
-    ['maskColumn', 'splitColumn', 'groupColumn', 'valueColumn', 'xColumn', 'yColumn'].forEach(id => fillColumns(id, item, sheet));
+    ['maskColumn', 'splitColumn', 'groupColumn', 'valueColumn', 'compareColumns', 'xColumn', 'yColumn'].forEach(id => fillColumns(id, item, sheet));
   }
   if (tool === 'diff') {
     fillColumns('diffKey', app.files.fresh || app.files.old, $('freshSheet')?.value || $('oldSheet')?.value);
@@ -327,7 +344,7 @@ function fillColumns(id, item, sheetName) {
   const el = $(id);
   if (!el) return;
   const headers = item && sheetName ? getHeaders(item.workbook, sheetName) : [];
-  el.innerHTML = headers.map(name => `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join('');
+  el.innerHTML = headers.map(name => `<option value="${escapeAttr(name)}" ${id === 'compareColumns' ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('');
 }
 
 function previewCurrentInput() {
@@ -586,6 +603,62 @@ function runPivot() {
   } catch (_) {}
 }
 
+function runCompare() {
+  try {
+    const item = requireFile('main', '待对比文件');
+    const sheet = $('mainSheet').value;
+    const headers = getHeaders(item.workbook, sheet);
+    const selectedColumns = getSelectedValues('compareColumns');
+    const mode = $('compareMode').value;
+    if (selectedColumns.length < 2) {
+      toast('请至少选择 2 列参与对比', 'error');
+      return;
+    }
+
+    const sourceRows = getRows(item.workbook, sheet);
+    if (mode === 'column') {
+      const rows = selectedColumns.map(column => {
+        const values = sourceRows
+          .map((row, index) => ({ rowNumber: index + 2, value: normalizeNumber(row[column]) }))
+          .filter(item => item.value !== null);
+        const maxItem = values.reduce((best, current) => !best || current.value > best.value ? current : best, null);
+        const minItem = values.reduce((best, current) => !best || current.value < best.value ? current : best, null);
+        return {
+          对比列: column,
+          有效数字数量: values.length,
+          最大值: maxItem ? maxItem.value : '',
+          最大值所在行: maxItem ? maxItem.rowNumber : '',
+          最小值: minItem ? minItem.value : '',
+          最小值所在行: minItem ? minItem.rowNumber : '',
+        };
+      });
+      const resultHeaders = ['对比列', '有效数字数量', '最大值', '最大值所在行', '最小值', '最小值所在行'];
+      setWorkbookResult(rows, resultHeaders, `${baseName(item.file.name)}_多列对比统计.xlsx`);
+      toast(`列统计完成：已对比 ${selectedColumns.length} 列`, 'success');
+      return;
+    }
+
+    const rows = sourceRows.map(row => {
+      const values = selectedColumns
+        .map(column => ({ column, value: normalizeNumber(row[column]) }))
+        .filter(item => item.value !== null);
+      const maxItem = values.reduce((best, current) => !best || current.value > best.value ? current : best, null);
+      const minItem = values.reduce((best, current) => !best || current.value < best.value ? current : best, null);
+      return {
+        ...row,
+        最大值: maxItem ? maxItem.value : '',
+        最大值来源列: maxItem ? maxItem.column : '',
+        最小值: minItem ? minItem.value : '',
+        最小值来源列: minItem ? minItem.column : '',
+        参与对比列数: values.length,
+      };
+    });
+    const resultHeaders = [...headers, '最大值', '最大值来源列', '最小值', '最小值来源列', '参与对比列数'];
+    setWorkbookResult(rows, resultHeaders, `${baseName(item.file.name)}_多列对比结果.xlsx`);
+    toast(`按行对比完成：${rows.length} 行，${selectedColumns.length} 列`, 'success');
+  } catch (_) {}
+}
+
 function runChart() {
   try {
     const item = requireFile('main', '图表数据');
@@ -738,6 +811,21 @@ function collectHeaders(rows) {
   const set = new Set();
   rows.forEach(row => Object.keys(row).forEach(key => set.add(key)));
   return Array.from(set);
+}
+
+function getSelectedValues(id) {
+  const el = $(id);
+  if (!el) return [];
+  return Array.from(el.selectedOptions).map(option => option.value);
+}
+
+function normalizeNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') return Number.isNaN(value) ? null : value;
+  const cleaned = String(value).replace(/,/g, '').trim();
+  if (!cleaned) return null;
+  const number = Number(cleaned);
+  return Number.isNaN(number) ? null : number;
 }
 
 function evaluateFormula(row, headers, expr) {
