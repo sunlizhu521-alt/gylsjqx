@@ -720,14 +720,11 @@ function buildMergeRows() {
       const next = { 映射值: mapValue };
       slotConfigs.forEach(config => {
         const record = (slotRecords[config.key] || [])[rowIndex];
-        next[`表格${config.index}_来源文件`] = record ? config.item.file.name : mapValue;
-        next[`表格${config.index}_来源Sheet`] = record ? record.sheet : mapValue;
-        next[`表格${config.index}_映射列`] = config.mapColumn;
-        next[`表格${config.index}_映射值`] = mapValue;
         config.outputColumns.forEach(column => {
-          const header = `表格${config.index}_${column}`;
           const value = record && record.columns.includes(column) ? record.row[column] : '';
-          next[header] = isBlankCell(value) ? mapValue : value;
+          if (!(column in next) || isBlankCell(next[column])) {
+            next[column] = isBlankCell(value) ? mapValue : value;
+          }
         });
       });
       output.push(next);
