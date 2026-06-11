@@ -1,6 +1,7 @@
 const tools = [
   { id: 'merge', icon: '▦', title: '报表合并', status: '可用-陈燕', desc: '多个文件按映射列合并，保留明细行。' },
   { id: 'compare', icon: '⌁', title: '多列对比', status: '可用-陈燕', desc: '选择多列数据，按行找最大值、最小值。' },
+  { id: 'seal', icon: '章', title: '检验报告单-电子章', status: '可用-品质', desc: '检验报告单图片旋正后加盖电子章，并一键保存图片。' },
   { id: 'ocr', icon: '文', title: '图片转文字', status: '仅限简单图片', desc: '上传图片后识别文字，并导出 TXT、Excel、Word。' },
   { id: 'match', icon: '⇄', title: '智能匹配', status: '不可用仅是举例', desc: '根据关键列把源表字段填入目标表。' },
   { id: 'convert', icon: '↔', title: '格式转换', status: '不可用仅是举例', desc: 'Excel、CSV、JSON 互相转换。' },
@@ -24,6 +25,8 @@ const app = {
   ocrText: '',
   ocrImageUrl: '',
   ocrRotation: 0,
+  sealRotation: 0,
+  sealResultUrl: '',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -90,6 +93,8 @@ function saveToolState(id) {
     ocrText: app.ocrText,
     ocrImageUrl: app.ocrImageUrl,
     ocrRotation: app.ocrRotation,
+    sealRotation: app.sealRotation,
+    sealResultUrl: app.sealResultUrl,
   };
 }
 
@@ -102,6 +107,8 @@ function restoreToolState(id) {
   app.ocrText = state.ocrText || '';
   app.ocrImageUrl = state.ocrImageUrl || '';
   app.ocrRotation = state.ocrRotation || 0;
+  app.sealRotation = state.sealRotation || 0;
+  app.sealResultUrl = state.sealResultUrl || '';
 }
 
 function updateFileLabels() {
@@ -126,6 +133,7 @@ function renderToolPanel(id) {
     formula: renderFormulaPanel,
     pivot: renderPivotPanel,
     compare: renderComparePanel,
+    seal: renderSealPanel,
     ocr: renderOcrPanel,
     chart: renderChartPanel,
   };
@@ -294,6 +302,40 @@ function renderComparePanel() {
   `;
 }
 
+function renderSealPanel() {
+  return `
+    ${fileDropHTML('sealReport', '上传检验报告单图片', '.png,.jpg,.jpeg,.webp,.bmp')}
+    ${fileDropHTML('sealStamp', '上传电子章图片', '.png,.jpg,.jpeg,.webp,.bmp')}
+    <div class="ocr-preview-card seal-preview-card">
+      <div class="ocr-image-panel">
+        <div class="ocr-image-stage">
+          <img id="sealImagePreview" alt="检验报告单预览" />
+        </div>
+        <div class="ocr-rotate-row">
+          <button class="ghost-button" id="rotateSealLeft" type="button">左转 90°</button>
+          <button class="ghost-button" id="rotateSealRight" type="button">右转 90°</button>
+          <button class="ghost-button" id="resetSealRotation" type="button">重置旋转</button>
+          <button class="ghost-button" id="clearSealImages" type="button">清空图片</button>
+        </div>
+      </div>
+      <div class="seal-summary">
+        <h3>检验报告单-电子章</h3>
+        <p>把刚才常用的两个动作合并成一个工具：先旋正检验报告单，再在右下角加盖电子质检章。</p>
+        <ul>
+          <li>支持左转、右转、重置旋转，确保文字是正的。</li>
+          <li>电子章按报告宽度约 18% 缩放，轻微倾斜后放在右下角。</li>
+          <li>所有处理都在浏览器本地完成，不上传服务器。</li>
+          <li>点击“一键保存到桌面”会下载盖章后的 JPG；浏览器下载目录设为桌面时会直接保存到桌面。</li>
+        </ul>
+      </div>
+    </div>
+    <div class="button-row ocr-actions">
+      <button class="primary-button" id="runAction">旋正并加章</button>
+      <button class="secondary-button" id="saveSealDesktop" type="button">一键保存到桌面</button>
+    </div>
+  `;
+}
+
 function renderOcrPanel() {
   return `
     ${fileDropHTML('image', '上传待识别图片', '.png,.jpg,.jpeg,.webp,.bmp')}
@@ -380,12 +422,14 @@ function bindActions(id) {
     formula: runFormula,
     pivot: runPivot,
     compare: runCompare,
+    seal: runSealStamp,
     ocr: runOcr,
     chart: runChart,
   };
   button.addEventListener('click', handlers[id]);
   if (id === 'merge') bindMergeControls();
   if (id === 'compare') bindCompareControls();
+  if (id === 'seal') bindSealControls();
   if (id === 'ocr') bindOcrControls();
 }
 
@@ -446,8 +490,26 @@ function bindOcrControls() {
   });
 }
 
+function bindSealControls() {
+  $('rotateSealLeft')?.addEventListener('click', () => rotateSealImage(-90));
+  $('rotateSealRight')?.addEventListener('click', () => rotateSealImage(90));
+  $('resetSealRotation')?.addEventListener('click', resetSealRotation);
+  $('clearSealImages')?.addEventListener('click', clearSealImages);
+  $('saveSealDesktop')?.addEventListener('click', saveSealToDesktop);
+}
+
 async function handleFiles(key, files) {
   try {
+    if (key === 'sealReport' || key === 'sealStamp') {
+      app.files[key] = await loadToolImageFile(files[0]);
+      $(key + 'Name').textContent = files[0].name;
+      if (key === 'sealReport') app.sealRotation = 0;
+      clearResult();
+      previewCurrentInput();
+      updateStatus();
+      toast('已读取图片', 'success');
+      return;
+    }
     if (key === 'image') {
       app.files[key] = await loadImageFile(files[0]);
       $(key + 'Name').textContent = files[0].name;
@@ -480,6 +542,13 @@ async function loadImageFile(file) {
   app.ocrText = '';
   app.ocrRotation = 0;
   return { file, url: app.ocrImageUrl };
+}
+
+async function loadToolImageFile(file) {
+  if (!file || !file.type.startsWith('image/')) {
+    throw new Error('请选择图片文件');
+  }
+  return { file, url: URL.createObjectURL(file) };
 }
 
 async function loadFile(file) {
@@ -665,6 +734,10 @@ function previewCurrentInput() {
     previewCompareData();
     return;
   }
+  if (app.activeTool === 'seal') {
+    previewSealImage();
+    return;
+  }
   if (app.activeTool === 'ocr') {
     previewOcrImage();
     return;
@@ -677,6 +750,69 @@ function previewCurrentInput() {
   renderTable(getHeaders(item.workbook, sheet), data);
   $('previewMeta').textContent = `${item.file.name} / ${sheet} / ${data.length} 行`;
   $('activeRowCount').textContent = `${data.length} 行数据`;
+}
+
+function previewSealImage() {
+  const item = app.files.sealReport;
+  const img = $('sealImagePreview');
+  if (img) {
+    img.src = app.sealResultUrl || item?.url || '';
+    img.style.transform = app.sealResultUrl ? 'none' : `rotate(${app.sealRotation}deg)`;
+    img.classList.toggle('hidden', !(app.sealResultUrl || item?.url));
+  }
+  const rows = [
+    { 项目: '报告图片', 状态: item ? item.file.name : '未上传' },
+    { 项目: '电子章', 状态: app.files.sealStamp ? app.files.sealStamp.file.name : '未上传' },
+    { 项目: '旋转角度', 状态: `${app.sealRotation}°` },
+    { 项目: '保存方式', 状态: '生成 JPG 后一键下载；浏览器下载目录设为桌面即可保存到桌面' },
+  ];
+  renderTable(['项目', '状态'], rows, null, { showIndex: false });
+  $('previewMeta').textContent = app.result ? '已生成盖章图片' : (item ? '等待加章' : '等待上传检验报告单');
+  $('activeRowCount').textContent = `${rows.length} 项`;
+}
+
+function rotateSealImage(degrees) {
+  if (!app.files.sealReport) {
+    toast('请先上传检验报告单图片', 'error');
+    return;
+  }
+  app.sealRotation = normalizeRotation(app.sealRotation + degrees);
+  clearSealResultOnly();
+  previewSealImage();
+}
+
+function resetSealRotation() {
+  if (!app.files.sealReport) {
+    toast('请先上传检验报告单图片', 'error');
+    return;
+  }
+  app.sealRotation = 0;
+  clearSealResultOnly();
+  previewSealImage();
+}
+
+function clearSealImages() {
+  ['sealReport', 'sealStamp'].forEach(key => {
+    if (app.files[key]?.url) URL.revokeObjectURL(app.files[key].url);
+    delete app.files[key];
+    const label = $(key + 'Name');
+    if (label) label.textContent = '未选择文件';
+  });
+  app.sealRotation = 0;
+  clearSealResultOnly();
+  clearResult();
+  previewSealImage();
+  updateStatus();
+  toast('已清空图片，可重新上传', 'success');
+}
+
+function clearSealResultOnly() {
+  if (app.sealResultUrl) URL.revokeObjectURL(app.sealResultUrl);
+  app.sealResultUrl = '';
+  app.result = null;
+  app.resultName = '处理结果.xlsx';
+  app.resultType = 'xlsx';
+  $('downloadResult').disabled = true;
 }
 
 function previewOcrImage() {
@@ -1096,6 +1232,60 @@ function runCompare() {
   } catch (_) {}
 }
 
+async function runSealStamp(downloadAfter = false) {
+  try {
+    const report = requireFile('sealReport', '检验报告单图片');
+    const stamp = requireFile('sealStamp', '电子章图片');
+    const reportImage = await loadHtmlImage(report.url);
+    const stampImage = await loadHtmlImage(stamp.url);
+    const rotation = normalizeRotation(app.sealRotation);
+    const swapSize = rotation === 90 || rotation === 270;
+    const canvas = document.createElement('canvas');
+    canvas.width = swapSize ? reportImage.naturalHeight : reportImage.naturalWidth;
+    canvas.height = swapSize ? reportImage.naturalWidth : reportImage.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(rotation * Math.PI / 180);
+    ctx.drawImage(reportImage, -reportImage.naturalWidth / 2, -reportImage.naturalHeight / 2);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    const sealWidth = Math.round(canvas.width * 0.18);
+    const sealHeight = Math.round(stampImage.naturalHeight * sealWidth / stampImage.naturalWidth);
+    const sealCanvas = document.createElement('canvas');
+    const angle = -5 * Math.PI / 180;
+    const extra = Math.ceil(Math.max(sealWidth, sealHeight) * 0.18);
+    sealCanvas.width = sealWidth + extra * 2;
+    sealCanvas.height = sealHeight + extra * 2;
+    const sealCtx = sealCanvas.getContext('2d');
+    sealCtx.translate(sealCanvas.width / 2, sealCanvas.height / 2);
+    sealCtx.rotate(angle);
+    sealCtx.drawImage(stampImage, -sealWidth / 2, -sealHeight / 2, sealWidth, sealHeight);
+
+    const x = canvas.width - sealCanvas.width - Math.round(canvas.width * 0.055);
+    const y = canvas.height - sealCanvas.height - Math.round(canvas.height * 0.045);
+    ctx.drawImage(sealCanvas, x, y);
+
+    const blob = await canvasToBlob(canvas, 'image/jpeg', 0.95);
+    clearSealResultOnly();
+    app.result = blob;
+    app.resultName = `${baseName(report.file.name)}_旋正已盖章.jpg`;
+    app.resultType = 'jpg';
+    app.sealResultUrl = URL.createObjectURL(blob);
+    $('downloadResult').disabled = false;
+    previewSealImage();
+    toast('已生成旋正盖章图片', 'success');
+    if (downloadAfter) downloadResult();
+  } catch (error) {
+    toast(`处理失败：${error.message}`, 'error');
+  }
+}
+
+async function saveSealToDesktop() {
+  await runSealStamp(true);
+}
+
 async function runOcr() {
   try {
     const item = requireFile('image', '待识别图片');
@@ -1261,6 +1451,24 @@ function downloadResult() {
 function downloadChart() {
   const canvas = $('chartCanvas');
   downloadBlob(dataURLToBlob(canvas.toDataURL('image/png')), '数据图表.png');
+}
+
+function loadHtmlImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('图片加载失败'));
+    image.src = url;
+  });
+}
+
+function canvasToBlob(canvas, type = 'image/png', quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => {
+      if (blob) resolve(blob);
+      else reject(new Error('图片生成失败'));
+    }, type, quality);
+  });
 }
 
 function renderTable(headers, rows, rowClassFn, options = {}) {

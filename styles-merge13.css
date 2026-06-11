@@ -289,6 +289,7 @@ button {
 .tool-tab[data-tool="formula"] { --tool-color: var(--indigo); }
 .tool-tab[data-tool="pivot"] { --tool-color: var(--green); }
 .tool-tab[data-tool="compare"] { --tool-color: var(--purple); }
+.tool-tab[data-tool="seal"] { --tool-color: var(--red); }
 .tool-tab[data-tool="ocr"] { --tool-color: var(--cyan); }
 .tool-tab[data-tool="chart"] { --tool-color: var(--yellow); }
 
@@ -744,6 +745,33 @@ button {
   padding: 12px;
   font: inherit;
   line-height: 1.55;
+}
+
+.seal-summary {
+  min-height: 280px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface-solid) 82%, var(--surface-2));
+  color: var(--text);
+}
+
+.seal-summary h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.seal-summary p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.seal-summary ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.75;
 }
 
 .ocr-actions {
