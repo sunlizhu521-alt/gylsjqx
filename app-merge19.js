@@ -1,4 +1,5 @@
 const tools = [
+  { id: 'payment', icon: '付', title: '付款申请单整理', status: '可用', desc: '按付款主体整理明细，每主体一页，导出 Word 和 PDF。' },
   { id: 'merge', icon: '▦', title: '报表合并', status: '可用-陈燕', desc: '多个文件按映射列合并，保留明细行。' },
   { id: 'compare', icon: '⌁', title: '多列对比', status: '可用-陈燕', desc: '选择多列数据，按行找最大值、最小值。' },
   { id: 'seal', icon: '章', title: '检验报告单-电子章', status: '可用-品质', desc: '检验报告单图片旋正后加盖电子章，并一键保存图片。' },
@@ -78,6 +79,13 @@ function switchTool(id) {
   document.querySelectorAll('.tool-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tool === id));
   $('chartCard').classList.toggle('hidden', id !== 'chart');
   document.querySelector('.result-layout').classList.toggle('single', id !== 'chart');
+  document.querySelector('.result-layout').hidden = id === 'payment';
+  if (id === 'payment') {
+    PaymentTool.mount($('toolPanel'));
+    $('activeFileCount').textContent = '本地处理';
+    $('activeRowCount').textContent = '每主体一页';
+    return;
+  }
   renderToolPanel(id);
   updateDependentFields();
   updateFileLabels();
