@@ -2,7 +2,7 @@
   'use strict';
   const C = PaymentCore, D = PaymentDocument;
   const state = { revision: 0, workbook: null, sheet: '', fileName: '', template: null, templateName: '内置付款申请模板', analysis: null, outputs: null, error: '', busy: false,
-    times: { detail: '', template: '', directory: '' }, loads: { detail: 0, template: 0, directory: 0 }, pending: {}, templateInitialized: false,
+    times: { detail: '', template: '', directory: '' }, loads: { detail: 0, template: 0, directory: 0 }, pending: {}, templateInitialized: false, restoring: false, cacheMessage: '',
     directoryWorkbook: null, directoryName: '', directorySheet: '', directoryHeaders: [], directoryRows: [], directoryErrors: [], directoryMap: { supplier: '', bank: '', unit: '' }, directoryFailure: '', bankPolicy: 'directory' };
   const now = () => new Date().toLocaleString('zh-CN', { hour12: false });
   const reference = kind => state.pending[kind] ? '正在读取…' : state.times[kind] || '未引用';
@@ -24,9 +24,43 @@
     if (!response.ok) throw new Error('内置模板读取失败，请刷新或上传模板');
     return D.readTemplate(await response.arrayBuffer());
   }
+  async function cacheChange(kind, file, time, remove = false) {
+    try {
+      if (remove) await PaymentCache.remove(kind);
+      else await PaymentCache.put(kind, { blob: file, name: file?.name || '', time });
+    } catch (_) {
+      state.cacheMessage = '浏览器未能保存文件缓存，本次仍可使用；下次打开需重新上传。';
+      const note = root?.querySelector('#paymentCacheMessage'); if (note) note.textContent = state.cacheMessage;
+    }
+  }
+  async function restoreFiles() {
+    state.restoring = true; render();
+    try {
+      for (const [kind, upload] of [['template', uploadTemplate], ['directory', uploadDirectory], ['detail', uploadExcel]]) {
+        const saved = await PaymentCache.get(kind);
+        if (saved) await upload(saved.blob ? new File([saved.blob], saved.name) : null, saved.time);
+        else if (kind === 'template') await uploadTemplate(null);
+      }
+    } catch (_) {
+      state.cacheMessage = '无法读取浏览器文件缓存，请重新上传文件。';
+      if (!state.template) await uploadTemplate(null);
+    } finally { state.restoring = false; render(); }
+  }
+  async function clearCachedFiles() {
+    for (const kind of ['detail', 'template', 'directory']) { state.loads[kind]++; state.pending[kind] = false; }
+    state.restoring = true; render();
+    try { await PaymentCache.clear(); }
+    catch (_) { state.restoring = false; state.cacheMessage = '缓存清除失败，请重试或在浏览器设置中清除此网站的数据。'; render(); return; }
+    for (const kind of ['detail', 'template', 'directory']) { state.loads[kind]++; state.pending[kind] = false; state.times[kind] = ''; }
+    invalidate(); state.workbook = null; state.analysis = null; state.fileName = ''; state.sheet = '';
+    state.directoryWorkbook = null; state.directoryName = ''; state.directoryFailure = ''; state.directoryRows = []; state.directoryHeaders = []; state.directoryErrors = [];
+    state.cacheMessage = '已清除上传文件缓存。';
+    await uploadTemplate(null);
+    state.restoring = false; render();
+  }
   function mount(element) {
     root = element; render();
-    if (!state.templateInitialized) { state.templateInitialized = true; uploadTemplate(null); }
+    if (!state.templateInitialized) { state.templateInitialized = true; restoreFiles(); }
   }
   function render() {
     root.innerHTML = `<div class="payment-tool">
@@ -36,6 +70,7 @@
         <label class="payment-upload">付款申请模板（Word，可选）<input id="paymentTemplate" type="file" accept=".docx" /><span>${esc(state.templateName)}</span><small data-reference="template">引用时间：${esc(reference('template'))}</small></label>
         <label class="payment-upload">供应商名录（Excel，可选）<input id="paymentDirectory" type="file" accept=".xlsx,.xls" /><span>${esc(state.directoryName || '按供应商全称获取银行信息')}</span><small data-reference="directory">引用时间：${esc(reference('directory'))}</small></label>
       </div>
+      <div class="payment-toolbar"><span id="paymentCacheMessage">${esc(state.cacheMessage || (state.restoring ? '正在恢复本机缓存…' : '已启用本机文件缓存，下次打开自动恢复。文件不会上传服务器。'))}</span><button id="paymentClearCache" class="secondary-button">清除上传文件缓存</button></div>
       <div id="paymentDirectorySettings"></div>
       <div class="payment-toolbar"><label>工作表 <select id="paymentSheet" ${state.workbook ? '' : 'disabled'}>${(state.workbook?.SheetNames || []).map(n => `<option ${n === state.sheet ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label><button id="paymentResetTemplate" class="secondary-button">恢复内置付款申请模板</button></div>
       <p class="payment-fixed">付款类型：<strong>采购货款</strong>　付款方式：<strong>对公转账</strong>（固定）</p>
@@ -46,6 +81,7 @@
       <p class="payment-hint">PDF 已按 85% 缩放排入纸张，打印请选择“实际大小 / 100%”。Word 可编辑，不同 Word/WPS 的字体替换可能影响分页；固定打印请使用 PDF。</p>
       <div id="paymentPages"></div>
     </div>`;
+    root.querySelector('#paymentClearCache').addEventListener('click', clearCachedFiles);
     root.querySelector('#paymentExcel').addEventListener('change', e => uploadExcel(e.target.files[0]));
     root.querySelector('#paymentTemplate').addEventListener('change', e => uploadTemplate(e.target.files[0]));
     root.querySelector('#paymentDirectory').addEventListener('change', e => uploadDirectory(e.target.files[0]));
@@ -65,10 +101,12 @@
     renderGroups();
     if (state.outputs) showOutputs();
     else if (state.error) status(state.error, true);
+    if (state.restoring) root.querySelectorAll('input, select, button').forEach(e => e.disabled = true);
   }
-  async function uploadExcel(file) {
+  async function uploadExcel(file, savedTime) {
     if (!file) return;
     const load = beginLoad('detail');
+    if (!savedTime) void cacheChange('detail', null, '', true);
     state.workbook = null; state.analysis = null; state.fileName = file.name; render();
     try {
       if (!/\.(xlsx|xls)$/i.test(file.name) || file.size > 30 * 1024 * 1024) throw new Error('请选择 30 MB 以内的 Excel 文件');
@@ -77,12 +115,14 @@
       state.workbook = XLSX.read(bytes, { type: 'array', cellDates: false, cellFormula: true });
       state.sheet = state.workbook.SheetNames[0];
       if (!state.sheet) throw new Error('文件中没有工作表');
-      state.pending.detail = false; state.times.detail = now();
+      state.pending.detail = false; state.times.detail = savedTime || now();
+      if (!savedTime) void cacheChange('detail', file, state.times.detail);
       analyzeSheet(); render();
     } catch (e) { if (load === state.loads.detail) { state.pending.detail = false; state.times.detail = ''; state.workbook = null; state.analysis = null; render(); status(e.message, true); } }
   }
-  async function uploadTemplate(file) {
+  async function uploadTemplate(file, savedTime) {
     const load = beginLoad('template');
+    if (!savedTime) void cacheChange('template', null, '', true);
     state.template = null;
     state.templateName = file ? file.name : '内置付款申请模板';
     render();
@@ -91,7 +131,8 @@
       if (file && !/\.docx$/i.test(file.name)) throw new Error('模板必须为 .docx 文件');
       const template = file ? await D.readTemplate(await file.arrayBuffer()) : await builtin();
       if (load !== state.loads.template) return;
-      state.template = template; state.pending.template = false; state.times.template = now();
+      state.template = template; state.pending.template = false; state.times.template = savedTime || now();
+      if (!savedTime) void cacheChange('template', file, state.times.template);
       render(); status('模板结构检查通过');
     } catch (e) { if (load === state.loads.template) { state.pending.template = false; render(); status(e.message + '。请重新选择模板或恢复内置模板。', true); } }
   }
@@ -105,9 +146,10 @@
       }
     }
   }
-  async function uploadDirectory(file) {
+  async function uploadDirectory(file, savedTime) {
     if (!file) return;
     const load = beginLoad('directory');
+    if (!savedTime) void cacheChange('directory', null, '', true);
     state.directoryName = file.name; state.directoryWorkbook = null; state.directoryRows = []; state.directoryHeaders = []; state.directoryErrors = []; state.directoryFailure = '';
     refreshPayments(); render();
     try {
@@ -118,7 +160,8 @@
       state.directorySheet = state.directoryWorkbook.SheetNames[0];
       if (!state.directorySheet) throw new Error('名录中没有工作表');
       readDirectorySheet(); state.pending.directory = false;
-      state.times.directory = now();
+      state.times.directory = savedTime || now();
+      if (!savedTime) void cacheChange('directory', file, state.times.directory);
       refreshPayments(); render();
     } catch (e) {
       if (load !== state.loads.directory) return;
@@ -188,6 +231,7 @@
     host.querySelectorAll('[data-directory-field]').forEach(input => input.addEventListener('change', () => { invalidate(); state.directoryMap[input.dataset.directoryField] = input.value; refreshPayments(); render(); }));
     host.querySelector('#paymentBankPolicy').addEventListener('change', e => { invalidate(); state.bankPolicy = e.target.value; refreshPayments(); render(); });
     host.querySelector('#paymentClearDirectory').addEventListener('click', () => {
+      void cacheChange('directory', null, '', true);
       invalidate(); state.loads.directory++; state.pending.directory = false; state.directoryWorkbook = null; state.directoryName = ''; state.times.directory = ''; state.directoryFailure = ''; state.directoryErrors = []; state.directoryRows = []; state.directoryHeaders = [];
       refreshPayments(); render();
     });
@@ -257,6 +301,7 @@
     if (state.busy) return;
     invalidate(); const revision = state.revision;
     try {
+      if (state.restoring) throw new Error('正在恢复文件缓存，请稍候');
       const a = state.analysis;
       if (Object.values(state.pending).some(Boolean)) throw new Error('文件正在读取，请稍候再生成');
       if (!a || a.errors.length || !a.groups.length) throw new Error('请先上传并修正付款明细');

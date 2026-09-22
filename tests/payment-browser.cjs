@@ -15,7 +15,8 @@ const base = (extra = {}) => ({
   await fs.mkdir(out, { recursive: true });
   const browser = await chromium.launch({ headless: true, ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}) });
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const page = await context.newPage();
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     // Existing OCR CDN is unrelated to this tool. Payment flow must work without it.
     await page.route('https://cdn.jsdelivr.net/**', route => route.fulfill({ status: 200, contentType: 'text/javascript', body: '' }));
@@ -25,6 +26,7 @@ const base = (extra = {}) => ({
     await page.locator('[data-tool="payment"]').click();
     assert.equal(await page.locator('.result-layout').isVisible(), false);
     async function upload(rows, options = {}) {
+      await page.waitForFunction(() => !document.querySelector('#paymentExcel').disabled);
       const array = await page.evaluate(({ rows, headers, options }) => {
         const ws = XLSX.utils.aoa_to_sheet([headers, ...rows.map(r => headers.map(h => r[h] ?? ''))]);
         if (options.formulaError) ws.L2 = { t: 'e', v: 15, f: '1/0' };
@@ -209,6 +211,47 @@ const base = (extra = {}) => ({
       await page.locator('#paymentPages').scrollIntoViewIfNeeded();
       await page.screenshot({path:path.join(out,'actual-directory.png'),fullPage:false});
     }
+    await upload([base({'开户银行及账号':''})]);
+    await uploadDirectory([['测试供应商有限公司','0011 2233']]);
+    await page.locator('#paymentTemplate').setInputFiles({ name: '缓存模板.docx', mimeType: 'application/octet-stream', buffer: Buffer.from(custom) });
+    await page.waitForFunction(() => !document.querySelector('[data-reference="template"]').textContent.includes('正在读取'));
+    // Wait for all queued IndexedDB writes, then restore in a fresh document.
+    const savedNames = await page.evaluate(async () => {
+      const records = await Promise.all(['detail','template','directory'].map(k => PaymentCache.get(k)));
+      return records.map(r => ({name:r.name,time:r.time}));
+    });
+    await page.reload(); await page.locator('[data-tool="payment"]').click();
+    await page.waitForFunction(() => !document.querySelector('#paymentExcel').disabled);
+    for (const [i,kind] of ['detail','template','directory'].entries()) assert.equal(await page.locator(`[data-reference="${kind}"]`).innerText(), '引用时间：'+savedNames[i].time);
+    assert.match(await page.locator('label.payment-upload').nth(1).innerText(), /缓存模板.docx/);
+    await page.locator('[data-field="计划付款日期"]').fill('2026-09-25'); await generate();
+    assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
+    const restored = await save('docx','cache-restored');
+    const restoredXml = await page.evaluate(async bytes => (await (await JSZip.loadAsync(new Uint8Array(bytes))).file('word/document.xml').async('string')), [...await fs.readFile(restored)]);
+    assert.ok(restoredXml.includes('部门主管审核')); assert.ok(restoredXml.includes('卡号:0011 2233'));
+    const fresh = await page.context().newPage();
+    await fresh.route('https://cdn.jsdelivr.net/**', route => route.fulfill({status:200,contentType:'text/javascript',body:''}));
+    await fresh.goto(process.env.QA_URL || 'http://127.0.0.1:8899/'); await fresh.locator('[data-tool="payment"]').click();
+    await fresh.waitForFunction(() => !document.querySelector('#paymentExcel').disabled);
+    assert.match(await fresh.locator('#paymentGroups').innerText(), /甲公司/); await fresh.close();
+    await page.locator('#paymentClearDirectory').click();
+    assert.equal(await page.evaluate(async()=>!!(await PaymentCache.get('directory'))),false);
+    await page.locator('#paymentResetTemplate').click();
+    await page.waitForFunction(() => !document.querySelector('[data-reference="template"]').textContent.includes('正在读取'));
+    assert.equal(await page.evaluate(async()=>!!(await PaymentCache.get('template')).blob),false);
+    await page.locator('#paymentClearCache').click();
+    await page.waitForFunction(() => !document.querySelector('#paymentExcel').disabled);
+    assert.equal(await page.evaluate(async()=>!!(await PaymentCache.get('detail'))),false);
+    await page.reload(); await page.locator('[data-tool="payment"]').click();
+    await page.waitForFunction(() => !document.querySelector('#paymentExcel').disabled);
+    assert.match(await page.locator('[data-reference="detail"]').innerText(), /未引用/);
+    assert.match(await page.locator('[data-reference="directory"]').innerText(), /未引用/);
+    // Failure to persist must be visible and must not break the current upload.
+    await page.evaluate(() => { PaymentCache.put = async()=>{throw new Error('quota');}; });
+    await upload([base()]); await generate();
+    assert.match(await page.locator('#paymentCacheMessage').innerText(), /未能保存/);
+    assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
+    await page.screenshot({path:path.join(out,'cache-desktop.png'),fullPage:false});
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ status: 'PASS', scenarios: ['identity', 'single/export/uppercase', 'stale-download', 'switch-state', 'invalid-amount', 'missing-subject', 'conflict', 'total-confirmation', 'custom-template', 'invalid-template', 'xls', 'formula-error', 'directory-match/export', 'three-reference-times', 'directory-conflict', 'directory-duplicate', 'directory-unmatched', 'directory-mapping', 'directory-fill-only', 'optional-bank-column', 'directory-precision', 'directory-failed-upload', 'directory-removal', 'three-subjects', '30-long-rows', '45-short-rows', 'mobile', 'console'], output: out }, null, 2));
   } finally { await browser.close(); }
