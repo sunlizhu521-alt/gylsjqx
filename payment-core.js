@@ -48,6 +48,16 @@
   }
   function text(v) { return v == null ? '' : String(v); }
   function subjectName(value) { const name = text(value).trim(); return name === '浙江迈德斯特医疗器械科技有限公司' ? '迈德斯特' : name; }
+  function downloadName(groups, extension) {
+    if (!groups?.length) throw new Error('没有可下载的付款申请单');
+    if (groups.length !== 1) throw new Error('请按付款主体分别下载');
+    const g = groups[0];
+    if (!text(g.info['计划付款日期']).trim()) throw new Error(`${g.subject}：请填写计划付款日期并重新生成后下载`);
+    const period = date(g.info['计划付款日期']);
+    const subject = subjectName(g.subject).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+    return `${period}${subject}${money(g.total).replace(/,/g, '')}.${extension}`;
+  }
+
   function bankSummary(value, supplier = '') {
     const raw = text(value);
     if (!raw.trim() || raw.trim() === '/') return { value: raw, compact: true };
@@ -160,7 +170,7 @@
     if (!records.length) errors.push('工作表没有付款明细');
     return { errors, groups: [...groups.values()] };
   }
-  const api = { fields, required, infoFields, cents, money, upper, text, date, analyze, subjectName, bankSummary, buildDirectory, resolveBank };
+  const api = { fields, required, infoFields, cents, money, upper, text, date, analyze, downloadName, subjectName, bankSummary, buildDirectory, resolveBank };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PaymentCore = api;
 })(typeof window === 'undefined' ? globalThis : window);

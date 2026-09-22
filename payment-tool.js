@@ -52,11 +52,15 @@
     root.querySelector('#paymentResetTemplate').addEventListener('click', () => uploadTemplate(null));
     root.querySelector('#paymentSheet').addEventListener('change', e => { invalidate(); state.sheet = e.target.value; analyzeSheet(); renderGroups(); });
     root.querySelector('#paymentGenerate').addEventListener('click', generate);
-    root.querySelectorAll('[data-payment-download]').forEach(b => b.addEventListener('click', () => {
-      const kind = b.dataset.paymentDownload, blob = state.outputs?.[kind];
-      if (!blob) return;
-      downloadBlob(blob, `付款申请单整理结果.${kind}`);
-    }));
+    root.onclick = e => {
+      const button = e.target.closest('[data-payment-download]');
+      if (!button || button.disabled) return;
+      const kind = button.dataset.paymentDownload, index = Number(button.dataset.paymentGroup || 0);
+      const file = state.outputs?.files[index], group = state.outputs?.groups[index];
+      if (!file || !group) return;
+      try { downloadBlob(file[kind], C.downloadName([group], kind)); }
+      catch (e) { status(e.message, true); }
+    };
     renderDirectorySettings();
     renderGroups();
     if (state.outputs) showOutputs();
@@ -273,9 +277,13 @@
       const template = state.template;
       const layouts = [];
       for (const g of groups) { layouts.push(await D.layout(template, g)); await new Promise(resolve => setTimeout(resolve, 0)); if (revision !== state.revision) return; }
-      const docx = await D.docx(template, layouts), pdf = await D.pdf(layouts);
+      const files = [];
+      for (const layout of layouts) {
+        files.push({ docx: await D.docx(template, [layout]), pdf: await D.pdf([layout]) });
+        if (revision !== state.revision) return;
+      }
       if (revision !== state.revision) return;
-      state.outputs = { docx, pdf, layouts, groups };
+      state.outputs = { files, layouts, groups };
       showOutputs();
     } catch (e) { if (revision === state.revision) status(e.message, true); }
     finally {
@@ -291,10 +299,25 @@
       const label = document.createElement('p');
       label.textContent = `${groups[i].subject} · 第 ${i + 1} 页 / 共 ${layouts.length} 页 · 正文 ${(Math.floor(l.body * 2) / 2).toFixed(1)} pt，表格 ${(Math.floor(l.table * 2) / 2).toFixed(1)} pt${l.table < 6.5 ? '（明细较多，已继续压缩，请放大核对）' : ''}`;
       const canvas = D.canvas(l); canvas.setAttribute('aria-label', `${groups[i].subject}申请单预览`);
-      card.append(label, canvas); pages.append(card);
+      card.append(label, canvas);
+      if (groups.length > 1) {
+        const actions = document.createElement('div'); actions.className = 'payment-actions';
+        for (const kind of ['docx', 'pdf']) {
+          const button = document.createElement('button'); button.className = 'secondary-button';
+          button.dataset.paymentDownload = kind; button.dataset.paymentGroup = String(i);
+          button.textContent = `下载${groups[i].subject} ${kind === 'docx' ? 'Word' : 'PDF'}`;
+          actions.append(button);
+        }
+        card.append(actions);
+      }
+      pages.append(card);
     });
-    root.querySelectorAll('[data-payment-download]').forEach(b => b.disabled = false);
-    status(`已生成 ${layouts.length} 页，每个付款主体一页；Word 与 PDF 均可下载。`);
+    root.querySelectorAll('[data-payment-download]').forEach(b => {
+      const combined = !b.hasAttribute('data-payment-group');
+      b.hidden = combined && groups.length > 1;
+      b.disabled = b.hidden;
+    });
+    status(`已生成 ${layouts.length} 页，每个付款主体一页；请按付款主体分别下载 Word 和 PDF。`);
   }
   window.PaymentTool = { mount };
 })();

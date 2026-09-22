@@ -128,3 +128,13 @@ test('directory bank name and receiving account stay together; subjects support 
  assert.equal(C.subjectName('迈德斯特（宁波）医疗科技有限公司'),'迈德斯特（宁波）医疗科技有限公司');
  for(const row of [{account:'',bankName:'支行'},{account:'123',bankName:''},{account:'abc',bankName:'支行'}]) assert.ok(C.resolveBank({'供应商全称':'甲'},C.buildDirectory([{supplier:'甲',row:2,...row}])).error);
 });
+test('download name uses planned date, short subject and exact numeric total',()=>{
+ const group={subject:'浙江迈德斯特医疗器械科技有限公司',total:220500n,info:{计划付款日期:'2026-09-25'}};
+ assert.equal(C.downloadName([group],'docx'),'2026-09-25迈德斯特2205.00.docx');
+ assert.equal(C.downloadName([group],'pdf'),'2026-09-25迈德斯特2205.00.pdf');
+ assert.equal(C.downloadName([{...group,total:0n}],'pdf'),'2026-09-25迈德斯特0.00.pdf');
+ assert.throws(()=>C.downloadName([{...group,info:{}}],'pdf'),/计划付款日期/);
+ assert.throws(()=>C.downloadName([{...group,info:{计划付款日期:'2026-02-30'}}],'pdf'),/日期无效/);
+ assert.throws(()=>C.downloadName([group,group],'pdf'),/分别下载/);
+ assert.equal(C.downloadName([{...group,subject:'乙/公司',total:1n}],'pdf'),'2026-09-25乙_公司0.01.pdf');
+});

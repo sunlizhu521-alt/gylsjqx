@@ -32,18 +32,22 @@ const base = (extra = {}) => ({
         return Array.from(new Uint8Array(XLSX.write(wb, { type: 'array', bookType: options.xls ? 'biff8' : 'xlsx' })));
       }, { rows, headers: ['填写时间', ...C.required.filter(h => !options.noBank || h !== '开户银行及账号')], options });
       await page.locator('#paymentExcel').setInputFiles({ name: options.xls ? '测试.xls' : '测试.xlsx', mimeType: 'application/octet-stream', buffer: Buffer.from(array) });
-      await page.waitForFunction(() => document.querySelector('#paymentGroups').textContent.length > 0);
+      await page.waitForFunction(() => !document.querySelector('[data-reference="detail"]').textContent.includes('正在读取') && document.querySelector('#paymentGroups').textContent.length > 0);
+      for (const input of await page.locator('[data-field="计划付款日期"]').all()) await input.fill('2026-09-25');
     }
     async function generate() {
       await page.waitForFunction(() => [...document.querySelectorAll('[data-reference]')].every(e => !e.textContent.includes('正在读取')));
       await page.locator('#paymentGenerate').click();
       await page.waitForFunction(() => !document.querySelector('#paymentGenerate').disabled);
     }
-    async function save(kind, name) {
-      assert.equal(await page.locator(`[data-payment-download="${kind}"]`).isDisabled(), false);
+    async function save(kind, name, index = 0) {
+      assert.equal(await page.locator(`[data-payment-download="${kind}"]:visible`).nth(index).isDisabled(), false);
       const wait = page.waitForEvent('download');
-      await page.locator(`[data-payment-download="${kind}"]`).click();
-      const p = path.join(out, `${name}.${kind}`); await (await wait).saveAs(p); return p;
+      await page.locator(`[data-payment-download="${kind}"]:visible`).nth(index).click();
+      const download = await wait;
+      assert.match(download.suggestedFilename(), new RegExp('^2026-09-25.+[0-9]+\\.[0-9]{2}\\.' + kind + '$'));
+      if (name === 'synthetic-single') assert.equal(download.suggestedFilename(), `2026-09-25甲公司2205.00.${kind}`);
+      const p = path.join(out, `${name}.${kind}`); await download.saveAs(p); return p;
     }
     await upload([base()]); await generate();
     assert.match(await page.locator('#paymentStatus').innerText(), /已生成 1 页/);
@@ -164,8 +168,14 @@ const base = (extra = {}) => ({
     assert.match(await page.locator('#paymentStatus').innerText(), /已生成 3 页/);
     assert.match(await page.locator('#paymentPages').innerText(), /继续压缩/);
     await save('docx', 'stress'); const pdfPath = await save('pdf', 'stress');
+    assert.equal(await page.locator('[data-payment-download="pdf"]:visible').count(), 3);
+    for (let i = 1; i < 3; i++) {
+      await save('docx', `stress-${i}`, i);
+      const file = await save('pdf', `stress-${i}`, i);
+      assert.equal(await page.evaluate(async bytes => (await PDFLib.PDFDocument.load(new Uint8Array(bytes))).getPageCount(), [...await fs.readFile(file)]), 1);
+    }
     const pageCount = await page.evaluate(async bytes => (await PDFLib.PDFDocument.load(new Uint8Array(bytes))).getPageCount(), [...await fs.readFile(pdfPath)]);
-    assert.equal(pageCount, 3);
+    assert.equal(pageCount, 1);
     await page.screenshot({ path: path.join(out, 'desktop.png'), fullPage: false });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
