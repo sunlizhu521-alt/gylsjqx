@@ -142,6 +142,8 @@
     if (errors.length) return { errors, groups: [] };
     for (const record of records) {
       const subject = subjectName(record['付款主体']), source = record._row;
+      // Skip only a valid, exact zero; invalid or missing amounts still need correction.
+      try { if (cents(record['本次申请付款金额']) === 0n) continue; } catch (_) {}
       if (!subject) { errors.push(`第 ${source} 行：缺少付款主体`); continue; }
       if (!groups.has(subject)) groups.set(subject, { subject, rows: [], total: 0n, info: {}, choices: {}, checks: [] });
       const group = groups.get(subject);
@@ -149,10 +151,6 @@
       try { row._cents = cents(record['本次申请付款金额']); group.total += row._cents; }
       catch (e) { errors.push(`第 ${source} 行：本次申请付款金额${e.message}`); }
       if (group.total > MAX_CENTS) errors.push(`${subject}：合计超出支持范围`);
-      if (text(record['付款总金额']).trim()) {
-        try { row._check = cents(record['付款总金额']); }
-        catch (e) { errors.push(`第 ${source} 行：付款总金额${e.message}`); }
-      }
       try { row['申请日期'] = date(record['申请日期']); }
       catch (e) { errors.push(`第 ${source} 行：申请日期${e.message}`); }
       group.rows.push(row);
@@ -164,10 +162,10 @@
         group.info[field] = choices.length === 1 ? choices[0] : '';
       }
       group.info['计划付款日期'] = '';
-      group.checks = group.rows.filter(r => r._check != null && r._check !== group.total)
-        .map(r => `第 ${r._row} 行付款总金额 ${money(r._check)}，明细合计 ${money(group.total)}`);
+
     }
     if (!records.length) errors.push('工作表没有付款明细');
+    else if (!groups.size && !errors.length) errors.push('本次申请付款金额均为 0，没有需要生成的付款明细');
     return { errors, groups: [...groups.values()] };
   }
   const api = { fields, required, infoFields, cents, money, upper, text, date, analyze, downloadName, subjectName, bankSummary, buildDirectory, resolveBank };

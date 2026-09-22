@@ -28,13 +28,13 @@ test('subjects and repeated supplier rows retain original order without deduplic
   assert.deepEqual(a.groups.map(g => g.subject), ['甲公司', '乙公司']);
   assert.deepEqual(a.groups[0].rows.map(r => r._row), [2, 4]);
 });
-test('repeated total column is checked, never added into sum', () => {
+test('payment total column never contributes to sum or warnings', () => {
   const a = C.analyze(C.required, [row({本次申请付款金额:'1.10',付款总金额:'3.30'}), row({_row:3,本次申请付款金额:'2.20',付款总金额:'3.30'})]);
   assert.equal(a.groups[0].total,330n);assert.deepEqual(a.groups[0].checks,[]);
 });
-test('mismatching totals expose source row, zero check values are not skipped', () => {
+test('mismatching payment total no longer requires confirmation', () => {
   const a = C.analyze(C.required,[row({付款总金额:0})]);
-  assert.equal(a.groups[0].checks.length,1);assert.match(a.groups[0].checks[0],/第 2 行/);
+  assert.deepEqual(a.groups[0].checks,[]);assert.equal(a.groups[0].total,220500n);
 });
 test('blank optional total is allowed but does not supply output total', () => {
   const a=C.analyze(C.required,[row({付款总金额:''})]);
@@ -137,4 +137,13 @@ test('download name uses planned date, short subject and exact numeric total',()
  assert.throws(()=>C.downloadName([{...group,info:{计划付款日期:'2026-02-30'}}],'pdf'),/日期无效/);
  assert.throws(()=>C.downloadName([group,group],'pdf'),/分别下载/);
  assert.equal(C.downloadName([{...group,subject:'乙/公司',total:1n}],'pdf'),'2026-09-25乙_公司0.01.pdf');
+});
+
+test('exact zero payment rows are omitted; order, nonzero cents and source data are preserved',()=>{
+ const rows=[row({本次申请付款金额:0,付款主体:'仅零主体'}),row({_row:3,本次申请付款金额:'0.00',经办人:'不同人'}),row({_row:4,本次申请付款金额:'0.01'}),row({_row:5,本次申请付款金额:'2.20'})];
+ const a=C.analyze(C.required,rows);
+ assert.deepEqual(a.errors,[]);assert.equal(a.groups.length,1);
+ assert.deepEqual(a.groups[0].rows.map(r=>r._row),[4,5]);assert.equal(a.groups[0].total,221n);assert.equal(rows.length,4);
+ const zero=C.analyze(C.required,[row({本次申请付款金额:'￥0.00'})]);assert.equal(zero.groups.length,0);assert.match(zero.errors[0],/均为 0/);
+ for(const value of ['',null,'bad','-1','0.001']) assert.ok(C.analyze(C.required,[row({本次申请付款金额:value})]).errors.length);
 });

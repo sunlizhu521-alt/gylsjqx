@@ -81,9 +81,19 @@ const base = (extra = {}) => ({
     await page.locator('[data-field="经办人"]').fill('核实人'); await generate();
     assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
     await upload([base({ 付款总金额: '0' })]); await generate();
-    assert.match(await page.locator('#paymentStatus').innerText(), /核实付款总金额差异/);
-    await page.locator('[data-confirm]').check(); await generate();
+    assert.equal(await page.locator('[data-confirm]').count(), 0);
+    assert.doesNotMatch(await page.locator('#paymentGroups').innerText(), /行付款总金额/);
     assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
+    await upload([base({本次申请付款金额:0,备注:'ZERO-OMIT'}),base({本次申请付款金额:'0.01',备注:'KEEP-ONE',开户银行及账号:'未知银行原文'}),base({本次申请付款金额:'2.20',备注:'KEEP-TWO'})]); await generate();
+    assert.doesNotMatch(await page.locator('#paymentGroups').innerText(), /银行信息无法明确识别|ZERO-OMIT/);
+    assert.match(await page.locator('#paymentGroups').innerText(), /2 笔/);
+    const filtered = await save('docx','zero-filtered'); await save('pdf','zero-filtered');
+    const filteredText = await page.evaluate(async bytes => (await (await JSZip.loadAsync(new Uint8Array(bytes))).file('word/document.xml').async('string')), [...await fs.readFile(filtered)]);
+    assert.ok(!filteredText.includes('ZERO-OMIT'));assert.ok(filteredText.includes('KEEP-ONE'));assert.ok(filteredText.includes('KEEP-TWO'));assert.ok(filteredText.includes('未知银行原文'));
+    await upload([base({本次申请付款金额:0})]); await generate();
+    assert.match(await page.locator('#paymentGroups').innerText(), /均为 0/);
+    assert.equal(await page.locator('[data-payment-download="docx"]').isDisabled(), true);
+    await upload([base()]); await generate();
     // Template replacement changes preserved approval content, never payment constants.
     const custom = await page.evaluate(async () => {
       const z = await JSZip.loadAsync(await (await fetch('assets/payment-template.docx')).arrayBuffer());

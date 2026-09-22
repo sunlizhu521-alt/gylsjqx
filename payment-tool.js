@@ -101,7 +101,7 @@
       analyzeSheet();
       for (const group of state.analysis.groups) {
         const old = previous.get(group.subject);
-        if (old) { group.info = { ...old.info }; group.confirmed = old.confirmed; }
+        if (old) { group.info = { ...old.info }; }
       }
     }
   }
@@ -240,17 +240,14 @@
     host.innerHTML = a.groups.map((g, i) => `<section class="payment-group" data-group="${i}">
       <h3>${esc(g.subject)} <small>${g.rows.length} 笔 · 合计 ￥${C.money(g.total)}</small></h3>
       <p>大写：${C.upper(g.total)}</p>
-      ${g.rows.some(r => !C.bankSummary(r._resolvedBank, r['供应商全称']).compact) ? `<p class="payment-warning">第 ${g.rows.filter(r => !C.bankSummary(r._resolvedBank, r['供应商全称']).compact).map(r => r._row).join('、')} 行银行信息无法明确识别，申请单暂保留原文。可将源表整理为“单位:名称 / 账号:号码”（分两行）后重新上传。</p>` : ''}
       <div class="payment-info-grid">${[...C.infoFields, '计划付款日期'].map(f => `<label>${f}<input data-field="${f}" type="${f.includes('日期') ? 'date' : 'text'}" value="${esc(g.info[f])}" ${f !== '计划付款日期' ? 'required' : ''} />${g.choices[f]?.length > 1 ? `<span class="payment-error">源表不一致：${g.choices[f].map(v => esc(v || '空白')).join('、')}。请填写统一值。</span>` : ''}</label>`).join('')}</div>
-      ${g.checks.length ? `<div class="payment-warning">${g.checks.map(esc).join('<br>')}<label><input type="checkbox" data-confirm ${g.confirmed ? 'checked' : ''} />已核实差异，仍以本次申请付款金额合计为准</label></div>` : ''}
       ${g.bankChecks?.length ? `<div class="payment-warning">${g.bankChecks.map(esc).join('<br>')}<label><input type="checkbox" data-bank-confirm ${g.bankConfirmed ? 'checked' : ''} />已对照下方原始明细和引用银行信息，确认使用供应商名录</label></div>` : ''}
       ${g.rows.some(r => r._bankReference?.notice) ? `<p class="payment-warning">${g.rows.filter(r => r._bankReference?.notice).map(r => `第 ${r._row} 行：${esc(r._bankReference.notice)}`).join('<br>')}</p>` : ''}
       <details ${g.bankChecks?.length ? 'open' : ''}><summary>核对 ${g.rows.length} 条原始明细及引用信息</summary><div class="payment-detail-scroll"><table><thead><tr><th>源行</th>${C.fields.map(f => `<th>${f}</th>`).join('')}<th>银行信息来源</th><th>申请单引用银行信息</th></tr></thead><tbody>${g.rows.map(r => `<tr><td>${r._row}</td>${C.fields.map(f => `<td>${esc(r[f])}</td>`).join('')}<td>${esc(r._bankReference?.source)}</td><td>${esc(C.bankSummary(r._resolvedBank, r['供应商全称']).value)}</td></tr>`).join('')}</tbody></table></div></details>
     </section>`).join('');
     host.querySelectorAll('input').forEach(input => input.addEventListener('input', () => {
       const group = a.groups[Number(input.closest('[data-group]').dataset.group)];
-      if (input.hasAttribute('data-confirm')) group.confirmed = input.checked;
-      else if (input.hasAttribute('data-bank-confirm')) group.bankConfirmed = input.checked;
+      if (input.hasAttribute('data-bank-confirm')) group.bankConfirmed = input.checked;
       else group.info[input.dataset.field] = input.value;
       invalidate(); status('信息已更新，请重新生成预览');
     }));
@@ -267,7 +264,6 @@
       for (const g of a.groups) {
         for (const f of C.infoFields) if (!g.info[f].trim()) throw new Error(`${g.subject}：请填写${f}，源数据冲突时需指定统一值`);
         C.date(g.info['申请日期']); C.date(g.info['计划付款日期']);
-        if (g.checks.length && !g.confirmed) throw new Error(`${g.subject}：请先核实付款总金额差异并勾选确认`);
         if (g.bankChecks?.length && !g.bankConfirmed) throw new Error(`${g.subject}：请核实名录与明细的银行信息差异并勾选确认`);
       }
       state.busy = true;
