@@ -39,7 +39,7 @@
       <div id="paymentDirectorySettings"></div>
       <div class="payment-toolbar"><label>工作表 <select id="paymentSheet" ${state.workbook ? '' : 'disabled'}>${(state.workbook?.SheetNames || []).map(n => `<option ${n === state.sheet ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label><button id="paymentResetTemplate" class="secondary-button">恢复内置付款申请模板</button></div>
       <p class="payment-fixed">付款类型：<strong>采购货款</strong>　付款方式：<strong>对公转账</strong>（固定）</p>
-      <p class="payment-hint">申请单银行栏仅保留“单位、账号”，账号空格保留；无法明确识别时保留原文并提示，原始明细不改。</p>
+      <p class="payment-hint">引用供应商名录时，“开户银行及账号”显示银行名称和卡号；未引用名录时整理原明细的单位和账号。账号空格保留，原始明细不改。</p>
       <div id="paymentStatus" role="status" aria-live="polite"></div>
       <div id="paymentGroups"></div>
       <div class="payment-actions"><button id="paymentGenerate" class="primary-button" ${state.busy ? 'disabled' : ''}>${state.busy ? '正在排版…' : '核对并生成预览'}</button><button class="secondary-button" data-payment-download="docx" disabled>下载 Word</button><button class="secondary-button" data-payment-download="pdf" disabled>下载 PDF 打印版</button></div>
