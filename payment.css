@@ -1,6 +1,10 @@
 .payment-tool { width:100%; min-width:0; }
 .payment-intro,.payment-hint { color:var(--muted); line-height:1.6; }
 .payment-upload-grid,.payment-info-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.payment-upload-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.payment-upload small { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+.payment-info-grid select { width:100%; min-width:0; padding:8px; }
+#paymentBankPolicy { max-width:100%; margin:8px 12px 8px 0; }
 .payment-upload { display:flex; flex-direction:column; gap:12px; padding:18px; background:var(--surface-2); border:1px dashed var(--line-strong); border-radius:8px; }
 .payment-upload input { max-width:100%; }
 .payment-upload span,.payment-group small { color:var(--muted); font-weight:normal; overflow-wrap:anywhere; }

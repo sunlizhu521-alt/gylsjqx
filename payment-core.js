@@ -47,6 +47,73 @@
     return out;
   }
   function text(v) { return v == null ? '' : String(v); }
+  function subjectName(value) { const name = text(value).trim(); return name === '浙江迈德斯特医疗器械科技有限公司' ? '迈德斯特' : name; }
+  function bankSummary(value, supplier = '') {
+    const raw = text(value);
+    if (!raw.trim() || raw.trim() === '/') return { value: raw, compact: true };
+    if (/^银行名称:[^\n]+\n卡号:[\d\s-]+$/.test(raw)) return { value: raw, compact: true };
+    const input = raw.replace(/&#(?:x20|32);/gi, ' ');
+    const labels = /收款银行名称|收款银行行号|开户银行行号|银行行号|开户行行号|收款单位|收款户名|账户名称|收款账号|银行账号|账户号码|开户银行|银行名称|开户行|联行号|单位|户名|账号|行号|备注/g;
+    const tokens = [...input.matchAll(labels)].filter(m => /[:：\s]|^$/.test(input.slice(m.index + m[0].length, m.index + m[0].length + 1)));
+    const units = [], accounts = [];
+    tokens.forEach((m, i) => {
+      const v = input.slice(m.index + m[0].length, tokens[i + 1]?.index ?? input.length).replace(/^\s*[:：]?\s*/, '').trim();
+      if (/^(收款单位|收款户名|账户名称|单位|户名)$/.test(m[0]) && v) units.push(v);
+      if (/^(收款账号|银行账号|账户号码|账号)$/.test(m[0]) && v) accounts.push(v);
+    });
+    const uniqueUnits = [...new Set(units)], uniqueAccounts = [...new Set(accounts)];
+    const unit = uniqueUnits[0] || text(supplier).trim();
+    if (uniqueUnits.length > 1 || uniqueAccounts.length !== 1 || !unit || !/^[\d\s-]+$/.test(uniqueAccounts[0])) return { value: raw, compact: false };
+    return { value: `单位:${unit.replace(/[\r\n]+/g, ' ')}\n账号:${uniqueAccounts[0].replace(/[\r\n]+/g, ' ')}`, compact: true };
+  }
+  function bankIdentity(value, supplier) {
+    const raw = text(value).trim();
+    const summary = bankSummary(raw, supplier);
+    return (summary.compact ? summary.value : /^[\d\s-]+$/.test(raw) ? `单位:${supplier}\n账号:${raw}` : raw).replace(/\s/g, '');
+  }
+  function buildDirectory(rows) {
+    const index = new Map(), errors = [];
+    for (const row of rows) {
+      const name = text(row.supplier).trim();
+      if (!name) { errors.push(`名录第 ${row.row} 行：供应商全称为空`); continue; }
+      const raw = text(row.bank).trim(), unit = text(row.unit).trim() || name;
+      const formatted = /^[\d\s-]+$/.test(raw) ? { value: `单位:${unit}\n账号:${raw}`, compact: true } : bankSummary(raw, unit);
+      if (text(row.unit).trim() && formatted.compact && raw && raw !== '/') formatted.value = formatted.value.replace(/^单位:[^\n]*\n/, `单位:${unit}\n`);
+      if (row.account !== undefined) {
+        const account = text(row.account).trim(), bankName = text(row.bankName).trim();
+        formatted.value = `银行名称:${bankName}\n卡号:${account}`;
+        formatted.compact = !!bankName && /^[\d\s-]+$/.test(account);
+      }
+      const entry = { row: row.row, subject: subjectName(row.subject), bank: formatted.value, error: row.error || (row.account !== undefined ? (!text(row.account).trim() ? '收款账号为空' : !text(row.bankName).trim() ? '银行名称为空' : !formatted.compact ? '收款账号格式异常' : '') : (!raw || raw === '/' ? '银行信息为空' : !formatted.compact ? '银行信息无法明确识别，请选择账号列或使用带单位、账号标签的内容' : '')) };
+      if (!index.has(name)) index.set(name, []);
+      index.get(name).push(entry);
+    }
+    if (!rows.length) errors.push('供应商名录没有数据');
+    return { index, errors };
+  }
+  function resolveBank(record, directory, policy = 'directory') {
+    const original = text(record['开户银行及账号']);
+    const name = text(record['供应商全称']).trim();
+    const result = { value: original, source: '付款明细', notice: '', error: '', conflict: false };
+    if (!directory) return result;
+    if (policy === 'fill' && original.trim() && original.trim() !== '/') return result;
+    const candidates = directory.index.get(name) || [];
+    const scoped = candidates.filter(e => e.subject);
+    const matches = scoped.length ? candidates.filter(e => e.subject === subjectName(record['付款主体'])) : candidates;
+    if (!matches.length) {
+      result.notice = '名录未匹配，沿用付款明细';
+      if (!original.trim() || original.trim() === '/') result.error = '名录未匹配且付款明细银行信息为空';
+      return result;
+    }
+    const invalid = matches.filter(e => e.error);
+    if (invalid.length) { result.error = invalid.map(e => `名录第 ${e.row} 行：${e.error}`).join('；'); return result; }
+    const identities = new Set(matches.map(e => bankIdentity(e.bank, name)));
+    if (identities.size !== 1) { result.error = `名录第 ${matches.map(e => e.row).join('、')} 行存在不同的收款单位或账号，请核实名录`; return result; }
+    result.value = matches[0].bank;
+    result.source = `供应商名录第 ${matches.map(e => e.row).join('、')} 行`;
+    result.conflict = !!original.trim() && original.trim() !== '/' && bankIdentity(original, name) !== bankIdentity(result.value, name);
+    return result;
+  }
   function date(v) {
     if (v === '' || v == null) return '';
     let s = text(v).trim().replace(/[年月/.]/g, '-').replace(/日$/, '');
@@ -64,7 +131,7 @@
     if (duplicates.length) errors.push('重复列名：' + [...new Set(duplicates)].join('、'));
     if (errors.length) return { errors, groups: [] };
     for (const record of records) {
-      const subject = text(record['付款主体']).trim(), source = record._row;
+      const subject = subjectName(record['付款主体']), source = record._row;
       if (!subject) { errors.push(`第 ${source} 行：缺少付款主体`); continue; }
       if (!groups.has(subject)) groups.set(subject, { subject, rows: [], total: 0n, info: {}, choices: {}, checks: [] });
       const group = groups.get(subject);
@@ -93,7 +160,7 @@
     if (!records.length) errors.push('工作表没有付款明细');
     return { errors, groups: [...groups.values()] };
   }
-  const api = { fields, required, infoFields, cents, money, upper, text, date, analyze };
+  const api = { fields, required, infoFields, cents, money, upper, text, date, analyze, subjectName, bankSummary, buildDirectory, resolveBank };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PaymentCore = api;
 })(typeof window === 'undefined' ? globalThis : window);

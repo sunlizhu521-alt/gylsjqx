@@ -30,7 +30,7 @@ const base = (extra = {}) => ({
         if (options.formulaError) ws.L2 = { t: 'e', v: 15, f: '1/0' };
         const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '付款明细');
         return Array.from(new Uint8Array(XLSX.write(wb, { type: 'array', bookType: options.xls ? 'biff8' : 'xlsx' })));
-      }, { rows, headers: ['填写时间', ...C.required], options });
+      }, { rows, headers: ['填写时间', ...C.required.filter(h => !options.noBank || h !== '开户银行及账号')], options });
       await page.locator('#paymentExcel').setInputFiles({ name: options.xls ? '测试.xls' : '测试.xlsx', mimeType: 'application/octet-stream', buffer: Buffer.from(array) });
       await page.waitForFunction(() => document.querySelector('#paymentGroups').textContent.length > 0);
     }
@@ -56,6 +56,10 @@ const base = (extra = {}) => ({
     assert.equal(docStats.sections, 1);
     for (const text of ['贰仟贰佰零伍元整', '☑ 采购货款', '☑ 对公转账', '三、审批意见', '四、财务办结记录', '整体付款凭证：详见银行付款单', '0012 3456 7890 1234']) assert.ok(docStats.text.includes(text), text);
     assert.equal((docStats.text.match(/2,205\.00/g) || []).length, 3);
+    assert.ok(docStats.text.includes('单位:测试供应商有限公司'));
+    assert.ok(docStats.text.includes('账号:0012 3456 7890 1234'));
+    assert.ok(!docStats.text.includes('测试银行支行'));
+    assert.ok(!docStats.text.includes('123456789012'));
     await page.locator('[data-field="计划付款日期"]').fill('2026-09-26');
     assert.equal(await page.locator('[data-payment-download="docx"]').isDisabled(), true);
     await page.locator('[data-tool="merge"]').click();
@@ -95,6 +99,65 @@ const base = (extra = {}) => ({
     assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
     await upload([base()], { formulaError: true });
     assert.match(await page.locator('#paymentGroups').innerText(), /公式错误/);
+    // Directory enrichment, timestamps, explicit account conflict handling.
+    assert.match(await page.locator('label.payment-upload').nth(1).innerText(), /付款申请模板/);
+    assert.doesNotMatch(await page.locator('[data-reference="template"]').innerText(), /未引用|正在读取/);
+    const templateTime = await page.locator('[data-reference="template"]').innerText();
+    async function uploadDirectory(rows, headers = ['供应商全称', '收款账号', '收款银行名称']) {
+      const bytes = await page.evaluate(({rows,headers}) => {
+        const book = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([headers,...rows.map(r => headers[2] === '收款银行名称' && r.length === 2 ? [...r, '测试银行支行'] : r)]), '名录');
+        return Array.from(new Uint8Array(XLSX.write(book,{type:'array',bookType:'xlsx'})));
+      }, {rows,headers});
+      await page.locator('#paymentDirectory').setInputFiles({name:'供应商名录.xlsx',mimeType:'application/octet-stream',buffer:Buffer.from(bytes)});
+      await page.waitForFunction(()=>!document.querySelector('[data-reference="directory"]').textContent.includes('正在读取'));
+    }
+    await upload([base({'开户银行及账号':''})]);
+    await uploadDirectory([['测试供应商有限公司','0099  0011']]);
+    assert.doesNotMatch(await page.locator('[data-reference="detail"]').innerText(), /未引用|正在读取/);
+    assert.doesNotMatch(await page.locator('[data-reference="directory"]').innerText(), /未引用|正在读取/);
+    const directoryTime = await page.locator('[data-reference="directory"]').innerText();
+    await generate(); assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
+    const directoryDoc = await save('docx', 'directory'); await save('pdf','directory');
+    const directoryXml = await page.evaluate(async bytes => (await (await JSZip.loadAsync(new Uint8Array(bytes))).file('word/document.xml').async('string')), [...await fs.readFile(directoryDoc)]);
+    assert.ok(directoryXml.includes('卡号:0099  0011'));
+    await page.screenshot({path:path.join(out,'directory-desktop.png'),fullPage:false});
+    await page.setViewportSize({width:390,height:844});
+    await page.locator('#paymentDirectorySettings').scrollIntoViewIfNeeded();
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= window.innerWidth + 1),true);
+    await page.screenshot({path:path.join(out,'directory-mobile.png'),fullPage:false});
+    await page.setViewportSize({width:1440,height:1000});
+    await page.locator('[data-tool="merge"]').click(); await page.locator('[data-tool="payment"]').click();
+    assert.equal(await page.locator('[data-reference="directory"]').innerText(), directoryTime);
+    assert.equal(await page.locator('[data-reference="template"]').innerText(), templateTime);
+    await upload([base()]); await generate();
+    assert.match(await page.locator('#paymentStatus').innerText(), /银行信息差异/);
+    await page.locator('[data-bank-confirm]').check(); await generate();
+    assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
+    await page.locator('#paymentBankPolicy').selectOption('fill'); await generate();
+    assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
+    assert.equal(await page.locator('[data-bank-confirm]').count(),0);
+    await page.locator('#paymentBankPolicy').selectOption('directory');
+    await uploadDirectory([['测试供应商有限公司','111'],['测试供应商有限公司','222']]);
+    assert.match(await page.locator('#paymentGroups').innerText(), /不同的收款单位或账号/);
+    assert.equal(await page.locator('[data-payment-download="docx"]').isDisabled(),true);
+    await uploadDirectory([['其他供应商','222']]);
+    assert.match(await page.locator('#paymentGroups').innerText(), /未匹配，沿用/);
+    await upload([base({'开户银行及账号':''})]);
+    assert.match(await page.locator('#paymentGroups').innerText(), /未匹配且付款明细银行信息为空/);
+    await uploadDirectory([['测试供应商有限公司','000123','收款公司']],['公司名称','收款账号','收款银行']);
+    await page.locator('[data-directory-field="supplier"]').selectOption('公司名称');
+    await generate(); assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
+    await upload([base()],{noBank:true}); await generate();
+    assert.match(await page.locator('#paymentStatus').innerText(),/已生成/);
+    await uploadDirectory([['测试供应商有限公司',27300476042050000]]);
+    assert.match(await page.locator('#paymentGroups').innerText(),/精度/);
+    await page.locator('#paymentDirectory').setInputFiles({name:'错误.xlsx',mimeType:'application/octet-stream',buffer:Buffer.from([0,1,2,3])});
+    await page.waitForFunction(()=>!document.querySelector('[data-reference="directory"]').textContent.includes('正在读取'));
+    assert.equal(await page.locator('[data-payment-download="docx"]').isDisabled(),true);
+    await page.locator('#paymentClearDirectory').click();
+    assert.match(await page.locator('[data-reference="directory"]').innerText(), /未引用/);
+    assert.equal(await page.locator('[data-payment-download="docx"]').isDisabled(),true);
     const stress = [base({ 付款主体: '单笔主体' }), ...Array.from({ length: 30 }, (_, i) => base({ 付款主体: '多笔主体', 备注: `记录${i+1}`, 本次申请付款金额: '0.01' })), ...Array.from({ length: 45 }, (_, i) => base({ 付款主体: '短明细主体', 开户银行及账号: '测试银行 0012 3456', 本次申请付款金额: '1.10', 备注: `记录${i+1}` }))];
     await upload(stress); await generate();
     assert.match(await page.locator('#paymentStatus').innerText(), /已生成 3 页/);
@@ -107,7 +170,25 @@ const base = (extra = {}) => ({
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
     await page.locator('#paymentGroups').scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(out, 'mobile.png'), fullPage: false });
+    if (process.env.QA_DIRECTORY_FILE) {
+      await page.setViewportSize({width:1440,height:1000});
+      await page.locator('#paymentDirectory').setInputFiles(process.env.QA_DIRECTORY_FILE);
+      await page.waitForFunction(()=>!document.querySelector('[data-reference="directory"]').textContent.includes('正在读取'));
+      await upload([base({付款主体:'浙江迈德斯特医疗器械科技有限公司',供应商全称:'浙江耐心医疗器械有限公司',开户银行及账号:''})]);
+      await generate();
+      assert.match(await page.locator('#paymentStatus').innerText(), /已生成 1 页/);
+      const doc = await save('docx','actual-directory'); await save('pdf','actual-directory');
+      const xml = await page.evaluate(async bytes => (await (await JSZip.loadAsync(new Uint8Array(bytes))).file('word/document.xml').async('string')), [...await fs.readFile(doc)]);
+      assert.ok(xml.includes('迈德斯特付款申请单'));
+      assert.ok(xml.includes('银行名称:农业银行永康市支行'));
+      assert.ok(xml.includes('卡号:19627201040060557'));
+      assert.ok(!xml.includes('103338262728'));
+      await upload([base({付款主体:'迈德斯特',供应商全称:'浙江耐心医疗器械有限公司',开户银行及账号:''})]);
+      await generate(); assert.match(await page.locator('#paymentStatus').innerText(), /已生成 1 页/);
+      await page.locator('#paymentPages').scrollIntoViewIfNeeded();
+      await page.screenshot({path:path.join(out,'actual-directory.png'),fullPage:false});
+    }
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ status: 'PASS', scenarios: ['identity', 'single/export/uppercase', 'stale-download', 'switch-state', 'invalid-amount', 'missing-subject', 'conflict', 'total-confirmation', 'custom-template', 'invalid-template', 'xls', 'formula-error', 'three-subjects', '30-long-rows', '45-short-rows', 'mobile', 'console'], output: out }, null, 2));
+    console.log(JSON.stringify({ status: 'PASS', scenarios: ['identity', 'single/export/uppercase', 'stale-download', 'switch-state', 'invalid-amount', 'missing-subject', 'conflict', 'total-confirmation', 'custom-template', 'invalid-template', 'xls', 'formula-error', 'directory-match/export', 'three-reference-times', 'directory-conflict', 'directory-duplicate', 'directory-unmatched', 'directory-mapping', 'directory-fill-only', 'optional-bank-column', 'directory-precision', 'directory-failed-upload', 'directory-removal', 'three-subjects', '30-long-rows', '45-short-rows', 'mobile', 'console'], output: out }, null, 2));
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

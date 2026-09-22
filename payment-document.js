@@ -73,12 +73,12 @@
         !tableRows[1].slice(1, -1).every(r => children(r, 'tc').length === 10) ||
         children(tableRows[1].at(-1), 'tc').length !== 8 || !cellText(children(tableRows[1].at(-1), 'tc')[0]).includes('合计') ||
         ![...tableRows[2], ...tableRows[3]].every(r => children(r, 'tc').length === 2)) {
-      throw new Error('模板结构不兼容：请使用与公用模板相同的四张表、明细列及章节结构');
+      throw new Error('模板结构不兼容：请使用与付款申请模板相同的四张表、明细列及章节结构');
     }
     const metadata = tableRows[0].map(r => children(r, 'tc'));
     if ([cellText(metadata[0][0]), cellText(metadata[0][2]), cellText(metadata[1][0]), cellText(metadata[2][0]), cellText(metadata[2][2])].map(s => s.trim()).join('|') !== labels.join('|') ||
         [...body.children].some(e => !['p', 'tbl', 'sectPr'].includes(e.localName))) {
-      throw new Error('模板字段位置不兼容，请保留公用模板的标签及排列顺序');
+      throw new Error('模板字段位置不兼容，请保留付款申请模板的标签及排列顺序');
     }
     const unsupported = ['drawing', 'pict', 'altChunk', 'sdt', 'fldChar', 'fldSimple', 'ins', 'del', 'vMerge', 'hyperlink', 'footnoteReference', 'endnoteReference'];
     if (unsupported.some(n => all(body, n).length) || all(doc, 'sectPr').length !== 1 || children(body, 'sectPr').length !== 1 ||
@@ -112,7 +112,7 @@
     rows.slice(1, -1).forEach(r => r.remove());
     group.rows.forEach((r, i) => {
       const tr = proto.cloneNode(true);
-      const values = [String(i + 1), ...C.fields.map(f => f === '本次申请付款金额' ? C.money(r._cents) : C.text(r[f]))];
+      const values = [String(i + 1), ...C.fields.map(f => f === '本次申请付款金额' ? C.money(r._cents) : f === '开户银行及账号' ? C.bankSummary(r._resolvedBank ?? r[f], r['供应商全称']).value : C.text(r[f]))];
       children(tr, 'tc').forEach((cell, j) => putText(cell, values[j]));
       ts[1].insertBefore(tr, total);
     });

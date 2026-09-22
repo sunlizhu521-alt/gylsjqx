@@ -68,3 +68,63 @@ test('sum limit and formula error text block calculation',()=>{
   assert.match(a.errors.join(''),/合计超出/);
   assert.throws(()=>C.cents('#VALUE!'));
 });
+test('bank summary retains payee and spaced account only',()=>{
+ const raw='收款单位 \n德州华彩纸制品有限公司\n收款银行名称 \n德州陵城农村商业银行边临镇支行\n收款账号 \n2730 0476 0420 50000 1025 6\n收款银行行号 \n402468300255';
+ assert.deepEqual(C.bankSummary(raw),{value:'单位:德州华彩纸制品有限公司\n账号:2730 0476 0420 50000 1025 6',compact:true});
+});
+test('bank labels accept colon and inline forms, preserve leading zeros',()=>{
+ assert.equal(C.bankSummary('单位：甲公司 账号：0012  3456 银行行号：999').value,'单位:甲公司\n账号:0012  3456');
+ assert.equal(C.bankSummary('账号:\n0012 3456','甲公司').value,'单位:甲公司\n账号:0012 3456');
+ assert.equal(C.bankSummary('单位:甲公司&#x20;\n账号:0012 3456&#x20;').value,'单位:甲公司\n账号:0012 3456');
+});
+test('bank ambiguity never selects routing number or discards unknown text',()=>{
+ for(const raw of ['开户行:测试银行\n行号:123456','账号:123\n账号:456','单位:甲\n单位:乙\n账号:123','测试银行 123456','账号:123\n附言不明确']) {
+  assert.deepEqual(C.bankSummary(raw,'甲公司'),{value:raw,compact:false});
+ }
+ assert.deepEqual(C.bankSummary(''),{value:'',compact:true});
+ assert.deepEqual(C.bankSummary('/'),{value:'/',compact:true});
+});
+test('directory matches full names, fills accounts and preserves the original detail',()=>{
+ const d=C.buildDirectory([{supplier:' 甲公司 ',bank:'0012  3456',row:2}]);
+ const r={'供应商全称':'甲公司','开户银行及账号':''};
+ assert.deepEqual(d.errors,[]);
+ const result=C.resolveBank(r,d);
+ assert.equal(result.value,'单位:甲公司\n账号:0012  3456'); assert.equal(result.source,'供应商名录第 2 行');
+ assert.equal(r['开户银行及账号'],'');
+ assert.match(C.resolveBank({'供应商全称':'甲公','开户银行及账号':''},d).error,/未匹配/);
+});
+test('directory priority reports differences; fill-only preserves populated detail',()=>{
+ const d=C.buildDirectory([{supplier:'甲',bank:'222',row:2}]);
+ const r={'供应商全称':'甲','开户银行及账号':'单位:甲\n账号:111'};
+ assert.equal(C.resolveBank(r,d).conflict,true);
+ assert.equal(C.resolveBank(r,d,'fill').value,r['开户银行及账号']);
+ assert.equal(C.resolveBank({...r,'开户银行及账号':'/'},d,'fill').value,'单位:甲\n账号:222');
+});
+test('duplicate directory identities are accepted but conflicting accounts block',()=>{
+ const same=C.buildDirectory([{supplier:'甲',bank:'0012 3456',row:2},{supplier:'甲',bank:'00123456',row:3}]);
+ assert.equal(C.resolveBank({'供应商全称':'甲'},same).error,'');
+ const conflict=C.buildDirectory([{supplier:'甲',bank:'111',row:2},{supplier:'甲',bank:'222',row:3}]);
+ assert.match(C.resolveBank({'供应商全称':'甲'},conflict).error,/2、3.*不同/);
+});
+test('unmatched supplier explicitly falls back; missing bank blocks',()=>{
+ const d=C.buildDirectory([{supplier:'甲',bank:'111',row:2}]);
+ const result=C.resolveBank({'供应商全称':'乙','开户银行及账号':'原始银行信息'},d);
+ assert.equal(result.value,'原始银行信息');assert.match(result.notice,/未匹配/);
+ assert.match(C.resolveBank({'供应商全称':'乙'},d).error,/为空/);
+});
+test('directory payee mapping, blanks, precision and formula issues are explicit',()=>{
+ const d=C.buildDirectory([{supplier:'甲',unit:'收款乙',bank:'单位:旧单位\n账号:000123',row:2}]);
+ assert.equal(C.resolveBank({'供应商全称':'甲'},d).value,'单位:收款乙\n账号:000123');
+ assert.match(C.buildDirectory([{supplier:'',bank:'123',row:4}]).errors[0],/第 4 行/);
+ for(const item of [{bank:''},{bank:'测试银行'},{bank:'123',error:'精度丢失'},{bank:'123',error:'公式错误'}]){
+ const index=C.buildDirectory([{supplier:'甲',row:2,...item}]);assert.ok(C.resolveBank({'供应商全称':'甲'},index).error);
+ }
+});
+test('directory bank name and receiving account stay together; subjects support explicit alias',()=>{
+ const d=C.buildDirectory([{supplier:'甲',subject:'浙江迈德斯特医疗器械科技有限公司',account:'001 234',bankName:'测试支行',row:2},{supplier:'甲',subject:'其他公司',account:'999',bankName:'其他支行',row:3}]);
+ const r=C.resolveBank({'供应商全称':'甲','付款主体':'迈德斯特'},d);
+ assert.equal(r.error,'');assert.equal(r.value,'银行名称:测试支行\n卡号:001 234');assert.equal(C.bankSummary(r.value).value,r.value);
+ assert.equal(C.subjectName('浙江迈德斯特医疗器械科技有限公司'),'迈德斯特');
+ assert.equal(C.subjectName('迈德斯特（宁波）医疗科技有限公司'),'迈德斯特（宁波）医疗科技有限公司');
+ for(const row of [{account:'',bankName:'支行'},{account:'123',bankName:''},{account:'abc',bankName:'支行'}]) assert.ok(C.resolveBank({'供应商全称':'甲'},C.buildDirectory([{supplier:'甲',row:2,...row}])).error);
+});
