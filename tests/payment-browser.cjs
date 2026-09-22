@@ -35,6 +35,7 @@ const base = (extra = {}) => ({
       await page.waitForFunction(() => document.querySelector('#paymentGroups').textContent.length > 0);
     }
     async function generate() {
+      await page.waitForFunction(() => [...document.querySelectorAll('[data-reference]')].every(e => !e.textContent.includes('正在读取')));
       await page.locator('#paymentGenerate').click();
       await page.waitForFunction(() => !document.querySelector('#paymentGenerate').disabled);
     }
