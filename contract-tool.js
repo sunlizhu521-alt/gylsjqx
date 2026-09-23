@@ -3,13 +3,16 @@
 
   const C = ContractCore;
   const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const S = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+  const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const P = 'http://schemas.openxmlformats.org/package/2006/relationships';
   const MIME = {
     docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   };
   const state = {
     orderFile: null, orderBytes: null, orderBook: null, orderSheet: '', order: null,
-    templateFile: null, templateBytes: null, templateType: '', templateBook: null, templateSheet: '', templateModel: null, fingerprint: '',
+    templateFile: null, templateBytes: null, templateType: '', templateBook: null, templateSheet: '', templateModel: null, templateFeatures: [], fingerprint: '',
     mappings: {}, detailRow: '', selectedTarget: '', output: null, outputFileName: '', busy: false,
   };
   const $ = id => document.getElementById(id);
@@ -118,10 +121,12 @@
       else parseXlsx();
       $('templateFileName').textContent = file.name; $('templateDrop').classList.add('loaded');
       if (!$('outputName').value.trim()) $('outputName').value = file.name.replace(/\.[^.]+$/, '') + '-生成合同';
-      restoreMapping(); status(`模板检查通过：${type === 'docx' ? 'Word' : 'Excel'}，指纹 ${state.fingerprint.slice(0, 12)}`, 'success');
+      restoreMapping();
+      const featureNote = state.templateFeatures.length ? `；已识别并保留${state.templateFeatures.join('、')}` : '';
+      status(`模板检查通过：${type === 'docx' ? 'Word' : 'Excel'}，指纹 ${state.fingerprint.slice(0, 12)}${featureNote}`, 'success');
       updateAll();
     } catch (error) {
-      state.templateFile = null; state.templateBytes = null; state.templateModel = null; state.templateType = ''; $('templateDrop').classList.remove('loaded');
+      state.templateFile = null; state.templateBytes = null; state.templateModel = null; state.templateType = ''; state.templateFeatures = []; $('templateDrop').classList.remove('loaded');
       status(error.message, 'error'); updateAll();
     }
   }
@@ -134,10 +139,13 @@
     const expanded = names.reduce((total, name) => total + Number(zip.files[name]._data?.uncompressedSize || 0), 0);
     if (expanded > 120 * 1024 * 1024) throw new Error('模板解压后过大，已停止处理');
     if (names.some(name => /vbaProject\.bin|macrosheets|xl\/externalLinks\//i.test(name))) throw new Error('模板包含宏或外部链接，不能生成');
+    state.templateFeatures = [];
     if (type === 'docx' && !zip.file('word/document.xml')) throw new Error('请选择有效的 Word .docx 模板');
     if (type === 'xlsx') {
       if (!zip.file('xl/workbook.xml')) throw new Error('请选择有效的 Excel .xlsx 模板');
-      if (names.some(name => /^xl\/(drawings|pivot|tables)\//i.test(name))) throw new Error('Excel模板包含图形、数据透视表或结构化表，浏览器版暂不支持');
+      if (names.some(name => /^xl\/drawings\//i.test(name))) state.templateFeatures.push('图形');
+      if (names.some(name => /^xl\/pivot/i.test(name))) state.templateFeatures.push('数据透视表');
+      if (names.some(name => /^xl\/tables\//i.test(name))) state.templateFeatures.push('结构化表');
       const workbookXml = await zip.file('xl/workbook.xml').async('string');
       if (/<workbookProtection\b/i.test(workbookXml)) throw new Error('Excel模板受到工作簿保护，不能生成');
       for (const name of names.filter(item => /^xl\/worksheets\/.*\.xml$/i.test(item))) {
@@ -334,7 +342,7 @@
     updateConfirmation(); if ($('generateContract').disabled) return;
     state.busy = true; $('generateContract').textContent = '正在生成…'; updateConfirmation(); status('正在生成合同副本…');
     try {
-      const blob = state.templateType === 'docx' ? await generateDocx() : generateXlsx();
+      const blob = state.templateType === 'docx' ? await generateDocx() : await generateXlsx();
       state.output = blob; state.outputFileName = `${C.sanitizeFileName($('outputName').value)}.${state.templateType}`;
       renderGeneratedPreview(); $('resultStage').hidden = false; $('downloadContract').disabled = false; $('downloadContract').textContent = `下载 ${state.templateType.toUpperCase()}`;
       saveMapping(); status(`合同已生成：${state.outputFileName}`, 'success'); toast('合同生成完成，请预览后下载', 'success'); updateSteps();
@@ -369,57 +377,203 @@
     return zip.generateAsync({ type: 'blob', mimeType: MIME.docx, compression: 'DEFLATE' });
   }
 
-  function generateXlsx() {
-    const book = XLSX.read(state.templateBytes, { type: 'array', cellStyles: true, cellFormula: true, cellNF: true });
-    const sheet = book.Sheets[state.templateSheet];
+  async function generateXlsx() {
+    const zip = await JSZip.loadAsync(state.templateBytes);
+    const context = await locateXlsxSheet(zip, state.templateSheet);
     for (const [targetId, mapping] of mappedEntries()) {
       if (mapping.mode === 'detail') continue;
-      writeExcelCell(sheet, targetId.slice(2), resolveMapping(mapping));
+      writeSheetCell(context.sheetDoc, targetId.slice(2), resolveMapping(mapping));
     }
     if (state.detailRow) {
       const rowNumber = Number(state.detailRow.split(':')[1]);
       const rowMappings = mappedEntries().filter(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow);
-      expandExcelDetailRow(sheet, rowNumber, state.order.rows, rowMappings);
+      await expandExcelDetailRowXml(zip, context, rowNumber, state.order.rows, rowMappings);
     }
-    const bytes = XLSX.write(book, { type: 'array', bookType: 'xlsx', cellStyles: true });
-    return new Blob([bytes], { type: MIME.xlsx });
+    await forceWorkbookRecalculation(zip, context);
+    zip.file(context.sheetPath, new XMLSerializer().serializeToString(context.sheetDoc));
+    return zip.generateAsync({ type: 'blob', mimeType: MIME.xlsx, compression: 'DEFLATE' });
   }
 
-  function expandExcelDetailRow(sheet, rowNumber, records, rowMappings) {
-    const rowIndex = rowNumber - 1, delta = records.length - 1;
-    const range = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : { s: { r: 0, c: 0 }, e: { r: rowIndex, c: 0 } };
-    const prototype = {};
-    for (let column = range.s.c; column <= range.e.c; column += 1) {
-      const address = XLSX.utils.encode_cell({ r: rowIndex, c: column });
-      if (sheet[address]) prototype[column] = { ...sheet[address] };
+  async function locateXlsxSheet(zip, sheetName) {
+    const workbookPath = 'xl/workbook.xml', workbookRelsPath = 'xl/_rels/workbook.xml.rels';
+    const workbookDoc = parseXml(await zip.file(workbookPath).async('string'));
+    const workbookRelsDoc = parseXml(await zip.file(workbookRelsPath).async('string'));
+    const sheet = all(workbookDoc, 'sheet', S).find(item => item.getAttribute('name') === sheetName);
+    if (!sheet) throw new Error('找不到选中的合同工作表');
+    const relationId = sheet.getAttributeNS(R, 'id') || sheet.getAttribute('r:id');
+    const relation = all(workbookRelsDoc, 'Relationship', P).find(item => item.getAttribute('Id') === relationId);
+    if (!relation) throw new Error('合同工作表关系损坏');
+    const sheetPath = resolveZipPath('xl', relation.getAttribute('Target'));
+    const sheetFile = zip.file(sheetPath); if (!sheetFile) throw new Error('合同工作表文件缺失');
+    const sheetDoc = parseXml(await sheetFile.async('string'));
+    return { zip, workbookPath, workbookRelsPath, workbookDoc, workbookRelsDoc, sheetPath, sheetDoc, sheetIndex: all(workbookDoc, 'sheet', S).indexOf(sheet) };
+  }
+
+  function resolveZipPath(base, target) {
+    if (!target) return '';
+    const parts = (target.startsWith('/') ? target.slice(1) : `${base}/${target}`).split('/'), output = [];
+    for (const part of parts) {
+      if (!part || part === '.') continue;
+      if (part === '..') output.pop(); else output.push(part);
     }
+    return output.join('/');
+  }
+
+  function sheetData(doc) {
+    const data = all(doc, 'sheetData', S)[0];
+    if (!data) throw new Error('Excel工作表缺少单元格数据');
+    return data;
+  }
+
+  function rowNumberOf(row) { return Number(row.getAttribute('r') || 0); }
+  function cellAddressOf(cell) { return cell.getAttribute('r') || ''; }
+
+  function ensureSheetRow(doc, rowNumber) {
+    const data = sheetData(doc), rows = direct(data, 'row', S);
+    let row = rows.find(item => rowNumberOf(item) === rowNumber);
+    if (row) return row;
+    row = doc.createElementNS(S, 'row'); row.setAttribute('r', String(rowNumber));
+    const next = rows.find(item => rowNumberOf(item) > rowNumber); data.insertBefore(row, next || null);
+    return row;
+  }
+
+  function ensureRowCell(row, address) {
+    let cell = direct(row, 'c', S).find(item => cellAddressOf(item) === address);
+    if (cell) return cell;
+    const point = XLSX.utils.decode_cell(address), doc = row.ownerDocument;
+    cell = doc.createElementNS(S, 'c'); cell.setAttribute('r', address);
+    const next = direct(row, 'c', S).find(item => XLSX.utils.decode_cell(cellAddressOf(item)).c > point.c);
+    row.insertBefore(cell, next || null); return cell;
+  }
+
+  function writeSheetCell(doc, address, value) {
+    const point = XLSX.utils.decode_cell(address), row = ensureSheetRow(doc, point.r + 1), cell = ensureRowCell(row, address);
+    writeCellValue(cell, value);
+  }
+
+  function writeCellValue(cell, value) {
+    const doc = cell.ownerDocument, originalType = cell.getAttribute('t');
+    direct(cell, 'f', S).forEach(item => item.remove()); direct(cell, 'v', S).forEach(item => item.remove()); direct(cell, 'is', S).forEach(item => item.remove());
+    const number = C.parseNumber(value), preferText = ['s', 'str', 'inlineStr'].includes(originalType);
+    if (number !== null && !preferText) {
+      cell.removeAttribute('t'); const node = doc.createElementNS(S, 'v'); node.textContent = String(number); cell.append(node); return;
+    }
+    cell.setAttribute('t', 'inlineStr');
+    const inline = doc.createElementNS(S, 'is'), textNode = doc.createElementNS(S, 't');
+    textNode.setAttribute('xml:space', 'preserve'); textNode.textContent = C.text(value); inline.append(textNode); cell.append(inline);
+  }
+
+  async function expandExcelDetailRowXml(zip, context, rowNumber, records, rowMappings) {
+    const data = sheetData(context.sheetDoc), rows = direct(data, 'row', S), prototype = rows.find(row => rowNumberOf(row) === rowNumber);
+    if (!prototype) throw new Error('找不到Excel明细模板行');
+    const delta = records.length - 1;
     if (delta > 0) {
-      const merged = sheet['!merges'] || [];
-      if (merged.some(item => item.s.r <= rowIndex && item.e.r >= rowIndex)) throw new Error('Excel明细模板行包含合并单元格，浏览器版不能安全扩展');
-      const formulaBelow = Object.keys(sheet).filter(key => !key.startsWith('!')).some(key => {
-        const point = XLSX.utils.decode_cell(key); return point.r > rowIndex && sheet[key]?.f;
-      });
-      if (formulaBelow) throw new Error('Excel明细行下方含公式，扩展可能改变引用，请调整模板后再生成');
-      const cells = Object.keys(sheet).filter(key => !key.startsWith('!')).map(key => ({ key, point: XLSX.utils.decode_cell(key) })).filter(item => item.point.r > rowIndex).sort((a, b) => b.point.r - a.point.r || b.point.c - a.point.c);
-      for (const item of cells) {
-        const next = XLSX.utils.encode_cell({ r: item.point.r + delta, c: item.point.c }); sheet[next] = sheet[item.key]; delete sheet[item.key];
+      const mergeRefs = all(context.sheetDoc, 'mergeCell', S).map(item => item.getAttribute('ref')).filter(Boolean);
+      if (mergeRefs.some(ref => rangeTouchesRow(ref, rowNumber))) throw new Error('Excel明细模板行包含合并单元格，浏览器版不能安全扩展');
+      const formulas = all(context.sheetDoc, 'f', S).filter(item => rowNumberFromAddress(cellAddressOf(item.parentElement)) >= rowNumber);
+      if (formulas.length) throw new Error('Excel明细行或其下方含公式，扩展可能改变引用，请调整模板后再生成');
+      const relationships = await loadSheetRelationships(zip, context.sheetPath);
+      if (relationships.some(item => /\/pivotTable$/i.test(item.type))) throw new Error('当前合同Sheet包含数据透视表，不能在该Sheet扩展明细行；可改用单值映射或将明细放到普通Sheet');
+      for (const row of rows) {
+        const current = rowNumberOf(row); if (current <= rowNumber) continue;
+        row.setAttribute('r', String(current + delta));
+        for (const cell of direct(row, 'c', S)) cell.setAttribute('r', shiftCellAddress(cellAddressOf(cell), delta));
       }
-      sheet['!merges'] = merged.map(item => ({ s: { ...item.s, r: item.s.r > rowIndex ? item.s.r + delta : item.s.r }, e: { ...item.e, r: item.e.r > rowIndex ? item.e.r + delta : item.e.r } }));
-      if (sheet['!rows']) sheet['!rows'].splice(rowIndex + 1, 0, ...Array.from({ length: delta }, () => ({ ...(sheet['!rows'][rowIndex] || {}) })));
+      shiftSheetRanges(context.sheetDoc, rowNumber, delta);
+      await shiftRelatedExcelParts(zip, relationships, rowNumber, delta);
+      shiftWorkbookNames(context.workbookDoc, state.templateSheet, rowNumber, delta);
     }
     records.forEach((record, offset) => {
-      for (const [column, cell] of Object.entries(prototype)) sheet[XLSX.utils.encode_cell({ r: rowIndex + offset, c: Number(column) })] = { ...cell };
+      const clone = prototype.cloneNode(true), targetRow = rowNumber + offset; clone.setAttribute('r', String(targetRow));
+      for (const cell of direct(clone, 'c', S)) cell.setAttribute('r', replaceAddressRow(cellAddressOf(cell), targetRow));
       for (const [targetId, mapping] of rowMappings) {
-        const source = XLSX.utils.decode_cell(targetId.slice(2));
-        writeExcelCell(sheet, XLSX.utils.encode_cell({ r: rowIndex + offset, c: source.c }), C.text(record[mapping.field]));
+        const source = XLSX.utils.decode_cell(targetId.slice(2)), address = XLSX.utils.encode_cell({ r: targetRow - 1, c: source.c });
+        writeCellValue(ensureRowCell(clone, address), C.text(record[mapping.field]));
       }
+      data.insertBefore(clone, prototype);
     });
-    range.e.r += Math.max(0, delta); sheet['!ref'] = XLSX.utils.encode_range(range);
+    prototype.remove();
   }
 
-  function writeExcelCell(sheet, address, value) {
-    const previous = sheet[address] || {};
-    sheet[address] = { ...previous, t: typeof value === 'number' ? 'n' : 's', v: value, w: undefined, f: undefined };
+  async function loadSheetRelationships(zip, sheetPath) {
+    const slash = sheetPath.lastIndexOf('/'), directory = sheetPath.slice(0, slash), name = sheetPath.slice(slash + 1), relsPath = `${directory}/_rels/${name}.rels`;
+    const file = zip.file(relsPath); if (!file) return [];
+    const doc = parseXml(await file.async('string'));
+    return all(doc, 'Relationship', P).map(item => ({
+      id: item.getAttribute('Id'), type: item.getAttribute('Type') || '', path: resolveZipPath(directory, item.getAttribute('Target')), relsPath, doc,
+    }));
+  }
+
+  async function shiftRelatedExcelParts(zip, relationships, rowNumber, delta) {
+    for (const relation of relationships) {
+      const file = zip.file(relation.path); if (!file) continue;
+      if (/\/table$/i.test(relation.type)) {
+        const doc = parseXml(await file.async('string')), table = doc.documentElement;
+        if (table.getAttribute('ref')) table.setAttribute('ref', shiftRange(table.getAttribute('ref'), rowNumber, delta));
+        for (const filter of all(doc, 'autoFilter', S)) if (filter.getAttribute('ref')) filter.setAttribute('ref', shiftRange(filter.getAttribute('ref'), rowNumber, delta));
+        zip.file(relation.path, new XMLSerializer().serializeToString(doc));
+      } else if (/\/drawing$/i.test(relation.type)) {
+        const doc = parseXml(await file.async('string'));
+        for (const marker of [...doc.getElementsByTagNameNS('*', 'row')]) {
+          const value = Number(marker.textContent); if (Number.isInteger(value) && value >= rowNumber) marker.textContent = String(value + delta);
+        }
+        zip.file(relation.path, new XMLSerializer().serializeToString(doc));
+      }
+    }
+  }
+
+  function shiftSheetRanges(doc, rowNumber, delta) {
+    for (const element of [...doc.getElementsByTagName('*')]) {
+      for (const attribute of ['ref', 'sqref']) {
+        const value = element.getAttribute(attribute); if (!value) continue;
+        if (['dimension', 'mergeCell', 'autoFilter', 'conditionalFormatting', 'dataValidation', 'hyperlink'].includes(element.localName)) element.setAttribute(attribute, shiftRangeList(value, rowNumber, delta));
+      }
+    }
+    for (const item of all(doc, 'brk', S)) {
+      const value = Number(item.getAttribute('id')); if (Number.isInteger(value) && value > rowNumber) item.setAttribute('id', String(value + delta));
+    }
+  }
+
+  function shiftWorkbookNames(workbookDoc, sheetName, rowNumber, delta) {
+    for (const name of all(workbookDoc, 'definedName', S)) {
+      const value = name.textContent || '', bang = value.lastIndexOf('!'); if (bang < 0) continue;
+      const prefix = value.slice(0, bang).replace(/^'/, '').replace(/'$/, '').replace(/''/g, "'");
+      if (prefix !== sheetName) continue;
+      name.textContent = `${value.slice(0, bang + 1)}${shiftRangeList(value.slice(bang + 1), rowNumber, delta)}`;
+    }
+  }
+
+  function shiftRangeList(value, rowNumber, delta) { return value.split(/(\s+)/).map(part => /[A-Z]\$?\d/i.test(part) ? shiftRange(part, rowNumber, delta) : part).join(''); }
+  function parseCellRef(value) { const match = value.match(/^(\$?[A-Z]{1,3})(\$?)(\d+)$/i); return match ? { column: match[1], rowAbsolute: match[2], row: Number(match[3]) } : null; }
+  function formatCellRef(cell) { return `${cell.column}${cell.rowAbsolute}${cell.row}`; }
+  function shiftRange(value, rowNumber, delta) {
+    const parts = value.split(':').map(parseCellRef); if (!parts[0] || (parts.length > 1 && !parts[1])) return value;
+    if (parts.length === 1) { if (parts[0].row > rowNumber) parts[0].row += delta; return formatCellRef(parts[0]); }
+    const [start, end] = parts;
+    if (start.row > rowNumber) { start.row += delta; end.row += delta; }
+    else if (end.row >= rowNumber) end.row += delta;
+    return `${formatCellRef(start)}:${formatCellRef(end)}`;
+  }
+  function rangeTouchesRow(value, rowNumber) { const parts = value.split(':').map(parseCellRef); return parts[0] && rowNumber >= parts[0].row && rowNumber <= (parts[1]?.row || parts[0].row); }
+  function rowNumberFromAddress(value) { return Number(value.match(/(\d+)$/)?.[1] || 0); }
+  function shiftCellAddress(value, delta) { return replaceAddressRow(value, rowNumberFromAddress(value) + delta); }
+  function replaceAddressRow(value, rowNumber) { return value.replace(/\d+$/, String(rowNumber)); }
+
+  async function forceWorkbookRecalculation(zip, context) {
+    let calc = all(context.workbookDoc, 'calcPr', S)[0];
+    if (!calc) { calc = context.workbookDoc.createElementNS(S, 'calcPr'); context.workbookDoc.documentElement.append(calc); }
+    calc.setAttribute('calcMode', 'auto'); calc.setAttribute('fullCalcOnLoad', '1'); calc.setAttribute('forceFullCalc', '1');
+    zip.file(context.workbookPath, new XMLSerializer().serializeToString(context.workbookDoc));
+    const calcRelationships = all(context.workbookRelsDoc, 'Relationship', P).filter(item => /\/calcChain$/i.test(item.getAttribute('Type') || ''));
+    if (calcRelationships.length || zip.file('xl/calcChain.xml')) {
+      calcRelationships.forEach(item => item.remove()); zip.file(context.workbookRelsPath, new XMLSerializer().serializeToString(context.workbookRelsDoc)); zip.remove('xl/calcChain.xml');
+      const typesFile = zip.file('[Content_Types].xml');
+      if (typesFile) {
+        const doc = parseXml(await typesFile.async('string'));
+        [...doc.getElementsByTagNameNS('*', 'Override')].filter(item => item.getAttribute('PartName') === '/xl/calcChain.xml').forEach(item => item.remove());
+        zip.file('[Content_Types].xml', new XMLSerializer().serializeToString(doc));
+      }
+    }
   }
 
   function resolveMapping(mapping) { return C.resolveField(state.order.rows, mapping.field, mapping.strategy || 'first', mapping.manual || ''); }

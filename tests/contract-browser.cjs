@@ -70,14 +70,30 @@ const HOME_URL = new URL('.', QA_URL).toString();
     // Excel template: repeat one detail row while keeping the original template file untouched.
     await page.reload({ waitUntil: 'networkidle' });
     await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(orderBytes) });
-    const templateXlsx = await page.evaluate(() => {
+    const templateXlsx = await page.evaluate(async () => {
       const sheet = XLSX.utils.aoa_to_sheet([['采购合同', ''], ['物料', '数量'], ['待填写', '待填写']]);
       sheet['!cols'] = [{ wch: 22 }, { wch: 12 }];
       const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, '合同');
-      return Array.from(new Uint8Array(XLSX.write(book, { type: 'array', bookType: 'xlsx' })));
+      const zip = await JSZip.loadAsync(XLSX.write(book, { type: 'array', bookType: 'xlsx' }));
+      const sheetPath = 'xl/worksheets/sheet1.xml';
+      let sheetXml = await zip.file(sheetPath).async('string');
+      sheetXml = sheetXml.replace('<worksheet ', '<worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ')
+        .replace('</worksheet>', '<tableParts count="1"><tablePart r:id="rIdTable1"/></tableParts></worksheet>');
+      zip.file(sheetPath, sheetXml);
+      zip.file('xl/worksheets/_rels/sheet1.xml.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdTable1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>');
+      zip.file('xl/tables/table1.xml', '<?xml version="1.0"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="ContractTable" displayName="ContractTable" ref="A1:B3" totalsRowShown="0"><autoFilter ref="A1:B3"/><tableColumns count="2"><tableColumn id="1" name="物料"/><tableColumn id="2" name="数量"/></tableColumns><tableStyleInfo name="TableStyleMedium2" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/></table>');
+      zip.file('xl/drawings/drawing-contract.xml', '<drawing-preserve>DRAWING-MARKER</drawing-preserve>');
+      zip.file('xl/pivotTables/pivot-contract.xml', '<pivot-preserve>PIVOT-MARKER</pivot-preserve>');
+      let types = await zip.file('[Content_Types].xml').async('string');
+      types = types.replace('</Types>', '<Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/></Types>');
+      zip.file('[Content_Types].xml', types);
+      return Array.from(await zip.generateAsync({ type: 'uint8array' }));
     });
     await page.locator('#templateFile').setInputFiles({ name: '虚构合同模板.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(templateXlsx) });
     await page.waitForFunction(() => !document.querySelector('#mappingStage').hidden);
+    assert.match(await page.locator('#contractStatus').innerText(), /已识别并保留图形、数据透视表、结构化表/);
+    await page.evaluate(() => scrollTo(0, 0));
+    await page.screenshot({ path: path.join(out, 'contract-complex-upload.png'), fullPage: false });
     await page.locator('[data-detail-row="excel:3"]').click();
     await page.locator('[data-target="x:A3"]').click(); await page.locator('#mapField').selectOption('物料');
     await page.locator('[data-target="x:B3"]').click(); await page.locator('#mapField').selectOption('数量');
@@ -92,6 +108,17 @@ const HOME_URL = new URL('.', QA_URL).toString();
       return ['A3', 'B3', 'A4', 'B4'].map(address => sheet[address]?.v);
     }, [...await fs.readFile(xlsxPath)]);
     assert.deepEqual(generatedCells, ['产品A', '2', '产品B', '3']);
+    const preservedParts = await page.evaluate(async bytes => {
+      const zip = await JSZip.loadAsync(new Uint8Array(bytes));
+      return {
+        table: await zip.file('xl/tables/table1.xml').async('string'),
+        drawing: await zip.file('xl/drawings/drawing-contract.xml').async('string'),
+        pivot: await zip.file('xl/pivotTables/pivot-contract.xml').async('string'),
+      };
+    }, [...await fs.readFile(xlsxPath)]);
+    assert.match(preservedParts.table, /ref="A1:B4"/);
+    assert.match(preservedParts.drawing, /DRAWING-MARKER/);
+    assert.match(preservedParts.pivot, /PIVOT-MARKER/);
     await page.screenshot({ path: path.join(out, 'contract-excel.png'), fullPage: false });
 
     await page.setViewportSize({ width: 390, height: 844 }); await page.reload({ waitUntil: 'networkidle' }); await page.evaluate(() => scrollTo(0, 0));
@@ -99,6 +126,6 @@ const HOME_URL = new URL('.', QA_URL).toString();
     assert.equal(overflow, false);
     await page.screenshot({ path: path.join(out, 'contract-mobile.png'), fullPage: false });
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ status: 'PASS', output: out, screenshots: ['contract-desktop.png', 'contract-word-result.png', 'contract-excel.png', 'contract-mobile.png'] }));
+    console.log(JSON.stringify({ status: 'PASS', output: out, screenshots: ['contract-desktop.png', 'contract-word-result.png', 'contract-complex-upload.png', 'contract-excel.png', 'contract-mobile.png'] }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
