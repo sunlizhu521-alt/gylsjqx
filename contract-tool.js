@@ -9,13 +9,20 @@
   const MIME = {
     docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    pdf: 'application/pdf',
   };
+  const ONLYOFFICE_ORIGIN = 'https://edit.chaxus.com';
+  const CONVERSION_TIMEOUT = 240000;
   let pdfJsPromise = null;
+  let converterFrame = null;
+  let converterReadyPromise = null;
+  let previewResizeTimer = null;
+  const converterRequests = new Map();
   const state = {
     orderFile: null, orderBytes: null, orderBook: null, orderSheet: '', order: null,
     templateFile: null, templateBytes: null, templateType: '', templateBook: null, templateSheet: '', templateModel: null, templateFeatures: [], fingerprint: '',
-    previewFile: null, previewBytes: null, previewDocument: null, previewPageCount: 0, previewPage: 0, previewMode: 'print', previewRenderToken: 0,
-    mappings: {}, detailRow: '', selectedTarget: '', output: null, outputFileName: '', busy: false,
+    previewDocument: null, previewPageCount: 0, previewPage: 0, previewRenderToken: 0,
+    mappings: {}, detailRow: '', selectedTarget: '', output: null, outputFileName: '', outputPdf: null, outputPdfFileName: '', busy: false,
   };
   const $ = id => document.getElementById(id);
   const esc = value => C.text(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -28,22 +35,26 @@
     initTheme();
     $('orderFile').addEventListener('change', event => loadOrder(event.target.files[0]));
     $('templateFile').addEventListener('change', event => loadTemplate(event.target.files[0]));
-    $('previewFile').addEventListener('change', event => loadPreviewPdf(event.target.files[0]));
-    $('previewMatchConfirm').addEventListener('change', updateAll);
     $('orderSheet').addEventListener('change', event => { state.orderSheet = event.target.value; analyzeOrder(); invalidateOutput(); updateAll(); });
     $('templateSheet').addEventListener('change', event => { state.templateSheet = event.target.value; buildExcelModel(); state.mappings = {}; state.detailRow = ''; state.selectedTarget = ''; invalidateOutput(); restoreMapping(); updateAll(); });
-    $('showPrintPreview').addEventListener('click', () => setPreviewMode('print'));
-    $('showMappingStructure').addEventListener('click', () => setPreviewMode('mapping'));
-    $('previewPrevious').addEventListener('click', () => changePreviewPage(-1));
-    $('previewNext').addEventListener('click', () => changePreviewPage(1));
+    $('resultPrevious').addEventListener('click', () => changePreviewPage(-1));
+    $('resultNext').addEventListener('click', () => changePreviewPage(1));
     $('outputName').addEventListener('input', () => { invalidateOutput(); updateConfirmation(); });
     $('confirmGenerate').addEventListener('change', updateConfirmation);
     $('generateContract').addEventListener('click', generate);
     $('downloadContract').addEventListener('click', downloadOutput);
+    $('downloadPdf').addEventListener('click', downloadPdf);
+    $('confirmExport').addEventListener('change', updateExportButtons);
     $('clearContract').addEventListener('click', () => location.reload());
     $('exportMapping').addEventListener('click', exportMapping);
     $('importMapping').addEventListener('change', event => importMapping(event.target.files[0]));
-    for (const [dropId, inputId] of [['orderDrop', 'orderFile'], ['templateDrop', 'templateFile'], ['previewDrop', 'previewFile']]) bindDrop($(dropId), $(inputId));
+    for (const [dropId, inputId] of [['orderDrop', 'orderFile'], ['templateDrop', 'templateFile']]) bindDrop($(dropId), $(inputId));
+    window.addEventListener('message', handleConverterMessage);
+    window.addEventListener('resize', () => {
+      if (!state.previewDocument) return;
+      clearTimeout(previewResizeTimer);
+      previewResizeTimer = setTimeout(renderGeneratedPdf, 100);
+    });
     window.addEventListener('beforeunload', releasePreviewDocument);
     updateAll();
   }
@@ -81,8 +92,10 @@
   }
 
   function invalidateOutput() {
-    state.output = null; state.outputFileName = '';
-    $('resultStage').hidden = true; $('downloadContract').disabled = true; $('generatedPreview').replaceChildren();
+    state.output = null; state.outputFileName = ''; state.outputPdf = null; state.outputPdfFileName = '';
+    releasePreviewDocument(); state.previewPageCount = 0; state.previewPage = 0;
+    $('confirmExport').checked = false; $('resultStage').hidden = true; $('resultPagination').hidden = true;
+    $('downloadContract').disabled = true; $('downloadPdf').disabled = true; $('generatedPreview').replaceChildren();
   }
 
   async function loadOrder(file) {
@@ -125,8 +138,7 @@
       const type = file.name.toLowerCase().endsWith('.docx') ? 'docx' : 'xlsx';
       const zip = await validateOoxml(bytes, type);
       state.templateFile = file; state.templateBytes = bytes; state.templateType = type; state.fingerprint = await sha256(bytes);
-      state.templateBook = null; state.templateSheet = ''; state.mappings = {}; state.detailRow = ''; state.selectedTarget = ''; state.previewMode = 'print';
-      $('previewMatchConfirm').checked = false;
+      state.templateBook = null; state.templateSheet = ''; state.mappings = {}; state.detailRow = ''; state.selectedTarget = '';
       if (type === 'docx') await parseDocx(zip);
       else parseXlsx();
       $('templateFileName').textContent = file.name; $('templateDrop').classList.add('loaded');
@@ -137,45 +149,6 @@
       updateAll();
     } catch (error) {
       state.templateFile = null; state.templateBytes = null; state.templateModel = null; state.templateType = ''; state.templateFeatures = []; $('templateDrop').classList.remove('loaded');
-      $('previewMatchConfirm').checked = false;
-      status(error.message, 'error'); updateAll();
-    }
-  }
-
-  async function loadPreviewPdf(file) {
-    if (!file) return;
-    invalidateOutput(); status('正在检查打印预览PDF…');
-    try {
-      if (!/\.pdf$/i.test(file.name)) throw new Error('打印预览文件必须是 .pdf');
-      if (file.size > 30 * 1024 * 1024) throw new Error('打印预览PDF不能超过 30 MB');
-      const bytes = await file.arrayBuffer(), header = new TextDecoder('latin1').decode(bytes.slice(0, 5));
-      if (header !== '%PDF-') throw new Error('请选择有效的PDF文件');
-      let document;
-      try {
-        const pdfjs = await loadPdfJs();
-        document = await pdfjs.getDocument({
-          data: new Uint8Array(bytes.slice(0)),
-          cMapUrl: new URL('vendor/pdfjs-cmaps/', location.href).href,
-          cMapPacked: true,
-          standardFontDataUrl: new URL('vendor/pdfjs-standard-fonts/', location.href).href,
-          wasmUrl: new URL('vendor/pdfjs-wasm/', location.href).href,
-          useSystemFonts: true,
-        }).promise;
-      }
-      catch (_) { throw new Error('打印预览PDF损坏或受到密码保护，无法读取'); }
-      const pageCount = document.numPages;
-      if (!pageCount) throw new Error('打印预览PDF没有页面');
-      if (pageCount > 500) throw new Error('打印预览PDF超过 500 页，请拆分后上传');
-      releasePreviewDocument();
-      state.previewFile = file; state.previewBytes = bytes; state.previewDocument = document; state.previewPageCount = pageCount; state.previewPage = 0; state.previewMode = 'print';
-      $('previewFileName').textContent = `${file.name}（${pageCount}页）`; $('previewDrop').classList.add('loaded');
-      $('previewMatchConfirm').checked = false;
-      const featureNote = state.templateFeatures.length ? `；模板中的${state.templateFeatures.join('、')}将在生成文件中保留` : '';
-      status(`打印预览PDF读取完成：${pageCount} 页，请确认它与合同模板是同一版本${featureNote}`, 'success');
-      updateAll();
-    } catch (error) {
-      releasePreviewDocument(); state.previewFile = null; state.previewBytes = null; state.previewPageCount = 0; state.previewPage = 0;
-      $('previewDrop').classList.remove('loaded'); $('previewFileName').textContent = '点击选择打印预览PDF'; $('previewMatchConfirm').checked = false;
       status(error.message, 'error'); updateAll();
     }
   }
@@ -290,10 +263,7 @@
   }
 
   function updateAll() {
-    const canConfirmPreview = !!(state.templateFile && state.previewFile);
-    $('previewMatchConfirm').disabled = !canConfirmPreview;
-    if (!canConfirmPreview) $('previewMatchConfirm').checked = false;
-    const ready = !!(state.order && state.templateModel && state.previewFile && $('previewMatchConfirm').checked);
+    const ready = !!(state.order && state.templateModel);
     $('mappingStage').hidden = !ready; $('confirmStage').hidden = !ready;
     $('orderMeta').textContent = state.order ? `${state.order.rows.length} 行 · ${state.order.headers.length} 个字段` : '尚未读取订单';
     $('orderFields').innerHTML = state.order ? state.order.headers.map(header => {
@@ -304,38 +274,33 @@
     const summary = [];
     if (state.orderFile) summary.push(`订单：${state.orderFile.name}（${state.order.rows.length}行）`);
     if (state.templateFile) summary.push(`模板：${state.templateFile.name}`);
-    if (state.previewFile) summary.push(`打印预览：${state.previewFile.name}（${state.previewPageCount}页）`);
-    $('fileSummary').textContent = summary.join('；') || '等待上传订单、模板和打印预览PDF';
+    $('fileSummary').textContent = summary.join('；') || '等待上传订单和合同模板';
     $('mappingStatus').textContent = `${mappedEntries().length} 个映射`;
     updateConfirmation(); updateSteps();
   }
 
   function renderTemplate() {
     const mapped = new Set(mappedEntries().map(([target]) => target));
-    $('showPrintPreview').setAttribute('aria-pressed', String(state.previewMode === 'print'));
-    $('showMappingStructure').setAttribute('aria-pressed', String(state.previewMode === 'mapping'));
-    if (state.previewMode === 'print') renderPdfPreview();
-    else renderMappingStructure(mapped);
+    renderMappingStructure(mapped);
     $('templatePreview').querySelectorAll('[data-target]').forEach(button => button.addEventListener('click', () => { state.selectedTarget = button.dataset.target; renderTemplate(); renderInspector(); }));
     $('templatePreview').querySelectorAll('[data-detail-row]').forEach(button => button.addEventListener('click', () => toggleDetailRow(button.dataset.detailRow)));
   }
 
-  async function renderPdfPreview() {
+  async function renderGeneratedPdf() {
+    if (!state.previewDocument) return;
     state.previewPage = Math.max(0, Math.min(state.previewPage, state.previewPageCount - 1));
     const pageNumber = state.previewPage + 1, renderToken = ++state.previewRenderToken;
-    $('templatePreview').className = 'template-preview pdf-mode';
-    $('templatePreview').innerHTML = `<div class="pdf-preview-shell"><canvas class="pdf-preview-canvas" data-page="${pageNumber}" aria-label="打印预览PDF第${pageNumber}页"></canvas><span class="pdf-render-status">正在渲染第 ${pageNumber} 页…</span></div>`;
-    $('templateMeta').textContent = `${state.previewFile.name} · 原样PDF`;
-    $('previewPagination').hidden = false;
-    $('previewPageLabel').textContent = `第 ${pageNumber} / ${state.previewPageCount} 页`;
-    $('previewPrevious').disabled = state.previewPage === 0;
-    $('previewNext').disabled = state.previewPage >= state.previewPageCount - 1;
-    $('previewPagination').dataset.totalPages = String(state.previewPageCount);
-    $('previewPagination').dataset.currentPage = String(state.previewPage + 1);
+    $('generatedPreview').innerHTML = `<div class="pdf-preview-shell"><canvas class="pdf-preview-canvas" data-page="${pageNumber}" aria-label="生成合同PDF第${pageNumber}页"></canvas><span class="pdf-render-status">正在渲染第 ${pageNumber} 页…</span></div>`;
+    $('resultPagination').hidden = false;
+    $('resultPageLabel').textContent = `第 ${pageNumber} / ${state.previewPageCount} 页`;
+    $('resultPrevious').disabled = state.previewPage === 0;
+    $('resultNext').disabled = state.previewPage >= state.previewPageCount - 1;
+    $('resultPagination').dataset.totalPages = String(state.previewPageCount);
+    $('resultPagination').dataset.currentPage = String(state.previewPage + 1);
     try {
       const pdfPage = await state.previewDocument.getPage(pageNumber);
-      if (renderToken !== state.previewRenderToken || state.previewMode !== 'print') return;
-      const host = $('templatePreview'), shell = host.querySelector('.pdf-preview-shell'), canvas = host.querySelector('.pdf-preview-canvas');
+      if (renderToken !== state.previewRenderToken) return;
+      const host = $('generatedPreview'), shell = host.querySelector('.pdf-preview-shell'), canvas = host.querySelector('.pdf-preview-canvas');
       const baseViewport = pdfPage.getViewport({ scale: 1 }), availableWidth = Math.min(794, Math.max(260, host.clientWidth - 48));
       const cssScale = availableWidth / baseViewport.width, pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
       const cssViewport = pdfPage.getViewport({ scale: cssScale }), renderViewport = pdfPage.getViewport({ scale: cssScale * pixelRatio });
@@ -347,14 +312,13 @@
       canvas.dataset.rendered = 'true'; shell.querySelector('.pdf-render-status')?.remove(); pdfPage.cleanup();
     } catch (error) {
       if (renderToken !== state.previewRenderToken) return;
-      $('templatePreview').innerHTML = `<div class="pdf-render-error">打印预览第 ${pageNumber} 页渲染失败：${esc(error.message || '未知错误')}</div>`;
+      $('generatedPreview').innerHTML = `<div class="pdf-render-error">生成PDF第 ${pageNumber} 页渲染失败：${esc(error.message || '未知错误')}</div>`;
     }
   }
 
   function renderMappingStructure(mapped) {
     $('templatePreview').className = 'template-preview mapping-mode';
     $('templateMeta').textContent = `${state.templateFile.name}${state.templateSheet ? ` · ${state.templateSheet}` : ''}`;
-    $('previewPagination').hidden = true;
     let content;
     if (state.templateModel.type === 'docx') {
       content = state.templateModel.blocks.map(block => {
@@ -365,22 +329,14 @@
       const letters = Array.from({ length: state.templateModel.columns }, (_, index) => XLSX.utils.encode_col(index));
       content = `<table class="excel-preview"><thead><tr><th class="row-number"></th>${letters.map(letter => `<th>${letter}</th>`).join('')}</tr></thead><tbody>${state.templateModel.rows.map(row => `<tr class="${state.detailRow === row.rowKey ? 'detail-row' : ''}"><th><button type="button" data-detail-row="${esc(row.rowKey)}" title="设为明细模板行">${row.rowIndex + 1}</button></th>${row.cells.map(cell => `<td>${targetButton(cell, mapped)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
     }
-    $('templatePreview').innerHTML = `<div class="mapping-structure"><p class="mapping-structure-note">这里仅用于选择写入位置，不代表合同打印排版；原样布局请切换到“打印预览”。</p>${content}</div>`;
-  }
-
-  function setPreviewMode(mode) {
-    if (!['print', 'mapping'].includes(mode) || state.previewMode === mode) return;
-    state.previewMode = mode;
-    $('showPrintPreview').setAttribute('aria-pressed', String(mode === 'print'));
-    $('showMappingStructure').setAttribute('aria-pressed', String(mode === 'mapping'));
-    renderTemplate();
+    $('templatePreview').innerHTML = `<div class="mapping-structure"><p class="mapping-structure-note">这里用于选择写入位置，不代表最终打印排版；点击“生成PDF预览”后查看实际转换结果。</p>${content}</div>`;
   }
 
   function changePreviewPage(offset) {
-    if (state.previewMode !== 'print') return;
+    if (!state.previewDocument) return;
     const total = state.previewPageCount || 1, next = Math.max(0, Math.min(state.previewPage + offset, total - 1));
     if (next === state.previewPage) return;
-    state.previewPage = next; renderTemplate(); $('templatePreview').scrollTop = 0; $('templatePreview').scrollLeft = 0;
+    state.previewPage = next; renderGeneratedPdf(); $('generatedPreview').scrollTop = 0; $('generatedPreview').scrollLeft = 0;
   }
 
   function targetButton(target, mapped, extra = '') {
@@ -405,7 +361,7 @@
     const host = $('mappingInspector'), target = findTarget(state.selectedTarget);
     if (!target) { host.className = 'mapping-empty'; host.textContent = '请点击模板中的段落、表格单元格或Excel单元格。'; return; }
     host.className = '';
-    const mapping = state.mappings[target.id] || { field: '', mode: target.rowKey === state.detailRow ? 'detail' : 'single', strategy: '' };
+    const mapping = state.mappings[target.id] || { field: '', mode: target.rowKey && target.rowKey === state.detailRow ? 'detail' : 'single', strategy: '' };
     const values = mapping.field ? C.distinctValues(state.order.rows, mapping.field) : [];
     const conflict = mapping.mode !== 'detail' && values.length > 1;
     host.innerHTML = `<div class="mapping-form">
@@ -428,14 +384,14 @@
   }
 
   function changeMapping(target, changes, fullRender = true) {
-    const current = state.mappings[target.id] || { field: '', mode: target.rowKey === state.detailRow ? 'detail' : 'single', strategy: '' };
+    const current = state.mappings[target.id] || { field: '', mode: target.rowKey && target.rowKey === state.detailRow ? 'detail' : 'single', strategy: '' };
     const next = { ...current, ...changes };
     if (!next.field) delete state.mappings[target.id];
     else {
       const values = C.distinctValues(state.order.rows, next.field);
       if (!('strategy' in changes) && values.length <= 1) next.strategy = 'first';
       if (!('strategy' in changes) && values.length > 1 && current.field !== next.field) next.strategy = '';
-      if (target.rowKey === state.detailRow) next.mode = 'detail';
+      if (target.rowKey && target.rowKey === state.detailRow) next.mode = 'detail';
       state.mappings[target.id] = next;
     }
     invalidateOutput(); saveMapping();
@@ -446,36 +402,124 @@
   function findTarget(id) { return state.templateModel?.targets.find(target => target.id === id); }
 
   function updateConfirmation() {
-    if (!state.order || !state.templateModel || !state.previewFile || !$('previewMatchConfirm').checked) { $('generateContract').disabled = true; return; }
+    if (!state.order || !state.templateModel) { $('generateContract').disabled = true; return; }
     const issues = C.mappingIssues(state.order.rows, state.mappings, state.detailRow);
     if (state.detailRow && !mappedEntries().some(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow)) issues.push('明细模板行还没有映射任何订单字段');
     const outputName = C.sanitizeFileName($('outputName').value);
     if (!$('outputName').value.trim()) issues.push('请填写合同文件名称');
     $('confirmSummary').innerHTML = `订单：<strong>${esc(state.orderSheet)}</strong>，${state.order.rows.length} 行；模板：<strong>${esc(state.templateFile.name)}</strong>${state.templateSheet ? `，合同Sheet：<strong>${esc(state.templateSheet)}</strong>` : ''}；输出：<strong>${esc(outputName)}.${state.templateType}</strong>`;
-    $('contractIssues').innerHTML = issues.length ? `<ul>${issues.map(issue => `<li>${esc(issue)}</li>`).join('')}</ul>` : '<div class="ready">映射检查通过，可以人工确认并生成。</div>';
+    $('contractIssues').innerHTML = issues.length ? `<ul>${issues.map(issue => `<li>${esc(issue)}</li>`).join('')}</ul>` : '<div class="ready">映射检查通过，可以生成PDF预览。</div>';
     $('generateContract').disabled = state.busy || issues.length > 0 || !$('confirmGenerate').checked;
   }
 
   function updateSteps() {
     const steps = [...$('contractSteps').children];
     const mapped = mappedEntries().length > 0;
-    const filesReady = !!(state.templateModel && state.previewFile && $('previewMatchConfirm').checked);
-    const values = [!!state.order, filesReady, mapped, mapped && $('confirmGenerate').checked, !!state.output];
+    const values = [!!state.order, !!state.templateModel, mapped, !!state.outputPdf, !!state.outputPdf && $('confirmExport').checked];
     let active = values.findIndex(value => !value); if (active < 0) active = 4;
     steps.forEach((step, index) => { step.classList.toggle('done', values[index] && index < active); step.classList.toggle('active', index === active); });
   }
 
   async function generate() {
     updateConfirmation(); if ($('generateContract').disabled) return;
-    state.busy = true; $('generateContract').textContent = '正在生成…'; updateConfirmation(); status('正在生成合同副本…');
+    invalidateOutput();
+    state.busy = true; $('generateContract').textContent = '正在生成合同…'; updateConfirmation(); status('正在生成合同副本…');
     try {
       const blob = state.templateType === 'docx' ? await generateDocx() : await generateXlsx();
       state.output = blob; state.outputFileName = `${C.sanitizeFileName($('outputName').value)}.${state.templateType}`;
-      renderGeneratedPreview(); $('resultStage').hidden = false; $('downloadContract').disabled = false; $('downloadContract').textContent = `下载 ${state.templateType.toUpperCase()}`;
-      saveMapping(); status(`合同已生成：${state.outputFileName}`, 'success'); toast('合同生成完成，请预览后下载', 'success'); updateSteps();
+      $('generateContract').textContent = '正在转换PDF…'; status('合同副本已生成，正在浏览器内转换PDF；首次加载可能需要一些时间…');
+      const pdfFile = await convertContractToPdf(blob, state.outputFileName);
+      await preparePdfPreview(pdfFile);
+      state.outputPdf = pdfFile; state.outputPdfFileName = `${C.sanitizeFileName($('outputName').value)}.pdf`;
+      $('resultStage').hidden = false;
+      $('downloadContract').textContent = `下载 ${state.templateType.toUpperCase()}`;
+      $('downloadPdf').textContent = '下载 PDF';
+      $('confirmExport').checked = false; updateExportButtons(); renderGeneratedPdf();
+      saveMapping(); status(`PDF预览已生成：${state.outputPdfFileName}（${state.previewPageCount}页）`, 'success'); toast('PDF预览生成完成，请核对后确认导出', 'success'); updateSteps();
       $('resultStage').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) { status(error.message, 'error'); toast(error.message, 'error'); }
-    finally { state.busy = false; $('generateContract').textContent = '确认生成'; updateConfirmation(); }
+    finally { state.busy = false; $('generateContract').textContent = '生成PDF预览'; updateConfirmation(); }
+  }
+
+  async function preparePdfPreview(file) {
+    const bytes = await file.arrayBuffer();
+    if (new TextDecoder('latin1').decode(bytes.slice(0, 5)) !== '%PDF-') throw new Error('PDF转换结果无效，请重新生成');
+    const pdfjs = await loadPdfJs();
+    let document;
+    try {
+      document = await pdfjs.getDocument({
+        data: new Uint8Array(bytes.slice(0)),
+        cMapUrl: new URL('vendor/pdfjs-cmaps/', location.href).href,
+        cMapPacked: true,
+        standardFontDataUrl: new URL('vendor/pdfjs-standard-fonts/', location.href).href,
+        wasmUrl: new URL('vendor/pdfjs-wasm/', location.href).href,
+        useSystemFonts: true,
+      }).promise;
+    } catch (_) { throw new Error('生成的PDF无法读取，请重新生成'); }
+    if (!document.numPages) throw new Error('生成的PDF没有页面');
+    if (document.numPages > 500) { document.destroy(); throw new Error('生成的PDF超过500页，请拆分订单'); }
+    releasePreviewDocument();
+    state.previewDocument = document; state.previewPageCount = document.numPages; state.previewPage = 0;
+  }
+
+  async function convertContractToPdf(blob, fileName) {
+    if (typeof window.__CONTRACT_PDF_CONVERTER__ === 'function') {
+      const result = await window.__CONTRACT_PDF_CONVERTER__(blob, fileName);
+      if (!(result instanceof Blob)) throw new Error('PDF转换测试接口没有返回文件');
+      return result;
+    }
+    await ensureConverterFrame();
+    const buffer = await blob.arrayBuffer();
+    await requestConverter('document:open-buffer', { fileName, buffer, readonly: false }, 'document:opened', [buffer]);
+    const result = await requestConverter('document:save', { targetExt: 'PDF' }, 'document:saved');
+    if (!(result.file instanceof Blob)) throw new Error('PDF转换组件没有返回文件');
+    return result.file;
+  }
+
+  function ensureConverterFrame() {
+    if (converterFrame?.dataset.ready === 'true') return Promise.resolve();
+    if (converterReadyPromise) return converterReadyPromise;
+    converterReadyPromise = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        converterReadyPromise = null;
+        reject(new Error('PDF转换组件加载超时，请检查网络后重试'));
+      }, CONVERSION_TIMEOUT);
+      converterReadyResolve = () => { clearTimeout(timeout); resolve(); };
+      converterFrame = document.createElement('iframe');
+      converterFrame.className = 'onlyoffice-converter-frame';
+      converterFrame.title = '浏览器本地PDF转换组件'; converterFrame.tabIndex = -1; converterFrame.setAttribute('aria-hidden', 'true');
+      converterFrame.src = `${ONLYOFFICE_ORIGIN}/editor?embed=1&locale=zh-CN&embedOrigin=${encodeURIComponent(location.origin)}`;
+      converterFrame.addEventListener('error', () => { clearTimeout(timeout); converterReadyPromise = null; reject(new Error('PDF转换组件加载失败，请检查网络后重试')); }, { once: true });
+      document.body.append(converterFrame);
+    });
+    return converterReadyPromise;
+  }
+
+  function requestConverter(type, payload, expectedType, transfer = []) {
+    const id = `contract-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => { converterRequests.delete(id); reject(new Error('PDF转换超时，请重新生成')); }, CONVERSION_TIMEOUT);
+      converterRequests.set(id, { expectedType, resolve, reject, timeout });
+      converterFrame.contentWindow.postMessage({ id, type, payload }, ONLYOFFICE_ORIGIN, transfer);
+    });
+  }
+
+  let converterReadyResolve = null;
+  function handleConverterMessage(event) {
+    if (event.origin !== ONLYOFFICE_ORIGIN || !event.data?.type?.startsWith('document:')) return;
+    if (event.data.type === 'document:ready') {
+      if (converterFrame) converterFrame.dataset.ready = 'true';
+      converterReadyResolve?.(); converterReadyResolve = null;
+      return;
+    }
+    const request = converterRequests.get(event.data.id);
+    if (!request) return;
+    if (event.data.type === 'document:error') {
+      clearTimeout(request.timeout); converterRequests.delete(event.data.id);
+      request.reject(new Error(`PDF转换失败：${event.data.payload?.message || '未知错误'}`));
+    } else if (event.data.type === request.expectedType) {
+      clearTimeout(request.timeout); converterRequests.delete(event.data.id); request.resolve(event.data.payload || {});
+    }
   }
 
   async function generateDocx() {
@@ -705,34 +749,24 @@
 
   function resolveMapping(mapping) { return C.resolveField(state.order.rows, mapping.field, mapping.strategy || 'first', mapping.manual || ''); }
 
-  function renderGeneratedPreview() {
-    if (state.templateModel.type === 'docx') {
-      $('generatedPreview').innerHTML = `<div class="generated-page">${state.templateModel.blocks.map(block => {
-        if (block.type === 'paragraph') return `<p>${esc(previewValue(block.target))}</p>`;
-        return `<table class="generated-table"><tbody>${block.rows.flatMap(row => {
-          const records = row.rowKey === state.detailRow ? state.order.rows : [null];
-          return records.map(record => `<tr>${row.cells.map(cell => `<td>${esc(previewValue(cell, record))}</td>`).join('')}</tr>`);
-        }).join('')}</tbody></table>`;
-      }).join('')}</div>`;
-    } else {
-      $('generatedPreview').innerHTML = `<div class="generated-page"><table class="generated-table"><tbody>${state.templateModel.rows.flatMap(row => {
-        const records = row.rowKey === state.detailRow ? state.order.rows : [null];
-        return records.map(record => `<tr>${row.cells.map(cell => `<td>${esc(previewValue(cell, record))}</td>`).join('')}</tr>`);
-      }).join('')}</tbody></table></div>`;
-    }
-  }
-
-  function previewValue(target, record = null) {
-    const mapping = state.mappings[target.id];
-    if (!mapping?.field) return target.value;
-    if (mapping.mode === 'detail') return C.text(record?.[mapping.field]);
-    return resolveMapping(mapping);
-  }
-
   function downloadOutput() {
-    if (!state.output) return;
-    const url = URL.createObjectURL(state.output), anchor = document.createElement('a');
-    anchor.href = url; anchor.download = state.outputFileName; document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (!state.output || !$('confirmExport').checked) return;
+    downloadBlob(state.output, state.outputFileName);
+  }
+
+  function downloadPdf() {
+    if (!state.outputPdf || !$('confirmExport').checked) return;
+    downloadBlob(state.outputPdf, state.outputPdfFileName);
+  }
+
+  function updateExportButtons() {
+    const ready = !!(state.output && state.outputPdf && $('confirmExport').checked);
+    $('downloadContract').disabled = !ready; $('downloadPdf').disabled = !ready; updateSteps();
+  }
+
+  function downloadBlob(blob, fileName) {
+    const url = URL.createObjectURL(blob), anchor = document.createElement('a');
+    anchor.href = url; anchor.download = fileName; document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   async function exportMapping() {
