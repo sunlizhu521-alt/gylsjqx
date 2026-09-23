@@ -10,10 +10,12 @@
     docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   };
+  let pdfJsPromise = null;
   const state = {
     orderFile: null, orderBytes: null, orderBook: null, orderSheet: '', order: null,
     templateFile: null, templateBytes: null, templateType: '', templateBook: null, templateSheet: '', templateModel: null, templateFeatures: [], fingerprint: '',
-    mappings: {}, detailRow: '', selectedTarget: '', previewPage: 0, output: null, outputFileName: '', busy: false,
+    previewFile: null, previewBytes: null, previewDocument: null, previewPageCount: 0, previewPage: 0, previewMode: 'print', previewRenderToken: 0,
+    mappings: {}, detailRow: '', selectedTarget: '', output: null, outputFileName: '', busy: false,
   };
   const $ = id => document.getElementById(id);
   const esc = value => C.text(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -26,8 +28,12 @@
     initTheme();
     $('orderFile').addEventListener('change', event => loadOrder(event.target.files[0]));
     $('templateFile').addEventListener('change', event => loadTemplate(event.target.files[0]));
+    $('previewFile').addEventListener('change', event => loadPreviewPdf(event.target.files[0]));
+    $('previewMatchConfirm').addEventListener('change', updateAll);
     $('orderSheet').addEventListener('change', event => { state.orderSheet = event.target.value; analyzeOrder(); invalidateOutput(); updateAll(); });
-    $('templateSheet').addEventListener('change', event => { state.templateSheet = event.target.value; buildExcelModel(); state.mappings = {}; state.detailRow = ''; state.selectedTarget = ''; state.previewPage = 0; invalidateOutput(); restoreMapping(); updateAll(); });
+    $('templateSheet').addEventListener('change', event => { state.templateSheet = event.target.value; buildExcelModel(); state.mappings = {}; state.detailRow = ''; state.selectedTarget = ''; invalidateOutput(); restoreMapping(); updateAll(); });
+    $('showPrintPreview').addEventListener('click', () => setPreviewMode('print'));
+    $('showMappingStructure').addEventListener('click', () => setPreviewMode('mapping'));
     $('previewPrevious').addEventListener('click', () => changePreviewPage(-1));
     $('previewNext').addEventListener('click', () => changePreviewPage(1));
     $('outputName').addEventListener('input', () => { invalidateOutput(); updateConfirmation(); });
@@ -37,8 +43,8 @@
     $('clearContract').addEventListener('click', () => location.reload());
     $('exportMapping').addEventListener('click', exportMapping);
     $('importMapping').addEventListener('change', event => importMapping(event.target.files[0]));
-    for (const [dropId, inputId] of [['orderDrop', 'orderFile'], ['templateDrop', 'templateFile']]) bindDrop($(dropId), $(inputId));
-    if ('ResizeObserver' in window) new ResizeObserver(updatePreviewScale).observe($('templatePreview'));
+    for (const [dropId, inputId] of [['orderDrop', 'orderFile'], ['templateDrop', 'templateFile'], ['previewDrop', 'previewFile']]) bindDrop($(dropId), $(inputId));
+    window.addEventListener('beforeunload', releasePreviewDocument);
     updateAll();
   }
 
@@ -119,7 +125,8 @@
       const type = file.name.toLowerCase().endsWith('.docx') ? 'docx' : 'xlsx';
       const zip = await validateOoxml(bytes, type);
       state.templateFile = file; state.templateBytes = bytes; state.templateType = type; state.fingerprint = await sha256(bytes);
-      state.templateBook = null; state.templateSheet = ''; state.mappings = {}; state.detailRow = ''; state.selectedTarget = ''; state.previewPage = 0;
+      state.templateBook = null; state.templateSheet = ''; state.mappings = {}; state.detailRow = ''; state.selectedTarget = ''; state.previewMode = 'print';
+      $('previewMatchConfirm').checked = false;
       if (type === 'docx') await parseDocx(zip);
       else parseXlsx();
       $('templateFileName').textContent = file.name; $('templateDrop').classList.add('loaded');
@@ -130,8 +137,63 @@
       updateAll();
     } catch (error) {
       state.templateFile = null; state.templateBytes = null; state.templateModel = null; state.templateType = ''; state.templateFeatures = []; $('templateDrop').classList.remove('loaded');
+      $('previewMatchConfirm').checked = false;
       status(error.message, 'error'); updateAll();
     }
+  }
+
+  async function loadPreviewPdf(file) {
+    if (!file) return;
+    invalidateOutput(); status('正在检查打印预览PDF…');
+    try {
+      if (!/\.pdf$/i.test(file.name)) throw new Error('打印预览文件必须是 .pdf');
+      if (file.size > 30 * 1024 * 1024) throw new Error('打印预览PDF不能超过 30 MB');
+      const bytes = await file.arrayBuffer(), header = new TextDecoder('latin1').decode(bytes.slice(0, 5));
+      if (header !== '%PDF-') throw new Error('请选择有效的PDF文件');
+      let document;
+      try {
+        const pdfjs = await loadPdfJs();
+        document = await pdfjs.getDocument({
+          data: new Uint8Array(bytes.slice(0)),
+          cMapUrl: new URL('vendor/pdfjs-cmaps/', location.href).href,
+          cMapPacked: true,
+          standardFontDataUrl: new URL('vendor/pdfjs-standard-fonts/', location.href).href,
+          wasmUrl: new URL('vendor/pdfjs-wasm/', location.href).href,
+          useSystemFonts: true,
+        }).promise;
+      }
+      catch (_) { throw new Error('打印预览PDF损坏或受到密码保护，无法读取'); }
+      const pageCount = document.numPages;
+      if (!pageCount) throw new Error('打印预览PDF没有页面');
+      if (pageCount > 500) throw new Error('打印预览PDF超过 500 页，请拆分后上传');
+      releasePreviewDocument();
+      state.previewFile = file; state.previewBytes = bytes; state.previewDocument = document; state.previewPageCount = pageCount; state.previewPage = 0; state.previewMode = 'print';
+      $('previewFileName').textContent = `${file.name}（${pageCount}页）`; $('previewDrop').classList.add('loaded');
+      $('previewMatchConfirm').checked = false;
+      const featureNote = state.templateFeatures.length ? `；模板中的${state.templateFeatures.join('、')}将在生成文件中保留` : '';
+      status(`打印预览PDF读取完成：${pageCount} 页，请确认它与合同模板是同一版本${featureNote}`, 'success');
+      updateAll();
+    } catch (error) {
+      releasePreviewDocument(); state.previewFile = null; state.previewBytes = null; state.previewPageCount = 0; state.previewPage = 0;
+      $('previewDrop').classList.remove('loaded'); $('previewFileName').textContent = '点击选择打印预览PDF'; $('previewMatchConfirm').checked = false;
+      status(error.message, 'error'); updateAll();
+    }
+  }
+
+  function loadPdfJs() {
+    if (!pdfJsPromise) {
+      pdfJsPromise = import('./vendor/pdf.min.mjs').then(pdfjs => {
+        pdfjs.GlobalWorkerOptions.workerSrc = new URL('vendor/pdf.worker.min.mjs', location.href).href;
+        return pdfjs;
+      });
+    }
+    return pdfJsPromise;
+  }
+
+  function releasePreviewDocument() {
+    state.previewRenderToken += 1;
+    state.previewDocument?.destroy?.();
+    state.previewDocument = null;
   }
 
   async function validateOoxml(bytes, type) {
@@ -228,7 +290,10 @@
   }
 
   function updateAll() {
-    const ready = !!(state.order && state.templateModel);
+    const canConfirmPreview = !!(state.templateFile && state.previewFile);
+    $('previewMatchConfirm').disabled = !canConfirmPreview;
+    if (!canConfirmPreview) $('previewMatchConfirm').checked = false;
+    const ready = !!(state.order && state.templateModel && state.previewFile && $('previewMatchConfirm').checked);
     $('mappingStage').hidden = !ready; $('confirmStage').hidden = !ready;
     $('orderMeta').textContent = state.order ? `${state.order.rows.length} 行 · ${state.order.headers.length} 个字段` : '尚未读取订单';
     $('orderFields').innerHTML = state.order ? state.order.headers.map(header => {
@@ -239,100 +304,83 @@
     const summary = [];
     if (state.orderFile) summary.push(`订单：${state.orderFile.name}（${state.order.rows.length}行）`);
     if (state.templateFile) summary.push(`模板：${state.templateFile.name}`);
-    $('fileSummary').textContent = summary.join('；') || '等待上传订单和模板';
-    $('templateMeta').textContent = state.templateFile ? `${state.templateFile.name}${state.templateSheet ? ` · ${state.templateSheet}` : ''}` : '';
+    if (state.previewFile) summary.push(`打印预览：${state.previewFile.name}（${state.previewPageCount}页）`);
+    $('fileSummary').textContent = summary.join('；') || '等待上传订单、模板和打印预览PDF';
     $('mappingStatus').textContent = `${mappedEntries().length} 个映射`;
     updateConfirmation(); updateSteps();
   }
 
   function renderTemplate() {
     const mapped = new Set(mappedEntries().map(([target]) => target));
-    const pages = buildPreviewPages();
-    state.previewPage = Math.max(0, Math.min(state.previewPage, pages.length - 1));
-    const page = pages[state.previewPage];
-    const content = page.type === 'docx' ? renderWordPreviewPage(page.items, mapped) : renderExcelPreviewPage(page, mapped);
-    $('templatePreview').innerHTML = `<div class="a4-page-shell"><article class="a4-page" aria-label="A4合同模板第 ${state.previewPage + 1} 页"><div class="a4-page-content">${content}</div><span class="a4-page-number">第 ${state.previewPage + 1} 页</span>${page.rangeLabel ? `<span class="a4-sheet-range">${esc(page.rangeLabel)}</span>` : ''}</article></div>`;
-    updatePreviewPagination(pages.length);
+    $('showPrintPreview').setAttribute('aria-pressed', String(state.previewMode === 'print'));
+    $('showMappingStructure').setAttribute('aria-pressed', String(state.previewMode === 'mapping'));
+    if (state.previewMode === 'print') renderPdfPreview();
+    else renderMappingStructure(mapped);
     $('templatePreview').querySelectorAll('[data-target]').forEach(button => button.addEventListener('click', () => { state.selectedTarget = button.dataset.target; renderTemplate(); renderInspector(); }));
     $('templatePreview').querySelectorAll('[data-detail-row]').forEach(button => button.addEventListener('click', () => toggleDetailRow(button.dataset.detailRow)));
-    requestAnimationFrame(updatePreviewScale);
   }
 
-  function buildPreviewPages() {
-    return state.templateModel.type === 'docx' ? paginateWordBlocks(state.templateModel.blocks) : paginateExcelRows(state.templateModel);
-  }
-
-  function paginateWordBlocks(blocks) {
-    const pages = [[]]; let used = 0;
-    const add = (item, units) => {
-      if (used && used + units > 38) { pages.push([]); used = 0; }
-      pages[pages.length - 1].push(item); used += Math.min(units, 38);
-    };
-    for (const block of blocks) {
-      if (block.type === 'paragraph') {
-        const text = block.target.value || '';
-        add({ type: 'paragraph', target: block.target }, Math.max(2, Math.ceil(Math.max(text.length, 12) / 28)));
-      } else {
-        for (const row of block.rows) {
-          const longest = Math.max(0, ...row.cells.map(cell => (cell.value || '').length));
-          add({ type: 'table-row', tableIndex: block.tableIndex, row }, Math.max(3, Math.ceil(Math.max(longest, 12) / 20) + 2));
-        }
-      }
-    }
-    const populated = pages.filter(items => items.length).map(items => ({ type: 'docx', items }));
-    return populated.length ? populated : [{ type: 'docx', items: [] }];
-  }
-
-  function paginateExcelRows(model) {
-    const pages = [], rowsPerPage = 22, columnsPerPage = 8;
-    for (let rowStart = 0; rowStart < model.rows.length; rowStart += rowsPerPage) {
-      for (let columnStart = 0; columnStart < model.columns; columnStart += columnsPerPage) {
-        const rows = model.rows.slice(rowStart, rowStart + rowsPerPage), columnEnd = Math.min(columnStart + columnsPerPage, model.columns);
-        pages.push({
-          type: 'xlsx', rows, columnStart, columnEnd,
-          rangeLabel: `${rowStart + 1}–${rowStart + rows.length} 行 · ${XLSX.utils.encode_col(columnStart)}–${XLSX.utils.encode_col(columnEnd - 1)} 列`,
-        });
-      }
-    }
-    return pages.length ? pages : [{ type: 'xlsx', rows: [], columnStart: 0, columnEnd: Math.min(8, model.columns), rangeLabel: '' }];
-  }
-
-  function renderWordPreviewPage(items, mapped) {
-    let html = '', openTable = null;
-    const closeTable = () => { if (openTable !== null) { html += '</tbody></table>'; openTable = null; } };
-    for (const item of items) {
-      if (item.type === 'paragraph') { closeTable(); html += targetButton(item.target, mapped, 'word-paragraph'); continue; }
-      if (openTable !== item.tableIndex) { closeTable(); html += '<table class="word-table"><tbody>'; openTable = item.tableIndex; }
-      const row = item.row;
-      html += `<tr class="word-row ${state.detailRow === row.rowKey ? 'detail-row' : ''}">${row.cells.map(cell => `<td>${targetButton(cell, mapped)}</td>`).join('')}<td class="word-row-marker"><button type="button" data-detail-row="${esc(row.rowKey)}">${state.detailRow === row.rowKey ? '取消明细行' : '设为明细行'}</button></td></tr>`;
-    }
-    closeTable(); return html;
-  }
-
-  function renderExcelPreviewPage(page, mapped) {
-    const letters = Array.from({ length: page.columnEnd - page.columnStart }, (_, index) => XLSX.utils.encode_col(page.columnStart + index));
-    return `<table class="excel-preview"><thead><tr><th class="row-number"></th>${letters.map(letter => `<th>${letter}</th>`).join('')}</tr></thead><tbody>${page.rows.map(row => `<tr class="${state.detailRow === row.rowKey ? 'detail-row' : ''}"><th><button type="button" data-detail-row="${esc(row.rowKey)}" title="设为明细模板行">${row.rowIndex + 1}</button></th>${row.cells.slice(page.columnStart, page.columnEnd).map(cell => `<td>${targetButton(cell, mapped)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
-  }
-
-  function updatePreviewPagination(totalPages) {
-    $('previewPagination').hidden = !state.templateModel;
-    $('previewPageLabel').textContent = `第 ${state.previewPage + 1} / ${totalPages} 页`;
+  async function renderPdfPreview() {
+    state.previewPage = Math.max(0, Math.min(state.previewPage, state.previewPageCount - 1));
+    const pageNumber = state.previewPage + 1, renderToken = ++state.previewRenderToken;
+    $('templatePreview').className = 'template-preview pdf-mode';
+    $('templatePreview').innerHTML = `<div class="pdf-preview-shell"><canvas class="pdf-preview-canvas" data-page="${pageNumber}" aria-label="打印预览PDF第${pageNumber}页"></canvas><span class="pdf-render-status">正在渲染第 ${pageNumber} 页…</span></div>`;
+    $('templateMeta').textContent = `${state.previewFile.name} · 原样PDF`;
+    $('previewPagination').hidden = false;
+    $('previewPageLabel').textContent = `第 ${pageNumber} / ${state.previewPageCount} 页`;
     $('previewPrevious').disabled = state.previewPage === 0;
-    $('previewNext').disabled = state.previewPage >= totalPages - 1;
-    $('previewPagination').dataset.totalPages = String(totalPages);
+    $('previewNext').disabled = state.previewPage >= state.previewPageCount - 1;
+    $('previewPagination').dataset.totalPages = String(state.previewPageCount);
     $('previewPagination').dataset.currentPage = String(state.previewPage + 1);
+    try {
+      const pdfPage = await state.previewDocument.getPage(pageNumber);
+      if (renderToken !== state.previewRenderToken || state.previewMode !== 'print') return;
+      const host = $('templatePreview'), shell = host.querySelector('.pdf-preview-shell'), canvas = host.querySelector('.pdf-preview-canvas');
+      const baseViewport = pdfPage.getViewport({ scale: 1 }), availableWidth = Math.min(794, Math.max(260, host.clientWidth - 48));
+      const cssScale = availableWidth / baseViewport.width, pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      const cssViewport = pdfPage.getViewport({ scale: cssScale }), renderViewport = pdfPage.getViewport({ scale: cssScale * pixelRatio });
+      canvas.width = Math.ceil(renderViewport.width); canvas.height = Math.ceil(renderViewport.height);
+      canvas.style.width = `${Math.ceil(cssViewport.width)}px`; canvas.style.height = `${Math.ceil(cssViewport.height)}px`;
+      shell.style.width = `${Math.ceil(cssViewport.width)}px`; shell.style.height = `${Math.ceil(cssViewport.height)}px`;
+      await pdfPage.render({ canvasContext: canvas.getContext('2d', { alpha: false }), viewport: renderViewport }).promise;
+      if (renderToken !== state.previewRenderToken) return;
+      canvas.dataset.rendered = 'true'; shell.querySelector('.pdf-render-status')?.remove(); pdfPage.cleanup();
+    } catch (error) {
+      if (renderToken !== state.previewRenderToken) return;
+      $('templatePreview').innerHTML = `<div class="pdf-render-error">打印预览第 ${pageNumber} 页渲染失败：${esc(error.message || '未知错误')}</div>`;
+    }
+  }
+
+  function renderMappingStructure(mapped) {
+    $('templatePreview').className = 'template-preview mapping-mode';
+    $('templateMeta').textContent = `${state.templateFile.name}${state.templateSheet ? ` · ${state.templateSheet}` : ''}`;
+    $('previewPagination').hidden = true;
+    let content;
+    if (state.templateModel.type === 'docx') {
+      content = state.templateModel.blocks.map(block => {
+        if (block.type === 'paragraph') return targetButton(block.target, mapped, 'word-paragraph');
+        return `<table class="word-table"><tbody>${block.rows.map(row => `<tr class="word-row ${state.detailRow === row.rowKey ? 'detail-row' : ''}">${row.cells.map(cell => `<td>${targetButton(cell, mapped)}</td>`).join('')}<td class="word-row-marker"><button type="button" data-detail-row="${esc(row.rowKey)}">${state.detailRow === row.rowKey ? '取消明细行' : '设为明细行'}</button></td></tr>`).join('')}</tbody></table>`;
+      }).join('');
+    } else {
+      const letters = Array.from({ length: state.templateModel.columns }, (_, index) => XLSX.utils.encode_col(index));
+      content = `<table class="excel-preview"><thead><tr><th class="row-number"></th>${letters.map(letter => `<th>${letter}</th>`).join('')}</tr></thead><tbody>${state.templateModel.rows.map(row => `<tr class="${state.detailRow === row.rowKey ? 'detail-row' : ''}"><th><button type="button" data-detail-row="${esc(row.rowKey)}" title="设为明细模板行">${row.rowIndex + 1}</button></th>${row.cells.map(cell => `<td>${targetButton(cell, mapped)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    }
+    $('templatePreview').innerHTML = `<div class="mapping-structure"><p class="mapping-structure-note">这里仅用于选择写入位置，不代表合同打印排版；原样布局请切换到“打印预览”。</p>${content}</div>`;
+  }
+
+  function setPreviewMode(mode) {
+    if (!['print', 'mapping'].includes(mode) || state.previewMode === mode) return;
+    state.previewMode = mode;
+    $('showPrintPreview').setAttribute('aria-pressed', String(mode === 'print'));
+    $('showMappingStructure').setAttribute('aria-pressed', String(mode === 'mapping'));
+    renderTemplate();
   }
 
   function changePreviewPage(offset) {
-    const total = Number($('previewPagination').dataset.totalPages || 1), next = Math.max(0, Math.min(state.previewPage + offset, total - 1));
+    if (state.previewMode !== 'print') return;
+    const total = state.previewPageCount || 1, next = Math.max(0, Math.min(state.previewPage + offset, total - 1));
     if (next === state.previewPage) return;
     state.previewPage = next; renderTemplate(); $('templatePreview').scrollTop = 0; $('templatePreview').scrollLeft = 0;
-  }
-
-  function updatePreviewScale() {
-    const host = $('templatePreview'); if (!host || host.hidden || host.clientWidth < 1) return;
-    const scale = Math.max(.34, Math.min(1, (host.clientWidth - 48) / 794));
-    host.style.setProperty('--a4-scale', scale.toFixed(4));
   }
 
   function targetButton(target, mapped, extra = '') {
@@ -398,7 +446,7 @@
   function findTarget(id) { return state.templateModel?.targets.find(target => target.id === id); }
 
   function updateConfirmation() {
-    if (!state.order || !state.templateModel) return;
+    if (!state.order || !state.templateModel || !state.previewFile || !$('previewMatchConfirm').checked) { $('generateContract').disabled = true; return; }
     const issues = C.mappingIssues(state.order.rows, state.mappings, state.detailRow);
     if (state.detailRow && !mappedEntries().some(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow)) issues.push('明细模板行还没有映射任何订单字段');
     const outputName = C.sanitizeFileName($('outputName').value);
@@ -411,7 +459,8 @@
   function updateSteps() {
     const steps = [...$('contractSteps').children];
     const mapped = mappedEntries().length > 0;
-    const values = [!!state.order, !!state.templateModel, mapped, mapped && $('confirmGenerate').checked, !!state.output];
+    const filesReady = !!(state.templateModel && state.previewFile && $('previewMatchConfirm').checked);
+    const values = [!!state.order, filesReady, mapped, mapped && $('confirmGenerate').checked, !!state.output];
     let active = values.findIndex(value => !value); if (active < 0) active = 4;
     steps.forEach((step, index) => { step.classList.toggle('done', values[index] && index < active); step.classList.toggle('active', index === active); });
   }

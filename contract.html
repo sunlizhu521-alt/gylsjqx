@@ -6,7 +6,7 @@
   <title>合同生成｜供应链数据清洗</title>
   <meta name="description" content="在浏览器本地解析订单并填写用户上传的 Word 或 Excel 合同模板。" />
   <link rel="stylesheet" href="styles-merge14.css" />
-  <link rel="stylesheet" href="contract.css?v=2" />
+  <link rel="stylesheet" href="contract.css?v=3" />
 </head>
 <body>
   <header class="app-header">
@@ -29,7 +29,7 @@
         <span class="sidebar-label">生成步骤</span>
         <ol class="contract-steps" id="contractSteps">
           <li class="active"><span>1</span><div><strong>上传订单</strong><small>Excel订单明细</small></div></li>
-          <li><span>2</span><div><strong>上传模板</strong><small>Word或Excel</small></div></li>
+          <li><span>2</span><div><strong>上传模板</strong><small>模板＋预览PDF</small></div></li>
           <li><span>3</span><div><strong>字段映射</strong><small>点击模板位置配置</small></div></li>
           <li><span>4</span><div><strong>人工确认</strong><small>核对冲突与文件名</small></div></li>
           <li><span>5</span><div><strong>预览下载</strong><small>生成新文件</small></div></li>
@@ -44,16 +44,16 @@
     <section class="contract-workspace">
       <header class="workspace-header contract-title-row">
         <div>
-          <p class="eyebrow">DOCX / XLSX / XLS</p>
+          <p class="eyebrow">DOCX / XLSX / XLS / PDF</p>
           <h1>合同生成</h1>
-          <p>上传订单和合同模板，完成字段映射并确认后生成合同。</p>
+          <p>上传订单、合同模板和同版本打印预览PDF，完成字段映射并确认后生成合同。</p>
         </div>
         <div class="status-strip"><span id="privacyStatus">本地处理</span><span id="mappingStatus">0 个映射</span></div>
       </header>
 
       <section class="contract-card upload-stage" aria-labelledby="uploadHeading">
         <div class="contract-section-heading">
-          <div><h2 id="uploadHeading">上传文件</h2><p>订单与模板不会离开当前浏览器。</p></div>
+          <div><h2 id="uploadHeading">上传文件</h2><p>订单、模板和打印预览PDF都不会离开当前浏览器。</p></div>
           <button class="ghost-button" id="clearContract" type="button">清空本次内容</button>
         </div>
         <div class="contract-upload-grid">
@@ -71,18 +71,26 @@
             <em id="templateFileName">点击选择合同模板</em>
             <input id="templateFile" type="file" accept=".docx,.xlsx" />
           </label>
+          <label class="contract-upload" id="previewDrop">
+            <span class="upload-number">3</span>
+            <strong>打印预览PDF</strong>
+            <small>请从当前合同模板用 Office/WPS 导出，最大 30 MB</small>
+            <em id="previewFileName">点击选择打印预览PDF</em>
+            <input id="previewFile" type="file" accept="application/pdf,.pdf" />
+          </label>
         </div>
         <div class="contract-select-row">
           <label>订单 Sheet<select id="orderSheet" disabled><option>请先上传订单</option></select></label>
           <label id="templateSheetLabel" hidden>合同 Sheet<select id="templateSheet" disabled></select></label>
-          <div class="contract-file-summary" id="fileSummary">等待上传订单和模板</div>
+          <div class="contract-file-summary" id="fileSummary">等待上传订单、模板和打印预览PDF</div>
         </div>
+        <label class="preview-match-check"><input id="previewMatchConfirm" type="checkbox" disabled /> 我确认打印预览PDF由当前合同模板导出，二者是同一版本</label>
         <div class="contract-status" id="contractStatus" role="status" aria-live="polite"></div>
       </section>
 
       <section class="contract-card mapping-stage" id="mappingStage" hidden aria-labelledby="mappingHeading">
         <div class="contract-section-heading">
-          <div><h2 id="mappingHeading">字段映射</h2><p>先点击中间模板位置，再从右侧选择订单字段。</p></div>
+          <div><h2 id="mappingHeading">预览与字段映射</h2><p>先核对原样PDF；映射时切换到“字段映射”，点击位置后从右侧选择订单字段。</p></div>
           <div class="mapping-actions"><button class="secondary-button" id="exportMapping" type="button">导出映射</button><label class="secondary-button mapping-import">导入映射<input id="importMapping" type="file" accept="application/json,.json" /></label></div>
         </div>
         <div class="mapping-layout">
@@ -93,10 +101,13 @@
           </aside>
           <div class="template-panel">
             <div class="template-toolbar">
-              <div class="template-toolbar-title"><strong>合同模板预览</strong><span class="a4-badge">A4 · 210 × 297 mm</span></div>
+              <div class="preview-mode-switch" role="group" aria-label="预览模式">
+                <button id="showPrintPreview" type="button" aria-pressed="true">打印预览</button>
+                <button id="showMappingStructure" type="button" aria-pressed="false">字段映射</button>
+              </div>
               <div class="template-toolbar-actions">
                 <span id="templateMeta"></span>
-                <nav class="preview-pagination" id="previewPagination" aria-label="合同模板翻页" hidden>
+                <nav class="preview-pagination" id="previewPagination" aria-label="打印预览翻页" hidden>
                   <button id="previewPrevious" type="button" aria-label="上一页">上一页</button>
                   <span id="previewPageLabel" aria-live="polite">第 1 / 1 页</span>
                   <button id="previewNext" type="button" aria-label="下一页">下一页</button>
@@ -129,7 +140,7 @@
           <button class="primary-button" id="downloadContract" type="button" disabled>下载合同</button>
         </div>
         <div class="generated-preview" id="generatedPreview"></div>
-        <p class="contract-limit-note">GitHub Pages不能运行LibreOffice，本页面不提供“Office实际PDF预览”。如需PDF，请下载后在Word或Excel中另存为PDF。</p>
+        <p class="contract-limit-note">打印预览区显示的是你上传的原版PDF；此处不提供生成结果的“Office实际PDF预览”。如需最终PDF，请下载合同后在Word或Excel中另存。</p>
       </section>
     </section>
   </main>
@@ -138,6 +149,6 @@
   <script src="vendor/xlsx.full.min.js"></script>
   <script src="vendor/jszip.min.js"></script>
   <script src="contract-core.js?v=1"></script>
-  <script src="contract-tool.js?v=2"></script>
+  <script src="contract-tool.js?v=3"></script>
 </body>
 </html>
