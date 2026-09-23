@@ -280,6 +280,7 @@ button {
 }
 
 .tool-tab[data-tool="match"] { --tool-color: var(--blue); }
+.tool-tab[data-tool="contract"] { --tool-color: var(--green); }
 .tool-tab[data-tool="convert"] { --tool-color: var(--mint); }
 .tool-tab[data-tool="clean"] { --tool-color: var(--orange); }
 .tool-tab[data-tool="merge"] { --tool-color: var(--purple); }

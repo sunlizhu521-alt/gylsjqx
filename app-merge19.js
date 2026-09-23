@@ -1,4 +1,5 @@
 const tools = [
+  { id: 'contract', icon: '合', title: '合同生成', status: '可用', desc: '上传订单与合同模板，确认字段映射后在浏览器本地生成合同。', href: 'contract.html' },
   { id: 'payment', icon: '付', title: '付款申请单整理', status: '可用', desc: '按付款主体整理明细，每主体一页，导出 Word 和 PDF。' },
   { id: 'merge', icon: '▦', title: '报表合并', status: '可用-陈燕', desc: '多个文件按映射列合并，保留明细行。' },
   { id: 'compare', icon: '⌁', title: '多列对比', status: '可用-陈燕', desc: '选择多列数据，按行找最大值、最小值。' },
@@ -55,13 +56,17 @@ function initTheme() {
 
 function renderToolList() {
   $('toolList').innerHTML = tools.map(tool => `
-    <button class="tool-tab" data-tool="${tool.id}">
+    <button class="tool-tab" data-tool="${tool.id}" ${tool.href ? `data-href="${tool.href}"` : ''}>
       <span class="tab-icon">${tool.icon}</span>
       <span class="tab-text">${tool.title}（${tool.status}）</span>
     </button>
   `).join('');
   document.querySelectorAll('.tool-tab').forEach(button => {
     button.addEventListener('click', () => {
+      if (button.dataset.href) {
+        window.location.href = button.dataset.href;
+        return;
+      }
       if (button.dataset.tool === app.activeTool) return;
       switchTool(button.dataset.tool);
     });
