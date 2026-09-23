@@ -46,10 +46,24 @@
 .field-item { padding:8px 9px; border:1px solid var(--line); border-radius:6px; background:var(--surface-solid); color:var(--text); font-size:.82rem; overflow-wrap:anywhere; }
 .field-item small { display:block; margin-top:3px; color:var(--muted); font-size:.72rem; }
 .template-panel { min-width:0; display:grid; grid-template-rows:auto minmax(0,1fr); }
-.template-toolbar { display:flex; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line); color:var(--muted); }
+.template-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; border-bottom:1px solid var(--line); color:var(--muted); }
 .template-toolbar strong { color:var(--text); }
-.template-preview { overflow:auto; padding:22px; background:#eef2f7; color:#111827; }
-.word-page { max-width:760px; min-height:880px; margin:0 auto; padding:54px 50px; background:#fff; box-shadow:0 10px 35px rgba(15,23,42,.14); }
+.template-toolbar-title,.template-toolbar-actions { min-width:0; display:flex; align-items:center; gap:9px; }
+.template-toolbar-actions { justify-content:flex-end; flex-wrap:wrap; }
+.template-toolbar-actions > span:first-child { max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.a4-badge { padding:3px 7px; border:1px solid var(--line); border-radius:999px; background:var(--surface-2); font-size:10px; font-weight:800; white-space:nowrap; }
+.preview-pagination { display:flex; align-items:center; gap:7px; }
+.preview-pagination[hidden] { display:none; }
+.preview-pagination button { min-width:58px; padding:6px 9px; border:1px solid var(--line-strong); border-radius:6px; color:var(--text); background:var(--surface-solid); cursor:pointer; font-size:12px; font-weight:700; }
+.preview-pagination button:hover:not(:disabled) { border-color:var(--blue); color:var(--blue); }
+.preview-pagination button:disabled { opacity:.4; cursor:not-allowed; }
+.preview-pagination span { min-width:78px; text-align:center; color:var(--text); font-size:12px; font-weight:800; white-space:nowrap; }
+.template-preview { --a4-scale:.72; overflow:auto; min-height:620px; padding:24px; background:#e9eef5; color:#111827; }
+.a4-page-shell { width:calc(794px * var(--a4-scale)); height:calc(1123px * var(--a4-scale)); margin:0 auto; }
+.a4-page { position:relative; width:794px; height:1123px; box-sizing:border-box; padding:72px 66px 58px; overflow:hidden; transform:scale(var(--a4-scale)); transform-origin:top left; background:#fff; box-shadow:0 12px 42px rgba(15,23,42,.18); }
+.a4-page-content { height:100%; overflow:hidden; }
+.a4-page-number { position:absolute; right:0; bottom:24px; left:0; color:#667085; text-align:center; font-size:11px; }
+.a4-sheet-range { position:absolute; right:24px; bottom:22px; color:#98a2b3; font-size:10px; }
 .template-target { position:relative; width:100%; min-height:32px; border:1px solid transparent; border-radius:4px; padding:6px 8px; text-align:left; background:transparent; color:inherit; cursor:pointer; white-space:pre-wrap; overflow-wrap:anywhere; }
 .template-target:hover { border-color:#70a9ff; background:#edf6ff; }
 .template-target.selected { border-color:#007aff; background:#e7f2ff; box-shadow:0 0 0 2px rgba(0,122,255,.12); }
@@ -61,10 +75,10 @@
 .word-row.detail-row td { background:#fff8dc; }
 .word-row-marker { margin:2px 0 10px; text-align:right; }
 .word-row-marker button { border:0; color:#8a5b00; background:transparent; font-size:11px; cursor:pointer; }
-.excel-preview { min-width:620px; background:#fff; }
+.excel-preview { background:#fff; }
 .excel-preview th { padding:6px; background:#f3f6fa; color:#667085; text-align:center; font-size:11px; }
 .excel-preview .row-number { width:42px; }
-.excel-preview .template-target { min-width:95px; min-height:38px; border-radius:0; font-size:12px; }
+.excel-preview .template-target { min-width:0; min-height:38px; border-radius:0; font-size:12px; }
 .excel-preview tr.detail-row td { background:#fff8dc; }
 .mapping-empty { padding:18px 0; color:var(--muted); line-height:1.6; }
 .mapping-form { display:grid; gap:12px; }
@@ -96,4 +110,4 @@
 .toast.success { border-color:var(--green); }
 @media(max-width:1100px) { .mapping-layout { grid-template-columns:180px minmax(320px,1fr); } .mapping-panel { grid-column:1/-1; border-left:0; border-top:1px solid var(--line); } }
 @media(max-width:900px) { .contract-shell { grid-template-columns:1fr; } .contract-sidebar { position:static; } .contract-steps { grid-template-columns:repeat(5,minmax(0,1fr)); } .contract-steps li { display:grid; justify-items:center; text-align:center; } .contract-steps li small { display:none; } }
-@media(max-width:720px) { .app-header { height:auto; min-height:56px; padding:8px 12px; } .brand span { display:none; } .contract-home-link { display:none; } .contract-shell { padding:10px; } .contract-upload-grid,.confirm-grid { grid-template-columns:1fr; } .mapping-layout { display:block; } .field-panel,.mapping-panel { border:0; border-bottom:1px solid var(--line); } .field-list { max-height:190px; } .template-preview { padding:10px; } .word-page { min-width:620px; padding:32px; } .contract-section-heading { align-items:stretch; flex-direction:column; } .mapping-actions { width:100%; } .mapping-actions > * { flex:1; justify-content:center; } .contract-steps li { padding:5px 2px; } .contract-steps li strong { font-size:.75rem; } .contract-title-row { align-items:flex-start; } }
+@media(max-width:720px) { .app-header { height:auto; min-height:56px; padding:8px 12px; } .brand span { display:none; } .contract-home-link { display:none; } .contract-shell { padding:10px; } .contract-upload-grid,.confirm-grid { grid-template-columns:1fr; } .mapping-layout { display:block; } .field-panel,.mapping-panel { border:0; border-bottom:1px solid var(--line); } .field-list { max-height:190px; } .template-toolbar { align-items:flex-start; flex-direction:column; } .template-toolbar-actions { width:100%; justify-content:space-between; } .template-toolbar-actions > span:first-child { max-width:150px; } .template-preview { min-height:470px; padding:10px; } .contract-section-heading { align-items:stretch; flex-direction:column; } .mapping-actions { width:100%; } .mapping-actions > * { flex:1; justify-content:center; } .contract-steps li { padding:5px 2px; } .contract-steps li strong { font-size:.75rem; } .contract-title-row { align-items:flex-start; } }

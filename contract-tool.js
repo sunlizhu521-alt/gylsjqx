@@ -13,7 +13,7 @@
   const state = {
     orderFile: null, orderBytes: null, orderBook: null, orderSheet: '', order: null,
     templateFile: null, templateBytes: null, templateType: '', templateBook: null, templateSheet: '', templateModel: null, templateFeatures: [], fingerprint: '',
-    mappings: {}, detailRow: '', selectedTarget: '', output: null, outputFileName: '', busy: false,
+    mappings: {}, detailRow: '', selectedTarget: '', previewPage: 0, output: null, outputFileName: '', busy: false,
   };
   const $ = id => document.getElementById(id);
   const esc = value => C.text(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -27,7 +27,9 @@
     $('orderFile').addEventListener('change', event => loadOrder(event.target.files[0]));
     $('templateFile').addEventListener('change', event => loadTemplate(event.target.files[0]));
     $('orderSheet').addEventListener('change', event => { state.orderSheet = event.target.value; analyzeOrder(); invalidateOutput(); updateAll(); });
-    $('templateSheet').addEventListener('change', event => { state.templateSheet = event.target.value; buildExcelModel(); state.mappings = {}; state.detailRow = ''; state.selectedTarget = ''; invalidateOutput(); restoreMapping(); updateAll(); });
+    $('templateSheet').addEventListener('change', event => { state.templateSheet = event.target.value; buildExcelModel(); state.mappings = {}; state.detailRow = ''; state.selectedTarget = ''; state.previewPage = 0; invalidateOutput(); restoreMapping(); updateAll(); });
+    $('previewPrevious').addEventListener('click', () => changePreviewPage(-1));
+    $('previewNext').addEventListener('click', () => changePreviewPage(1));
     $('outputName').addEventListener('input', () => { invalidateOutput(); updateConfirmation(); });
     $('confirmGenerate').addEventListener('change', updateConfirmation);
     $('generateContract').addEventListener('click', generate);
@@ -36,6 +38,7 @@
     $('exportMapping').addEventListener('click', exportMapping);
     $('importMapping').addEventListener('change', event => importMapping(event.target.files[0]));
     for (const [dropId, inputId] of [['orderDrop', 'orderFile'], ['templateDrop', 'templateFile']]) bindDrop($(dropId), $(inputId));
+    if ('ResizeObserver' in window) new ResizeObserver(updatePreviewScale).observe($('templatePreview'));
     updateAll();
   }
 
@@ -116,7 +119,7 @@
       const type = file.name.toLowerCase().endsWith('.docx') ? 'docx' : 'xlsx';
       const zip = await validateOoxml(bytes, type);
       state.templateFile = file; state.templateBytes = bytes; state.templateType = type; state.fingerprint = await sha256(bytes);
-      state.templateBook = null; state.templateSheet = ''; state.mappings = {}; state.detailRow = ''; state.selectedTarget = '';
+      state.templateBook = null; state.templateSheet = ''; state.mappings = {}; state.detailRow = ''; state.selectedTarget = ''; state.previewPage = 0;
       if (type === 'docx') await parseDocx(zip);
       else parseXlsx();
       $('templateFileName').textContent = file.name; $('templateDrop').classList.add('loaded');
@@ -244,17 +247,92 @@
 
   function renderTemplate() {
     const mapped = new Set(mappedEntries().map(([target]) => target));
-    if (state.templateModel.type === 'docx') {
-      $('templatePreview').innerHTML = `<div class="word-page">${state.templateModel.blocks.map(block => {
-        if (block.type === 'paragraph') return targetButton(block.target, mapped, 'word-paragraph');
-        return `<table class="word-table"><tbody>${block.rows.map(row => `<tr class="word-row ${state.detailRow === row.rowKey ? 'detail-row' : ''}">${row.cells.map(cell => `<td>${targetButton(cell, mapped)}</td>`).join('')}<td class="word-row-marker"><button type="button" data-detail-row="${esc(row.rowKey)}">${state.detailRow === row.rowKey ? '取消明细行' : '设为明细行'}</button></td></tr>`).join('')}</tbody></table>`;
-      }).join('')}</div>`;
-    } else {
-      const letters = Array.from({ length: state.templateModel.columns }, (_, index) => XLSX.utils.encode_col(index));
-      $('templatePreview').innerHTML = `<table class="excel-preview"><thead><tr><th class="row-number"></th>${letters.map(letter => `<th>${letter}</th>`).join('')}</tr></thead><tbody>${state.templateModel.rows.map(row => `<tr class="${state.detailRow === row.rowKey ? 'detail-row' : ''}"><th><button type="button" data-detail-row="${esc(row.rowKey)}" title="设为明细模板行">${row.rowIndex + 1}</button></th>${row.cells.map(cell => `<td>${targetButton(cell, mapped)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
-    }
+    const pages = buildPreviewPages();
+    state.previewPage = Math.max(0, Math.min(state.previewPage, pages.length - 1));
+    const page = pages[state.previewPage];
+    const content = page.type === 'docx' ? renderWordPreviewPage(page.items, mapped) : renderExcelPreviewPage(page, mapped);
+    $('templatePreview').innerHTML = `<div class="a4-page-shell"><article class="a4-page" aria-label="A4合同模板第 ${state.previewPage + 1} 页"><div class="a4-page-content">${content}</div><span class="a4-page-number">第 ${state.previewPage + 1} 页</span>${page.rangeLabel ? `<span class="a4-sheet-range">${esc(page.rangeLabel)}</span>` : ''}</article></div>`;
+    updatePreviewPagination(pages.length);
     $('templatePreview').querySelectorAll('[data-target]').forEach(button => button.addEventListener('click', () => { state.selectedTarget = button.dataset.target; renderTemplate(); renderInspector(); }));
     $('templatePreview').querySelectorAll('[data-detail-row]').forEach(button => button.addEventListener('click', () => toggleDetailRow(button.dataset.detailRow)));
+    requestAnimationFrame(updatePreviewScale);
+  }
+
+  function buildPreviewPages() {
+    return state.templateModel.type === 'docx' ? paginateWordBlocks(state.templateModel.blocks) : paginateExcelRows(state.templateModel);
+  }
+
+  function paginateWordBlocks(blocks) {
+    const pages = [[]]; let used = 0;
+    const add = (item, units) => {
+      if (used && used + units > 38) { pages.push([]); used = 0; }
+      pages[pages.length - 1].push(item); used += Math.min(units, 38);
+    };
+    for (const block of blocks) {
+      if (block.type === 'paragraph') {
+        const text = block.target.value || '';
+        add({ type: 'paragraph', target: block.target }, Math.max(2, Math.ceil(Math.max(text.length, 12) / 28)));
+      } else {
+        for (const row of block.rows) {
+          const longest = Math.max(0, ...row.cells.map(cell => (cell.value || '').length));
+          add({ type: 'table-row', tableIndex: block.tableIndex, row }, Math.max(3, Math.ceil(Math.max(longest, 12) / 20) + 2));
+        }
+      }
+    }
+    const populated = pages.filter(items => items.length).map(items => ({ type: 'docx', items }));
+    return populated.length ? populated : [{ type: 'docx', items: [] }];
+  }
+
+  function paginateExcelRows(model) {
+    const pages = [], rowsPerPage = 22, columnsPerPage = 8;
+    for (let rowStart = 0; rowStart < model.rows.length; rowStart += rowsPerPage) {
+      for (let columnStart = 0; columnStart < model.columns; columnStart += columnsPerPage) {
+        const rows = model.rows.slice(rowStart, rowStart + rowsPerPage), columnEnd = Math.min(columnStart + columnsPerPage, model.columns);
+        pages.push({
+          type: 'xlsx', rows, columnStart, columnEnd,
+          rangeLabel: `${rowStart + 1}–${rowStart + rows.length} 行 · ${XLSX.utils.encode_col(columnStart)}–${XLSX.utils.encode_col(columnEnd - 1)} 列`,
+        });
+      }
+    }
+    return pages.length ? pages : [{ type: 'xlsx', rows: [], columnStart: 0, columnEnd: Math.min(8, model.columns), rangeLabel: '' }];
+  }
+
+  function renderWordPreviewPage(items, mapped) {
+    let html = '', openTable = null;
+    const closeTable = () => { if (openTable !== null) { html += '</tbody></table>'; openTable = null; } };
+    for (const item of items) {
+      if (item.type === 'paragraph') { closeTable(); html += targetButton(item.target, mapped, 'word-paragraph'); continue; }
+      if (openTable !== item.tableIndex) { closeTable(); html += '<table class="word-table"><tbody>'; openTable = item.tableIndex; }
+      const row = item.row;
+      html += `<tr class="word-row ${state.detailRow === row.rowKey ? 'detail-row' : ''}">${row.cells.map(cell => `<td>${targetButton(cell, mapped)}</td>`).join('')}<td class="word-row-marker"><button type="button" data-detail-row="${esc(row.rowKey)}">${state.detailRow === row.rowKey ? '取消明细行' : '设为明细行'}</button></td></tr>`;
+    }
+    closeTable(); return html;
+  }
+
+  function renderExcelPreviewPage(page, mapped) {
+    const letters = Array.from({ length: page.columnEnd - page.columnStart }, (_, index) => XLSX.utils.encode_col(page.columnStart + index));
+    return `<table class="excel-preview"><thead><tr><th class="row-number"></th>${letters.map(letter => `<th>${letter}</th>`).join('')}</tr></thead><tbody>${page.rows.map(row => `<tr class="${state.detailRow === row.rowKey ? 'detail-row' : ''}"><th><button type="button" data-detail-row="${esc(row.rowKey)}" title="设为明细模板行">${row.rowIndex + 1}</button></th>${row.cells.slice(page.columnStart, page.columnEnd).map(cell => `<td>${targetButton(cell, mapped)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  }
+
+  function updatePreviewPagination(totalPages) {
+    $('previewPagination').hidden = !state.templateModel;
+    $('previewPageLabel').textContent = `第 ${state.previewPage + 1} / ${totalPages} 页`;
+    $('previewPrevious').disabled = state.previewPage === 0;
+    $('previewNext').disabled = state.previewPage >= totalPages - 1;
+    $('previewPagination').dataset.totalPages = String(totalPages);
+    $('previewPagination').dataset.currentPage = String(state.previewPage + 1);
+  }
+
+  function changePreviewPage(offset) {
+    const total = Number($('previewPagination').dataset.totalPages || 1), next = Math.max(0, Math.min(state.previewPage + offset, total - 1));
+    if (next === state.previewPage) return;
+    state.previewPage = next; renderTemplate(); $('templatePreview').scrollTop = 0; $('templatePreview').scrollLeft = 0;
+  }
+
+  function updatePreviewScale() {
+    const host = $('templatePreview'); if (!host || host.hidden || host.clientWidth < 1) return;
+    const scale = Math.max(.34, Math.min(1, (host.clientWidth - 48) / 794));
+    host.style.setProperty('--a4-scale', scale.toFixed(4));
   }
 
   function targetButton(target, mapped, extra = '') {

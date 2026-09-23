@@ -6,7 +6,7 @@
   <title>合同生成｜供应链数据清洗</title>
   <meta name="description" content="在浏览器本地解析订单并填写用户上传的 Word 或 Excel 合同模板。" />
   <link rel="stylesheet" href="styles-merge14.css" />
-  <link rel="stylesheet" href="contract.css?v=1" />
+  <link rel="stylesheet" href="contract.css?v=2" />
 </head>
 <body>
   <header class="app-header">
@@ -92,7 +92,17 @@
             <div class="field-list" id="orderFields"></div>
           </aside>
           <div class="template-panel">
-            <div class="template-toolbar"><strong>合同模板预览</strong><span id="templateMeta"></span></div>
+            <div class="template-toolbar">
+              <div class="template-toolbar-title"><strong>合同模板预览</strong><span class="a4-badge">A4 · 210 × 297 mm</span></div>
+              <div class="template-toolbar-actions">
+                <span id="templateMeta"></span>
+                <nav class="preview-pagination" id="previewPagination" aria-label="合同模板翻页" hidden>
+                  <button id="previewPrevious" type="button" aria-label="上一页">上一页</button>
+                  <span id="previewPageLabel" aria-live="polite">第 1 / 1 页</span>
+                  <button id="previewNext" type="button" aria-label="下一页">下一页</button>
+                </nav>
+              </div>
+            </div>
             <div class="template-preview" id="templatePreview"></div>
           </div>
           <aside class="mapping-panel">
@@ -128,6 +138,6 @@
   <script src="vendor/xlsx.full.min.js"></script>
   <script src="vendor/jszip.min.js"></script>
   <script src="contract-core.js?v=1"></script>
-  <script src="contract-tool.js?v=1"></script>
+  <script src="contract-tool.js?v=2"></script>
 </body>
 </html>
