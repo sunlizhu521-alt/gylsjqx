@@ -68,6 +68,19 @@ test('合同编号、交货地点和交货时间读取标签右侧内容', () =>
   });
 });
 
+test('合同编号可从合并标签右侧读取', () => {
+  const values = C.extractAdjacentLabelValues([
+    ['                                     合同编号：', '', '', '', '', '', '', '', '', 'CGDD015036', ''],
+    ['序号', '物料编码', '物料名称', '', '规格型号', 'SKU', '单位', '数量', '含税单价\n(元)', '含税总金额\n(元)', '备注'],
+  ], {
+    contractNumber: ['合同编号', '合同号'],
+  }, [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } },
+    { s: { r: 0, c: 9 }, e: { r: 0, c: 10 } },
+  ], [1]);
+  assert.deepEqual(values, { contractNumber: 'CGDD015036' });
+});
+
 test('重复表头、空明细和超长明细均被拦截', () => {
   assert.throws(() => C.analyzeMatrix([['名称', '名称'], ['A', 'B']]), /重复字段/);
   assert.throws(() => C.analyzeMatrix([['名称']]), /只有表头/);

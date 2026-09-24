@@ -75,7 +75,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const labeledRow = (label, placeholder = '待填写') => `<w:tr><w:tc><w:p><w:r><w:t>${label}</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>${placeholder}</w:t></w:r></w:p></w:tc></w:tr>`;
       const incompleteTerms = terms.slice(1).join('\n').replace('复印件与本合同原件具有同等法律效力。', '复印件与本合同原件');
       const termsRow = `<w:tr><w:trPr><w:trHeight w:val="2600" w:hRule="exact"/><w:cantSplit/></w:trPr><w:tc><w:p><w:r><w:t>合同条款</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:keepLines/></w:pPr><w:r><w:t xml:space="preserve">${incompleteTerms}</w:t></w:r></w:p></w:tc></w:tr>`;
-      zip.folder('word').file('document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>采购合同</w:t></w:r></w:p><w:p><w:r><w:t>供应商名称：</w:t></w:r></w:p><w:tbl><w:tr>${headerRow}</w:tr><w:tr>${detailRow}</w:tr><w:tr>${deliveryRow}</w:tr>${labeledRow('合同编号：')}${labeledRow('交货地点：')}${labeledRow('含税运合计（小写）')}${labeledRow('含税运合计（大写）')}${termsRow}</w:tbl>${extraParagraphs}<w:sectPr/></w:body></w:document>`);
+      zip.folder('word').file('document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>采购合同</w:t></w:r></w:p><w:p><w:r><w:t>合同编号：</w:t></w:r></w:p><w:p><w:r><w:t>供应商名称：</w:t></w:r></w:p><w:tbl><w:tr>${headerRow}</w:tr><w:tr>${detailRow}</w:tr><w:tr>${deliveryRow}</w:tr>${labeledRow('合同编号：')}${labeledRow('交货地点：')}${labeledRow('含税运合计（小写）')}${labeledRow('含税运合计（大写）')}${termsRow}</w:tbl>${extraParagraphs}<w:sectPr/></w:body></w:document>`);
       return Array.from(await zip.generateAsync({ type: 'uint8array' }));
     }, CONTRACT_TERMS);
     await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(orderBytes) });
@@ -333,6 +333,30 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.match(preservedParts.sheet, /<pageSetup[^>]*paperSize="9"[^>]*fitToWidth="1"[^>]*fitToHeight="1"/);
     assert.match(preservedParts.styles, /<alignment[^>]*wrapText="1"[^>]*vertical="top"/);
     await page.screenshot({ path: path.join(out, 'contract-excel.png'), fullPage: false });
+
+    if (process.env.REAL_ORDER_FILE) {
+      const realOrder = await fs.readFile(process.env.REAL_ORDER_FILE);
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.locator('#orderFile').setInputFiles({ name: path.basename(process.env.REAL_ORDER_FILE), mimeType: 'application/vnd.ms-excel', buffer: realOrder });
+      await page.locator('#templateFile').setInputFiles({ name: '虚构合同模板.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: Buffer.from(docxBytes) });
+      await page.waitForFunction(() => !document.querySelector('#mappingStage').hidden);
+      assert.equal(await page.locator('[data-field-key="contractNumber"]').inputValue(), '合同编号（右侧内容）');
+      assert.equal(await page.locator('[data-business-key="contractNumber"] .template-detection').innerText(), '识别成功');
+      assert.match(await page.locator('[data-business-key="contractNumber"] .business-template-field').innerText(), /右侧填写位置/);
+      await page.locator('#outputName').fill('真实订单合同编号测试');
+      await page.locator('#confirmGenerate').check();
+      await page.evaluate(bytes => {
+        window.__CONTRACT_PDF_CONVERTER__ = async () => new File([new Uint8Array(bytes)], '真实订单合同编号测试.pdf', { type: 'application/pdf' });
+      }, Array.from(previewPdfBytes));
+      await page.locator('#generateContract').click();
+      await page.waitForFunction(() => !document.querySelector('#resultStage').hidden && document.querySelector('.pdf-preview-canvas')?.dataset.rendered === 'true');
+      await page.locator('#confirmExport').check();
+      const realDownloadPromise = page.waitForEvent('download'); await page.locator('#downloadContract').click(); const realDownload = await realDownloadPromise;
+      const realDocxPath = path.join(out, '真实订单合同编号测试.docx'); await realDownload.saveAs(realDocxPath);
+      const realXml = await page.evaluate(async bytes => (await (await JSZip.loadAsync(new Uint8Array(bytes))).file('word/document.xml').async('string')), [...await fs.readFile(realDocxPath)]);
+      assert.match(realXml, />CGDD015036</);
+      await page.locator('#mappingStage').screenshot({ path: path.join(out, 'contract-real-order-number.png') });
+    }
 
     assert.deepEqual(errors, []);
     assert.deepEqual(consoleErrors.filter(message => !message.includes('Failed to load resource: the server responded with a status of 404')), []);

@@ -447,23 +447,25 @@
     const usedTargets = new Set(Object.values(bindings).map(binding => binding.targetId));
     for (const definition of BUSINESS_FIELDS.filter(field => field.kind === 'single')) {
       let best = null;
-      for (const target of state.templateModel.targets) {
-        if (excludedRows.has(target.rowKey)) continue;
-        const score = fieldMatchScore(target.value, definition);
-        if (score > 0 && (!best || score > best.score)) best = { target, score };
+      for (const labelTarget of state.templateModel.targets) {
+        if (excludedRows.has(labelTarget.rowKey)) continue;
+        const score = fieldMatchScore(labelTarget.value, definition);
+        if (score <= 0) continue;
+        const row = locateRow(labelTarget.rowKey), next = nextWritableTemplateCell(row, labelTarget);
+        const canUseNext = next && !usedTargets.has(next.id) && (!bestDefinition(next.value)?.score || /待填|填写|空白/.test(C.text(next.value)));
+        if (RIGHT_SIDE_VALUE_FIELDS.has(definition.key) && !canUseNext) continue;
+        const target = canUseNext ? next : labelTarget;
+        if (usedTargets.has(target.id)) continue;
+        if (!best || score > best.score) best = { labelTarget, target, score };
       }
       if (!best) continue;
-      const row = locateRow(best.target.rowKey), next = nextWritableTemplateCell(row, best.target);
-      const canUseNext = next && !usedTargets.has(next.id) && (!bestDefinition(next.value)?.score || /待填|填写|空白/.test(C.text(next.value)));
-      if (RIGHT_SIDE_VALUE_FIELDS.has(definition.key) && !canUseNext) continue;
-      const target = canUseNext ? next : best.target;
-      if (usedTargets.has(target.id)) continue;
+      const { labelTarget, target } = best;
       bindings[definition.key] = {
         targetId: target.id,
         mode: 'single',
-        preserveLabel: target.id === best.target.id,
-        labelText: best.target.value,
-        templateLabel: RIGHT_SIDE_VALUE_FIELDS.has(definition.key) ? `${best.target.value} → 右侧填写位置` : best.target.value,
+        preserveLabel: target.id === labelTarget.id,
+        labelText: labelTarget.value,
+        templateLabel: RIGHT_SIDE_VALUE_FIELDS.has(definition.key) ? `${labelTarget.value} → 右侧填写位置` : labelTarget.value,
       };
       usedTargets.add(target.id);
     }
