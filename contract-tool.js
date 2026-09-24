@@ -41,8 +41,8 @@
     { key: 'taxRate', label: '税率', aliases: ['税率', '增值税率'], kind: 'detail' },
     { key: 'deliveryTime', label: '交货时间', aliases: ['交货时间', '交期', '要求货好时间', '要求交货日期'], kind: 'single' },
     { key: 'remark', label: '备注', aliases: ['备注', '说明'], kind: 'detail' },
-    { key: 'taxTotalLower', label: '含税运合计（小写）', aliases: ['含税运合计（小写）', '含税运合计小写', '合计（小写）', '合计小写', '小写合计'], kind: 'single', automatic: '@tax-total-lower', automaticLabel: '自动汇总含税运总金额（元）', writeMode: '自动汇总' },
-    { key: 'taxTotalUpper', label: '含税运合计（大写）', aliases: ['含税运合计（大写）', '含税运合计大写', '合计（大写）', '合计大写', '大写合计'], kind: 'single', automatic: '@tax-total-upper', automaticLabel: '由小写合计自动转人民币大写', writeMode: '自动转大写' },
+    { key: 'taxTotalLower', label: '含税运合计（小写）', aliases: ['含税运合计（小写）', '含税运合计小写', '合计（小写）', '合计小写', '小写合计', '人民币小写', '人民币小写金额'], kind: 'single', automatic: '@tax-total-lower', automaticLabel: '自动汇总含税运总金额（元）', writeMode: '自动汇总' },
+    { key: 'taxTotalUpper', label: '含税运合计（大写）', aliases: ['含税运合计（大写）', '含税运合计大写', '合计（大写）', '合计大写', '大写合计', '人民币大写', '人民币大写金额'], kind: 'single', automatic: '@tax-total-upper', automaticLabel: '由小写合计自动转人民币大写', writeMode: '自动转大写' },
     { key: 'contractNumber', label: '合同编号', aliases: ['合同编号', '合同号'], kind: 'single' },
     { key: 'orderNumber', label: '订单编号', aliases: ['订单编号', '采购订单号', '采购单号', '订单号'], kind: 'single' },
     { key: 'buyer', label: '采购方（甲方）', aliases: ['采购方（甲方）', '采购方', '甲方', '买方'], kind: 'single' },
@@ -389,6 +389,17 @@
     return score;
   }
 
+  function inlineTotalTemplate(definition, value) {
+    const source = C.text(value);
+    const pattern = definition.key === 'taxTotalLower'
+      ? /^([\s\S]*?人民币小写\s*[：:]?)[\s\u00a0]*(元)\s*$/
+      : definition.key === 'taxTotalUpper'
+        ? /^([\s\S]*?人民币大写\s*[：:]?)[\s\u00a0]*([圆元]整)\s*$/
+        : null;
+    const match = pattern?.exec(source);
+    return match ? { prefix: match[1].trimEnd(), suffix: match[2] } : null;
+  }
+
   function bestDefinition(value, kind = '') {
     return BUSINESS_FIELDS.filter(field => !kind || field.kind === kind).map(field => ({ field, score: fieldMatchScore(value, field) })).sort((a, b) => b.score - a.score)[0];
   }
@@ -451,12 +462,13 @@
         if (excludedRows.has(labelTarget.rowKey)) continue;
         const score = fieldMatchScore(labelTarget.value, definition);
         if (score <= 0) continue;
+        const inline = inlineTotalTemplate(definition, labelTarget.value);
         const row = locateRow(labelTarget.rowKey), next = nextWritableTemplateCell(row, labelTarget);
         const canUseNext = next && !usedTargets.has(next.id) && (!bestDefinition(next.value)?.score || /待填|填写|空白/.test(C.text(next.value)));
         if (RIGHT_SIDE_VALUE_FIELDS.has(definition.key) && !canUseNext) continue;
-        const target = canUseNext ? next : labelTarget;
+        const target = inline ? labelTarget : (canUseNext ? next : labelTarget);
         if (usedTargets.has(target.id)) continue;
-        if (!best || score > best.score) best = { labelTarget, target, score };
+        if (!best || score > best.score) best = { labelTarget, target, score, inline };
       }
       if (!best) continue;
       const { labelTarget, target } = best;
@@ -465,6 +477,8 @@
         mode: 'single',
         preserveLabel: target.id === labelTarget.id,
         labelText: labelTarget.value,
+        inlinePrefix: best.inline?.prefix || '',
+        inlineSuffix: best.inline?.suffix || '',
         templateLabel: RIGHT_SIDE_VALUE_FIELDS.has(definition.key) ? `${labelTarget.value} → 右侧填写位置` : labelTarget.value,
       };
       usedTargets.add(target.id);
@@ -492,6 +506,7 @@
       const values = field.startsWith('@') ? [] : C.distinctValues(state.order.rows, field);
       mappings[binding.targetId] = {
         field, mode: binding.mode, businessKey: definition.key, preserveLabel: !!binding.preserveLabel, labelText: binding.labelText || '',
+        inlinePrefix: binding.inlinePrefix || '', inlineSuffix: binding.inlineSuffix || '',
         strategy: binding.mode === 'single' ? (values.length <= 1 ? 'first' : (state.fieldStrategies?.[definition.key] || '')) : '',
       };
     }
@@ -864,7 +879,7 @@
       if (mapping.mode === 'detail') continue;
       const target = locateWordTarget(doc, targetId); if (!target) throw new Error(`模板位置已变化：${targetId}`);
       const value = resolveMapping(mapping);
-      putWordText(target, mapping.preserveLabel ? labeledValue(mapping.labelText, value) : value);
+      putWordText(target, templateValue(mapping, value));
     }
     if (state.detailRow) {
       const match = state.detailRow.match(/^word:(\d+):(\d+)$/); if (!match) throw new Error('Word明细模板行无效');
@@ -892,7 +907,7 @@
     for (const [targetId, mapping] of mappedEntries()) {
       if (mapping.mode === 'detail') continue;
       const value = resolveMapping(mapping);
-      writeSheetCell(context.sheetDoc, targetId.slice(2), mapping.preserveLabel ? labeledValue(mapping.labelText, value) : value, { forceNumber: NUMERIC_BUSINESS_FIELDS.has(mapping.businessKey) && !mapping.preserveLabel });
+      writeSheetCell(context.sheetDoc, targetId.slice(2), templateValue(mapping, value), { forceNumber: NUMERIC_BUSINESS_FIELDS.has(mapping.businessKey) && !mapping.preserveLabel });
     }
     if (state.detailRow) {
       const rowNumber = Number(state.detailRow.split(':')[1]);
@@ -1306,6 +1321,17 @@
     return C.resolveField(state.order.rows, mapping.field, mapping.strategy || 'first', mapping.manual || '');
   }
   function detailValue(mapping, record, index) { return mapping.field === '@sequence' ? String(index + 1) : C.text(record[mapping.field]); }
+  function templateValue(mapping, value) {
+    if (mapping.inlinePrefix || mapping.inlineSuffix) {
+      let output = C.text(value);
+      if (mapping.businessKey === 'taxTotalUpper' && /[圆元]整$/.test(mapping.inlineSuffix)) {
+        if (/[圆元]整$/.test(output)) output = output.replace(/[圆元]整$/, '');
+        else return `${mapping.inlinePrefix}${output}`;
+      }
+      return `${mapping.inlinePrefix}${output}${mapping.inlineSuffix}`;
+    }
+    return mapping.preserveLabel ? labeledValue(mapping.labelText, value) : value;
+  }
   function labeledValue(label, value) {
     const source = C.text(label), output = C.text(value);
     if (/\{\{[^{}]+\}\}/.test(source)) return source.replace(/\{\{[^{}]+\}\}/g, output);
