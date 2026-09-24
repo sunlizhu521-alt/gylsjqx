@@ -75,6 +75,8 @@
 .template-preview { overflow:auto; min-height:620px; padding:24px; background:#e9eef5; color:#111827; }
 .pdf-preview-shell { position:relative; width:min(100%,794px); min-height:420px; overflow:hidden; background:#fff; box-shadow:0 12px 42px rgba(15,23,42,.18); }
 .pdf-preview-canvas { display:block; max-width:100%; height:auto; background:#fff; }
+.compat-pdf-preview-shell { position:relative; width:min(100%,794px); aspect-ratio:210/297; overflow:hidden; background:#fff; box-shadow:0 12px 42px rgba(15,23,42,.18); }
+.compat-pdf-preview { display:block; width:100%; height:100%; border:0; background:#fff; pointer-events:none; }
 .pdf-render-status { position:absolute; inset:0; display:grid; place-items:center; color:#667085; background:#fff; font-size:13px; }
 .pdf-render-error { width:min(100%,620px); padding:18px; border:1px solid #f1a29a; border-radius:8px; color:#b42318; background:#fff3f2; line-height:1.6; }
 .mapping-structure { width:max-content; min-width:min(100%,680px); max-width:100%; margin:0 auto; padding:26px; box-sizing:border-box; background:#fff; box-shadow:0 10px 30px rgba(15,23,42,.14); }

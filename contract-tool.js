@@ -39,6 +39,7 @@
     { key: 'paymentTerms', label: '付款方式', aliases: ['付款方式', '付款条件', '结算方式', '结算条件'], kind: 'single' },
   ];
   let pdfJsPromise = null;
+  let legacyPdfJsPromise = null;
   let converterFrame = null;
   let converterReadyPromise = null;
   let previewResizeTimer = null;
@@ -46,7 +47,7 @@
   const state = {
     orderFile: null, orderBytes: null, orderBook: null, orderSheet: '', order: null,
     templateFile: null, templateBytes: null, templateType: '', templateBook: null, templateSheet: '', templateModel: null, templateFeatures: [], fingerprint: '',
-    previewDocument: null, previewMode: '', previewPageCount: 0, previewPage: 0, previewRenderToken: 0,
+    previewDocument: null, previewObjectUrl: '', previewMode: '', previewPageCount: 0, previewPage: 0, previewRenderToken: 0,
     mappings: {}, detailRow: '', fieldSelections: {}, fieldStrategies: {}, templateBindings: {}, mappingSignature: '', output: null, outputFileName: '', outputPdf: null, outputPdfFileName: '', busy: false,
   };
   const $ = id => document.getElementById(id);
@@ -204,10 +205,33 @@
     return pdfJsPromise;
   }
 
+  function loadLegacyPdfJs() {
+    if (!legacyPdfJsPromise) {
+      legacyPdfJsPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = new URL('vendor/pdf-legacy-3.11.174.min.js', location.href).href;
+        script.onload = () => {
+          const pdfjs = window.pdfjsLib;
+          if (!pdfjs?.getDocument || !C.text(pdfjs.version).startsWith('3.')) {
+            reject(new Error('兼容PDF解析器加载异常'));
+            return;
+          }
+          pdfjs.GlobalWorkerOptions.workerSrc = new URL('vendor/pdf-legacy-3.11.174.worker.min.js', location.href).href;
+          resolve(pdfjs);
+        };
+        script.onerror = () => reject(new Error('兼容PDF解析器加载失败'));
+        document.head.append(script);
+      });
+    }
+    return legacyPdfJsPromise;
+  }
+
   function releasePreviewDocument() {
     state.previewRenderToken += 1;
     state.previewDocument?.destroy?.();
     state.previewDocument = null;
+    if (state.previewObjectUrl) URL.revokeObjectURL(state.previewObjectUrl);
+    state.previewObjectUrl = '';
     state.previewMode = '';
   }
 
@@ -482,6 +506,19 @@
   }
 
   async function renderGeneratedPdf() {
+    if (state.previewMode === 'compat' && state.previewObjectUrl) {
+      const pageNumber = Math.max(1, Math.min(state.previewPage + 1, state.previewPageCount || 1));
+      $('generatedPreview').innerHTML = `<div class="compat-pdf-preview-shell"><iframe class="compat-pdf-preview" data-page="${pageNumber}" src="${esc(state.previewObjectUrl)}#page=${pageNumber}&zoom=page-fit&toolbar=0&navpanes=0&pagemode=none" title="生成合同PDF第${pageNumber}页兼容预览" scrolling="no"></iframe></div>`;
+      const iframe = $('generatedPreview').querySelector('.compat-pdf-preview');
+      iframe.addEventListener('load', () => { iframe.dataset.loaded = 'true'; }, { once: true });
+      $('resultPagination').hidden = state.previewPageCount <= 1;
+      $('resultPageLabel').textContent = `第 ${pageNumber} / ${state.previewPageCount || 1} 页`;
+      $('resultPrevious').disabled = state.previewPage === 0;
+      $('resultNext').disabled = state.previewPage >= state.previewPageCount - 1;
+      $('resultPagination').dataset.totalPages = String(state.previewPageCount || 1);
+      $('resultPagination').dataset.currentPage = String(pageNumber);
+      return;
+    }
     if (!state.previewDocument) return;
     state.previewPage = Math.max(0, Math.min(state.previewPage, state.previewPageCount - 1));
     const pageNumber = state.previewPage + 1, renderToken = ++state.previewRenderToken;
@@ -512,7 +549,7 @@
   }
 
   function changePreviewPage(offset) {
-    if (!state.previewDocument) return;
+    if (!state.previewDocument && state.previewMode !== 'compat') return;
     const total = state.previewPageCount || 1, next = Math.max(0, Math.min(state.previewPage + offset, total - 1));
     if (next === state.previewPage) return;
     state.previewPage = next; renderGeneratedPdf(); $('generatedPreview').scrollTop = 0; $('generatedPreview').scrollLeft = 0;
@@ -552,40 +589,68 @@
       state.output = blob; state.outputFileName = `${C.sanitizeFileName($('outputName').value)}.${state.templateType}`;
       $('generateContract').textContent = '正在转换PDF…'; status('合同副本已生成，正在浏览器内转换PDF；首次加载可能需要一些时间…');
       let pdfFile = await convertContractToPdf(blob, state.outputFileName);
-      try { state.outputPdf = await preparePdfPreview(pdfFile); }
+      try { state.outputPdf = await preparePdfPreview(pdfFile, false); }
       catch (error) {
         if (error.code !== 'PDF_PARSE_FAILED') throw error;
         status('第一次PDF结果无法解析，正在自动重新转换…');
         pdfFile = await convertContractToPdf(blob, state.outputFileName);
-        state.outputPdf = await preparePdfPreview(pdfFile);
+        state.outputPdf = await preparePdfPreview(pdfFile, true);
       }
       state.outputPdfFileName = `${C.sanitizeFileName($('outputName').value)}.pdf`;
       $('resultStage').hidden = false;
       $('downloadContract').textContent = `下载 ${state.templateType.toUpperCase()}`;
       $('downloadPdf').textContent = '下载 PDF';
       $('confirmExport').checked = false; updateExportButtons(); renderGeneratedPdf();
-      saveMapping(); status(`PDF预览已生成：${state.outputPdfFileName}（${state.previewPageCount}页，整页显示）`, 'success'); toast('PDF预览生成完成，请核对后确认导出', 'success'); updateSteps();
+      const previewText = state.previewMode === 'compat'
+        ? `${state.previewPageCount}页，浏览器兼容整页预览`
+        : `${state.previewPageCount}页，${state.previewMode === 'legacy' ? '兼容渲染，' : ''}整页显示`;
+      saveMapping(); status(`PDF预览已生成：${state.outputPdfFileName}（${previewText}）`, 'success'); toast('PDF预览生成完成，请核对后确认导出', 'success'); updateSteps();
       $('resultStage').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) { status(error.message, 'error'); toast(error.message, 'error'); }
     finally { state.busy = false; $('generateContract').textContent = '生成PDF预览'; updateConfirmation(); }
   }
 
-  async function preparePdfPreview(file) {
+  async function preparePdfPreview(file, allowCompatPreview) {
     let normalized = await normalizePdfFile(file, state.outputFileName.replace(/\.[^.]+$/, '.pdf'));
     const pdfjs = await loadPdfJs();
-    let result = await parsePdfDocument(pdfjs, await normalized.arrayBuffer());
+    const forceLegacyPreview = !!window.__CONTRACT_FORCE_LEGACY_PDF_PREVIEW__;
+    const forceNativePreview = !!window.__CONTRACT_FORCE_NATIVE_PDF_PREVIEW__;
+    let usedLegacyRenderer = false;
+    let result = forceLegacyPreview || forceNativePreview
+      ? { document: null, lastError: new Error('测试兼容预览') }
+      : await parsePdfDocument(pdfjs, await normalized.arrayBuffer());
+    let fallbackPageCount = 0;
     if (!result.document && window.PDFLib?.PDFDocument) {
       try {
         const repaired = await window.PDFLib.PDFDocument.load(await normalized.arrayBuffer(), { ignoreEncryption: false, updateMetadata: false });
+        fallbackPageCount = repaired.getPageCount();
         const repairedBytes = await repaired.save({ useObjectStreams: false, addDefaultPage: false, updateFieldAppearances: false });
         normalized = await normalizePdfFile(repairedBytes, normalized.name);
-        result = await parsePdfDocument(pdfjs, await normalized.arrayBuffer());
+        if (!forceLegacyPreview && !forceNativePreview) result = await parsePdfDocument(pdfjs, await normalized.arrayBuffer());
+      } catch (error) {
+        result.lastError = error;
+      }
+    }
+    if (!result.document && !forceNativePreview) {
+      try {
+        const legacyPdfJs = await loadLegacyPdfJs();
+        result = await parsePdfDocument(legacyPdfJs, await normalized.arrayBuffer());
+        usedLegacyRenderer = !!result.document;
       } catch (error) {
         result.lastError = error;
       }
     }
     const document = result.document;
     if (!document) {
+      if (allowCompatPreview) {
+        const bytes = new Uint8Array(await normalized.arrayBuffer());
+        releasePreviewDocument();
+        state.previewObjectUrl = URL.createObjectURL(normalized);
+        state.previewMode = 'compat';
+        state.previewPageCount = Math.max(1, fallbackPageCount || estimatePdfPageCount(bytes));
+        state.previewPage = 0;
+        return normalized;
+      }
       const parseError = new Error('生成的PDF无法完整读取，请重新生成');
       parseError.code = 'PDF_PARSE_FAILED';
       parseError.cause = result.lastError;
@@ -594,8 +659,18 @@
     if (!document.numPages) { document.destroy(); throw new Error('生成的PDF没有页面'); }
     if (document.numPages > 500) { document.destroy(); throw new Error('生成的PDF超过500页，请拆分订单'); }
     releasePreviewDocument();
-    state.previewDocument = document; state.previewMode = 'pdfjs'; state.previewPageCount = document.numPages; state.previewPage = 0;
+    state.previewDocument = document; state.previewMode = usedLegacyRenderer ? 'legacy' : 'pdfjs'; state.previewPageCount = document.numPages; state.previewPage = 0;
     return normalized;
+  }
+
+  function estimatePdfPageCount(bytes) {
+    const decoder = new TextDecoder('latin1');
+    let count = 0;
+    for (let offset = 0; offset < bytes.length; offset += 1024 * 1024) {
+      const text = decoder.decode(bytes.slice(offset, Math.min(bytes.length, offset + 1024 * 1024)));
+      count += (text.match(/\/Type\s*\/Page\b/g) || []).length;
+    }
+    return Math.min(500, count);
   }
 
   async function parsePdfDocument(pdfjs, bytes) {

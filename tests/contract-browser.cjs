@@ -191,13 +191,33 @@ const HOME_URL = new URL('.', QA_URL).toString();
     await page.screenshot({ path: path.join(out, 'contract-complex-upload.png'), fullPage: false });
     await page.locator('#outputName').fill('虚构Excel合同'); await page.locator('#confirmGenerate').check();
     await page.evaluate(bytes => {
+      window.__CONTRACT_FORCE_LEGACY_PDF_PREVIEW__ = true;
       window.__CONTRACT_PDF_CONVERTER__ = async () => new File([new Uint8Array(bytes)], '虚构Excel合同.pdf', { type: 'application/pdf' });
     }, Array.from(previewPdfBytes));
     await page.locator('#generateContract').click();
     await page.waitForFunction(() => !document.querySelector('#resultStage').hidden && document.querySelector('.pdf-preview-canvas')?.dataset.rendered === 'true');
     assert.equal(await page.locator('.native-pdf-preview').count(), 0);
+    assert.equal(await page.locator('.compat-pdf-preview').count(), 0);
     assert.equal(await page.locator('#resultPagination').getAttribute('data-total-pages'), '2');
-    assert.match(await page.locator('#contractStatus').innerText(), /整页显示/);
+    assert.match(await page.locator('#contractStatus').innerText(), /兼容渲染，整页显示/);
+    const legacyLayout = await page.evaluate(() => {
+      const host = document.querySelector('#generatedPreview'), shell = host.querySelector('.pdf-preview-shell'), canvas = host.querySelector('.pdf-preview-canvas');
+      const hostRect = host.getBoundingClientRect(), shellRect = shell.getBoundingClientRect(), canvasRect = canvas.getBoundingClientRect();
+      return {
+        hostOverflow: getComputedStyle(host).overflow,
+        horizontallyContained: shellRect.left >= hostRect.left - 1 && shellRect.right <= hostRect.right + 1,
+        verticallyContained: shellRect.bottom <= hostRect.bottom + 1,
+        canvasMatchesShell: Math.abs(canvasRect.width - shellRect.width) <= 1 && Math.abs(canvasRect.height - shellRect.height) <= 1,
+      };
+    });
+    assert.equal(legacyLayout.hostOverflow, 'visible');
+    assert.equal(legacyLayout.horizontallyContained, true);
+    assert.equal(legacyLayout.verticallyContained, true);
+    assert.equal(legacyLayout.canvasMatchesShell, true);
+    await page.locator('#resultNext').click();
+    await page.waitForFunction(() => document.querySelector('.pdf-preview-canvas')?.dataset.page === '2' && document.querySelector('.pdf-preview-canvas')?.dataset.rendered === 'true');
+    assert.equal(await page.locator('#resultPageLabel').innerText(), '第 2 / 2 页');
+    await page.locator('#resultStage').screenshot({ path: path.join(out, 'contract-legacy-preview.png') });
     await page.locator('#confirmExport').check();
     const xlsxDownloadPromise = page.waitForEvent('download'); await page.locator('#downloadContract').click(); const xlsxDownload = await xlsxDownloadPromise;
     assert.equal(xlsxDownload.suggestedFilename(), '虚构Excel合同.xlsx');
@@ -231,6 +251,6 @@ const HOME_URL = new URL('.', QA_URL).toString();
     assert.deepEqual(consoleErrors.filter(message => !message.includes('Failed to load resource: the server responded with a status of 404')), []);
     assert.deepEqual(httpErrors, []);
     assert.deepEqual(mutatingRequests, []);
-    console.log(JSON.stringify({ status: 'PASS', output: out, screenshots: ['contract-pdf-page2.png', 'contract-field-mapping.png', 'contract-desktop.png', 'contract-complex-upload.png', 'contract-excel.png'] }));
+    console.log(JSON.stringify({ status: 'PASS', output: out, screenshots: ['contract-pdf-page2.png', 'contract-legacy-preview.png', 'contract-field-mapping.png', 'contract-desktop.png', 'contract-complex-upload.png', 'contract-excel.png'] }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
