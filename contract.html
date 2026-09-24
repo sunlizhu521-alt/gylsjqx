@@ -6,7 +6,7 @@
   <title>合同生成｜供应链数据清洗</title>
   <meta name="description" content="在浏览器本地解析订单并填写用户上传的 Word 或 Excel 合同模板。" />
   <link rel="stylesheet" href="styles-merge14.css" />
-  <link rel="stylesheet" href="contract.css?v=4" />
+  <link rel="stylesheet" href="contract.css?v=5" />
 </head>
 <body>
   <header class="app-header">
@@ -30,7 +30,7 @@
         <ol class="contract-steps" id="contractSteps">
           <li class="active"><span>1</span><div><strong>上传订单</strong><small>Excel订单明细</small></div></li>
           <li><span>2</span><div><strong>上传模板</strong><small>Word或Excel模板</small></div></li>
-          <li><span>3</span><div><strong>字段映射</strong><small>点击模板位置配置</small></div></li>
+          <li><span>3</span><div><strong>字段映射</strong><small>选择对应订单列</small></div></li>
           <li><span>4</span><div><strong>生成PDF预览</strong><small>本地转换合同副本</small></div></li>
           <li><span>5</span><div><strong>确认导出</strong><small>下载合同和PDF</small></div></li>
         </ol>
@@ -82,23 +82,21 @@
 
       <section class="contract-card mapping-stage" id="mappingStage" hidden aria-labelledby="mappingHeading">
         <div class="contract-section-heading">
-          <div><h2 id="mappingHeading">选择需要映射的字段</h2><p>点击中间的模板位置，再从右侧选择订单字段；这里仅用于设置写入位置。</p></div>
+          <div><h2 id="mappingHeading">选择需要映射的字段</h2><p>按合同字段选择对应的订单明细列；模板中的写入位置由系统自动识别，不再展示模板结构。</p></div>
           <div class="mapping-actions"><button class="secondary-button" id="exportMapping" type="button">导出映射</button><label class="secondary-button mapping-import">导入映射<input id="importMapping" type="file" accept="application/json,.json" /></label></div>
         </div>
-        <div class="mapping-layout">
-          <aside class="field-panel">
-            <h3>订单字段</h3>
-            <p id="orderMeta">尚未读取订单</p>
-            <div class="field-list" id="orderFields"></div>
-          </aside>
-          <div class="template-panel">
-            <div class="template-toolbar"><strong>合同模板位置</strong><span id="templateMeta"></span></div>
-            <div class="template-preview" id="templatePreview"></div>
+        <div class="business-mapping-summary">
+          <strong id="orderMeta">尚未读取订单</strong>
+          <span id="templateDetectionSummary"></span>
+        </div>
+        <div class="business-mapping-table" role="table" aria-label="合同字段映射">
+          <div class="business-mapping-head" role="row">
+            <span role="columnheader">合同字段</span>
+            <span role="columnheader">对应订单明细列</span>
+            <span role="columnheader">写入方式</span>
+            <span role="columnheader">模板识别</span>
           </div>
-          <aside class="mapping-panel">
-            <h3>当前位置设置</h3>
-            <div id="mappingInspector" class="mapping-empty">请点击模板中的段落、表格单元格或Excel单元格。</div>
-          </aside>
+          <div id="businessMappingRows"></div>
         </div>
       </section>
 
@@ -109,7 +107,7 @@
           <div class="confirm-summary" id="confirmSummary"></div>
         </div>
         <div class="contract-issues" id="contractIssues"></div>
-        <label class="confirm-check"><input id="confirmGenerate" type="checkbox" /> 我已核对订单 Sheet、模板位置、全部字段映射及冲突处理规则</label>
+        <label class="confirm-check"><input id="confirmGenerate" type="checkbox" /> 我已核对订单 Sheet、合同字段映射及冲突处理规则</label>
         <div class="contract-action-row"><button class="primary-button" id="generateContract" type="button" disabled>生成PDF预览</button></div>
       </section>
 
@@ -136,7 +134,7 @@
   <div class="toast-area" id="toastArea"></div>
   <script src="vendor/xlsx.full.min.js"></script>
   <script src="vendor/jszip.min.js"></script>
-  <script src="contract-core.js?v=1"></script>
-  <script src="contract-tool.js?v=4"></script>
+  <script src="contract-core.js?v=2"></script>
+  <script src="contract-tool.js?v=5"></script>
 </body>
 </html>

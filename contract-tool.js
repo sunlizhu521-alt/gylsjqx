@@ -13,6 +13,26 @@
   };
   const ONLYOFFICE_ORIGIN = 'https://edit.chaxus.com';
   const CONVERSION_TIMEOUT = 240000;
+  const BUSINESS_FIELDS = [
+    { key: 'sequence', label: '序号', aliases: ['序号', '行号'], kind: 'detail', automatic: true },
+    { key: 'materialCode', label: '物料编码', aliases: ['物料编码', '产品编码', '商品编码', '货号'], kind: 'detail' },
+    { key: 'materialName', label: '物料名称', aliases: ['物料名称', '物料', '产品名称', '商品名称', '品名'], kind: 'detail' },
+    { key: 'specification', label: '规格型号', aliases: ['规格型号', '规格', '型号'], kind: 'detail' },
+    { key: 'sku', label: 'SKU', aliases: ['SKU', 'SKU编码'], kind: 'detail' },
+    { key: 'unit', label: '单位', aliases: ['单位', '计量单位'], kind: 'detail' },
+    { key: 'quantity', label: '数量', aliases: ['数量', '采购数量', '订单数量'], kind: 'detail' },
+    { key: 'taxUnitPrice', label: '含税运单价（元）', aliases: ['含税运单价（元）', '含税运单价', '含税单价（元）', '含税单价', '单价'], kind: 'detail' },
+    { key: 'taxAmount', label: '含税运总金额（元）', aliases: ['含税运总金额（元）', '含税运总金额', '含税总金额（元）', '含税总金额', '含税金额', '金额'], kind: 'detail' },
+    { key: 'deliveryTime', label: '交货时间', aliases: ['交货时间', '交期', '要求货好时间', '要求交货日期'], kind: 'detail' },
+    { key: 'remark', label: '备注', aliases: ['备注', '说明'], kind: 'detail' },
+    { key: 'taxTotalLower', label: '含税运合计（小写）', aliases: ['含税运合计（小写）', '含税运合计小写', '合计（小写）', '合计小写', '小写合计'], kind: 'single' },
+    { key: 'taxTotalUpper', label: '含税运合计（大写）', aliases: ['含税运合计（大写）', '含税运合计大写', '合计（大写）', '合计大写', '大写合计'], kind: 'single' },
+    { key: 'contractNumber', label: '合同编号', aliases: ['合同编号', '合同号'], kind: 'single' },
+    { key: 'buyer', label: '采购方（甲方）', aliases: ['采购方（甲方）', '采购方', '甲方', '买方'], kind: 'single' },
+    { key: 'supplier', label: '供应商（乙方）', aliases: ['供应商名称', '供应商（乙方）', '供应商', '乙方', '卖方'], kind: 'single' },
+    { key: 'signDate', label: '签订日期', aliases: ['签订日期', '合同日期', '签约日期'], kind: 'single' },
+    { key: 'deliveryPlace', label: '交货地点', aliases: ['交货地点', '送货地址', '交付地点'], kind: 'single' },
+  ];
   let pdfJsPromise = null;
   let converterFrame = null;
   let converterReadyPromise = null;
@@ -21,8 +41,8 @@
   const state = {
     orderFile: null, orderBytes: null, orderBook: null, orderSheet: '', order: null,
     templateFile: null, templateBytes: null, templateType: '', templateBook: null, templateSheet: '', templateModel: null, templateFeatures: [], fingerprint: '',
-    previewDocument: null, previewPageCount: 0, previewPage: 0, previewRenderToken: 0,
-    mappings: {}, detailRow: '', selectedTarget: '', output: null, outputFileName: '', outputPdf: null, outputPdfFileName: '', busy: false,
+    previewDocument: null, previewObjectUrl: '', previewMode: '', previewPageCount: 0, previewPage: 0, previewRenderToken: 0,
+    mappings: {}, detailRow: '', fieldSelections: {}, fieldStrategies: {}, templateBindings: {}, mappingSignature: '', output: null, outputFileName: '', outputPdf: null, outputPdfFileName: '', busy: false,
   };
   const $ = id => document.getElementById(id);
   const esc = value => C.text(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -35,8 +55,8 @@
     initTheme();
     $('orderFile').addEventListener('change', event => loadOrder(event.target.files[0]));
     $('templateFile').addEventListener('change', event => loadTemplate(event.target.files[0]));
-    $('orderSheet').addEventListener('change', event => { state.orderSheet = event.target.value; analyzeOrder(); invalidateOutput(); updateAll(); });
-    $('templateSheet').addEventListener('change', event => { state.templateSheet = event.target.value; buildExcelModel(); state.mappings = {}; state.detailRow = ''; state.selectedTarget = ''; invalidateOutput(); restoreMapping(); updateAll(); });
+    $('orderSheet').addEventListener('change', event => { state.orderSheet = event.target.value; state.fieldSelections = {}; state.fieldStrategies = {}; state.mappingSignature = ''; analyzeOrder(); invalidateOutput(); updateAll(); });
+    $('templateSheet').addEventListener('change', event => { state.templateSheet = event.target.value; buildExcelModel(); state.mappings = {}; state.detailRow = ''; state.templateBindings = {}; state.mappingSignature = ''; invalidateOutput(); restoreMapping(); updateAll(); });
     $('resultPrevious').addEventListener('click', () => changePreviewPage(-1));
     $('resultNext').addEventListener('click', () => changePreviewPage(1));
     $('outputName').addEventListener('input', () => { invalidateOutput(); updateConfirmation(); });
@@ -110,6 +130,7 @@
       state.orderFile = file; state.orderBytes = bytes; state.orderBook = book; state.orderSheet = book.SheetNames[0];
       setOptions($('orderSheet'), book.SheetNames, state.orderSheet); $('orderSheet').disabled = false;
       analyzeOrder();
+      if (state.templateModel) restoreMapping();
       $('orderFileName').textContent = file.name; $('orderDrop').classList.add('loaded');
       status(`订单读取完成：${state.order.rows.length} 行，${state.order.headers.length} 个字段`, 'success');
       updateAll();
@@ -138,7 +159,7 @@
       const type = file.name.toLowerCase().endsWith('.docx') ? 'docx' : 'xlsx';
       const zip = await validateOoxml(bytes, type);
       state.templateFile = file; state.templateBytes = bytes; state.templateType = type; state.fingerprint = await sha256(bytes);
-      state.templateBook = null; state.templateSheet = ''; state.mappings = {}; state.detailRow = ''; state.selectedTarget = '';
+      state.templateBook = null; state.templateSheet = ''; state.mappings = {}; state.detailRow = ''; state.fieldSelections = {}; state.fieldStrategies = {}; state.templateBindings = {}; state.mappingSignature = '';
       if (type === 'docx') await parseDocx(zip);
       else parseXlsx();
       $('templateFileName').textContent = file.name; $('templateDrop').classList.add('loaded');
@@ -167,6 +188,8 @@
     state.previewRenderToken += 1;
     state.previewDocument?.destroy?.();
     state.previewDocument = null;
+    if (state.previewObjectUrl) URL.revokeObjectURL(state.previewObjectUrl);
+    state.previewObjectUrl = ''; state.previewMode = '';
   }
 
   async function validateOoxml(bytes, type) {
@@ -266,27 +289,152 @@
     const ready = !!(state.order && state.templateModel);
     $('mappingStage').hidden = !ready; $('confirmStage').hidden = !ready;
     $('orderMeta').textContent = state.order ? `${state.order.rows.length} 行 · ${state.order.headers.length} 个字段` : '尚未读取订单';
-    $('orderFields').innerHTML = state.order ? state.order.headers.map(header => {
-      const sample = C.distinctValues(state.order.rows.slice(0, 20), header).slice(0, 2).join('、');
-      return `<div class="field-item">${esc(header)}<small>${esc(sample || '前20行为空')}</small></div>`;
-    }).join('') : '';
-    if (ready) { renderTemplate(); renderInspector(); }
+    if (ready) { ensureBusinessMappings(); renderBusinessMappings(); }
     const summary = [];
     if (state.orderFile) summary.push(`订单：${state.orderFile.name}（${state.order.rows.length}行）`);
     if (state.templateFile) summary.push(`模板：${state.templateFile.name}`);
     $('fileSummary').textContent = summary.join('；') || '等待上传订单和合同模板';
-    $('mappingStatus').textContent = `${mappedEntries().length} 个映射`;
+    const selectedCount = BUSINESS_FIELDS.filter(field => field.automatic || state.fieldSelections[field.key]).length;
+    $('mappingStatus').textContent = ready ? `${mappedEntries().length} / ${selectedCount} 已识别` : '0 个映射';
     updateConfirmation(); updateSteps();
   }
 
-  function renderTemplate() {
-    const mapped = new Set(mappedEntries().map(([target]) => target));
-    renderMappingStructure(mapped);
-    $('templatePreview').querySelectorAll('[data-target]').forEach(button => button.addEventListener('click', () => { state.selectedTarget = button.dataset.target; renderTemplate(); renderInspector(); }));
-    $('templatePreview').querySelectorAll('[data-detail-row]').forEach(button => button.addEventListener('click', () => toggleDetailRow(button.dataset.detailRow)));
+  function normalizeBusinessLabel(value) {
+    return C.text(value).toUpperCase().replace(/[^A-Z0-9\u4e00-\u9fff]/g, '');
+  }
+
+  function fieldMatchScore(value, definition) {
+    const text = normalizeBusinessLabel(value); if (!text) return 0;
+    let score = 0;
+    for (const alias of definition.aliases) {
+      const candidate = normalizeBusinessLabel(alias); if (!candidate) continue;
+      if (text === candidate) score = Math.max(score, 100 + candidate.length);
+      else if (candidate.length >= 4 && text.includes(candidate)) score = Math.max(score, 60 + candidate.length);
+      else if (text.length >= 4 && candidate.includes(text)) score = Math.max(score, 40 + text.length);
+    }
+    return score;
+  }
+
+  function bestDefinition(value, kind = '') {
+    return BUSINESS_FIELDS.filter(field => !kind || field.kind === kind).map(field => ({ field, score: fieldMatchScore(value, field) })).sort((a, b) => b.score - a.score)[0];
+  }
+
+  function bestOrderHeader(definition) {
+    const best = state.order.headers.map(header => ({ header, score: fieldMatchScore(header, definition) })).sort((a, b) => b.score - a.score)[0];
+    return best?.score > 0 ? best.header : '';
+  }
+
+  function templateRows() {
+    if (state.templateModel.type === 'docx') return state.templateModel.blocks.filter(block => block.type === 'table').flatMap(block => block.rows);
+    return state.templateModel.rows;
+  }
+
+  function locateRow(rowKey) { return templateRows().find(row => row.rowKey === rowKey); }
+
+  function detectTemplateBindings() {
+    const bindings = {}, rows = templateRows(), detailFields = BUSINESS_FIELDS.filter(field => field.kind === 'detail');
+    let bestHeader = null;
+    for (let index = 0; index < rows.length - 1; index += 1) {
+      const matches = new Map(); let score = 0;
+      for (const cell of rows[index].cells) {
+        const found = bestDefinition(cell.value, 'detail');
+        if (found?.score > 0 && !matches.has(found.field.key)) { matches.set(found.field.key, cell); score += found.score; }
+      }
+      if (matches.size && (!bestHeader || matches.size > bestHeader.matches.size || (matches.size === bestHeader.matches.size && score > bestHeader.score))) {
+        bestHeader = { index, matches, score };
+      }
+    }
+    state.detailRow = '';
+    if (bestHeader) {
+      const detailRow = rows[bestHeader.index + 1]; state.detailRow = detailRow.rowKey;
+      for (const definition of detailFields) {
+        const headerCell = bestHeader.matches.get(definition.key); if (!headerCell) continue;
+        const target = detailRow.cells.find(cell => cell.cellIndex === headerCell.cellIndex);
+        if (target) bindings[definition.key] = { targetId: target.id, mode: 'detail' };
+      }
+    }
+    const excludedRows = new Set([bestHeader ? rows[bestHeader.index].rowKey : '', state.detailRow].filter(Boolean));
+    const usedTargets = new Set(Object.values(bindings).map(binding => binding.targetId));
+    for (const definition of BUSINESS_FIELDS.filter(field => field.kind === 'single')) {
+      let best = null;
+      for (const target of state.templateModel.targets) {
+        if (excludedRows.has(target.rowKey)) continue;
+        const score = fieldMatchScore(target.value, definition);
+        if (score > 0 && (!best || score > best.score)) best = { target, score };
+      }
+      if (!best) continue;
+      const row = locateRow(best.target.rowKey), next = row?.cells.find(cell => cell.cellIndex === best.target.cellIndex + 1);
+      const canUseNext = next && !usedTargets.has(next.id) && (!bestDefinition(next.value)?.score || /待填|填写|空白/.test(C.text(next.value)));
+      const target = canUseNext ? next : best.target;
+      if (usedTargets.has(target.id)) continue;
+      bindings[definition.key] = { targetId: target.id, mode: 'single', preserveLabel: target.id === best.target.id, labelText: best.target.value };
+      usedTargets.add(target.id);
+    }
+    state.templateBindings = bindings;
+  }
+
+  function ensureBusinessMappings() {
+    const signature = `${state.fingerprint}:${state.templateSheet}:${state.orderSheet}:${state.order.headers.join('|')}`;
+    if (state.mappingSignature !== signature) {
+      for (const definition of BUSINESS_FIELDS) {
+        if (definition.automatic) state.fieldSelections[definition.key] = '@sequence';
+        else if (!state.fieldSelections[definition.key] || !state.order.headers.includes(state.fieldSelections[definition.key])) state.fieldSelections[definition.key] = bestOrderHeader(definition);
+      }
+      state.mappingSignature = signature;
+    }
+    detectTemplateBindings(); rebuildMappings();
+  }
+
+  function rebuildMappings() {
+    const mappings = {};
+    for (const definition of BUSINESS_FIELDS) {
+      const binding = state.templateBindings[definition.key], field = state.fieldSelections[definition.key];
+      if (!binding || !field) continue;
+      const values = field === '@sequence' ? [] : C.distinctValues(state.order.rows, field);
+      mappings[binding.targetId] = {
+        field, mode: binding.mode, businessKey: definition.key, preserveLabel: !!binding.preserveLabel, labelText: binding.labelText || '',
+        strategy: binding.mode === 'single' ? (values.length <= 1 ? 'first' : (state.fieldStrategies?.[definition.key] || '')) : '',
+      };
+    }
+    state.mappings = mappings;
+  }
+
+  function renderBusinessMappings() {
+    if (!state.fieldStrategies) state.fieldStrategies = {};
+    const mapped = new Set(mappedEntries().map(([, mapping]) => mapping.businessKey));
+    const detected = Object.keys(state.templateBindings).length;
+    $('templateDetectionSummary').textContent = `模板自动识别 ${detected} 个可写字段；序号按 ${state.order.rows.length} 行自动生成`;
+    $('businessMappingRows').innerHTML = BUSINESS_FIELDS.map(definition => {
+      const selection = state.fieldSelections[definition.key] || '', binding = state.templateBindings[definition.key];
+      const values = selection && selection !== '@sequence' ? C.distinctValues(state.order.rows, selection) : [];
+      const conflict = definition.kind === 'single' && values.length > 1;
+      const options = definition.automatic
+        ? '<option value="@sequence">自动生成 1、2、3…</option>'
+        : `<option value="">不填写</option>${state.order.headers.map(header => `<option value="${esc(header)}" ${header === selection ? 'selected' : ''}>${esc(header)}</option>`).join('')}`;
+      const strategy = conflict ? `<select class="business-field-select business-strategy-select" data-strategy-key="${definition.key}" aria-label="${esc(definition.label)}多值处理"><option value="">该列有多个值，请选择处理方式</option><option value="first" ${state.fieldStrategies[definition.key] === 'first' ? 'selected' : ''}>取第一条非空值</option><option value="merge" ${state.fieldStrategies[definition.key] === 'merge' ? 'selected' : ''}>合并去重值</option><option value="sum" ${state.fieldStrategies[definition.key] === 'sum' ? 'selected' : ''}>求和</option></select>` : '';
+      return `<div class="business-mapping-row" role="row" data-business-key="${definition.key}">
+        <div class="business-field-name" role="cell"><strong>${esc(definition.label)}</strong><small>${definition.automatic ? '无需选择订单列' : esc(definition.aliases.slice(0, 3).join('、'))}</small></div>
+        <div role="cell"><select class="business-field-select" data-field-key="${definition.key}" ${definition.automatic ? 'disabled' : ''} aria-label="${esc(definition.label)}对应订单列">${options}</select>${strategy}</div>
+        <span class="business-write-mode" role="cell">${definition.kind === 'detail' ? '按订单逐行写入' : '合同单值'}</span>
+        <span class="template-detection ${binding && mapped.has(definition.key) ? 'detected' : ''}" role="cell">${binding ? (selection ? '已识别' : '等待选择') : '模板未识别'}</span>
+      </div>`;
+    }).join('');
+    $('businessMappingRows').querySelectorAll('[data-field-key]').forEach(select => select.addEventListener('change', event => {
+      state.fieldSelections[event.target.dataset.fieldKey] = event.target.value; state.fieldStrategies[event.target.dataset.fieldKey] = '';
+      invalidateOutput(); rebuildMappings(); saveMapping(); updateAll();
+    }));
+    $('businessMappingRows').querySelectorAll('[data-strategy-key]').forEach(select => select.addEventListener('change', event => {
+      state.fieldStrategies[event.target.dataset.strategyKey] = event.target.value;
+      invalidateOutput(); rebuildMappings(); saveMapping(); updateAll();
+    }));
   }
 
   async function renderGeneratedPdf() {
+    if (state.previewMode === 'native' && state.previewObjectUrl) {
+      $('resultPagination').hidden = true;
+      $('generatedPreview').innerHTML = `<iframe class="native-pdf-preview" src="${esc(state.previewObjectUrl)}#toolbar=0&navpanes=0&view=FitH" title="生成合同PDF预览"></iframe>`;
+      return;
+    }
     if (!state.previewDocument) return;
     state.previewPage = Math.max(0, Math.min(state.previewPage, state.previewPageCount - 1));
     const pageNumber = state.previewPage + 1, renderToken = ++state.previewRenderToken;
@@ -316,86 +464,11 @@
     }
   }
 
-  function renderMappingStructure(mapped) {
-    $('templatePreview').className = 'template-preview mapping-mode';
-    $('templateMeta').textContent = `${state.templateFile.name}${state.templateSheet ? ` · ${state.templateSheet}` : ''}`;
-    let content;
-    if (state.templateModel.type === 'docx') {
-      content = state.templateModel.blocks.map(block => {
-        if (block.type === 'paragraph') return targetButton(block.target, mapped, 'word-paragraph');
-        return `<table class="word-table"><tbody>${block.rows.map(row => `<tr class="word-row ${state.detailRow === row.rowKey ? 'detail-row' : ''}">${row.cells.map(cell => `<td>${targetButton(cell, mapped)}</td>`).join('')}<td class="word-row-marker"><button type="button" data-detail-row="${esc(row.rowKey)}">${state.detailRow === row.rowKey ? '取消明细行' : '设为明细行'}</button></td></tr>`).join('')}</tbody></table>`;
-      }).join('');
-    } else {
-      const letters = Array.from({ length: state.templateModel.columns }, (_, index) => XLSX.utils.encode_col(index));
-      content = `<table class="excel-preview"><thead><tr><th class="row-number"></th>${letters.map(letter => `<th>${letter}</th>`).join('')}</tr></thead><tbody>${state.templateModel.rows.map(row => `<tr class="${state.detailRow === row.rowKey ? 'detail-row' : ''}"><th><button type="button" data-detail-row="${esc(row.rowKey)}" title="设为明细模板行">${row.rowIndex + 1}</button></th>${row.cells.map(cell => `<td>${targetButton(cell, mapped)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
-    }
-    $('templatePreview').innerHTML = `<div class="mapping-structure"><p class="mapping-structure-note">这里用于选择写入位置，不代表最终打印排版；点击“生成PDF预览”后查看实际转换结果。</p>${content}</div>`;
-  }
-
   function changePreviewPage(offset) {
     if (!state.previewDocument) return;
     const total = state.previewPageCount || 1, next = Math.max(0, Math.min(state.previewPage + offset, total - 1));
     if (next === state.previewPage) return;
     state.previewPage = next; renderGeneratedPdf(); $('generatedPreview').scrollTop = 0; $('generatedPreview').scrollLeft = 0;
-  }
-
-  function targetButton(target, mapped, extra = '') {
-    const value = target.value ? esc(target.value) : '<span style="color:#98a2b3">空白位置</span>';
-    const classes = ['template-target', extra, state.selectedTarget === target.id ? 'selected' : '', mapped.has(target.id) ? 'mapped' : ''].filter(Boolean).join(' ');
-    return `<button type="button" class="${classes}" data-target="${esc(target.id)}" title="${esc(target.label)}">${value}</button>`;
-  }
-
-  function toggleDetailRow(rowKey) {
-    const previous = state.detailRow;
-    state.detailRow = previous === rowKey ? '' : rowKey;
-    for (const [targetId, mapping] of Object.entries(state.mappings)) {
-      const target = findTarget(targetId);
-      if (!target) continue;
-      if (target.rowKey === previous) mapping.mode = 'single';
-      if (target.rowKey === state.detailRow) mapping.mode = 'detail';
-    }
-    invalidateOutput(); saveMapping(); updateAll();
-  }
-
-  function renderInspector() {
-    const host = $('mappingInspector'), target = findTarget(state.selectedTarget);
-    if (!target) { host.className = 'mapping-empty'; host.textContent = '请点击模板中的段落、表格单元格或Excel单元格。'; return; }
-    host.className = '';
-    const mapping = state.mappings[target.id] || { field: '', mode: target.rowKey && target.rowKey === state.detailRow ? 'detail' : 'single', strategy: '' };
-    const values = mapping.field ? C.distinctValues(state.order.rows, mapping.field) : [];
-    const conflict = mapping.mode !== 'detail' && values.length > 1;
-    host.innerHTML = `<div class="mapping-form">
-      <div class="mapping-location"><strong>${esc(target.label)}</strong>${esc(target.value || '当前为空白位置')}</div>
-      <label>订单字段<select id="mapField"><option value="">不映射</option>${state.order.headers.map(header => `<option value="${esc(header)}" ${header === mapping.field ? 'selected' : ''}>${esc(header)}</option>`).join('')}</select></label>
-      <label>写入方式<select id="mapMode" ${target.rowKey ? '' : 'disabled'}><option value="single" ${mapping.mode !== 'detail' ? 'selected' : ''}>合同单值</option><option value="detail" ${mapping.mode === 'detail' ? 'selected' : ''}>订单明细（需设为明细行）</option></select></label>
-      ${conflict ? `<div class="mapping-conflict">${esc(mapping.field)} 有 ${values.length} 个不同值：${esc(values.slice(0, 4).join('、'))}${values.length > 4 ? '…' : ''}</div><label>多值处理<select id="mapStrategy"><option value="">请选择</option><option value="first" ${mapping.strategy === 'first' ? 'selected' : ''}>指定取第一条非空值</option><option value="merge" ${mapping.strategy === 'merge' ? 'selected' : ''}>合并去重值</option><option value="manual" ${mapping.strategy === 'manual' ? 'selected' : ''}>手工输入</option><option value="sum" ${mapping.strategy === 'sum' ? 'selected' : ''}>明确求和</option></select></label>${mapping.strategy === 'manual' ? `<label>手工值<input id="mapManual" value="${esc(mapping.manual || '')}" /></label>` : ''}` : ''}
-      ${target.rowKey ? `<button class="secondary-button mapping-row-button" id="detailRowButton" type="button">${state.detailRow === target.rowKey ? '取消当前明细模板行' : '将当前行设为明细模板行'}</button>` : ''}
-      ${mapping.field ? '<button class="ghost-button" id="removeMapping" type="button">移除此映射</button>' : ''}
-    </div>`;
-    $('mapField').addEventListener('change', event => changeMapping(target, { field: event.target.value }));
-    $('mapMode').addEventListener('change', event => {
-      if (event.target.value === 'detail' && target.rowKey !== state.detailRow) toggleDetailRow(target.rowKey);
-      else changeMapping(target, { mode: event.target.value });
-    });
-    $('mapStrategy')?.addEventListener('change', event => changeMapping(target, { strategy: event.target.value, manual: '' }));
-    $('mapManual')?.addEventListener('input', event => changeMapping(target, { manual: event.target.value }, false));
-    $('detailRowButton')?.addEventListener('click', () => toggleDetailRow(target.rowKey));
-    $('removeMapping')?.addEventListener('click', () => { delete state.mappings[target.id]; invalidateOutput(); saveMapping(); updateAll(); });
-  }
-
-  function changeMapping(target, changes, fullRender = true) {
-    const current = state.mappings[target.id] || { field: '', mode: target.rowKey && target.rowKey === state.detailRow ? 'detail' : 'single', strategy: '' };
-    const next = { ...current, ...changes };
-    if (!next.field) delete state.mappings[target.id];
-    else {
-      const values = C.distinctValues(state.order.rows, next.field);
-      if (!('strategy' in changes) && values.length <= 1) next.strategy = 'first';
-      if (!('strategy' in changes) && values.length > 1 && current.field !== next.field) next.strategy = '';
-      if (target.rowKey && target.rowKey === state.detailRow) next.mode = 'detail';
-      state.mappings[target.id] = next;
-    }
-    invalidateOutput(); saveMapping();
-    if (fullRender) updateAll(); else updateConfirmation();
   }
 
   function mappedEntries() { return Object.entries(state.mappings).filter(([, mapping]) => mapping?.field); }
@@ -405,10 +478,12 @@
     if (!state.order || !state.templateModel) { $('generateContract').disabled = true; return; }
     const issues = C.mappingIssues(state.order.rows, state.mappings, state.detailRow);
     if (state.detailRow && !mappedEntries().some(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow)) issues.push('明细模板行还没有映射任何订单字段');
+    const notDetected = BUSINESS_FIELDS.filter(field => state.fieldSelections[field.key] && !state.templateBindings[field.key]).map(field => field.label);
     const outputName = C.sanitizeFileName($('outputName').value);
     if (!$('outputName').value.trim()) issues.push('请填写合同文件名称');
     $('confirmSummary').innerHTML = `订单：<strong>${esc(state.orderSheet)}</strong>，${state.order.rows.length} 行；模板：<strong>${esc(state.templateFile.name)}</strong>${state.templateSheet ? `，合同Sheet：<strong>${esc(state.templateSheet)}</strong>` : ''}；输出：<strong>${esc(outputName)}.${state.templateType}</strong>`;
-    $('contractIssues').innerHTML = issues.length ? `<ul>${issues.map(issue => `<li>${esc(issue)}</li>`).join('')}</ul>` : '<div class="ready">映射检查通过，可以生成PDF预览。</div>';
+    const warnings = notDetected.length ? `<div class="warnings">模板中未识别：${esc(notDetected.join('、'))}；这些字段本次不会写入。</div>` : '';
+    $('contractIssues').innerHTML = `${issues.length ? `<ul>${issues.map(issue => `<li>${esc(issue)}</li>`).join('')}</ul>` : '<div class="ready">映射检查通过，可以生成PDF预览。</div>'}${warnings}`;
     $('generateContract').disabled = state.busy || issues.length > 0 || !$('confirmGenerate').checked;
   }
 
@@ -428,25 +503,33 @@
       const blob = state.templateType === 'docx' ? await generateDocx() : await generateXlsx();
       state.output = blob; state.outputFileName = `${C.sanitizeFileName($('outputName').value)}.${state.templateType}`;
       $('generateContract').textContent = '正在转换PDF…'; status('合同副本已生成，正在浏览器内转换PDF；首次加载可能需要一些时间…');
-      const pdfFile = await convertContractToPdf(blob, state.outputFileName);
-      await preparePdfPreview(pdfFile);
-      state.outputPdf = pdfFile; state.outputPdfFileName = `${C.sanitizeFileName($('outputName').value)}.pdf`;
+      let pdfFile = await convertContractToPdf(blob, state.outputFileName);
+      try { state.outputPdf = await preparePdfPreview(pdfFile, false); }
+      catch (error) {
+        if (error.code !== 'PDF_PARSE_FAILED') throw error;
+        status('第一次PDF结果无法解析，正在自动重新转换…');
+        pdfFile = await convertContractToPdf(blob, state.outputFileName);
+        state.outputPdf = await preparePdfPreview(pdfFile, true);
+      }
+      state.outputPdfFileName = `${C.sanitizeFileName($('outputName').value)}.pdf`;
       $('resultStage').hidden = false;
       $('downloadContract').textContent = `下载 ${state.templateType.toUpperCase()}`;
       $('downloadPdf').textContent = '下载 PDF';
       $('confirmExport').checked = false; updateExportButtons(); renderGeneratedPdf();
-      saveMapping(); status(`PDF预览已生成：${state.outputPdfFileName}（${state.previewPageCount}页）`, 'success'); toast('PDF预览生成完成，请核对后确认导出', 'success'); updateSteps();
+      const previewText = state.previewMode === 'native' ? '浏览器原生预览' : `${state.previewPageCount}页`;
+      saveMapping(); status(`PDF预览已生成：${state.outputPdfFileName}（${previewText}）`, 'success'); toast('PDF预览生成完成，请核对后确认导出', 'success'); updateSteps();
       $('resultStage').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) { status(error.message, 'error'); toast(error.message, 'error'); }
     finally { state.busy = false; $('generateContract').textContent = '生成PDF预览'; updateConfirmation(); }
   }
 
-  async function preparePdfPreview(file) {
-    const bytes = await file.arrayBuffer();
-    if (new TextDecoder('latin1').decode(bytes.slice(0, 5)) !== '%PDF-') throw new Error('PDF转换结果无效，请重新生成');
+  async function preparePdfPreview(file, allowNativeFallback) {
+    const normalized = await normalizePdfFile(file, state.outputFileName.replace(/\.[^.]+$/, '.pdf'));
+    const bytes = await normalized.arrayBuffer();
     const pdfjs = await loadPdfJs();
     let document;
     try {
+      if (window.__CONTRACT_FORCE_NATIVE_PDF_PREVIEW__) throw new Error('测试浏览器原生PDF预览');
       document = await pdfjs.getDocument({
         data: new Uint8Array(bytes.slice(0)),
         cMapUrl: new URL('vendor/pdfjs-cmaps/', location.href).href,
@@ -455,25 +538,60 @@
         wasmUrl: new URL('vendor/pdfjs-wasm/', location.href).href,
         useSystemFonts: true,
       }).promise;
-    } catch (_) { throw new Error('生成的PDF无法读取，请重新生成'); }
-    if (!document.numPages) throw new Error('生成的PDF没有页面');
+    } catch (error) {
+      if (!allowNativeFallback && !window.__CONTRACT_FORCE_NATIVE_PDF_PREVIEW__) {
+        const parseError = new Error('PDF转换结果无法解析，正在重试'); parseError.code = 'PDF_PARSE_FAILED'; throw parseError;
+      }
+      releasePreviewDocument();
+      state.previewObjectUrl = URL.createObjectURL(normalized); state.previewMode = 'native'; state.previewPageCount = 0; state.previewPage = 0;
+      console.warn('PDF.js读取失败，已切换浏览器原生预览：', error?.message || error);
+      return normalized;
+    }
+    if (!document.numPages) { document.destroy(); throw new Error('生成的PDF没有页面'); }
     if (document.numPages > 500) { document.destroy(); throw new Error('生成的PDF超过500页，请拆分订单'); }
     releasePreviewDocument();
-    state.previewDocument = document; state.previewPageCount = document.numPages; state.previewPage = 0;
+    state.previewDocument = document; state.previewMode = 'pdfjs'; state.previewPageCount = document.numPages; state.previewPage = 0;
+    return normalized;
   }
 
   async function convertContractToPdf(blob, fileName) {
     if (typeof window.__CONTRACT_PDF_CONVERTER__ === 'function') {
-      const result = await window.__CONTRACT_PDF_CONVERTER__(blob, fileName);
-      if (!(result instanceof Blob)) throw new Error('PDF转换测试接口没有返回文件');
-      return result;
+      let lastError;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const result = await window.__CONTRACT_PDF_CONVERTER__(blob, fileName);
+          return await normalizePdfFile(result, fileName.replace(/\.[^.]+$/, '.pdf'));
+        } catch (error) { lastError = error; }
+      }
+      throw lastError || new Error('PDF转换测试接口没有返回有效文件');
     }
     await ensureConverterFrame();
     const buffer = await blob.arrayBuffer();
     await requestConverter('document:open-buffer', { fileName, buffer, readonly: false }, 'document:opened', [buffer]);
-    const result = await requestConverter('document:save', { targetExt: 'PDF' }, 'document:saved');
-    if (!(result.file instanceof Blob)) throw new Error('PDF转换组件没有返回文件');
-    return result.file;
+    let lastError;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const result = await requestConverter('document:save', { targetExt: 'PDF' }, 'document:saved');
+        return await normalizePdfFile(result.file, fileName.replace(/\.[^.]+$/, '.pdf'));
+      } catch (error) {
+        lastError = error;
+        if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    throw lastError || new Error('PDF转换组件没有返回有效文件');
+  }
+
+  async function normalizePdfFile(value, fileName) {
+    let bytes;
+    if (value && typeof value.arrayBuffer === 'function') bytes = new Uint8Array(await value.arrayBuffer());
+    else if (value instanceof ArrayBuffer) bytes = new Uint8Array(value);
+    else if (ArrayBuffer.isView(value)) bytes = new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+    else throw new Error('PDF转换组件没有返回文件');
+    if (bytes.length < 100) throw new Error('PDF转换结果不完整，正在重试');
+    const prefix = new TextDecoder('latin1').decode(bytes.slice(0, Math.min(bytes.length, 1024))), headerIndex = prefix.indexOf('%PDF-');
+    if (headerIndex < 0) throw new Error('PDF转换结果格式无效，正在重试');
+    if (headerIndex > 0) bytes = bytes.slice(headerIndex);
+    return new File([bytes], fileName, { type: MIME.pdf, lastModified: Date.now() });
   }
 
   function ensureConverterFrame() {
@@ -527,18 +645,19 @@
     for (const [targetId, mapping] of mappedEntries()) {
       if (mapping.mode === 'detail') continue;
       const target = locateWordTarget(doc, targetId); if (!target) throw new Error(`模板位置已变化：${targetId}`);
-      putWordText(target, resolveMapping(mapping));
+      const value = resolveMapping(mapping);
+      putWordText(target, mapping.preserveLabel ? labeledValue(mapping.labelText, value) : value);
     }
     if (state.detailRow) {
       const match = state.detailRow.match(/^word:(\d+):(\d+)$/); if (!match) throw new Error('Word明细模板行无效');
       const table = direct(all(doc, 'body')[0], 'tbl')[Number(match[1])], row = direct(table, 'tr')[Number(match[2])];
       if (!row) throw new Error('找不到Word明细模板行');
       const rowMappings = mappedEntries().filter(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow);
-      for (const record of state.order.rows) {
+      for (const [recordIndex, record] of state.order.rows.entries()) {
         const clone = row.cloneNode(true), cells = direct(clone, 'tc');
         for (const [targetId, mapping] of rowMappings) {
           const cellIndex = Number(targetId.match(/:c:(\d+)$/)?.[1]);
-          if (cells[cellIndex]) putWordText(cells[cellIndex], C.text(record[mapping.field]));
+          if (cells[cellIndex]) putWordText(cells[cellIndex], detailValue(mapping, record, recordIndex));
         }
         row.parentNode.insertBefore(clone, row);
       }
@@ -553,7 +672,8 @@
     const context = await locateXlsxSheet(zip, state.templateSheet);
     for (const [targetId, mapping] of mappedEntries()) {
       if (mapping.mode === 'detail') continue;
-      writeSheetCell(context.sheetDoc, targetId.slice(2), resolveMapping(mapping));
+      const value = resolveMapping(mapping);
+      writeSheetCell(context.sheetDoc, targetId.slice(2), mapping.preserveLabel ? labeledValue(mapping.labelText, value) : value);
     }
     if (state.detailRow) {
       const rowNumber = Number(state.detailRow.split(':')[1]);
@@ -659,7 +779,7 @@
       for (const cell of direct(clone, 'c', S)) cell.setAttribute('r', replaceAddressRow(cellAddressOf(cell), targetRow));
       for (const [targetId, mapping] of rowMappings) {
         const source = XLSX.utils.decode_cell(targetId.slice(2)), address = XLSX.utils.encode_cell({ r: targetRow - 1, c: source.c });
-        writeCellValue(ensureRowCell(clone, address), C.text(record[mapping.field]));
+        writeCellValue(ensureRowCell(clone, address), detailValue(mapping, record, offset));
       }
       data.insertBefore(clone, prototype);
     });
@@ -748,6 +868,14 @@
   }
 
   function resolveMapping(mapping) { return C.resolveField(state.order.rows, mapping.field, mapping.strategy || 'first', mapping.manual || ''); }
+  function detailValue(mapping, record, index) { return mapping.field === '@sequence' ? String(index + 1) : C.text(record[mapping.field]); }
+  function labeledValue(label, value) {
+    const source = C.text(label), output = C.text(value);
+    if (/\{\{[^{}]+\}\}/.test(source)) return source.replace(/\{\{[^{}]+\}\}/g, output);
+    const separator = source.search(/[：:]/);
+    if (separator >= 0) return `${source.slice(0, separator + 1)}${output}`;
+    return `${source}${source ? '：' : ''}${output}`;
+  }
 
   function downloadOutput() {
     if (!state.output || !$('confirmExport').checked) return;
@@ -784,21 +912,25 @@
   }
 
   function mappingPayload() {
-    return { version: 1, fingerprint: state.fingerprint, templateType: state.templateType, templateSheet: state.templateSheet || '', detailRow: state.detailRow, mappings: state.mappings };
+    return { version: 2, fingerprint: state.fingerprint, templateType: state.templateType, templateSheet: state.templateSheet || '', fieldSelections: state.fieldSelections, fieldStrategies: state.fieldStrategies };
   }
 
   function applyMappingPayload(payload) {
-    if (payload?.version !== 1 || payload.fingerprint !== state.fingerprint || payload.templateType !== state.templateType || (payload.templateSheet || '') !== (state.templateSheet || '')) throw new Error('映射文件与当前合同模板不完全一致');
-    const targetIds = new Set(state.templateModel.targets.map(target => target.id)), fields = new Set(state.order?.headers || []), mappings = {};
-    for (const [target, mapping] of Object.entries(payload.mappings || {})) if (targetIds.has(target) && fields.has(mapping.field)) mappings[target] = { field: mapping.field, mode: mapping.mode === 'detail' ? 'detail' : 'single', strategy: mapping.strategy || '', manual: mapping.manual || '' };
-    state.mappings = mappings; state.detailRow = state.templateModel.targets.some(target => target.rowKey === payload.detailRow) ? payload.detailRow : '';
+    if (payload?.version !== 2 || payload.fingerprint !== state.fingerprint || payload.templateType !== state.templateType || (payload.templateSheet || '') !== (state.templateSheet || '')) throw new Error('映射文件与当前合同模板不完全一致');
+    const fields = new Set(state.order?.headers || []), selections = {};
+    for (const definition of BUSINESS_FIELDS) {
+      const value = payload.fieldSelections?.[definition.key];
+      if (definition.automatic) selections[definition.key] = '@sequence';
+      else if (fields.has(value)) selections[definition.key] = value;
+    }
+    state.fieldSelections = selections; state.fieldStrategies = { ...(payload.fieldStrategies || {}) }; state.mappingSignature = '';
   }
 
   function mappingKey() { return state.fingerprint ? `gylsjqx-contract-mapping:${state.fingerprint}:${state.templateSheet || 'docx'}` : ''; }
   function saveMapping() { try { const key = mappingKey(); if (key) localStorage.setItem(key, JSON.stringify(mappingPayload())); } catch (_) {} }
   function restoreMapping() {
     try { const key = mappingKey(), raw = key && localStorage.getItem(key); if (raw) applyMappingPayload(JSON.parse(raw)); }
-    catch (_) { state.mappings = {}; state.detailRow = ''; }
+    catch (_) { state.mappings = {}; state.detailRow = ''; state.fieldSelections = {}; state.fieldStrategies = {}; state.mappingSignature = ''; }
   }
 
   function parseXml(xml) {

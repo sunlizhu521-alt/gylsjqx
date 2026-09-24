@@ -30,9 +30,9 @@ const HOME_URL = new URL('.', QA_URL).toString();
 
     const orderBytes = await page.evaluate(() => {
       const sheet = XLSX.utils.aoa_to_sheet([
-        ['供应商', '物料', '数量'],
-        ['甲公司', '产品A', '2'],
-        ['甲公司', '产品B', '3'],
+        ['供应商', '物料编码', '物料名称', '规格型号', 'SKU', '单位', '数量', '含税运单价（元）', '含税运总金额（元）', '备注', '交货时间'],
+        ['甲公司', 'MAT-001', '产品A', 'A型', 'SKU-A', '件', '2', '10.5', '21', '首批', '2026-10-01'],
+        ['甲公司', 'MAT-002', '产品B', 'B型', 'SKU-B', '件', '3', '20', '60', '', '2026-10-08'],
       ]);
       const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, '订单');
       return Array.from(new Uint8Array(XLSX.write(book, { type: 'array', bookType: 'xlsx' })));
@@ -49,7 +49,10 @@ const HOME_URL = new URL('.', QA_URL).toString();
       const extraParagraphs = Array.from({ length: 50 }, (_, index) => `<w:p><w:r><w:t>附加条款 ${index + 1}：本条为A4分页预览测试内容。</w:t></w:r></w:p>`).join('');
       zip.file('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
       zip.folder('_rels').file('.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
-      zip.folder('word').file('document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>采购合同</w:t></w:r></w:p><w:p><w:r><w:t>供应商名称</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>物料</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>数量</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>待填写</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>待填写</w:t></w:r></w:p></w:tc></w:tr></w:tbl>${extraParagraphs}<w:sectPr/></w:body></w:document>`);
+      const headers = ['序号', '物料编码', '物料名称', '规格型号', 'SKU', '单位', '数量', '含税运单价（元）', '含税运总金额（元）', '备注', '交货时间'];
+      const headerRow = headers.map(value => `<w:tc><w:p><w:r><w:t>${value}</w:t></w:r></w:p></w:tc>`).join('');
+      const detailRow = headers.map(() => '<w:tc><w:p><w:r><w:t>待填写</w:t></w:r></w:p></w:tc>').join('');
+      zip.folder('word').file('document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>采购合同</w:t></w:r></w:p><w:p><w:r><w:t>供应商名称：</w:t></w:r></w:p><w:tbl><w:tr>${headerRow}</w:tr><w:tr>${detailRow}</w:tr></w:tbl>${extraParagraphs}<w:sectPr/></w:body></w:document>`);
       return Array.from(await zip.generateAsync({ type: 'uint8array' }));
     });
     await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(orderBytes) });
@@ -57,22 +60,28 @@ const HOME_URL = new URL('.', QA_URL).toString();
     await page.waitForFunction(() => !document.querySelector('#mappingStage').hidden);
     assert.equal(await page.locator('#previewFile').count(), 0);
     assert.equal(await page.locator('.contract-upload').count(), 2);
-    assert.match(await page.locator('.mapping-structure-note').innerText(), /生成PDF预览/);
-    await page.locator('#mappingStage').screenshot({ path: path.join(out, 'contract-mapping-structure.png') });
+    assert.equal(await page.locator('#templatePreview').count(), 0);
+    assert.equal(await page.locator('#mappingInspector').count(), 0);
+    assert.equal(await page.locator('.business-mapping-row').count(), 18);
+    assert.equal(await page.locator('[data-field-key="sequence"]').inputValue(), '@sequence');
+    assert.equal(await page.locator('[data-field-key="sequence"]').isDisabled(), true);
+    for (const [key, field] of [['materialCode', '物料编码'], ['materialName', '物料名称'], ['specification', '规格型号'], ['sku', 'SKU'], ['unit', '单位'], ['quantity', '数量'], ['taxUnitPrice', '含税运单价（元）'], ['taxAmount', '含税运总金额（元）'], ['remark', '备注'], ['deliveryTime', '交货时间'], ['supplier', '供应商']]) {
+      assert.equal(await page.locator(`[data-field-key="${key}"]`).inputValue(), field);
+    }
+    assert.match(await page.locator('#templateDetectionSummary').innerText(), /序号按 2 行自动生成/);
+    await page.locator('#mappingStage').screenshot({ path: path.join(out, 'contract-field-mapping.png') });
 
-    await page.locator('[data-target="p:1"]').click();
-    await page.locator('#mapField').selectOption('供应商');
-    assert.equal(await page.locator('#mapMode').inputValue(), 'single');
-    await page.locator('[data-detail-row="word:0:1"]').click();
-    await page.locator('[data-target="t:0:r:1:c:0"]').click();
-    await page.locator('#mapField').selectOption('物料');
-    await page.locator('[data-target="t:0:r:1:c:1"]').click();
-    await page.locator('#mapField').selectOption('数量');
     await page.locator('#outputName').fill('虚构采购合同');
     await page.locator('#confirmGenerate').check();
     assert.equal(await page.locator('#generateContract').isDisabled(), false);
     await page.evaluate(bytes => {
-      window.__CONTRACT_PDF_CONVERTER__ = async () => new File([new Uint8Array(bytes)], '虚构采购合同.pdf', { type: 'application/pdf' });
+      let calls = 0;
+      window.__CONTRACT_PDF_CONVERTER__ = async () => {
+        calls += 1;
+        if (calls === 1) return new File([new Uint8Array(120)], '错误.pdf', { type: 'application/pdf' });
+        if (calls === 2) return new File(['%PDF-1.4\n', new Uint8Array(160)], '截断.pdf', { type: 'application/pdf' });
+        return new File([new Uint8Array([0, 1, 2]), new Uint8Array(bytes)], '虚构采购合同.pdf', { type: 'application/pdf' });
+      };
     }, Array.from(previewPdfBytes));
     await page.locator('#generateContract').click();
     await page.waitForFunction(() => !document.querySelector('#resultStage').hidden && document.querySelector('.pdf-preview-canvas')?.dataset.rendered === 'true');
@@ -91,7 +100,7 @@ const HOME_URL = new URL('.', QA_URL).toString();
     assert.equal(download.suggestedFilename(), '虚构采购合同.docx');
     const docxPath = path.join(out, '虚构采购合同.docx'); await download.saveAs(docxPath);
     const generatedXml = await page.evaluate(async bytes => (await (await JSZip.loadAsync(new Uint8Array(bytes))).file('word/document.xml').async('string')), [...await fs.readFile(docxPath)]);
-    for (const value of ['甲公司', '产品A', '产品B', '>2<', '>3<']) assert.ok(generatedXml.includes(value), value);
+    for (const value of ['供应商名称：甲公司', 'MAT-001', 'MAT-002', '产品A', '产品B', 'SKU-A', 'SKU-B', '>1<', '>2<', '>3<']) assert.ok(generatedXml.includes(value), value);
     assert.equal((generatedXml.match(/<w:tr>/g) || []).length, 3);
     const pdfDownloadPromise = page.waitForEvent('download'); await page.locator('#downloadPdf').click(); const pdfDownload = await pdfDownloadPromise;
     assert.equal(pdfDownload.suggestedFilename(), '虚构采购合同.pdf');
@@ -104,10 +113,10 @@ const HOME_URL = new URL('.', QA_URL).toString();
     await page.reload({ waitUntil: 'networkidle' });
     await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(orderBytes) });
     const templateXlsx = await page.evaluate(async () => {
-      const matrix = [['采购合同', ''], ['物料', '数量'], ['待填写', '待填写']];
-      for (let row = 4; row <= 30; row += 1) matrix.push([`附注${row}`, '']);
+      const matrix = [['采购合同', '', ''], ['序号', '物料名称', '数量'], ['待填写', '待填写', '待填写']];
+      for (let row = 4; row <= 30; row += 1) matrix.push([`附注${row}`, '', '']);
       const sheet = XLSX.utils.aoa_to_sheet(matrix);
-      sheet['!cols'] = [{ wch: 22 }, { wch: 12 }];
+      sheet['!cols'] = [{ wch: 10 }, { wch: 22 }, { wch: 12 }];
       const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, '合同');
       const zip = await JSZip.loadAsync(XLSX.write(book, { type: 'array', bookType: 'xlsx' }));
       const sheetPath = 'xl/worksheets/sheet1.xml';
@@ -116,7 +125,7 @@ const HOME_URL = new URL('.', QA_URL).toString();
         .replace('</worksheet>', '<tableParts count="1"><tablePart r:id="rIdTable1"/></tableParts></worksheet>');
       zip.file(sheetPath, sheetXml);
       zip.file('xl/worksheets/_rels/sheet1.xml.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdTable1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>');
-      zip.file('xl/tables/table1.xml', '<?xml version="1.0"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="ContractTable" displayName="ContractTable" ref="A1:B3" totalsRowShown="0"><autoFilter ref="A1:B3"/><tableColumns count="2"><tableColumn id="1" name="物料"/><tableColumn id="2" name="数量"/></tableColumns><tableStyleInfo name="TableStyleMedium2" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/></table>');
+      zip.file('xl/tables/table1.xml', '<?xml version="1.0"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="ContractTable" displayName="ContractTable" ref="A1:C3" totalsRowShown="0"><autoFilter ref="A1:C3"/><tableColumns count="3"><tableColumn id="1" name="序号"/><tableColumn id="2" name="物料名称"/><tableColumn id="3" name="数量"/></tableColumns><tableStyleInfo name="TableStyleMedium2" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/></table>');
       zip.file('xl/drawings/drawing-contract.xml', '<drawing-preserve>DRAWING-MARKER</drawing-preserve>');
       zip.file('xl/pivotTables/pivot-contract.xml', '<pivot-preserve>PIVOT-MARKER</pivot-preserve>');
       let types = await zip.file('[Content_Types].xml').async('string');
@@ -127,27 +136,28 @@ const HOME_URL = new URL('.', QA_URL).toString();
     await page.locator('#templateFile').setInputFiles({ name: '虚构合同模板.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(templateXlsx) });
     await page.waitForFunction(() => !document.querySelector('#mappingStage').hidden);
     assert.match(await page.locator('#contractStatus').innerText(), /已识别并保留图形、数据透视表、结构化表/);
-    assert.match(await page.locator('#templatePreview').innerText(), /附注23/);
+    assert.equal(await page.locator('#templatePreview').count(), 0);
+    assert.match(await page.locator('#templateDetectionSummary').innerText(), /序号按 2 行自动生成/);
     await page.evaluate(() => scrollTo(0, 0));
     await page.screenshot({ path: path.join(out, 'contract-complex-upload.png'), fullPage: false });
-    await page.locator('[data-detail-row="excel:3"]').click();
-    await page.locator('[data-target="x:A3"]').click(); await page.locator('#mapField').selectOption('物料');
-    await page.locator('[data-target="x:B3"]').click(); await page.locator('#mapField').selectOption('数量');
     await page.locator('#outputName').fill('虚构Excel合同'); await page.locator('#confirmGenerate').check();
     await page.evaluate(bytes => {
+      window.__CONTRACT_FORCE_NATIVE_PDF_PREVIEW__ = true;
       window.__CONTRACT_PDF_CONVERTER__ = async () => new File([new Uint8Array(bytes)], '虚构Excel合同.pdf', { type: 'application/pdf' });
     }, Array.from(previewPdfBytes));
     await page.locator('#generateContract').click();
-    await page.waitForFunction(() => !document.querySelector('#resultStage').hidden && document.querySelector('.pdf-preview-canvas')?.dataset.rendered === 'true');
+    await page.waitForFunction(() => !document.querySelector('#resultStage').hidden && !!document.querySelector('.native-pdf-preview'));
+    assert.equal(await page.locator('#resultPagination').isHidden(), true);
+    assert.match(await page.locator('#contractStatus').innerText(), /浏览器原生预览/);
     await page.locator('#confirmExport').check();
     const xlsxDownloadPromise = page.waitForEvent('download'); await page.locator('#downloadContract').click(); const xlsxDownload = await xlsxDownloadPromise;
     assert.equal(xlsxDownload.suggestedFilename(), '虚构Excel合同.xlsx');
     const xlsxPath = path.join(out, '虚构Excel合同.xlsx'); await xlsxDownload.saveAs(xlsxPath);
     const generatedCells = await page.evaluate(bytes => {
       const book = XLSX.read(new Uint8Array(bytes), { type: 'array' }), sheet = book.Sheets['合同'];
-      return ['A3', 'B3', 'A4', 'B4'].map(address => sheet[address]?.v);
+      return ['A3', 'B3', 'C3', 'A4', 'B4', 'C4'].map(address => sheet[address]?.v);
     }, [...await fs.readFile(xlsxPath)]);
-    assert.deepEqual(generatedCells, ['产品A', '2', '产品B', '3']);
+    assert.deepEqual(generatedCells, ['1', '产品A', '2', '2', '产品B', '3']);
     const preservedParts = await page.evaluate(async bytes => {
       const zip = await JSZip.loadAsync(new Uint8Array(bytes));
       return {
@@ -156,11 +166,15 @@ const HOME_URL = new URL('.', QA_URL).toString();
         pivot: await zip.file('xl/pivotTables/pivot-contract.xml').async('string'),
       };
     }, [...await fs.readFile(xlsxPath)]);
-    assert.match(preservedParts.table, /ref="A1:B4"/);
+    assert.match(preservedParts.table, /ref="A1:C4"/);
     assert.match(preservedParts.drawing, /DRAWING-MARKER/);
     assert.match(preservedParts.pivot, /PIVOT-MARKER/);
     await page.screenshot({ path: path.join(out, 'contract-excel.png'), fullPage: false });
 
+    await page.evaluate(() => { window.__CONTRACT_FORCE_NATIVE_PDF_PREVIEW__ = false; });
+    await page.locator('#generateContract').click();
+    await page.waitForFunction(() => !document.querySelector('#resultStage').hidden && document.querySelector('.pdf-preview-canvas')?.dataset.rendered === 'true');
+    await page.waitForTimeout(3700);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('#resultStage').scrollIntoViewIfNeeded();
     await page.waitForFunction(() => {
@@ -174,6 +188,6 @@ const HOME_URL = new URL('.', QA_URL).toString();
     assert.deepEqual(consoleErrors.filter(message => !message.includes('Failed to load resource: the server responded with a status of 404')), []);
     assert.deepEqual(httpErrors, []);
     assert.deepEqual(mutatingRequests, []);
-    console.log(JSON.stringify({ status: 'PASS', output: out, screenshots: ['contract-pdf-page2.png', 'contract-mapping-structure.png', 'contract-desktop.png', 'contract-complex-upload.png', 'contract-excel.png', 'contract-mobile.png'] }));
+    console.log(JSON.stringify({ status: 'PASS', output: out, screenshots: ['contract-pdf-page2.png', 'contract-field-mapping.png', 'contract-desktop.png', 'contract-complex-upload.png', 'contract-excel.png', 'contract-mobile.png'] }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
