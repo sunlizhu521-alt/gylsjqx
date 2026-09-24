@@ -39,19 +39,20 @@
 .business-mapping-summary { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; padding:11px 13px; border:1px solid var(--line); border-radius:8px; background:var(--surface-2); color:var(--muted); font-size:.82rem; }
 .business-mapping-summary strong { color:var(--text); }
 .business-mapping-table { overflow:hidden; border:1px solid var(--line); border-radius:8px; background:var(--surface-solid); }
-.business-mapping-head,.business-mapping-row { display:grid; grid-template-columns:minmax(150px,1fr) minmax(230px,1.5fr) minmax(130px,.75fr) minmax(120px,.7fr); align-items:center; gap:12px; }
+.business-mapping-head,.business-mapping-row { display:grid; grid-template-columns:minmax(140px,.95fr) minmax(210px,1.35fr) minmax(150px,1fr) minmax(100px,.65fr) minmax(130px,.8fr); align-items:center; gap:12px; }
 .business-mapping-head { min-height:44px; padding:0 14px; color:var(--muted); background:var(--surface-2); font-size:.76rem; font-weight:800; }
 .business-mapping-row { min-height:60px; padding:9px 14px; border-top:1px solid var(--line); }
 .business-mapping-row:hover { background:color-mix(in srgb,var(--blue) 4%,transparent); }
 .business-field-name { display:grid; gap:3px; min-width:0; }
 .business-field-name strong { overflow-wrap:anywhere; }
-.business-field-name small,.business-write-mode { color:var(--muted); font-size:.76rem; line-height:1.4; }
+.business-field-name small,.business-template-field,.business-write-mode { color:var(--muted); font-size:.76rem; line-height:1.4; overflow-wrap:anywhere; }
 .business-field-select { width:100%; min-width:0; padding:9px 30px 9px 10px; border:1px solid var(--line-strong); border-radius:7px; color:var(--text); background:var(--surface-solid); }
 .business-field-select:disabled { opacity:.78; color:var(--text); background:var(--surface-2); }
 .template-detection { display:inline-flex; align-items:center; gap:6px; color:#b54708; font-size:.78rem; font-weight:750; }
 .template-detection::before { content:""; width:7px; height:7px; flex:0 0 auto; border-radius:50%; background:#e1a53b; }
 .template-detection.detected { color:#12843b; }
 .template-detection.detected::before { background:#22a559; }
+.mobile-cell-label { display:none; }
 .mapping-layout { display:grid; grid-template-columns:210px minmax(360px,1fr) 280px; min-height:520px; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--surface-solid); }
 .field-panel,.mapping-panel { min-width:0; padding:14px; background:var(--surface-2); }
 .field-panel { border-right:1px solid var(--line); }
@@ -123,6 +124,6 @@
 .toast { max-width:360px; padding:11px 14px; border-left:4px solid var(--blue); border-radius:7px; background:var(--surface-solid); color:var(--text); box-shadow:var(--shadow); }
 .toast.error { border-color:var(--red); }
 .toast.success { border-color:var(--green); }
-@media(max-width:1100px) { .business-mapping-head,.business-mapping-row { grid-template-columns:minmax(140px,1fr) minmax(210px,1.35fr) minmax(120px,.75fr) minmax(110px,.7fr); } }
+@media(max-width:1180px) { .business-mapping-table { overflow-x:auto; } .business-mapping-head,.business-mapping-row { min-width:940px; grid-template-columns:150px 250px 180px 110px 150px; } }
 @media(max-width:900px) { .contract-shell { grid-template-columns:1fr; } .contract-sidebar { position:static; } .contract-steps { grid-template-columns:repeat(5,minmax(0,1fr)); } .contract-steps li { display:grid; justify-items:center; text-align:center; } .contract-steps li small { display:none; } }
-@media(max-width:720px) { .app-header { height:auto; min-height:56px; padding:8px 12px; } .brand span { display:none; } .contract-home-link { display:none; } .contract-shell { padding:10px; } .contract-upload-grid,.confirm-grid { grid-template-columns:1fr; } .business-mapping-summary { align-items:flex-start; flex-direction:column; } .business-mapping-head { display:none; } .business-mapping-row { grid-template-columns:1fr; gap:7px; padding:14px; } .business-write-mode::before { content:"写入方式："; color:var(--faint); font-size:.68rem; font-weight:750; } .contract-section-heading { align-items:stretch; flex-direction:column; } .mapping-actions { width:100%; } .mapping-actions > * { flex:1; justify-content:center; } .contract-steps li { padding:5px 2px; } .contract-steps li strong { font-size:.75rem; } .contract-title-row { align-items:flex-start; } .generated-preview { min-height:440px; padding:10px; } .native-pdf-preview { min-height:520px; } .result-actions { flex-direction:column; } }
+@media(max-width:720px) { .app-header { height:auto; min-height:56px; padding:8px 12px; } .brand span { display:none; } .contract-home-link { display:none; } .contract-shell { padding:10px; } .contract-upload-grid,.confirm-grid { grid-template-columns:1fr; } .business-mapping-summary { align-items:flex-start; flex-direction:column; } .business-mapping-table { overflow:visible; } .business-mapping-head { display:none; } .business-mapping-row { min-width:0; grid-template-columns:1fr; gap:9px; padding:14px; } .business-mapping-row [data-cell-label]::before { content:attr(data-cell-label) "："; display:block; margin-bottom:4px; color:var(--faint); font-size:.68rem; font-weight:750; } .template-detection { flex-wrap:wrap; } .template-detection .mobile-cell-label { display:block; flex-basis:100%; order:1; color:var(--faint); font-size:.68rem; } .template-detection::before { order:2; } .template-detection .detection-text { order:3; } .contract-section-heading { align-items:stretch; flex-direction:column; } .mapping-actions { width:100%; } .mapping-actions > * { flex:1; justify-content:center; } .contract-steps li { padding:5px 2px; } .contract-steps li strong { font-size:.75rem; } .contract-title-row { align-items:flex-start; } .generated-preview { min-height:440px; padding:10px; } .native-pdf-preview { min-height:520px; } .result-actions { flex-direction:column; } }

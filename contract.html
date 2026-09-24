@@ -6,7 +6,7 @@
   <title>合同生成｜供应链数据清洗</title>
   <meta name="description" content="在浏览器本地解析订单并填写用户上传的 Word 或 Excel 合同模板。" />
   <link rel="stylesheet" href="styles-merge14.css" />
-  <link rel="stylesheet" href="contract.css?v=5" />
+  <link rel="stylesheet" href="contract.css?v=6" />
 </head>
 <body>
   <header class="app-header">
@@ -82,7 +82,7 @@
 
       <section class="contract-card mapping-stage" id="mappingStage" hidden aria-labelledby="mappingHeading">
         <div class="contract-section-heading">
-          <div><h2 id="mappingHeading">选择需要映射的字段</h2><p>按合同字段选择对应的订单明细列；模板中的写入位置由系统自动识别，不再展示模板结构。</p></div>
+          <div><h2 id="mappingHeading">选择需要映射的字段</h2><p>每一行对照查看订单字段、合同模板字段和写入方式；不展示模板位置或版面预览。</p></div>
           <div class="mapping-actions"><button class="secondary-button" id="exportMapping" type="button">导出映射</button><label class="secondary-button mapping-import">导入映射<input id="importMapping" type="file" accept="application/json,.json" /></label></div>
         </div>
         <div class="business-mapping-summary">
@@ -91,10 +91,11 @@
         </div>
         <div class="business-mapping-table" role="table" aria-label="合同字段映射">
           <div class="business-mapping-head" role="row">
-            <span role="columnheader">合同字段</span>
-            <span role="columnheader">对应订单明细列</span>
+            <span role="columnheader">映射字段</span>
+            <span role="columnheader">订单明细</span>
+            <span role="columnheader">合同模板</span>
+            <span role="columnheader">是否识别</span>
             <span role="columnheader">写入方式</span>
-            <span role="columnheader">模板识别</span>
           </div>
           <div id="businessMappingRows"></div>
         </div>

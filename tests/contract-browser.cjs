@@ -30,6 +30,7 @@ const HOME_URL = new URL('.', QA_URL).toString();
 
     const orderBytes = await page.evaluate(() => {
       const sheet = XLSX.utils.aoa_to_sheet([
+        ['采购合同', '', '', '', '', '', '', '', '', '', ''],
         ['供应商', '物料编码', '物料名称', '规格型号', 'SKU', '单位', '数量', '含税运单价（元）', '含税运总金额（元）', '备注', '交货时间'],
         ['甲公司', 'MAT-001', '产品A', 'A型', 'SKU-A', '件', '2', '10.5', '21', '首批', '2026-10-01'],
         ['甲公司', 'MAT-002', '产品B', 'B型', 'SKU-B', '件', '3', '20', '60', '', '2026-10-08'],
@@ -62,14 +63,24 @@ const HOME_URL = new URL('.', QA_URL).toString();
     assert.equal(await page.locator('.contract-upload').count(), 2);
     assert.equal(await page.locator('#templatePreview').count(), 0);
     assert.equal(await page.locator('#mappingInspector').count(), 0);
-    assert.equal(await page.locator('.business-mapping-row').count(), 18);
+    assert.equal(await page.locator('.business-mapping-row').count(), 21);
+    assert.deepEqual(await page.locator('.business-mapping-head [role="columnheader"]').allTextContents(), ['映射字段', '订单明细', '合同模板', '是否识别', '写入方式']);
+    assert.equal(await page.locator('[data-field-key="materialCode"] option').allTextContents().then(items => items.includes('采购合同')), false);
     assert.equal(await page.locator('[data-field-key="sequence"]').inputValue(), '@sequence');
     assert.equal(await page.locator('[data-field-key="sequence"]').isDisabled(), true);
     for (const [key, field] of [['materialCode', '物料编码'], ['materialName', '物料名称'], ['specification', '规格型号'], ['sku', 'SKU'], ['unit', '单位'], ['quantity', '数量'], ['taxUnitPrice', '含税运单价（元）'], ['taxAmount', '含税运总金额（元）'], ['remark', '备注'], ['deliveryTime', '交货时间'], ['supplier', '供应商']]) {
       assert.equal(await page.locator(`[data-field-key="${key}"]`).inputValue(), field);
     }
     assert.match(await page.locator('#templateDetectionSummary').innerText(), /序号按 2 行自动生成/);
+    assert.equal(await page.locator('[data-business-key="materialCode"] .business-template-field').innerText(), '物料编码');
+    assert.equal(await page.locator('[data-business-key="materialCode"] .template-detection').innerText(), '识别成功');
+    assert.equal(await page.locator('[data-business-key="materialCode"] .business-write-mode').innerText(), '按订单逐行写入');
     await page.locator('#mappingStage').screenshot({ path: path.join(out, 'contract-field-mapping.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('[data-business-key="materialCode"]').scrollIntoViewIfNeeded();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false);
+    await page.locator('[data-business-key="materialCode"]').screenshot({ path: path.join(out, 'contract-field-mapping-mobile.png') });
+    await page.setViewportSize({ width: 1440, height: 1000 });
 
     await page.locator('#outputName').fill('虚构采购合同');
     await page.locator('#confirmGenerate').check();
@@ -188,6 +199,6 @@ const HOME_URL = new URL('.', QA_URL).toString();
     assert.deepEqual(consoleErrors.filter(message => !message.includes('Failed to load resource: the server responded with a status of 404')), []);
     assert.deepEqual(httpErrors, []);
     assert.deepEqual(mutatingRequests, []);
-    console.log(JSON.stringify({ status: 'PASS', output: out, screenshots: ['contract-pdf-page2.png', 'contract-field-mapping.png', 'contract-desktop.png', 'contract-complex-upload.png', 'contract-excel.png', 'contract-mobile.png'] }));
+    console.log(JSON.stringify({ status: 'PASS', output: out, screenshots: ['contract-pdf-page2.png', 'contract-field-mapping.png', 'contract-field-mapping-mobile.png', 'contract-desktop.png', 'contract-complex-upload.png', 'contract-excel.png', 'contract-mobile.png'] }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

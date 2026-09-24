@@ -23,15 +23,18 @@
     { key: 'quantity', label: '数量', aliases: ['数量', '采购数量', '订单数量'], kind: 'detail' },
     { key: 'taxUnitPrice', label: '含税运单价（元）', aliases: ['含税运单价（元）', '含税运单价', '含税单价（元）', '含税单价', '单价'], kind: 'detail' },
     { key: 'taxAmount', label: '含税运总金额（元）', aliases: ['含税运总金额（元）', '含税运总金额', '含税总金额（元）', '含税总金额', '含税金额', '金额'], kind: 'detail' },
+    { key: 'taxRate', label: '税率', aliases: ['税率', '增值税率'], kind: 'detail' },
     { key: 'deliveryTime', label: '交货时间', aliases: ['交货时间', '交期', '要求货好时间', '要求交货日期'], kind: 'detail' },
     { key: 'remark', label: '备注', aliases: ['备注', '说明'], kind: 'detail' },
     { key: 'taxTotalLower', label: '含税运合计（小写）', aliases: ['含税运合计（小写）', '含税运合计小写', '合计（小写）', '合计小写', '小写合计'], kind: 'single' },
     { key: 'taxTotalUpper', label: '含税运合计（大写）', aliases: ['含税运合计（大写）', '含税运合计大写', '合计（大写）', '合计大写', '大写合计'], kind: 'single' },
     { key: 'contractNumber', label: '合同编号', aliases: ['合同编号', '合同号'], kind: 'single' },
+    { key: 'orderNumber', label: '订单编号', aliases: ['订单编号', '采购订单号', '采购单号', '订单号'], kind: 'single' },
     { key: 'buyer', label: '采购方（甲方）', aliases: ['采购方（甲方）', '采购方', '甲方', '买方'], kind: 'single' },
     { key: 'supplier', label: '供应商（乙方）', aliases: ['供应商名称', '供应商（乙方）', '供应商', '乙方', '卖方'], kind: 'single' },
     { key: 'signDate', label: '签订日期', aliases: ['签订日期', '合同日期', '签约日期'], kind: 'single' },
     { key: 'deliveryPlace', label: '交货地点', aliases: ['交货地点', '送货地址', '交付地点'], kind: 'single' },
+    { key: 'paymentTerms', label: '付款方式', aliases: ['付款方式', '付款条件', '结算方式', '结算条件'], kind: 'single' },
   ];
   let pdfJsPromise = null;
   let converterFrame = null;
@@ -350,7 +353,7 @@
       for (const definition of detailFields) {
         const headerCell = bestHeader.matches.get(definition.key); if (!headerCell) continue;
         const target = detailRow.cells.find(cell => cell.cellIndex === headerCell.cellIndex);
-        if (target) bindings[definition.key] = { targetId: target.id, mode: 'detail' };
+        if (target) bindings[definition.key] = { targetId: target.id, mode: 'detail', templateLabel: headerCell.value };
       }
     }
     const excludedRows = new Set([bestHeader ? rows[bestHeader.index].rowKey : '', state.detailRow].filter(Boolean));
@@ -367,7 +370,7 @@
       const canUseNext = next && !usedTargets.has(next.id) && (!bestDefinition(next.value)?.score || /待填|填写|空白/.test(C.text(next.value)));
       const target = canUseNext ? next : best.target;
       if (usedTargets.has(target.id)) continue;
-      bindings[definition.key] = { targetId: target.id, mode: 'single', preserveLabel: target.id === best.target.id, labelText: best.target.value };
+      bindings[definition.key] = { targetId: target.id, mode: 'single', preserveLabel: target.id === best.target.id, labelText: best.target.value, templateLabel: best.target.value };
       usedTargets.add(target.id);
     }
     state.templateBindings = bindings;
@@ -412,11 +415,14 @@
         ? '<option value="@sequence">自动生成 1、2、3…</option>'
         : `<option value="">不填写</option>${state.order.headers.map(header => `<option value="${esc(header)}" ${header === selection ? 'selected' : ''}>${esc(header)}</option>`).join('')}`;
       const strategy = conflict ? `<select class="business-field-select business-strategy-select" data-strategy-key="${definition.key}" aria-label="${esc(definition.label)}多值处理"><option value="">该列有多个值，请选择处理方式</option><option value="first" ${state.fieldStrategies[definition.key] === 'first' ? 'selected' : ''}>取第一条非空值</option><option value="merge" ${state.fieldStrategies[definition.key] === 'merge' ? 'selected' : ''}>合并去重值</option><option value="sum" ${state.fieldStrategies[definition.key] === 'sum' ? 'selected' : ''}>求和</option></select>` : '';
+      const success = !!(binding && selection && mapped.has(definition.key));
+      const templateField = binding?.templateLabel || '未识别到对应字段';
       return `<div class="business-mapping-row" role="row" data-business-key="${definition.key}">
-        <div class="business-field-name" role="cell"><strong>${esc(definition.label)}</strong><small>${definition.automatic ? '无需选择订单列' : esc(definition.aliases.slice(0, 3).join('、'))}</small></div>
-        <div role="cell"><select class="business-field-select" data-field-key="${definition.key}" ${definition.automatic ? 'disabled' : ''} aria-label="${esc(definition.label)}对应订单列">${options}</select>${strategy}</div>
-        <span class="business-write-mode" role="cell">${definition.kind === 'detail' ? '按订单逐行写入' : '合同单值'}</span>
-        <span class="template-detection ${binding && mapped.has(definition.key) ? 'detected' : ''}" role="cell">${binding ? (selection ? '已识别' : '等待选择') : '模板未识别'}</span>
+        <div class="business-field-name" role="cell" data-cell-label="映射字段"><strong>${esc(definition.label)}</strong><small>${definition.automatic ? '序号由系统生成' : esc(definition.aliases.slice(0, 3).join('、'))}</small></div>
+        <div class="business-order-field" role="cell" data-cell-label="订单明细"><select class="business-field-select" data-field-key="${definition.key}" ${definition.automatic ? 'disabled' : ''} aria-label="${esc(definition.label)}对应订单列">${options}</select>${strategy}</div>
+        <span class="business-template-field" role="cell" data-cell-label="合同模板">${esc(templateField)}</span>
+        <span class="template-detection ${success ? 'detected' : ''}" role="cell"><span class="mobile-cell-label" aria-hidden="true">是否识别：</span><span class="detection-text">${success ? '识别成功' : '未识别'}</span></span>
+        <span class="business-write-mode" role="cell" data-cell-label="写入方式">${definition.kind === 'detail' ? '按订单逐行写入' : '填充内容'}</span>
       </div>`;
     }).join('');
     $('businessMappingRows').querySelectorAll('[data-field-key]').forEach(select => select.addEventListener('change', event => {

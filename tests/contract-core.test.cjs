@@ -15,6 +15,17 @@ test('订单表头和明细解析保留原始顺序', () => {
   assert.equal(result.rows[1]._row, 4);
 });
 
+test('跳过采购合同标题行并识别真实订单表头', () => {
+  const result = C.analyzeMatrix([
+    ['采购合同', '', '', ''],
+    ['物料编码', '物料名称', '规格型号', '数量'],
+    ['MAT-001', '产品A', 'A型', '2'],
+  ]);
+  assert.equal(result.headerIndex, 1);
+  assert.deepEqual(result.headers, ['物料编码', '物料名称', '规格型号', '数量']);
+  assert.equal(result.rows[0].物料编码, 'MAT-001');
+});
+
 test('重复表头、空明细和超长明细均被拦截', () => {
   assert.throws(() => C.analyzeMatrix([['名称', '名称'], ['A', 'B']]), /重复字段/);
   assert.throws(() => C.analyzeMatrix([['名称']]), /只有表头/);

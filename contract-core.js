@@ -20,8 +20,25 @@
     return cleaned || '合同';
   }
 
+  function findHeaderIndex(matrix) {
+    const hints = /(?:序号|编码|名称|物料|商品|产品|规格|型号|SKU|单位|数量|单价|金额|合计|备注|交货|供应商|采购方|订单号|合同编号|日期|税率|付款)/i;
+    let best = null;
+    for (let index = 0; index < Math.min(matrix.length, 50); index += 1) {
+      const row = Array.isArray(matrix[index]) ? matrix[index] : [];
+      const values = row.map(cleanHeader).filter(Boolean);
+      if (!values.length) continue;
+      const unique = new Set(values);
+      const hintCount = values.filter(value => hints.test(value)).length;
+      const numericCount = values.filter(value => /^[-+]?\d+(?:[.,]\d+)?$/.test(value)).length;
+      const longTextCount = values.filter(value => value.length > 40).length;
+      const score = values.length * 10 + hintCount * 30 + unique.size - numericCount * 4 - longTextCount * 5;
+      if (!best || score > best.score) best = { index, score };
+    }
+    return best?.index ?? -1;
+  }
+
   function analyzeMatrix(matrix, maxRows = 1000) {
-    const headerIndex = matrix.findIndex(row => Array.isArray(row) && row.some(value => cleanHeader(value)));
+    const headerIndex = findHeaderIndex(matrix);
     if (headerIndex < 0) throw new Error('订单工作表没有数据');
     const headers = matrix[headerIndex].map(cleanHeader);
     const populated = headers.filter(Boolean);
