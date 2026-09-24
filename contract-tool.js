@@ -25,7 +25,7 @@
     { key: 'taxUnitPrice', label: '含税运单价（元）', aliases: ['含税运单价（元）', '含税运单价', '含税单价（元）', '含税单价', '单价'], kind: 'detail' },
     { key: 'taxAmount', label: '含税运总金额（元）', aliases: ['含税运总金额（元）', '含税运总金额', '含税总金额（元）', '含税总金额', '含税金额', '金额'], kind: 'detail' },
     { key: 'taxRate', label: '税率', aliases: ['税率', '增值税率'], kind: 'detail' },
-    { key: 'deliveryTime', label: '交货时间', aliases: ['交货时间', '交期', '要求货好时间', '要求交货日期'], kind: 'detail' },
+    { key: 'deliveryTime', label: '交货时间', aliases: ['交货时间', '交期', '要求货好时间', '要求交货日期'], kind: 'single' },
     { key: 'remark', label: '备注', aliases: ['备注', '说明'], kind: 'detail' },
     { key: 'taxTotalLower', label: '含税运合计（小写）', aliases: ['含税运合计（小写）', '含税运合计小写', '合计（小写）', '合计小写', '小写合计'], kind: 'single' },
     { key: 'taxTotalUpper', label: '含税运合计（大写）', aliases: ['含税运合计（大写）', '含税运合计大写', '合计（大写）', '合计大写', '大写合计'], kind: 'single' },
@@ -328,6 +328,26 @@
     return best?.score > 0 ? best.header : '';
   }
 
+  function detailRecords() {
+    const rows = state.order?.rows || [];
+    const identityFields = ['materialCode', 'materialName', 'sku'].map(key => state.fieldSelections[key]).filter(field => field && field !== '@sequence');
+    if (identityFields.length) {
+      const matched = rows.filter(record => identityFields.some(field => isDetailIdentity(record[field])));
+      if (matched.length) return matched;
+    }
+    const fallbackFields = ['specification', 'quantity', 'taxUnitPrice', 'taxAmount'].map(key => state.fieldSelections[key]).filter(field => field && field !== '@sequence');
+    if (fallbackFields.length) {
+      const matched = rows.filter(record => fallbackFields.some(field => C.text(record[field]).trim()));
+      if (matched.length) return matched;
+    }
+    return rows;
+  }
+
+  function isDetailIdentity(value) {
+    const normalized = C.text(value).replace(/[\s：:]/g, '');
+    return !!normalized && !/^(序号|合计|总计|小计|交货时间|交货日期|交期|付款方式|付款条件|备注|说明|签字|盖章)$/.test(normalized);
+  }
+
   function templateRows() {
     if (state.templateModel.type === 'docx') return state.templateModel.blocks.filter(block => block.type === 'table').flatMap(block => block.rows);
     return state.templateModel.rows;
@@ -407,7 +427,8 @@
     if (!state.fieldStrategies) state.fieldStrategies = {};
     const mapped = new Set(mappedEntries().map(([, mapping]) => mapping.businessKey));
     const detected = Object.keys(state.templateBindings).length;
-    $('templateDetectionSummary').textContent = `模板自动识别 ${detected} 个可写字段；序号按 ${state.order.rows.length} 行自动生成`;
+    const detailRows = detailRecords();
+    $('templateDetectionSummary').textContent = `模板自动识别 ${detected} 个可写字段；序号按 ${detailRows.length} 条物料明细自动生成`;
     $('businessMappingRows').innerHTML = BUSINESS_FIELDS.map(definition => {
       const selection = state.fieldSelections[definition.key] || '', binding = state.templateBindings[definition.key];
       const values = selection && selection !== '@sequence' ? C.distinctValues(state.order.rows, selection) : [];
@@ -488,7 +509,8 @@
     const notDetected = BUSINESS_FIELDS.filter(field => state.fieldSelections[field.key] && !state.templateBindings[field.key]).map(field => field.label);
     const outputName = C.sanitizeFileName($('outputName').value);
     if (!$('outputName').value.trim()) issues.push('请填写合同文件名称');
-    $('confirmSummary').innerHTML = `订单：<strong>${esc(state.orderSheet)}</strong>，${state.order.rows.length} 行；模板：<strong>${esc(state.templateFile.name)}</strong>${state.templateSheet ? `，合同Sheet：<strong>${esc(state.templateSheet)}</strong>` : ''}；输出：<strong>${esc(outputName)}.${state.templateType}</strong>`;
+    const detailRows = detailRecords();
+    $('confirmSummary').innerHTML = `订单：<strong>${esc(state.orderSheet)}</strong>，识别 ${detailRows.length} 条物料明细${detailRows.length !== state.order.rows.length ? `（原表 ${state.order.rows.length} 行）` : ''}；模板：<strong>${esc(state.templateFile.name)}</strong>${state.templateSheet ? `，合同Sheet：<strong>${esc(state.templateSheet)}</strong>` : ''}；输出：<strong>${esc(outputName)}.${state.templateType}</strong>`;
     const warnings = notDetected.length ? `<div class="warnings">模板中未识别：${esc(notDetected.join('、'))}；这些字段本次不会写入。</div>` : '';
     $('contractIssues').innerHTML = `${issues.length ? `<ul>${issues.map(issue => `<li>${esc(issue)}</li>`).join('')}</ul>` : '<div class="ready">映射检查通过，可以生成PDF预览。</div>'}${warnings}`;
     $('generateContract').disabled = state.busy || issues.length > 0 || !$('confirmGenerate').checked;
@@ -660,7 +682,7 @@
       const table = direct(all(doc, 'body')[0], 'tbl')[Number(match[1])], row = direct(table, 'tr')[Number(match[2])];
       if (!row) throw new Error('找不到Word明细模板行');
       const rowMappings = mappedEntries().filter(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow);
-      for (const [recordIndex, record] of state.order.rows.entries()) {
+      for (const [recordIndex, record] of detailRecords().entries()) {
         const clone = row.cloneNode(true), cells = direct(clone, 'tc');
         for (const [targetId, mapping] of rowMappings) {
           const cellIndex = Number(targetId.match(/:c:(\d+)$/)?.[1]);
@@ -685,7 +707,7 @@
     if (state.detailRow) {
       const rowNumber = Number(state.detailRow.split(':')[1]);
       const rowMappings = mappedEntries().filter(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow);
-      await expandExcelDetailRowXml(zip, context, rowNumber, state.order.rows, rowMappings);
+      await expandExcelDetailRowXml(zip, context, rowNumber, detailRecords(), rowMappings);
     }
     await forceWorkbookRecalculation(zip, context);
     zip.file(context.sheetPath, new XMLSerializer().serializeToString(context.sheetDoc));

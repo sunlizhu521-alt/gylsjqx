@@ -116,7 +116,7 @@
 .confirm-check { display:flex; align-items:flex-start; gap:9px; margin-top:16px; color:var(--text); line-height:1.5; }
 .confirm-check input { margin-top:3px; }
 .contract-action-row { display:flex; justify-content:flex-end; margin-top:14px; }
-.generated-preview { display:grid; place-items:start center; overflow:auto; max-height:820px; min-height:520px; padding:22px; border:1px solid var(--line); border-radius:8px; background:#e9eef5; color:#111827; }
+.generated-preview { display:grid; place-items:start center; overflow:visible; width:100%; min-height:0; padding:22px; box-sizing:border-box; border:1px solid var(--line); border-radius:8px; background:#e9eef5; color:#111827; }
 .result-actions { gap:10px; }
 .onlyoffice-converter-frame { position:fixed; left:-20000px; top:0; width:1200px; height:900px; border:0; opacity:0; pointer-events:none; }
 .contract-limit-note { margin:14px 0 0; color:var(--muted); line-height:1.6; }
