@@ -150,6 +150,21 @@
     if (!sheet) throw new Error('找不到选中的订单工作表');
     const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, blankrows: true });
     state.order = C.analyzeMatrix(matrix, 1000);
+    const rightSideValues = C.extractAdjacentLabelValues(
+      matrix,
+      Object.fromEntries(BUSINESS_FIELDS.map(field => [field.key, field.aliases])),
+      sheet['!merges'] || [],
+      [state.order.headerIndex],
+    );
+    state.order.rightSideFields = {};
+    for (const definition of BUSINESS_FIELDS.filter(field => RIGHT_SIDE_VALUE_FIELDS.has(field.key))) {
+      const value = rightSideValues[definition.key];
+      if (!C.text(value).trim()) continue;
+      const header = `${definition.label}（右侧内容）`;
+      state.order.headers.push(header);
+      state.order.rows.forEach(record => { record[header] = value; });
+      state.order.rightSideFields[definition.key] = header;
+    }
     const allowed = new Set(state.order.headers);
     for (const [target, mapping] of Object.entries(state.mappings)) if (!allowed.has(mapping.field)) delete state.mappings[target];
   }
@@ -324,6 +339,8 @@
   }
 
   function bestOrderHeader(definition) {
+    const rightSideHeader = state.order.rightSideFields?.[definition.key];
+    if (rightSideHeader) return rightSideHeader;
     const best = state.order.headers.map(header => ({ header, score: fieldMatchScore(header, definition) })).sort((a, b) => b.score - a.score)[0];
     return best?.score > 0 ? best.header : '';
   }
@@ -554,10 +571,35 @@
   }
 
   async function preparePdfPreview(file) {
-    const normalized = await normalizePdfFile(file, state.outputFileName.replace(/\.[^.]+$/, '.pdf'));
-    const bytes = await normalized.arrayBuffer();
+    let normalized = await normalizePdfFile(file, state.outputFileName.replace(/\.[^.]+$/, '.pdf'));
     const pdfjs = await loadPdfJs();
-    let document, lastError;
+    let result = await parsePdfDocument(pdfjs, await normalized.arrayBuffer());
+    if (!result.document && window.PDFLib?.PDFDocument) {
+      try {
+        const repaired = await window.PDFLib.PDFDocument.load(await normalized.arrayBuffer(), { ignoreEncryption: false, updateMetadata: false });
+        const repairedBytes = await repaired.save({ useObjectStreams: false, addDefaultPage: false, updateFieldAppearances: false });
+        normalized = await normalizePdfFile(repairedBytes, normalized.name);
+        result = await parsePdfDocument(pdfjs, await normalized.arrayBuffer());
+      } catch (error) {
+        result.lastError = error;
+      }
+    }
+    const document = result.document;
+    if (!document) {
+      const parseError = new Error('生成的PDF无法完整读取，请重新生成');
+      parseError.code = 'PDF_PARSE_FAILED';
+      parseError.cause = result.lastError;
+      throw parseError;
+    }
+    if (!document.numPages) { document.destroy(); throw new Error('生成的PDF没有页面'); }
+    if (document.numPages > 500) { document.destroy(); throw new Error('生成的PDF超过500页，请拆分订单'); }
+    releasePreviewDocument();
+    state.previewDocument = document; state.previewMode = 'pdfjs'; state.previewPageCount = document.numPages; state.previewPage = 0;
+    return normalized;
+  }
+
+  async function parsePdfDocument(pdfjs, bytes) {
+    let lastError;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       let loadingTask;
       try {
@@ -569,24 +611,13 @@
           wasmUrl: new URL('vendor/pdfjs-wasm/', location.href).href,
           useSystemFonts: true,
         });
-        document = await loadingTask.promise;
-        break;
+        return { document: await loadingTask.promise, lastError: null };
       } catch (error) {
         lastError = error;
         try { await loadingTask?.destroy?.(); } catch (_) { /* 保留原解析错误 */ }
       }
     }
-    if (!document) {
-      const parseError = new Error('生成的PDF无法完整读取，请重新生成');
-      parseError.code = 'PDF_PARSE_FAILED';
-      parseError.cause = lastError;
-      throw parseError;
-    }
-    if (!document.numPages) { document.destroy(); throw new Error('生成的PDF没有页面'); }
-    if (document.numPages > 500) { document.destroy(); throw new Error('生成的PDF超过500页，请拆分订单'); }
-    releasePreviewDocument();
-    state.previewDocument = document; state.previewMode = 'pdfjs'; state.previewPageCount = document.numPages; state.previewPage = 0;
-    return normalized;
+    return { document: null, lastError };
   }
 
   async function convertContractToPdf(blob, fileName) {

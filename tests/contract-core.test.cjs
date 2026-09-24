@@ -26,6 +26,23 @@ test('跳过采购合同标题行并识别真实订单表头', () => {
   assert.equal(result.rows[0].物料编码, 'MAT-001');
 });
 
+test('合同编号、交货地点和交货时间读取标签右侧内容', () => {
+  const values = C.extractAdjacentLabelValues([
+    ['合同编号：', 'HT-001', '', '交货地点', '杭州仓'],
+    ['交货时间', '', '2026-10-01'],
+    ['交货时间', '备注'],
+  ], {
+    contractNumber: ['合同编号', '合同号'],
+    deliveryPlace: ['交货地点', '送货地址'],
+    deliveryTime: ['交货时间', '交期'],
+  }, [{ s: { r: 1, c: 0 }, e: { r: 1, c: 1 } }], [2]);
+  assert.deepEqual(values, {
+    contractNumber: 'HT-001',
+    deliveryPlace: '杭州仓',
+    deliveryTime: '2026-10-01',
+  });
+});
+
 test('重复表头、空明细和超长明细均被拦截', () => {
   assert.throws(() => C.analyzeMatrix([['名称', '名称'], ['A', 'B']]), /重复字段/);
   assert.throws(() => C.analyzeMatrix([['名称']]), /只有表头/);

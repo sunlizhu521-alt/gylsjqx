@@ -60,6 +60,40 @@
     return { headerIndex, headers: populated, rows };
   }
 
+  function normalizeLabel(value) {
+    return cleanHeader(value).toUpperCase().replace(/[^A-Z0-9\u4e00-\u9fff]/g, '');
+  }
+
+  function extractAdjacentLabelValues(matrix, aliasesByKey, mergedRanges = [], excludedRowIndexes = []) {
+    const definitions = Object.entries(aliasesByKey || {}).map(([key, aliases]) => ({
+      key,
+      aliases: (aliases || []).map(normalizeLabel).filter(Boolean),
+    }));
+    const allLabels = new Set(definitions.flatMap(definition => definition.aliases));
+    const excludedRows = new Set(excludedRowIndexes);
+    const values = {};
+    for (let rowIndex = 0; rowIndex < matrix.length; rowIndex += 1) {
+      if (excludedRows.has(rowIndex)) continue;
+      const row = Array.isArray(matrix[rowIndex]) ? matrix[rowIndex] : [];
+      for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
+        const label = normalizeLabel(row[columnIndex]);
+        if (!label) continue;
+        const definition = definitions.find(item => item.aliases.includes(label));
+        if (!definition || values[definition.key] !== undefined) continue;
+        const merged = mergedRanges.find(range => rowIndex >= range.s.r && rowIndex <= range.e.r && columnIndex >= range.s.c && columnIndex <= range.e.c);
+        const startColumn = merged ? merged.e.c + 1 : columnIndex + 1;
+        for (let valueColumn = startColumn; valueColumn < Math.min(row.length, startColumn + 4); valueColumn += 1) {
+          const candidate = cleanHeader(row[valueColumn]);
+          if (!candidate) continue;
+          if (allLabels.has(normalizeLabel(candidate))) break;
+          values[definition.key] = candidate;
+          break;
+        }
+      }
+    }
+    return values;
+  }
+
   function distinctValues(rows, field) {
     const seen = new Set();
     const values = [];
@@ -119,6 +153,7 @@
     cleanHeader,
     sanitizeFileName,
     analyzeMatrix,
+    extractAdjacentLabelValues,
     distinctValues,
     parseNumber,
     resolveField,
