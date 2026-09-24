@@ -6,7 +6,7 @@
   <title>合同生成｜供应链数据清洗</title>
   <meta name="description" content="在浏览器本地解析订单并填写用户上传的 Word 或 Excel 合同模板。" />
   <link rel="stylesheet" href="styles-merge14.css" />
-  <link rel="stylesheet" href="contract.css?v=7" />
+  <link rel="stylesheet" href="contract.css?v=8" />
 </head>
 <body>
   <header class="app-header">
@@ -114,7 +114,7 @@
 
       <section class="contract-card result-stage" id="resultStage" hidden aria-labelledby="resultHeading">
         <div class="contract-section-heading">
-          <div><h2 id="resultHeading">PDF预览与确认导出</h2><p>这里显示的是生成后合同实际转换得到的PDF，下载的PDF与预览为同一文件。</p></div>
+          <div><h2 id="resultHeading">PDF预览与确认导出</h2><p>按完整页面缩放展示，不裁切左右内容；多页合同可逐页翻看。下载的PDF与预览为同一文件。</p></div>
           <nav class="preview-pagination" id="resultPagination" aria-label="生成PDF预览翻页" hidden>
             <button id="resultPrevious" type="button" aria-label="上一页">上一页</button>
             <span id="resultPageLabel" aria-live="polite">第 1 / 1 页</span>
@@ -136,6 +136,6 @@
   <script src="vendor/xlsx.full.min.js"></script>
   <script src="vendor/jszip.min.js"></script>
   <script src="contract-core.js?v=2"></script>
-  <script src="contract-tool.js?v=7"></script>
+  <script src="contract-tool.js?v=8"></script>
 </body>
 </html>

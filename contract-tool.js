@@ -14,6 +14,7 @@
   const ONLYOFFICE_ORIGIN = 'https://edit.chaxus.com';
   const CONVERSION_TIMEOUT = 240000;
   const NUMERIC_BUSINESS_FIELDS = new Set(['sequence', 'quantity', 'taxUnitPrice', 'taxAmount', 'taxRate', 'taxTotalLower']);
+  const RIGHT_SIDE_VALUE_FIELDS = new Set(['contractNumber', 'deliveryPlace', 'deliveryTime']);
   const BUSINESS_FIELDS = [
     { key: 'sequence', label: '序号', aliases: ['序号', '行号'], kind: 'detail', automatic: true },
     { key: 'materialCode', label: '物料编码', aliases: ['物料编码', '产品编码', '商品编码', '货号'], kind: 'detail' },
@@ -45,7 +46,7 @@
   const state = {
     orderFile: null, orderBytes: null, orderBook: null, orderSheet: '', order: null,
     templateFile: null, templateBytes: null, templateType: '', templateBook: null, templateSheet: '', templateModel: null, templateFeatures: [], fingerprint: '',
-    previewDocument: null, previewObjectUrl: '', previewMode: '', previewPageCount: 0, previewPage: 0, previewRenderToken: 0,
+    previewDocument: null, previewMode: '', previewPageCount: 0, previewPage: 0, previewRenderToken: 0,
     mappings: {}, detailRow: '', fieldSelections: {}, fieldStrategies: {}, templateBindings: {}, mappingSignature: '', output: null, outputFileName: '', outputPdf: null, outputPdfFileName: '', busy: false,
   };
   const $ = id => document.getElementById(id);
@@ -192,8 +193,7 @@
     state.previewRenderToken += 1;
     state.previewDocument?.destroy?.();
     state.previewDocument = null;
-    if (state.previewObjectUrl) URL.revokeObjectURL(state.previewObjectUrl);
-    state.previewObjectUrl = ''; state.previewMode = '';
+    state.previewMode = '';
   }
 
   async function validateOoxml(bytes, type) {
@@ -389,9 +389,16 @@
       if (!best) continue;
       const row = locateRow(best.target.rowKey), next = row?.cells.find(cell => cell.cellIndex === best.target.cellIndex + 1);
       const canUseNext = next && !usedTargets.has(next.id) && (!bestDefinition(next.value)?.score || /待填|填写|空白/.test(C.text(next.value)));
+      if (RIGHT_SIDE_VALUE_FIELDS.has(definition.key) && !canUseNext) continue;
       const target = canUseNext ? next : best.target;
       if (usedTargets.has(target.id)) continue;
-      bindings[definition.key] = { targetId: target.id, mode: 'single', preserveLabel: target.id === best.target.id, labelText: best.target.value, templateLabel: best.target.value };
+      bindings[definition.key] = {
+        targetId: target.id,
+        mode: 'single',
+        preserveLabel: target.id === best.target.id,
+        labelText: best.target.value,
+        templateLabel: RIGHT_SIDE_VALUE_FIELDS.has(definition.key) ? `${best.target.value} → 右侧填写位置` : best.target.value,
+      };
       usedTargets.add(target.id);
     }
     state.templateBindings = bindings;
@@ -458,11 +465,6 @@
   }
 
   async function renderGeneratedPdf() {
-    if (state.previewMode === 'native' && state.previewObjectUrl) {
-      $('resultPagination').hidden = true;
-      $('generatedPreview').innerHTML = `<iframe class="native-pdf-preview" src="${esc(state.previewObjectUrl)}#toolbar=0&navpanes=0&view=FitH" title="生成合同PDF预览"></iframe>`;
-      return;
-    }
     if (!state.previewDocument) return;
     state.previewPage = Math.max(0, Math.min(state.previewPage, state.previewPageCount - 1));
     const pageNumber = state.previewPage + 1, renderToken = ++state.previewRenderToken;
@@ -533,48 +535,52 @@
       state.output = blob; state.outputFileName = `${C.sanitizeFileName($('outputName').value)}.${state.templateType}`;
       $('generateContract').textContent = '正在转换PDF…'; status('合同副本已生成，正在浏览器内转换PDF；首次加载可能需要一些时间…');
       let pdfFile = await convertContractToPdf(blob, state.outputFileName);
-      try { state.outputPdf = await preparePdfPreview(pdfFile, false); }
+      try { state.outputPdf = await preparePdfPreview(pdfFile); }
       catch (error) {
         if (error.code !== 'PDF_PARSE_FAILED') throw error;
         status('第一次PDF结果无法解析，正在自动重新转换…');
         pdfFile = await convertContractToPdf(blob, state.outputFileName);
-        state.outputPdf = await preparePdfPreview(pdfFile, true);
+        state.outputPdf = await preparePdfPreview(pdfFile);
       }
       state.outputPdfFileName = `${C.sanitizeFileName($('outputName').value)}.pdf`;
       $('resultStage').hidden = false;
       $('downloadContract').textContent = `下载 ${state.templateType.toUpperCase()}`;
       $('downloadPdf').textContent = '下载 PDF';
       $('confirmExport').checked = false; updateExportButtons(); renderGeneratedPdf();
-      const previewText = state.previewMode === 'native' ? '浏览器原生预览' : `${state.previewPageCount}页`;
-      saveMapping(); status(`PDF预览已生成：${state.outputPdfFileName}（${previewText}）`, 'success'); toast('PDF预览生成完成，请核对后确认导出', 'success'); updateSteps();
+      saveMapping(); status(`PDF预览已生成：${state.outputPdfFileName}（${state.previewPageCount}页，整页显示）`, 'success'); toast('PDF预览生成完成，请核对后确认导出', 'success'); updateSteps();
       $('resultStage').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) { status(error.message, 'error'); toast(error.message, 'error'); }
     finally { state.busy = false; $('generateContract').textContent = '生成PDF预览'; updateConfirmation(); }
   }
 
-  async function preparePdfPreview(file, allowNativeFallback) {
+  async function preparePdfPreview(file) {
     const normalized = await normalizePdfFile(file, state.outputFileName.replace(/\.[^.]+$/, '.pdf'));
     const bytes = await normalized.arrayBuffer();
     const pdfjs = await loadPdfJs();
-    let document;
-    try {
-      if (window.__CONTRACT_FORCE_NATIVE_PDF_PREVIEW__) throw new Error('测试浏览器原生PDF预览');
-      document = await pdfjs.getDocument({
-        data: new Uint8Array(bytes.slice(0)),
-        cMapUrl: new URL('vendor/pdfjs-cmaps/', location.href).href,
-        cMapPacked: true,
-        standardFontDataUrl: new URL('vendor/pdfjs-standard-fonts/', location.href).href,
-        wasmUrl: new URL('vendor/pdfjs-wasm/', location.href).href,
-        useSystemFonts: true,
-      }).promise;
-    } catch (error) {
-      if (!allowNativeFallback && !window.__CONTRACT_FORCE_NATIVE_PDF_PREVIEW__) {
-        const parseError = new Error('PDF转换结果无法解析，正在重试'); parseError.code = 'PDF_PARSE_FAILED'; throw parseError;
+    let document, lastError;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let loadingTask;
+      try {
+        loadingTask = pdfjs.getDocument({
+          data: new Uint8Array(bytes.slice(0)),
+          cMapUrl: new URL('vendor/pdfjs-cmaps/', location.href).href,
+          cMapPacked: true,
+          standardFontDataUrl: new URL('vendor/pdfjs-standard-fonts/', location.href).href,
+          wasmUrl: new URL('vendor/pdfjs-wasm/', location.href).href,
+          useSystemFonts: true,
+        });
+        document = await loadingTask.promise;
+        break;
+      } catch (error) {
+        lastError = error;
+        try { await loadingTask?.destroy?.(); } catch (_) { /* 保留原解析错误 */ }
       }
-      releasePreviewDocument();
-      state.previewObjectUrl = URL.createObjectURL(normalized); state.previewMode = 'native'; state.previewPageCount = 0; state.previewPage = 0;
-      console.warn('PDF.js读取失败，已切换浏览器原生预览：', error?.message || error);
-      return normalized;
+    }
+    if (!document) {
+      const parseError = new Error('生成的PDF无法完整读取，请重新生成');
+      parseError.code = 'PDF_PARSE_FAILED';
+      parseError.cause = lastError;
+      throw parseError;
     }
     if (!document.numPages) { document.destroy(); throw new Error('生成的PDF没有页面'); }
     if (document.numPages > 500) { document.destroy(); throw new Error('生成的PDF超过500页，请拆分订单'); }
