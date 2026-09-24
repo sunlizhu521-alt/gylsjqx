@@ -53,7 +53,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
         { s: { r: 1, c: 2 }, e: { r: 1, c: 3 } },
       ];
       const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, '订单');
-      return Array.from(new Uint8Array(XLSX.write(book, { type: 'array', bookType: 'xlsx' })));
+      return Array.from(new Uint8Array(XLSX.write(book, { type: 'array', bookType: 'biff8' })));
     });
     const previewPdf = await PDFDocument.create();
     for (const [index, title] of ['GENERATED CONTRACT PAGE 1', 'GENERATED CONTRACT PAGE 2'].entries()) {
@@ -78,7 +78,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       zip.folder('word').file('document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>采购合同</w:t></w:r></w:p><w:p><w:r><w:t>合同编号：</w:t></w:r></w:p><w:p><w:r><w:t>供应商名称：</w:t></w:r></w:p><w:tbl><w:tr>${headerRow}</w:tr><w:tr>${detailRow}</w:tr><w:tr>${deliveryRow}</w:tr>${labeledRow('合同编号：')}${labeledRow('交货地点：')}${labeledRow('含税运合计（小写）')}${labeledRow('含税运合计（大写）')}${termsRow}</w:tbl>${extraParagraphs}<w:sectPr/></w:body></w:document>`);
       return Array.from(await zip.generateAsync({ type: 'uint8array' }));
     }, CONTRACT_TERMS);
-    await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(orderBytes) });
+    await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from(orderBytes) });
     assert.equal(await page.locator('#orderFile').inputValue(), '');
     await page.locator('#templateFile').setInputFiles({ name: '虚构合同模板.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: Buffer.from(docxBytes) });
     await page.waitForFunction(() => !document.querySelector('#mappingStage').hidden);
@@ -181,7 +181,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
 
     // Excel template: repeat one detail row while keeping the original template file untouched.
     await page.reload({ waitUntil: 'networkidle' });
-    await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(orderBytes) });
+    await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from(orderBytes) });
     const templateXlsx = await page.evaluate(async terms => {
       const matrix = [['采购合同', '', '', ''], ['序号', '物料名称', '数量', '行金额'], ['待填写', '待填写', '待填写', ''], ['合计', '', '', ''], ['含税运合计（小写）', '', '待填写', '', '', '含税运合计（大写）', '', '待填写', '', '']];
       for (let row = 6; row <= 31; row += 1) matrix.push([`附注${row}`, '', '', '']);
