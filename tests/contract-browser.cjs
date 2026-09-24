@@ -8,6 +8,18 @@ const { PDFDocument, rgb } = require(runtimeNodeModules ? path.join(runtimeNodeM
 
 const QA_URL = process.env.QA_URL || 'http://127.0.0.1:8899/contract.html';
 const HOME_URL = new URL('.', QA_URL).toString();
+const CONTRACT_TERMS = [
+  '1、采购合同所述价格为甲方在本合同项下应向乙方支付的最终价格，其中已经包括所有的安装费、售后服务费和税费等，除合同金额外，甲方不再支付任何其他费用。',
+  '2、乙方应根据甲方要求进行包装并确保产品交付给甲方时包装完好无损，按照甲方要求进行必要的标识贴附工作并承担相关费用。',
+  '3、乙方应按时将产品及时足额送货至甲方指定地点，同时附带产品合格证及出厂检验报告及其他应提供的相应材料，否则甲方有权拒绝收货。因乙方原因造成延迟交货、不能交货的，乙方应承担相应责任。甲方在交货地依据出厂标准或双方约定对合同产品进行检验并签署验收单，若产品与本合同约定不符，乙方应免费更换或退货退款并承担相应费用。',
+  '4、乙方保证产品质量符合相关标准及双方相关约定。乙方产品保修期为 / 年，保修期内产生产品质量问题的，乙方应于甲方指定时间及地点接收产品，并免费进行产品部件或整体保修。产品出货后因人为损坏原因或超出保修期限，有偿维修期为 / 年，乙方提供成本价有偿维修，对修复产品提供与新品相同的质量保证。',
+  '5、乙方向甲方交付产品并经甲方检验合格后，产品所有权及风险转移到甲方。乙方保证对交付给甲方的产品拥有合法的所有权、知识产权及其他权益，保证不侵犯任何第三方的合法权利。否则，由此产生的一切责任由乙方承担。',
+  '6、乙方应对所接触到的甲方的保密信息承担保密义务，未经甲方事先书面同意不得将甲方保密信息对外提供、披露。',
+  '7、任何一方违反本合同约定的，应按照本合同总价款30%的标准向守约方支付违约金。如违约金不足以弥补守约方的实际损失，违约方仍应向守约方赔偿其全部损失。',
+  '8、因本合同发生争议的，应友好协商解决；协商不成的，任何一方均有权向甲方所在地有管辖权的人民法院提起诉讼。',
+  '9、本合同一式二份，双方各执一份，具有同等法律效力。本合同自双方加盖公章或合同专用章之日起生效，扫描件、复印件与本合同原件具有同等法律效力。',
+];
+const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
 
 (async () => {
   const out = process.env.QA_OUTPUT || await fs.mkdtemp(path.join(os.tmpdir(), 'contract-browser-'));
@@ -49,7 +61,7 @@ const HOME_URL = new URL('.', QA_URL).toString();
       sheet.drawText('END OF CONTRACT TERMS', { x: 92, y: 28, size: 10, color: rgb(.08, .16, .3) });
     }
     const previewPdfBytes = await previewPdf.save();
-    const docxBytes = await page.evaluate(async () => {
+    const docxBytes = await page.evaluate(async terms => {
       const zip = new JSZip();
       const extraParagraphs = Array.from({ length: 50 }, (_, index) => `<w:p><w:r><w:t>附加条款 ${index + 1}：本条为A4分页预览测试内容。</w:t></w:r></w:p>`).join('');
       zip.file('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
@@ -59,9 +71,11 @@ const HOME_URL = new URL('.', QA_URL).toString();
       const detailRow = headers.map(() => '<w:tc><w:p><w:r><w:t>待填写</w:t></w:r></w:p></w:tc>').join('');
       const deliveryRow = headers.map((_, index) => `<w:tc><w:p><w:r><w:t>${index === 7 ? '交货时间：' : (index === 8 ? '待填写' : '')}</w:t></w:r></w:p></w:tc>`).join('');
       const labeledRow = (label, placeholder = '待填写') => `<w:tr><w:tc><w:p><w:r><w:t>${label}</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>${placeholder}</w:t></w:r></w:p></w:tc></w:tr>`;
-      zip.folder('word').file('document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>采购合同</w:t></w:r></w:p><w:p><w:r><w:t>供应商名称：</w:t></w:r></w:p><w:tbl><w:tr>${headerRow}</w:tr><w:tr>${detailRow}</w:tr><w:tr>${deliveryRow}</w:tr>${labeledRow('合同编号：')}${labeledRow('交货地点：')}</w:tbl>${extraParagraphs}<w:sectPr/></w:body></w:document>`);
+      const incompleteTerms = terms.slice(1).join('\n').replace('复印件与本合同原件具有同等法律效力。', '复印件与本合同原件');
+      const termsRow = `<w:tr><w:trPr><w:trHeight w:val="2600" w:hRule="exact"/><w:cantSplit/></w:trPr><w:tc><w:p><w:r><w:t>合同条款</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:keepLines/></w:pPr><w:r><w:t xml:space="preserve">${incompleteTerms}</w:t></w:r></w:p></w:tc></w:tr>`;
+      zip.folder('word').file('document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>采购合同</w:t></w:r></w:p><w:p><w:r><w:t>供应商名称：</w:t></w:r></w:p><w:tbl><w:tr>${headerRow}</w:tr><w:tr>${detailRow}</w:tr><w:tr>${deliveryRow}</w:tr>${labeledRow('合同编号：')}${labeledRow('交货地点：')}${termsRow}</w:tbl>${extraParagraphs}<w:sectPr/></w:body></w:document>`);
       return Array.from(await zip.generateAsync({ type: 'uint8array' }));
-    });
+    }, CONTRACT_TERMS);
     await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(orderBytes) });
     await page.locator('#templateFile').setInputFiles({ name: '虚构合同模板.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: Buffer.from(docxBytes) });
     await page.waitForFunction(() => !document.querySelector('#mappingStage').hidden);
@@ -144,7 +158,11 @@ const HOME_URL = new URL('.', QA_URL).toString();
     const generatedXml = await page.evaluate(async bytes => (await (await JSZip.loadAsync(new Uint8Array(bytes))).file('word/document.xml').async('string')), [...await fs.readFile(docxPath)]);
     for (const value of ['供应商名称：甲公司', '交货时间：', '>2026-10-01<', '合同编号：', '>HT-TEST-001<', '交货地点：', '>虚构交货地点<', 'MAT-001', 'MAT-002', '产品A', '产品B', 'SKU-A', 'SKU-B', '>1<', '>2<', '>3<']) assert.ok(generatedXml.includes(value), value);
     assert.doesNotMatch(generatedXml, /合同编号：HT-TEST-001|交货地点：虚构交货地点|交货时间：2026-10-01/);
-    assert.equal((generatedXml.match(/<w:tr>/g) || []).length, 6);
+    assert.equal((generatedXml.match(/<w:tr(?:\s|>)/g) || []).length, 7);
+    for (const term of CONTRACT_TERMS) assert.ok(generatedXml.includes(term), term.slice(0, 24));
+    assert.doesNotMatch(generatedXml, /<w:trHeight\b/);
+    assert.doesNotMatch(generatedXml, /<w:cantSplit\b|<w:keepLines\b/);
+    assert.match(generatedXml, /<w:vAlign[^>]*(?:w:val|val)="top"/);
     const pdfDownloadPromise = page.waitForEvent('download'); await page.locator('#downloadPdf').click(); const pdfDownload = await pdfDownloadPromise;
     assert.equal(pdfDownload.suggestedFilename(), '虚构采购合同.pdf');
     const pdfPath = path.join(out, '虚构采购合同.pdf'); await pdfDownload.saveAs(pdfPath);
@@ -155,14 +173,18 @@ const HOME_URL = new URL('.', QA_URL).toString();
     // Excel template: repeat one detail row while keeping the original template file untouched.
     await page.reload({ waitUntil: 'networkidle' });
     await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(orderBytes) });
-    const templateXlsx = await page.evaluate(async () => {
+    const templateXlsx = await page.evaluate(async terms => {
       const matrix = [['采购合同', '', '', ''], ['序号', '物料名称', '数量', '行金额'], ['待填写', '待填写', '待填写', ''], ['合计', '', '', '']];
       for (let row = 5; row <= 30; row += 1) matrix.push([`附注${row}`, '', '', '']);
+      const incompleteTerms = terms.slice(1).join('\n').replace('复印件与本合同原件具有同等法律效力。', '复印件与本合同原件');
+      matrix.push(['合同条款', incompleteTerms, '', '', '', '', '', '', '', '']);
       const sheet = XLSX.utils.aoa_to_sheet(matrix);
       sheet.D1 = { t: 'n', f: 'SUM(D3:D3)', v: 0 };
       sheet.D3 = { t: 'n', f: 'C3*10+$C$1+参考!A3+IF(A3="A1",0,0)', v: 0 };
       sheet.D4 = { t: 'n', f: 'SUM(D3:D3)+参考!A4+LOG10(100)', v: 0 };
-      sheet['!cols'] = [{ wch: 10 }, { wch: 22 }, { wch: 12 }, { wch: 14 }];
+      sheet['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
+      sheet['!rows'] = Array.from({ length: 31 }, (_, index) => index === 30 ? { hpt: 90 } : null);
+      sheet['!merges'] = [{ s: { r: 30, c: 1 }, e: { r: 30, c: 9 } }];
       const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, '合同');
       const referenceSheet = XLSX.utils.aoa_to_sheet([['参考数据', ''], [1, ''], [2, ''], [3, '']]);
       referenceSheet.B1 = { t: 'n', f: 'SUM(合同!D3:D3)', v: 0 };
@@ -181,7 +203,7 @@ const HOME_URL = new URL('.', QA_URL).toString();
       types = types.replace('</Types>', '<Override PartName="/xl/tables/table1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/></Types>');
       zip.file('[Content_Types].xml', types);
       return Array.from(await zip.generateAsync({ type: 'uint8array' }));
-    });
+    }, CONTRACT_TERMS);
     await page.locator('#templateFile').setInputFiles({ name: '虚构合同模板.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(templateXlsx) });
     await page.waitForFunction(() => !document.querySelector('#mappingStage').hidden);
     assert.match(await page.locator('#contractStatus').innerText(), /已识别并保留图形、数据透视表、结构化表/);
@@ -259,9 +281,13 @@ const HOME_URL = new URL('.', QA_URL).toString();
     const xlsxPath = path.join(out, '虚构Excel合同.xlsx'); await xlsxDownload.saveAs(xlsxPath);
     const generatedCells = await page.evaluate(bytes => {
       const book = XLSX.read(new Uint8Array(bytes), { type: 'array' }), sheet = book.Sheets['合同'];
-      return ['A3', 'B3', 'C3', 'A4', 'B4', 'C4', 'A5'].map(address => sheet[address]?.v);
+      return {
+        details: ['A3', 'B3', 'C3', 'A4', 'B4', 'C4', 'A5'].map(address => sheet[address]?.v),
+        terms: sheet.B32?.v,
+      };
     }, [...await fs.readFile(xlsxPath)]);
-    assert.deepEqual(generatedCells, [1, '产品A', 2, 2, '产品B', 3, '合计']);
+    assert.deepEqual(generatedCells.details, [1, '产品A', 2, 2, '产品B', 3, '合计']);
+    assert.equal(generatedCells.terms, CONTRACT_TERMS_TEXT);
     const preservedParts = await page.evaluate(async bytes => {
       const zip = await JSZip.loadAsync(new Uint8Array(bytes));
       return {
@@ -270,6 +296,7 @@ const HOME_URL = new URL('.', QA_URL).toString();
         table: await zip.file('xl/tables/table1.xml').async('string'),
         drawing: await zip.file('xl/drawings/drawing-contract.xml').async('string'),
         pivot: await zip.file('xl/pivotTables/pivot-contract.xml').async('string'),
+        styles: await zip.file('xl/styles.xml').async('string'),
       };
     }, [...await fs.readFile(xlsxPath)]);
     assert.match(preservedParts.sheet, /<c r="D1"><f>SUM\(D3:D4\)<\/f><\/c>/);
@@ -280,6 +307,10 @@ const HOME_URL = new URL('.', QA_URL).toString();
     assert.match(preservedParts.table, /ref="A1:D5"/);
     assert.match(preservedParts.drawing, /DRAWING-MARKER/);
     assert.match(preservedParts.pivot, /PIVOT-MARKER/);
+    assert.match(preservedParts.sheet, /<row[^>]*r="32"[^>]*ht="(?:[2-3]\d\d|40\d)(?:\.\d+)?"[^>]*customHeight="1"/);
+    assert.match(preservedParts.sheet, /<pageSetUpPr[^>]*fitToPage="1"[^>]*autoPageBreaks="0"/);
+    assert.match(preservedParts.sheet, /<pageSetup[^>]*paperSize="9"[^>]*fitToWidth="1"[^>]*fitToHeight="1"/);
+    assert.match(preservedParts.styles, /<alignment[^>]*wrapText="1"[^>]*vertical="top"/);
     await page.screenshot({ path: path.join(out, 'contract-excel.png'), fullPage: false });
 
     assert.deepEqual(errors, []);

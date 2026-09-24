@@ -15,6 +15,19 @@
   const CONVERSION_TIMEOUT = 240000;
   const NUMERIC_BUSINESS_FIELDS = new Set(['sequence', 'quantity', 'taxUnitPrice', 'taxAmount', 'taxRate', 'taxTotalLower']);
   const RIGHT_SIDE_VALUE_FIELDS = new Set(['contractNumber', 'deliveryPlace', 'deliveryTime']);
+  const CONTRACT_TERMS = [
+    '1、采购合同所述价格为甲方在本合同项下应向乙方支付的最终价格，其中已经包括所有的安装费、售后服务费和税费等，除合同金额外，甲方不再支付任何其他费用。',
+    '2、乙方应根据甲方要求进行包装并确保产品交付给甲方时包装完好无损，按照甲方要求进行必要的标识贴附工作并承担相关费用。',
+    '3、乙方应按时将产品及时足额送货至甲方指定地点，同时附带产品合格证及出厂检验报告及其他应提供的相应材料，否则甲方有权拒绝收货。因乙方原因造成延迟交货、不能交货的，乙方应承担相应责任。甲方在交货地依据出厂标准或双方约定对合同产品进行检验并签署验收单，若产品与本合同约定不符，乙方应免费更换或退货退款并承担相应费用。',
+    '4、乙方保证产品质量符合相关标准及双方相关约定。乙方产品保修期为 / 年，保修期内产生产品质量问题的，乙方应于甲方指定时间及地点接收产品，并免费进行产品部件或整体保修。产品出货后因人为损坏原因或超出保修期限，有偿维修期为 / 年，乙方提供成本价有偿维修，对修复产品提供与新品相同的质量保证。',
+    '5、乙方向甲方交付产品并经甲方检验合格后，产品所有权及风险转移到甲方。乙方保证对交付给甲方的产品拥有合法的所有权、知识产权及其他权益，保证不侵犯任何第三方的合法权利。否则，由此产生的一切责任由乙方承担。',
+    '6、乙方应对所接触到的甲方的保密信息承担保密义务，未经甲方事先书面同意不得将甲方保密信息对外提供、披露。',
+    '7、任何一方违反本合同约定的，应按照本合同总价款30%的标准向守约方支付违约金。如违约金不足以弥补守约方的实际损失，违约方仍应向守约方赔偿其全部损失。',
+    '8、因本合同发生争议的，应友好协商解决；协商不成的，任何一方均有权向甲方所在地有管辖权的人民法院提起诉讼。',
+    '9、本合同一式二份，双方各执一份，具有同等法律效力。本合同自双方加盖公章或合同专用章之日起生效，扫描件、复印件与本合同原件具有同等法律效力。',
+  ];
+  const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
+  const CONTRACT_TERMS_MARKERS = ['乙方应根据甲方要求进行包装', '产品所有权及风险转移到甲方', '有权向甲方所在地有管辖权的人民法院提起诉讼', '本合同一式二份'];
   const BUSINESS_FIELDS = [
     { key: 'sequence', label: '序号', aliases: ['序号', '行号'], kind: 'detail', automatic: true },
     { key: 'materialCode', label: '物料编码', aliases: ['物料编码', '产品编码', '商品编码', '货号'], kind: 'detail' },
@@ -494,7 +507,8 @@
     const mapped = new Set(mappedEntries().map(([, mapping]) => mapping.businessKey));
     const detected = Object.keys(state.templateBindings).length;
     const detailRows = detailRecords();
-    $('templateDetectionSummary').textContent = `模板自动识别 ${detected} 个可写字段；序号按 ${detailRows.length} 条物料明细自动生成`;
+    const termsSummary = hasStandardContractTermsTemplate() ? '；标准合同条款 1—9 已识别，生成时将完整写入' : '';
+    $('templateDetectionSummary').textContent = `模板自动识别 ${detected} 个可写字段；序号按 ${detailRows.length} 条物料明细自动生成${termsSummary}`;
     $('businessMappingRows').innerHTML = BUSINESS_FIELDS.map(definition => {
       const selection = state.fieldSelections[definition.key] || '', binding = state.templateBindings[definition.key];
       const values = selection && selection !== '@sequence' ? C.distinctValues(state.order.rows, selection) : [];
@@ -867,6 +881,7 @@
       }
       row.remove();
     }
+    normalizeWordContractTerms(doc);
     zip.file('word/document.xml', new XMLSerializer().serializeToString(doc));
     return zip.generateAsync({ type: 'blob', mimeType: MIME.docx, compression: 'DEFLATE' });
   }
@@ -884,9 +899,131 @@
       const rowMappings = mappedEntries().filter(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow);
       await expandExcelDetailRowXml(zip, context, rowNumber, detailRecords(), rowMappings);
     }
+    await normalizeExcelContractTerms(zip, context);
     await forceWorkbookRecalculation(zip, context);
     zip.file(context.sheetPath, new XMLSerializer().serializeToString(context.sheetDoc));
     return zip.generateAsync({ type: 'blob', mimeType: MIME.xlsx, compression: 'DEFLATE' });
+  }
+
+  function compactText(value) { return C.text(value).replace(/\s+/g, ''); }
+
+  function looksLikeStandardContractTerms(value) {
+    const text = compactText(value);
+    if (text.length < 160) return false;
+    return CONTRACT_TERMS_MARKERS.filter(marker => text.includes(compactText(marker))).length >= 2;
+  }
+
+  function hasStandardContractTermsTemplate() {
+    return (state.templateModel?.rows || []).some(row => {
+      const labelIndex = row.cells.findIndex(cell => compactText(cell.value) === '合同条款');
+      return labelIndex >= 0 && row.cells.slice(labelIndex + 1).some(cell => looksLikeStandardContractTerms(cell.value));
+    });
+  }
+
+  function normalizeWordContractTerms(doc) {
+    for (const table of all(all(doc, 'body')[0], 'tbl')) {
+      for (const row of direct(table, 'tr')) {
+        const cells = direct(row, 'tc'), labelIndex = cells.findIndex(cell => compactText(wordCellText(cell)) === '合同条款');
+        if (labelIndex < 0) continue;
+        const contentCell = cells.slice(labelIndex + 1).find(cell => looksLikeStandardContractTerms(wordCellText(cell)));
+        if (!contentCell) continue;
+        putWordText(contentCell, CONTRACT_TERMS_TEXT);
+        const rowProperties = direct(row, 'trPr')[0];
+        if (rowProperties) {
+          direct(rowProperties, 'trHeight').forEach(item => item.remove());
+          direct(rowProperties, 'cantSplit').forEach(item => item.remove());
+        }
+        let cellProperties = direct(contentCell, 'tcPr')[0];
+        if (!cellProperties) { cellProperties = wordNode(doc, 'tcPr'); contentCell.insertBefore(cellProperties, contentCell.firstChild); }
+        direct(cellProperties, 'noWrap').forEach(item => item.remove());
+        let vertical = direct(cellProperties, 'vAlign')[0];
+        if (!vertical) { vertical = wordNode(doc, 'vAlign'); cellProperties.append(vertical); }
+        vertical.setAttributeNS(W, 'w:val', 'top');
+        const paragraphProperties = direct(direct(contentCell, 'p')[0], 'pPr')[0];
+        if (paragraphProperties) ['keepLines', 'keepNext', 'pageBreakBefore'].forEach(name => direct(paragraphProperties, name).forEach(item => item.remove()));
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function findExcelContractTermsTarget() {
+    for (const row of state.templateModel?.rows || []) {
+      const label = row.cells.find(cell => compactText(cell.value) === '合同条款');
+      if (!label) continue;
+      const content = row.cells.find(cell => cell.cellIndex > label.cellIndex && looksLikeStandardContractTerms(cell.value));
+      if (content) return content;
+    }
+    return null;
+  }
+
+  function shiftedTemplateAddress(address) {
+    const point = XLSX.utils.decode_cell(address), detailRow = Number(state.detailRow?.split(':')[1] || 0), delta = detailRecords().length - 1;
+    if (detailRow && delta > 0 && point.r + 1 > detailRow) point.r += delta;
+    return XLSX.utils.encode_cell(point);
+  }
+
+  function excelContractTermsLayout(address) {
+    const sheet = state.templateBook?.Sheets[state.templateSheet], point = XLSX.utils.decode_cell(address);
+    const merge = (sheet?.['!merges'] || []).find(range => point.r >= range.s.r && point.r <= range.e.r && point.c >= range.s.c && point.c <= range.e.c);
+    const startColumn = merge?.s.c ?? point.c, endColumn = merge?.e.c ?? point.c;
+    let width = 0;
+    for (let column = startColumn; column <= endColumn; column += 1) width += Number(sheet?.['!cols']?.[column]?.wch || 8.43);
+    const usableWidth = Math.max(18, width - 2), weightedLength = line => [...line].reduce((total, character) => total + (/[^\u0000-\u00ff]/.test(character) ? 2 : 1), 0);
+    const lines = CONTRACT_TERMS.reduce((total, clause) => total + Math.max(1, Math.ceil(weightedLength(clause) / usableWidth)), 0);
+    let fontSize = 10, height = Math.ceil(lines * fontSize * 1.38 + 8);
+    if (height > 409.5) { fontSize = Math.max(8, Number((fontSize * 409.5 / height).toFixed(1))); height = Math.ceil(lines * fontSize * 1.38 + 8); }
+    if (height > 409.5) throw new Error('合同条款区域过窄，无法完整显示1—9条；请扩大模板中“合同条款”右侧内容区域');
+    return { fontSize, height: Math.min(409.5, Math.max(15, height)) };
+  }
+
+  async function normalizeExcelContractTerms(zip, context) {
+    const target = findExcelContractTermsTarget();
+    if (!target) return false;
+    const address = shiftedTemplateAddress(target.address), point = XLSX.utils.decode_cell(address), row = ensureSheetRow(context.sheetDoc, point.r + 1), cell = ensureRowCell(row, address);
+    const layout = excelContractTermsLayout(target.address);
+    writeCellValue(cell, CONTRACT_TERMS_TEXT);
+    row.setAttribute('ht', String(layout.height)); row.setAttribute('customHeight', '1');
+    await ensureExcelContractTermsStyle(zip, cell, layout.fontSize);
+    configureExcelContractPrint(context.sheetDoc, detailRecords().length <= 8);
+    return true;
+  }
+
+  function configureExcelContractPrint(doc, fitOnePage) {
+    const worksheet = doc.documentElement;
+    let sheetProperties = direct(worksheet, 'sheetPr', S)[0];
+    if (!sheetProperties) { sheetProperties = doc.createElementNS(S, 'sheetPr'); worksheet.insertBefore(sheetProperties, worksheet.firstChild); }
+    let pageSetupProperties = direct(sheetProperties, 'pageSetUpPr', S)[0];
+    if (!pageSetupProperties) { pageSetupProperties = doc.createElementNS(S, 'pageSetUpPr'); sheetProperties.append(pageSetupProperties); }
+    pageSetupProperties.setAttribute('fitToPage', '1'); pageSetupProperties.setAttribute('autoPageBreaks', '0');
+    let pageSetup = direct(worksheet, 'pageSetup', S)[0];
+    if (!pageSetup) {
+      pageSetup = doc.createElementNS(S, 'pageSetup');
+      const margins = direct(worksheet, 'pageMargins', S)[0];
+      worksheet.insertBefore(pageSetup, margins?.nextSibling || null);
+    }
+    pageSetup.setAttribute('paperSize', '9'); pageSetup.setAttribute('fitToWidth', '1'); pageSetup.setAttribute('fitToHeight', fitOnePage ? '1' : '0'); pageSetup.removeAttribute('scale');
+  }
+
+  async function ensureExcelContractTermsStyle(zip, cell, fontSize) {
+    const stylesFile = zip.file('xl/styles.xml');
+    if (!stylesFile) return;
+    const doc = parseXml(await stylesFile.async('string')), fonts = all(doc, 'fonts', S)[0], cellXfs = all(doc, 'cellXfs', S)[0];
+    if (!fonts || !cellXfs) return;
+    const xfs = direct(cellXfs, 'xf', S), sourceXf = xfs[Number(cell.getAttribute('s') || 0)] || xfs[0];
+    if (!sourceXf) return;
+    const fontId = Number(sourceXf.getAttribute('fontId') || 0), sourceFont = direct(fonts, 'font', S)[fontId] || direct(fonts, 'font', S)[0];
+    const font = sourceFont?.cloneNode(true) || doc.createElementNS(S, 'font');
+    let size = direct(font, 'sz', S)[0];
+    if (!size) { size = doc.createElementNS(S, 'sz'); font.append(size); }
+    const sourceSize = Number(size.getAttribute('val') || fontSize); size.setAttribute('val', String(Math.min(sourceSize || fontSize, fontSize)));
+    fonts.append(font); fonts.setAttribute('count', String(direct(fonts, 'font', S).length));
+    const xf = sourceXf.cloneNode(true); xf.setAttribute('fontId', String(direct(fonts, 'font', S).length - 1)); xf.setAttribute('applyFont', '1'); xf.setAttribute('applyAlignment', '1');
+    let alignment = direct(xf, 'alignment', S)[0];
+    if (!alignment) { alignment = doc.createElementNS(S, 'alignment'); xf.append(alignment); }
+    alignment.setAttribute('wrapText', '1'); alignment.setAttribute('vertical', 'top'); alignment.removeAttribute('shrinkToFit');
+    cellXfs.append(xf); cellXfs.setAttribute('count', String(direct(cellXfs, 'xf', S).length)); cell.setAttribute('s', String(direct(cellXfs, 'xf', S).length - 1));
+    zip.file('xl/styles.xml', new XMLSerializer().serializeToString(doc));
   }
 
   async function locateXlsxSheet(zip, sheetName) {
