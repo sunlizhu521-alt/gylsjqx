@@ -42,14 +42,16 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
 
     const orderBytes = await page.evaluate(() => {
       const sheet = XLSX.utils.aoa_to_sheet([
-        ['合同编号：', 'HT-TEST-001', '', '交货地点：', '虚构交货地点', '', '', '', '', ''],
-        ['交货时间：', '', '2026-10-01', '', '', '', '', '', '', ''],
-        ['采购合同', '', '', '', '', '', '', '', '', ''],
-        ['供应商', '物料编码', '物料名称', '规格型号', 'SKU', '单位', '数量', '含税运单价（元）', '含税运总金额（元）', '备注'],
-        ['甲公司', 'MAT-001', '产品A', 'A型', 'SKU-A', '件', '2', '10.5', '21', '首批'],
-        ['甲公司', 'MAT-002', '产品B', 'B型', 'SKU-B', '件', '3', '20', '60', ''],
+        ['合同编号：', '', '', '', '', '', '', '', '', 'HT-TEST-001', '', ''],
+        ['序号', '物料编码', '物料名称', '', '规格型号', 'SKU', '单位', '数量', '含税单价\n(元)', '含税总金额\n(元)', '备注', '供应商'],
+        ['1', 'MAT-001', '产品A', '', 'A型', 'SKU-A', '件', '2', '10.5', '21', '首批', '甲公司'],
+        ['2', 'MAT-002', '产品B', '', 'B型', 'SKU-B', '件', '3', '20', '60', '', '甲公司'],
+        ['交货地点', '虚构交货地点', '', '', '', '', '', '', '交货时间', '2026-10-01', '', ''],
       ]);
-      sheet['!merges'] = [{ s: { r: 1, c: 0 }, e: { r: 1, c: 1 } }];
+      sheet['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } },
+        { s: { r: 1, c: 2 }, e: { r: 1, c: 3 } },
+      ];
       const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, '订单');
       return Array.from(new Uint8Array(XLSX.write(book, { type: 'array', bookType: 'xlsx' })));
     });
@@ -77,6 +79,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       return Array.from(await zip.generateAsync({ type: 'uint8array' }));
     }, CONTRACT_TERMS);
     await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(orderBytes) });
+    assert.equal(await page.locator('#orderFile').inputValue(), '');
     await page.locator('#templateFile').setInputFiles({ name: '虚构合同模板.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: Buffer.from(docxBytes) });
     await page.waitForFunction(() => !document.querySelector('#mappingStage').hidden);
     assert.equal(await page.locator('#previewFile').count(), 0);
@@ -88,7 +91,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.equal(await page.locator('[data-field-key="materialCode"] option').allTextContents().then(items => items.includes('采购合同')), false);
     assert.equal(await page.locator('[data-field-key="sequence"]').inputValue(), '@sequence');
     assert.equal(await page.locator('[data-field-key="sequence"]').isDisabled(), true);
-    for (const [key, field] of [['materialCode', '物料编码'], ['materialName', '物料名称'], ['specification', '规格型号'], ['sku', 'SKU'], ['unit', '单位'], ['quantity', '数量'], ['taxUnitPrice', '含税运单价（元）'], ['taxAmount', '含税运总金额（元）'], ['remark', '备注'], ['deliveryTime', '交货时间（右侧内容）'], ['contractNumber', '合同编号（右侧内容）'], ['deliveryPlace', '交货地点（右侧内容）'], ['supplier', '供应商']]) {
+    for (const [key, field] of [['materialCode', '物料编码'], ['materialName', '物料名称'], ['specification', '规格型号'], ['sku', 'SKU'], ['unit', '单位'], ['quantity', '数量'], ['taxUnitPrice', '含税单价 (元)'], ['taxAmount', '含税总金额 (元)'], ['remark', '备注'], ['deliveryTime', '交货时间（右侧内容）'], ['contractNumber', '合同编号（右侧内容）'], ['deliveryPlace', '交货地点（右侧内容）'], ['supplier', '供应商']]) {
       assert.equal(await page.locator(`[data-field-key="${key}"]`).inputValue(), field);
     }
     assert.match(await page.locator('#templateDetectionSummary').innerText(), /序号按 2 条物料明细自动生成/);

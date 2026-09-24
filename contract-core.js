@@ -106,6 +106,34 @@
     return values;
   }
 
+  function selectDetailRows(rows, headers = [], fieldSelections = {}) {
+    const sourceRows = Array.isArray(rows) ? rows : [];
+    const sequenceField = (headers || []).find(header => /^(?:序号|行号|明细序号)$/.test(normalizeLabel(header)));
+    if (sequenceField) {
+      const sequenced = sourceRows.filter(row => {
+        const value = text(row[sequenceField]).trim().replace(/[、.．。]$/, '');
+        return /^\d+(?:\.0+)?$/.test(value) && Number(value) >= 0;
+      });
+      if (sequenced.length) return sequenced;
+    }
+
+    const isIdentity = value => {
+      const normalized = text(value).replace(/[\s：:]/g, '');
+      return !!normalized && !/^(序号|合计|总计|小计|交货时间|交货日期|交期|付款方式|付款条件|备注|说明|签字|盖章)$/.test(normalized);
+    };
+    const identityFields = ['materialCode', 'materialName', 'sku'].map(key => fieldSelections[key]).filter(field => field && field !== '@sequence');
+    if (identityFields.length) {
+      const matched = sourceRows.filter(record => identityFields.some(field => isIdentity(record[field])));
+      if (matched.length) return matched;
+    }
+    const fallbackFields = ['specification', 'quantity', 'taxUnitPrice', 'taxAmount'].map(key => fieldSelections[key]).filter(field => field && field !== '@sequence');
+    if (fallbackFields.length) {
+      const matched = sourceRows.filter(record => fallbackFields.some(field => text(record[field]).trim()));
+      if (matched.length) return matched;
+    }
+    return sourceRows;
+  }
+
   function parseNumber(value) {
     const normalized = text(value).trim().replace(/[￥¥,，\s]/g, '');
     if (!normalized || !/^-?(?:\d+\.?\d*|\.\d+)$/.test(normalized)) return null;
@@ -155,6 +183,7 @@
     analyzeMatrix,
     extractAdjacentLabelValues,
     distinctValues,
+    selectDetailRows,
     parseNumber,
     resolveField,
     mappingIssues,

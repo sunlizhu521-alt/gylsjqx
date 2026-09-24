@@ -26,6 +26,19 @@ test('跳过采购合同标题行并识别真实订单表头', () => {
   assert.equal(result.rows[0].物料编码, 'MAT-001');
 });
 
+test('订单有序号列时按序号行生成明细并排除交货信息行', () => {
+  const result = C.analyzeMatrix([
+    ['合同编号：', '', '', '', '', '', '', '', '', 'CGDD015006'],
+    ['序号', '物料编码', '物料名称', '', '规格型号', 'SKU', '单位', '数量', '含税单价\n(元)', '含税总金额\n(元)', '备注'],
+    ['1', '2001020022', '产品A', '', '24V', '', '根', '200', '2.00', '400.00', ''],
+    ['2', '2001020023', '产品B', '', '24V', '', '根', '400', '2.00', '800.00', ''],
+    ['交货地点', '', '', '', '', '', '', '', '交货时间', '2026年9月30日', ''],
+  ]);
+  const detail = C.selectDetailRows(result.rows, result.headers, { materialCode: '错误字段' });
+  assert.deepEqual(detail.map(row => row.序号), ['1', '2']);
+  assert.deepEqual(detail.map(row => row._row), [3, 4]);
+});
+
 test('合同编号、交货地点和交货时间读取标签右侧内容', () => {
   const values = C.extractAdjacentLabelValues([
     ['合同编号：', 'HT-001', '', '交货地点', '杭州仓'],

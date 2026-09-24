@@ -73,8 +73,8 @@
 
   function init() {
     initTheme();
-    $('orderFile').addEventListener('change', event => loadOrder(event.target.files[0]));
-    $('templateFile').addEventListener('change', event => loadTemplate(event.target.files[0]));
+    $('orderFile').addEventListener('change', event => { const file = event.target.files[0]; event.target.value = ''; loadOrder(file); });
+    $('templateFile').addEventListener('change', event => { const file = event.target.files[0]; event.target.value = ''; loadTemplate(file); });
     $('orderSheet').addEventListener('change', event => { state.orderSheet = event.target.value; state.fieldSelections = {}; state.fieldStrategies = {}; state.mappingSignature = ''; analyzeOrder(); invalidateOutput(); updateAll(); });
     $('templateSheet').addEventListener('change', event => { state.templateSheet = event.target.value; buildExcelModel(); state.mappings = {}; state.detailRow = ''; state.templateBindings = {}; state.mappingSignature = ''; invalidateOutput(); restoreMapping(); updateAll(); });
     $('resultPrevious').addEventListener('click', () => changePreviewPage(-1));
@@ -401,23 +401,7 @@
   }
 
   function detailRecords() {
-    const rows = state.order?.rows || [];
-    const identityFields = ['materialCode', 'materialName', 'sku'].map(key => state.fieldSelections[key]).filter(field => field && field !== '@sequence');
-    if (identityFields.length) {
-      const matched = rows.filter(record => identityFields.some(field => isDetailIdentity(record[field])));
-      if (matched.length) return matched;
-    }
-    const fallbackFields = ['specification', 'quantity', 'taxUnitPrice', 'taxAmount'].map(key => state.fieldSelections[key]).filter(field => field && field !== '@sequence');
-    if (fallbackFields.length) {
-      const matched = rows.filter(record => fallbackFields.some(field => C.text(record[field]).trim()));
-      if (matched.length) return matched;
-    }
-    return rows;
-  }
-
-  function isDetailIdentity(value) {
-    const normalized = C.text(value).replace(/[\s：:]/g, '');
-    return !!normalized && !/^(序号|合计|总计|小计|交货时间|交货日期|交期|付款方式|付款条件|备注|说明|签字|盖章)$/.test(normalized);
+    return C.selectDetailRows(state.order?.rows || [], state.order?.headers || [], state.fieldSelections);
   }
 
   function templateRows() {
