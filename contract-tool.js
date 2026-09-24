@@ -40,6 +40,7 @@
   ];
   let pdfJsPromise = null;
   let legacyPdfJsPromise = null;
+  let pdfiumPromise = null;
   let converterFrame = null;
   let converterReadyPromise = null;
   let previewResizeTimer = null;
@@ -47,7 +48,7 @@
   const state = {
     orderFile: null, orderBytes: null, orderBook: null, orderSheet: '', order: null,
     templateFile: null, templateBytes: null, templateType: '', templateBook: null, templateSheet: '', templateModel: null, templateFeatures: [], fingerprint: '',
-    previewDocument: null, previewObjectUrl: '', previewMode: '', previewPageCount: 0, previewPage: 0, previewRenderToken: 0,
+    previewDocument: null, previewPdfiumDocument: null, previewMode: '', previewPageCount: 0, previewPage: 0, previewRenderToken: 0,
     mappings: {}, detailRow: '', fieldSelections: {}, fieldStrategies: {}, templateBindings: {}, mappingSignature: '', output: null, outputFileName: '', outputPdf: null, outputPdfFileName: '', busy: false,
   };
   const $ = id => document.getElementById(id);
@@ -77,7 +78,7 @@
     for (const [dropId, inputId] of [['orderDrop', 'orderFile'], ['templateDrop', 'templateFile']]) bindDrop($(dropId), $(inputId));
     window.addEventListener('message', handleConverterMessage);
     window.addEventListener('resize', () => {
-      if (!state.previewDocument) return;
+      if (!state.previewDocument && !state.previewPdfiumDocument) return;
       clearTimeout(previewResizeTimer);
       previewResizeTimer = setTimeout(renderGeneratedPdf, 100);
     });
@@ -226,12 +227,29 @@
     return legacyPdfJsPromise;
   }
 
+  function loadPdfium() {
+    if (!pdfiumPromise) {
+      pdfiumPromise = Promise.all([
+        import('./vendor/pdfium-2.15.1.mjs'),
+        fetch(new URL('vendor/pdfium-2.15.1.wasm', location.href)).then(response => {
+          if (!response.ok) throw new Error('PDFium预览引擎加载失败');
+          return response.arrayBuffer();
+        }),
+      ]).then(async ([module, wasmBinary]) => {
+        const pdfium = await module.init({ wasmBinary });
+        pdfium.PDFiumExt_Init();
+        return pdfium;
+      });
+    }
+    return pdfiumPromise;
+  }
+
   function releasePreviewDocument() {
     state.previewRenderToken += 1;
     state.previewDocument?.destroy?.();
     state.previewDocument = null;
-    if (state.previewObjectUrl) URL.revokeObjectURL(state.previewObjectUrl);
-    state.previewObjectUrl = '';
+    state.previewPdfiumDocument?.close?.();
+    state.previewPdfiumDocument = null;
     state.previewMode = '';
   }
 
@@ -506,42 +524,37 @@
   }
 
   async function renderGeneratedPdf() {
-    if (state.previewMode === 'compat' && state.previewObjectUrl) {
-      const pageNumber = Math.max(1, Math.min(state.previewPage + 1, state.previewPageCount || 1));
-      $('generatedPreview').innerHTML = `<div class="compat-pdf-preview-shell"><iframe class="compat-pdf-preview" data-page="${pageNumber}" src="${esc(state.previewObjectUrl)}#page=${pageNumber}&zoom=page-fit&toolbar=0&navpanes=0&pagemode=none" title="生成合同PDF第${pageNumber}页兼容预览" scrolling="no"></iframe></div>`;
-      const iframe = $('generatedPreview').querySelector('.compat-pdf-preview');
-      iframe.addEventListener('load', () => { iframe.dataset.loaded = 'true'; }, { once: true });
-      $('resultPagination').hidden = state.previewPageCount <= 1;
-      $('resultPageLabel').textContent = `第 ${pageNumber} / ${state.previewPageCount || 1} 页`;
-      $('resultPrevious').disabled = state.previewPage === 0;
-      $('resultNext').disabled = state.previewPage >= state.previewPageCount - 1;
-      $('resultPagination').dataset.totalPages = String(state.previewPageCount || 1);
-      $('resultPagination').dataset.currentPage = String(pageNumber);
-      return;
-    }
-    if (!state.previewDocument) return;
+    if (!state.previewDocument && !state.previewPdfiumDocument) return;
     state.previewPage = Math.max(0, Math.min(state.previewPage, state.previewPageCount - 1));
     const pageNumber = state.previewPage + 1, renderToken = ++state.previewRenderToken;
     $('generatedPreview').innerHTML = `<div class="pdf-preview-shell"><canvas class="pdf-preview-canvas" data-page="${pageNumber}" aria-label="生成合同PDF第${pageNumber}页"></canvas><span class="pdf-render-status">正在渲染第 ${pageNumber} 页…</span></div>`;
-    $('resultPagination').hidden = false;
+    $('resultPagination').hidden = state.previewPageCount <= 1;
     $('resultPageLabel').textContent = `第 ${pageNumber} / ${state.previewPageCount} 页`;
     $('resultPrevious').disabled = state.previewPage === 0;
     $('resultNext').disabled = state.previewPage >= state.previewPageCount - 1;
     $('resultPagination').dataset.totalPages = String(state.previewPageCount);
     $('resultPagination').dataset.currentPage = String(state.previewPage + 1);
     try {
-      const pdfPage = await state.previewDocument.getPage(pageNumber);
-      if (renderToken !== state.previewRenderToken) return;
       const host = $('generatedPreview'), shell = host.querySelector('.pdf-preview-shell'), canvas = host.querySelector('.pdf-preview-canvas');
-      const baseViewport = pdfPage.getViewport({ scale: 1 }), availableWidth = Math.min(794, Math.max(260, host.clientWidth - 48));
-      const cssScale = availableWidth / baseViewport.width, pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-      const cssViewport = pdfPage.getViewport({ scale: cssScale }), renderViewport = pdfPage.getViewport({ scale: cssScale * pixelRatio });
-      canvas.width = Math.ceil(renderViewport.width); canvas.height = Math.ceil(renderViewport.height);
-      canvas.style.width = `${Math.ceil(cssViewport.width)}px`; canvas.style.height = `${Math.ceil(cssViewport.height)}px`;
-      shell.style.width = `${Math.ceil(cssViewport.width)}px`; shell.style.height = `${Math.ceil(cssViewport.height)}px`;
-      await pdfPage.render({ canvasContext: canvas.getContext('2d', { alpha: false }), viewport: renderViewport }).promise;
+      const availableWidth = Math.min(794, Math.max(260, host.clientWidth - 48));
+      if (state.previewMode === 'pdfium') {
+        const dimensions = await state.previewPdfiumDocument.renderPage(state.previewPage, availableWidth, canvas);
+        canvas.dataset.renderer = 'pdfium';
+        shell.style.width = `${Math.ceil(dimensions.width)}px`; shell.style.height = `${Math.ceil(dimensions.height)}px`;
+      } else {
+        const pdfPage = await state.previewDocument.getPage(pageNumber);
+        if (renderToken !== state.previewRenderToken) return;
+        const baseViewport = pdfPage.getViewport({ scale: 1 });
+        const cssScale = availableWidth / baseViewport.width, pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        const cssViewport = pdfPage.getViewport({ scale: cssScale }), renderViewport = pdfPage.getViewport({ scale: cssScale * pixelRatio });
+        canvas.width = Math.ceil(renderViewport.width); canvas.height = Math.ceil(renderViewport.height);
+        canvas.style.width = `${Math.ceil(cssViewport.width)}px`; canvas.style.height = `${Math.ceil(cssViewport.height)}px`;
+        shell.style.width = `${Math.ceil(cssViewport.width)}px`; shell.style.height = `${Math.ceil(cssViewport.height)}px`;
+        await pdfPage.render({ canvasContext: canvas.getContext('2d', { alpha: false }), viewport: renderViewport }).promise;
+        pdfPage.cleanup();
+      }
       if (renderToken !== state.previewRenderToken) return;
-      canvas.dataset.rendered = 'true'; shell.querySelector('.pdf-render-status')?.remove(); pdfPage.cleanup();
+      canvas.dataset.rendered = 'true'; shell.querySelector('.pdf-render-status')?.remove();
     } catch (error) {
       if (renderToken !== state.previewRenderToken) return;
       $('generatedPreview').innerHTML = `<div class="pdf-render-error">生成PDF第 ${pageNumber} 页渲染失败：${esc(error.message || '未知错误')}</div>`;
@@ -549,7 +562,7 @@
   }
 
   function changePreviewPage(offset) {
-    if (!state.previewDocument && state.previewMode !== 'compat') return;
+    if (!state.previewDocument && !state.previewPdfiumDocument) return;
     const total = state.previewPageCount || 1, next = Math.max(0, Math.min(state.previewPage + offset, total - 1));
     if (next === state.previewPage) return;
     state.previewPage = next; renderGeneratedPdf(); $('generatedPreview').scrollTop = 0; $('generatedPreview').scrollLeft = 0;
@@ -601,9 +614,7 @@
       $('downloadContract').textContent = `下载 ${state.templateType.toUpperCase()}`;
       $('downloadPdf').textContent = '下载 PDF';
       $('confirmExport').checked = false; updateExportButtons(); renderGeneratedPdf();
-      const previewText = state.previewMode === 'compat'
-        ? `${state.previewPageCount}页，浏览器兼容整页预览`
-        : `${state.previewPageCount}页，${state.previewMode === 'legacy' ? '兼容渲染，' : ''}整页显示`;
+      const previewText = `${state.previewPageCount}页，${state.previewMode === 'legacy' ? '兼容渲染，' : state.previewMode === 'pdfium' ? 'PDFium完整渲染，' : ''}整页显示`;
       saveMapping(); status(`PDF预览已生成：${state.outputPdfFileName}（${previewText}）`, 'success'); toast('PDF预览生成完成，请核对后确认导出', 'success'); updateSteps();
       $('resultStage').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) { status(error.message, 'error'); toast(error.message, 'error'); }
@@ -614,24 +625,22 @@
     let normalized = await normalizePdfFile(file, state.outputFileName.replace(/\.[^.]+$/, '.pdf'));
     const pdfjs = await loadPdfJs();
     const forceLegacyPreview = !!window.__CONTRACT_FORCE_LEGACY_PDF_PREVIEW__;
-    const forceNativePreview = !!window.__CONTRACT_FORCE_NATIVE_PDF_PREVIEW__;
+    const forcePdfiumPreview = !!window.__CONTRACT_FORCE_PDFIUM_PREVIEW__;
     let usedLegacyRenderer = false;
-    let result = forceLegacyPreview || forceNativePreview
+    let result = forceLegacyPreview || forcePdfiumPreview
       ? { document: null, lastError: new Error('测试兼容预览') }
       : await parsePdfDocument(pdfjs, await normalized.arrayBuffer());
-    let fallbackPageCount = 0;
     if (!result.document && window.PDFLib?.PDFDocument) {
       try {
         const repaired = await window.PDFLib.PDFDocument.load(await normalized.arrayBuffer(), { ignoreEncryption: false, updateMetadata: false });
-        fallbackPageCount = repaired.getPageCount();
         const repairedBytes = await repaired.save({ useObjectStreams: false, addDefaultPage: false, updateFieldAppearances: false });
         normalized = await normalizePdfFile(repairedBytes, normalized.name);
-        if (!forceLegacyPreview && !forceNativePreview) result = await parsePdfDocument(pdfjs, await normalized.arrayBuffer());
+        if (!forceLegacyPreview && !forcePdfiumPreview) result = await parsePdfDocument(pdfjs, await normalized.arrayBuffer());
       } catch (error) {
         result.lastError = error;
       }
     }
-    if (!result.document && !forceNativePreview) {
+    if (!result.document && !forcePdfiumPreview) {
       try {
         const legacyPdfJs = await loadLegacyPdfJs();
         result = await parsePdfDocument(legacyPdfJs, await normalized.arrayBuffer());
@@ -643,13 +652,17 @@
     const document = result.document;
     if (!document) {
       if (allowCompatPreview) {
-        const bytes = new Uint8Array(await normalized.arrayBuffer());
-        releasePreviewDocument();
-        state.previewObjectUrl = URL.createObjectURL(normalized);
-        state.previewMode = 'compat';
-        state.previewPageCount = Math.max(1, fallbackPageCount || estimatePdfPageCount(bytes));
-        state.previewPage = 0;
-        return normalized;
+        try {
+          const pdfiumDocument = await openPdfiumDocument(new Uint8Array(await normalized.arrayBuffer()));
+          releasePreviewDocument();
+          state.previewPdfiumDocument = pdfiumDocument;
+          state.previewMode = 'pdfium';
+          state.previewPageCount = pdfiumDocument.pageCount;
+          state.previewPage = 0;
+          return normalized;
+        } catch (error) {
+          result.lastError = error;
+        }
       }
       const parseError = new Error('生成的PDF无法完整读取，请重新生成');
       parseError.code = 'PDF_PARSE_FAILED';
@@ -663,14 +676,64 @@
     return normalized;
   }
 
-  function estimatePdfPageCount(bytes) {
-    const decoder = new TextDecoder('latin1');
-    let count = 0;
-    for (let offset = 0; offset < bytes.length; offset += 1024 * 1024) {
-      const text = decoder.decode(bytes.slice(offset, Math.min(bytes.length, offset + 1024 * 1024)));
-      count += (text.match(/\/Type\s*\/Page\b/g) || []).length;
+  async function openPdfiumDocument(bytes) {
+    const pdfium = await loadPdfium();
+    const filePtr = pdfium.pdfium.wasmExports.malloc(bytes.length);
+    pdfium.pdfium.HEAPU8.set(bytes, filePtr);
+    const docPtr = pdfium.FPDF_LoadMemDocument(filePtr, bytes.length, 0);
+    if (!docPtr) {
+      const errorCode = pdfium.FPDF_GetLastError();
+      pdfium.pdfium.wasmExports.free(filePtr);
+      throw new Error(`PDFium无法读取PDF（错误 ${errorCode}）`);
     }
-    return Math.min(500, count);
+    const pageCount = pdfium.FPDF_GetPageCount(docPtr);
+    if (!pageCount) {
+      pdfium.FPDF_CloseDocument(docPtr); pdfium.pdfium.wasmExports.free(filePtr);
+      throw new Error('生成的PDF没有页面');
+    }
+    if (pageCount > 500) {
+      pdfium.FPDF_CloseDocument(docPtr); pdfium.pdfium.wasmExports.free(filePtr);
+      throw new Error('生成的PDF超过500页，请拆分订单');
+    }
+    let closed = false;
+    return {
+      pageCount,
+      close() {
+        if (closed) return;
+        closed = true; pdfium.FPDF_CloseDocument(docPtr); pdfium.pdfium.wasmExports.free(filePtr);
+      },
+      async renderPage(pageIndex, availableWidth, canvas) {
+        if (closed) throw new Error('PDFium预览已关闭');
+        const pagePtr = pdfium.FPDF_LoadPage(docPtr, pageIndex);
+        if (!pagePtr) throw new Error(`PDFium无法读取第 ${pageIndex + 1} 页`);
+        try {
+          const pageWidth = pdfium.FPDF_GetPageWidthF(pagePtr), pageHeight = pdfium.FPDF_GetPageHeightF(pagePtr);
+          if (!(pageWidth > 0 && pageHeight > 0)) throw new Error('PDF页面尺寸无效');
+          const cssScale = availableWidth / pageWidth, pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+          const width = Math.max(1, Math.round(pageWidth * cssScale * pixelRatio));
+          const height = Math.max(1, Math.round(pageHeight * cssScale * pixelRatio));
+          const bitmapPtr = pdfium.FPDFBitmap_Create(width, height, 0);
+          if (!bitmapPtr) throw new Error('PDFium预览内存不足');
+          try {
+            pdfium.FPDFBitmap_FillRect(bitmapPtr, 0, 0, width, height, 0xFFFFFFFF);
+            pdfium.FPDF_RenderPageBitmap(bitmapPtr, pagePtr, 0, 0, width, height, 0, 16);
+            const bufferPtr = pdfium.FPDFBitmap_GetBuffer(bitmapPtr);
+            if (!bufferPtr) throw new Error('PDFium无法读取页面图像');
+            const rgba = new Uint8ClampedArray(pdfium.pdfium.HEAPU8.buffer, pdfium.pdfium.HEAPU8.byteOffset + bufferPtr, width * height * 4).slice();
+            canvas.width = width; canvas.height = height;
+            canvas.style.width = `${Math.ceil(width / pixelRatio)}px`; canvas.style.height = `${Math.ceil(height / pixelRatio)}px`;
+            const context = canvas.getContext('2d', { alpha: false });
+            if (!context) throw new Error('浏览器无法创建PDF预览画布');
+            context.putImageData(new ImageData(rgba, width, height), 0, 0);
+            return { width: width / pixelRatio, height: height / pixelRatio };
+          } finally {
+            pdfium.FPDFBitmap_Destroy(bitmapPtr);
+          }
+        } finally {
+          pdfium.FPDF_ClosePage(pagePtr);
+        }
+      },
+    };
   }
 
   async function parsePdfDocument(pdfjs, bytes) {

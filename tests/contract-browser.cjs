@@ -203,11 +203,13 @@ const HOME_URL = new URL('.', QA_URL).toString();
     const legacyLayout = await page.evaluate(() => {
       const host = document.querySelector('#generatedPreview'), shell = host.querySelector('.pdf-preview-shell'), canvas = host.querySelector('.pdf-preview-canvas');
       const hostRect = host.getBoundingClientRect(), shellRect = shell.getBoundingClientRect(), canvasRect = canvas.getBoundingClientRect();
+      const toastRect = document.querySelector('.toast-area').getBoundingClientRect();
       return {
         hostOverflow: getComputedStyle(host).overflow,
         horizontallyContained: shellRect.left >= hostRect.left - 1 && shellRect.right <= hostRect.right + 1,
         verticallyContained: shellRect.bottom <= hostRect.bottom + 1,
         canvasMatchesShell: Math.abs(canvasRect.width - shellRect.width) <= 1 && Math.abs(canvasRect.height - shellRect.height) <= 1,
+        toastOverlapsPage: !(toastRect.right <= canvasRect.left || toastRect.left >= canvasRect.right || toastRect.bottom <= canvasRect.top || toastRect.top >= canvasRect.bottom),
       };
     });
     assert.equal(legacyLayout.hostOverflow, 'visible');
@@ -218,6 +220,39 @@ const HOME_URL = new URL('.', QA_URL).toString();
     await page.waitForFunction(() => document.querySelector('.pdf-preview-canvas')?.dataset.page === '2' && document.querySelector('.pdf-preview-canvas')?.dataset.rendered === 'true');
     assert.equal(await page.locator('#resultPageLabel').innerText(), '第 2 / 2 页');
     await page.locator('#resultStage').screenshot({ path: path.join(out, 'contract-legacy-preview.png') });
+    await page.evaluate(() => {
+      window.__CONTRACT_FORCE_LEGACY_PDF_PREVIEW__ = false;
+      window.__CONTRACT_FORCE_PDFIUM_PREVIEW__ = true;
+    });
+    await page.locator('#generateContract').click();
+    await page.waitForFunction(() => document.querySelector('.pdf-preview-canvas[data-renderer="pdfium"]')?.dataset.rendered === 'true', null, { timeout: 30000 });
+    assert.equal(await page.locator('.compat-pdf-preview').count(), 0);
+    assert.equal(await page.locator('.pdf-preview-canvas').getAttribute('data-page'), '1');
+    assert.match(await page.locator('#contractStatus').innerText(), /PDFium完整渲染，整页显示/);
+    const pdfiumLayout = await page.evaluate(() => {
+      const host = document.querySelector('#generatedPreview'), shell = host.querySelector('.pdf-preview-shell'), canvas = host.querySelector('.pdf-preview-canvas');
+      const hostRect = host.getBoundingClientRect(), shellRect = shell.getBoundingClientRect(), canvasRect = canvas.getBoundingClientRect();
+      const toastRect = document.querySelector('.toast-area').getBoundingClientRect();
+      return {
+        nestedScrollers: [...document.querySelector('#resultStage').querySelectorAll('*')].filter(element => {
+          const style = getComputedStyle(element);
+          return /(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight + 1;
+        }).length,
+        horizontallyContained: shellRect.left >= hostRect.left - 1 && shellRect.right <= hostRect.right + 1,
+        verticallyContained: shellRect.bottom <= hostRect.bottom + 1,
+        canvasMatchesShell: Math.abs(canvasRect.width - shellRect.width) <= 1 && Math.abs(canvasRect.height - shellRect.height) <= 1,
+        toastOverlapsPage: !(toastRect.right <= canvasRect.left || toastRect.left >= canvasRect.right || toastRect.bottom <= canvasRect.top || toastRect.top >= canvasRect.bottom),
+      };
+    });
+    assert.equal(pdfiumLayout.nestedScrollers, 0);
+    assert.equal(pdfiumLayout.horizontallyContained, true);
+    assert.equal(pdfiumLayout.verticallyContained, true);
+    assert.equal(pdfiumLayout.canvasMatchesShell, true);
+    assert.equal(pdfiumLayout.toastOverlapsPage, false);
+    await page.locator('#resultNext').click();
+    await page.waitForFunction(() => document.querySelector('.pdf-preview-canvas[data-renderer="pdfium"]')?.dataset.page === '2' && document.querySelector('.pdf-preview-canvas')?.dataset.rendered === 'true');
+    assert.equal(await page.locator('#resultPageLabel').innerText(), '第 2 / 2 页');
+    await page.locator('#resultStage').screenshot({ path: path.join(out, 'contract-pdfium-preview.png') });
     await page.locator('#confirmExport').check();
     const xlsxDownloadPromise = page.waitForEvent('download'); await page.locator('#downloadContract').click(); const xlsxDownload = await xlsxDownloadPromise;
     assert.equal(xlsxDownload.suggestedFilename(), '虚构Excel合同.xlsx');
@@ -251,6 +286,6 @@ const HOME_URL = new URL('.', QA_URL).toString();
     assert.deepEqual(consoleErrors.filter(message => !message.includes('Failed to load resource: the server responded with a status of 404')), []);
     assert.deepEqual(httpErrors, []);
     assert.deepEqual(mutatingRequests, []);
-    console.log(JSON.stringify({ status: 'PASS', output: out, screenshots: ['contract-pdf-page2.png', 'contract-legacy-preview.png', 'contract-field-mapping.png', 'contract-desktop.png', 'contract-complex-upload.png', 'contract-excel.png'] }));
+    console.log(JSON.stringify({ status: 'PASS', output: out, screenshots: ['contract-pdf-page2.png', 'contract-legacy-preview.png', 'contract-pdfium-preview.png', 'contract-field-mapping.png', 'contract-desktop.png', 'contract-complex-upload.png', 'contract-excel.png'] }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
