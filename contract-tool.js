@@ -13,6 +13,7 @@
   };
   const ONLYOFFICE_ORIGIN = 'https://edit.chaxus.com';
   const CONVERSION_TIMEOUT = 240000;
+  const NUMERIC_BUSINESS_FIELDS = new Set(['sequence', 'quantity', 'taxUnitPrice', 'taxAmount', 'taxRate', 'taxTotalLower']);
   const BUSINESS_FIELDS = [
     { key: 'sequence', label: '序号', aliases: ['序号', '行号'], kind: 'detail', automatic: true },
     { key: 'materialCode', label: '物料编码', aliases: ['物料编码', '产品编码', '商品编码', '货号'], kind: 'detail' },
@@ -679,7 +680,7 @@
     for (const [targetId, mapping] of mappedEntries()) {
       if (mapping.mode === 'detail') continue;
       const value = resolveMapping(mapping);
-      writeSheetCell(context.sheetDoc, targetId.slice(2), mapping.preserveLabel ? labeledValue(mapping.labelText, value) : value);
+      writeSheetCell(context.sheetDoc, targetId.slice(2), mapping.preserveLabel ? labeledValue(mapping.labelText, value) : value, { forceNumber: NUMERIC_BUSINESS_FIELDS.has(mapping.businessKey) && !mapping.preserveLabel });
     }
     if (state.detailRow) {
       const rowNumber = Number(state.detailRow.split(':')[1]);
@@ -743,16 +744,16 @@
     row.insertBefore(cell, next || null); return cell;
   }
 
-  function writeSheetCell(doc, address, value) {
+  function writeSheetCell(doc, address, value, options) {
     const point = XLSX.utils.decode_cell(address), row = ensureSheetRow(doc, point.r + 1), cell = ensureRowCell(row, address);
-    writeCellValue(cell, value);
+    writeCellValue(cell, value, options);
   }
 
-  function writeCellValue(cell, value) {
+  function writeCellValue(cell, value, options = {}) {
     const doc = cell.ownerDocument, originalType = cell.getAttribute('t');
     direct(cell, 'f', S).forEach(item => item.remove()); direct(cell, 'v', S).forEach(item => item.remove()); direct(cell, 'is', S).forEach(item => item.remove());
     const number = C.parseNumber(value), preferText = ['s', 'str', 'inlineStr'].includes(originalType);
-    if (number !== null && !preferText) {
+    if (number !== null && (options.forceNumber || !preferText)) {
       cell.removeAttribute('t'); const node = doc.createElementNS(S, 'v'); node.textContent = String(number); cell.append(node); return;
     }
     cell.setAttribute('t', 'inlineStr');
@@ -767,8 +768,9 @@
     if (delta > 0) {
       const mergeRefs = all(context.sheetDoc, 'mergeCell', S).map(item => item.getAttribute('ref')).filter(Boolean);
       if (mergeRefs.some(ref => rangeTouchesRow(ref, rowNumber))) throw new Error('Excel明细模板行包含合并单元格，浏览器版不能安全扩展');
-      const formulas = all(context.sheetDoc, 'f', S).filter(item => rowNumberFromAddress(cellAddressOf(item.parentElement)) >= rowNumber);
-      if (formulas.length) throw new Error('Excel明细行或其下方含公式，扩展可能改变引用，请调整模板后再生成');
+      validateExpandableFormulas(context.sheetDoc, rowNumber);
+      adjustFormulasForInsertedRows(context.sheetDoc, state.templateSheet, rowNumber, delta, prototype);
+      await adjustOtherSheetFormulas(zip, context, state.templateSheet, rowNumber, delta);
       const relationships = await loadSheetRelationships(zip, context.sheetPath);
       if (relationships.some(item => /\/pivotTable$/i.test(item.type))) throw new Error('当前合同Sheet包含数据透视表，不能在该Sheet扩展明细行；可改用单值映射或将明细放到普通Sheet');
       for (const row of rows) {
@@ -782,10 +784,16 @@
     }
     records.forEach((record, offset) => {
       const clone = prototype.cloneNode(true), targetRow = rowNumber + offset; clone.setAttribute('r', String(targetRow));
-      for (const cell of direct(clone, 'c', S)) cell.setAttribute('r', replaceAddressRow(cellAddressOf(cell), targetRow));
+      for (const cell of direct(clone, 'c', S)) {
+        cell.setAttribute('r', replaceAddressRow(cellAddressOf(cell), targetRow));
+        for (const formula of direct(cell, 'f', S)) {
+          if (offset) formula.textContent = adjustCopiedFormula(formula.textContent || '', offset);
+          clearFormulaCache(cell);
+        }
+      }
       for (const [targetId, mapping] of rowMappings) {
         const source = XLSX.utils.decode_cell(targetId.slice(2)), address = XLSX.utils.encode_cell({ r: targetRow - 1, c: source.c });
-        writeCellValue(ensureRowCell(clone, address), detailValue(mapping, record, offset));
+        writeCellValue(ensureRowCell(clone, address), detailValue(mapping, record, offset), { forceNumber: NUMERIC_BUSINESS_FIELDS.has(mapping.businessKey) });
       }
       data.insertBefore(clone, prototype);
     });
@@ -855,6 +863,90 @@
   function rowNumberFromAddress(value) { return Number(value.match(/(\d+)$/)?.[1] || 0); }
   function shiftCellAddress(value, delta) { return replaceAddressRow(value, rowNumberFromAddress(value) + delta); }
   function replaceAddressRow(value, rowNumber) { return value.replace(/\d+$/, String(rowNumber)); }
+
+  function validateExpandableFormulas(doc, rowNumber) {
+    for (const formula of all(doc, 'f', S)) {
+      const type = formula.getAttribute('t') || 'normal';
+      const formulaRow = rowNumberFromAddress(cellAddressOf(formula.parentElement));
+      const formulaRange = formula.getAttribute('ref') || '';
+      if (formulaRow === rowNumber && type !== 'normal') {
+        throw new Error(`Excel明细模板行含${formulaTypeLabel(type)}，无法按订单行复制：${cellAddressOf(formula.parentElement)}`);
+      }
+      if (formulaRange && rangeTouchesRow(formulaRange, rowNumber) && type !== 'normal') {
+        throw new Error(`Excel公式区域穿过明细模板行，无法安全扩展：${formulaRange}`);
+      }
+    }
+  }
+
+  function formulaTypeLabel(type) {
+    return ({ shared: '共享公式', array: '数组公式', dataTable: '模拟运算表公式' })[type] || `特殊公式（${type}）`;
+  }
+
+  function adjustFormulasForInsertedRows(doc, sheetName, rowNumber, delta, prototype) {
+    for (const cell of all(doc, 'c', S)) {
+      if (cell.parentElement === prototype) continue;
+      for (const formula of direct(cell, 'f', S)) {
+        formula.textContent = transformFormulaReferences(formula.textContent || '', (range, formulaSheet) => {
+          if (formulaSheet && formulaSheet.toLocaleLowerCase() !== sheetName.toLocaleLowerCase()) return range;
+          return shiftRange(range, rowNumber, delta);
+        });
+        const formulaRange = formula.getAttribute('ref');
+        if (formulaRange) formula.setAttribute('ref', shiftRange(formulaRange, rowNumber, delta));
+        clearFormulaCache(cell);
+      }
+    }
+  }
+
+  async function adjustOtherSheetFormulas(zip, context, targetSheetName, rowNumber, delta) {
+    for (const sheet of all(context.workbookDoc, 'sheet', S)) {
+      if (sheet.getAttribute('name') === targetSheetName) continue;
+      const relationId = sheet.getAttributeNS(R, 'id') || sheet.getAttribute('r:id');
+      const relation = all(context.workbookRelsDoc, 'Relationship', P).find(item => item.getAttribute('Id') === relationId);
+      if (!relation || !/\/worksheet$/i.test(relation.getAttribute('Type') || '')) continue;
+      const sheetPath = resolveZipPath('xl', relation.getAttribute('Target')), file = zip.file(sheetPath);
+      if (!file) continue;
+      const doc = parseXml(await file.async('string')); let changed = false;
+      for (const cell of all(doc, 'c', S)) {
+        for (const formula of direct(cell, 'f', S)) {
+          const original = formula.textContent || '';
+          const updated = transformFormulaReferences(original, (range, formulaSheet) => {
+            if (!formulaSheet || formulaSheet.toLocaleLowerCase() !== targetSheetName.toLocaleLowerCase()) return range;
+            return shiftRange(range, rowNumber, delta);
+          });
+          if (updated === original) continue;
+          formula.textContent = updated; clearFormulaCache(cell); changed = true;
+        }
+      }
+      if (changed) zip.file(sheetPath, new XMLSerializer().serializeToString(doc));
+    }
+  }
+
+  function adjustCopiedFormula(formula, offset) {
+    return transformFormulaReferences(formula, range => range.split(':').map(reference => {
+      const cell = parseCellRef(reference); if (!cell) return reference;
+      if (!cell.rowAbsolute) cell.row += offset;
+      return formatCellRef(cell);
+    }).join(':'));
+  }
+
+  function transformFormulaReferences(formula, transform) {
+    return C.text(formula).split(/("(?:[^"]|"")*")/g).map((part, index) => {
+      if (index % 2) return part;
+      return part.replace(/(^|[^A-Z0-9_.])((?:'(?:[^']|'')+'|[A-Z_\u4e00-\u9fff][A-Z0-9_.\u4e00-\u9fff]*)!)?(\$?[A-Z]{1,3}\$?\d+)(?::(\$?[A-Z]{1,3}\$?\d+))?(?![A-Z0-9_(])/gi, (match, prefix, sheetToken, start, end) => {
+        const formulaSheet = normalizeFormulaSheet(sheetToken);
+        const range = end ? `${start}:${end}` : start;
+        return `${prefix}${sheetToken || ''}${transform(range, formulaSheet)}`;
+      });
+    }).join('');
+  }
+
+  function normalizeFormulaSheet(sheetToken) {
+    if (!sheetToken) return '';
+    const value = sheetToken.slice(0, -1);
+    return value.startsWith("'") && value.endsWith("'") ? value.slice(1, -1).replace(/''/g, "'") : value;
+  }
+
+  function clearFormulaCache(cell) { direct(cell, 'v', S).forEach(item => item.remove()); }
 
   async function forceWorkbookRecalculation(zip, context) {
     let calc = all(context.workbookDoc, 'calcPr', S)[0];

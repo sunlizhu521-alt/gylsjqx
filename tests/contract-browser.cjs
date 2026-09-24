@@ -124,11 +124,17 @@ const HOME_URL = new URL('.', QA_URL).toString();
     await page.reload({ waitUntil: 'networkidle' });
     await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(orderBytes) });
     const templateXlsx = await page.evaluate(async () => {
-      const matrix = [['采购合同', '', ''], ['序号', '物料名称', '数量'], ['待填写', '待填写', '待填写']];
-      for (let row = 4; row <= 30; row += 1) matrix.push([`附注${row}`, '', '']);
+      const matrix = [['采购合同', '', '', ''], ['序号', '物料名称', '数量', '行金额'], ['待填写', '待填写', '待填写', ''], ['合计', '', '', '']];
+      for (let row = 5; row <= 30; row += 1) matrix.push([`附注${row}`, '', '', '']);
       const sheet = XLSX.utils.aoa_to_sheet(matrix);
-      sheet['!cols'] = [{ wch: 10 }, { wch: 22 }, { wch: 12 }];
+      sheet.D1 = { t: 'n', f: 'SUM(D3:D3)', v: 0 };
+      sheet.D3 = { t: 'n', f: 'C3*10+$C$1+参考!A3+IF(A3="A1",0,0)', v: 0 };
+      sheet.D4 = { t: 'n', f: 'SUM(D3:D3)+参考!A4+LOG10(100)', v: 0 };
+      sheet['!cols'] = [{ wch: 10 }, { wch: 22 }, { wch: 12 }, { wch: 14 }];
       const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, '合同');
+      const referenceSheet = XLSX.utils.aoa_to_sheet([['参考数据', ''], [1, ''], [2, ''], [3, '']]);
+      referenceSheet.B1 = { t: 'n', f: 'SUM(合同!D3:D3)', v: 0 };
+      XLSX.utils.book_append_sheet(book, referenceSheet, '参考');
       const zip = await JSZip.loadAsync(XLSX.write(book, { type: 'array', bookType: 'xlsx' }));
       const sheetPath = 'xl/worksheets/sheet1.xml';
       let sheetXml = await zip.file(sheetPath).async('string');
@@ -136,7 +142,7 @@ const HOME_URL = new URL('.', QA_URL).toString();
         .replace('</worksheet>', '<tableParts count="1"><tablePart r:id="rIdTable1"/></tableParts></worksheet>');
       zip.file(sheetPath, sheetXml);
       zip.file('xl/worksheets/_rels/sheet1.xml.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdTable1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>');
-      zip.file('xl/tables/table1.xml', '<?xml version="1.0"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="ContractTable" displayName="ContractTable" ref="A1:C3" totalsRowShown="0"><autoFilter ref="A1:C3"/><tableColumns count="3"><tableColumn id="1" name="序号"/><tableColumn id="2" name="物料名称"/><tableColumn id="3" name="数量"/></tableColumns><tableStyleInfo name="TableStyleMedium2" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/></table>');
+      zip.file('xl/tables/table1.xml', '<?xml version="1.0"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="ContractTable" displayName="ContractTable" ref="A1:D4" totalsRowShown="0"><autoFilter ref="A1:D4"/><tableColumns count="4"><tableColumn id="1" name="序号"/><tableColumn id="2" name="物料名称"/><tableColumn id="3" name="数量"/><tableColumn id="4" name="行金额"/></tableColumns><tableStyleInfo name="TableStyleMedium2" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/></table>');
       zip.file('xl/drawings/drawing-contract.xml', '<drawing-preserve>DRAWING-MARKER</drawing-preserve>');
       zip.file('xl/pivotTables/pivot-contract.xml', '<pivot-preserve>PIVOT-MARKER</pivot-preserve>');
       let types = await zip.file('[Content_Types].xml').async('string');
@@ -166,18 +172,25 @@ const HOME_URL = new URL('.', QA_URL).toString();
     const xlsxPath = path.join(out, '虚构Excel合同.xlsx'); await xlsxDownload.saveAs(xlsxPath);
     const generatedCells = await page.evaluate(bytes => {
       const book = XLSX.read(new Uint8Array(bytes), { type: 'array' }), sheet = book.Sheets['合同'];
-      return ['A3', 'B3', 'C3', 'A4', 'B4', 'C4'].map(address => sheet[address]?.v);
+      return ['A3', 'B3', 'C3', 'A4', 'B4', 'C4', 'A5'].map(address => sheet[address]?.v);
     }, [...await fs.readFile(xlsxPath)]);
-    assert.deepEqual(generatedCells, ['1', '产品A', '2', '2', '产品B', '3']);
+    assert.deepEqual(generatedCells, [1, '产品A', 2, 2, '产品B', 3, '合计']);
     const preservedParts = await page.evaluate(async bytes => {
       const zip = await JSZip.loadAsync(new Uint8Array(bytes));
       return {
+        sheet: await zip.file('xl/worksheets/sheet1.xml').async('string'),
+        referenceSheet: await zip.file('xl/worksheets/sheet2.xml').async('string'),
         table: await zip.file('xl/tables/table1.xml').async('string'),
         drawing: await zip.file('xl/drawings/drawing-contract.xml').async('string'),
         pivot: await zip.file('xl/pivotTables/pivot-contract.xml').async('string'),
       };
     }, [...await fs.readFile(xlsxPath)]);
-    assert.match(preservedParts.table, /ref="A1:C4"/);
+    assert.match(preservedParts.sheet, /<c r="D1"><f>SUM\(D3:D4\)<\/f><\/c>/);
+    assert.match(preservedParts.sheet, /<c r="D3"><f>C3\*10\+\$C\$1\+参考!A3\+IF\(A3="A1",0,0\)<\/f><\/c>/);
+    assert.match(preservedParts.sheet, /<c r="D4"><f>C4\*10\+\$C\$1\+参考!A4\+IF\(A4="A1",0,0\)<\/f><\/c>/);
+    assert.match(preservedParts.sheet, /<c r="D5"><f>SUM\(D3:D4\)\+参考!A4\+LOG10\(100\)<\/f><\/c>/);
+    assert.match(preservedParts.referenceSheet, /<c r="B1"><f>SUM\(合同!D3:D4\)<\/f><\/c>/);
+    assert.match(preservedParts.table, /ref="A1:D5"/);
     assert.match(preservedParts.drawing, /DRAWING-MARKER/);
     assert.match(preservedParts.pivot, /PIVOT-MARKER/);
     await page.screenshot({ path: path.join(out, 'contract-excel.png'), fullPage: false });
