@@ -13,7 +13,7 @@
   };
   const ONLYOFFICE_ORIGIN = 'https://edit.chaxus.com';
   const CONVERSION_TIMEOUT = 240000;
-  const NUMERIC_BUSINESS_FIELDS = new Set(['sequence', 'quantity', 'taxUnitPrice', 'taxAmount', 'taxRate', 'taxTotalLower']);
+  const NUMERIC_BUSINESS_FIELDS = new Set(['sequence', 'quantity', 'taxUnitPrice', 'taxAmount', 'taxRate']);
   const RIGHT_SIDE_VALUE_FIELDS = new Set(['contractNumber', 'deliveryPlace', 'deliveryTime']);
   const CONTRACT_TERMS = [
     '1、采购合同所述价格为甲方在本合同项下应向乙方支付的最终价格，其中已经包括所有的安装费、售后服务费和税费等，除合同金额外，甲方不再支付任何其他费用。',
@@ -411,6 +411,16 @@
 
   function locateRow(rowKey) { return templateRows().find(row => row.rowKey === rowKey); }
 
+  function nextWritableTemplateCell(row, labelCell) {
+    if (state.templateModel.type !== 'xlsx') return row?.cells.find(cell => cell.cellIndex === labelCell.cellIndex + 1);
+    const sheet = state.templateBook?.Sheets[state.templateSheet], rowIndex = labelCell.rowIndex;
+    const labelMerge = (sheet?.['!merges'] || []).find(range => rowIndex >= range.s.r && rowIndex <= range.e.r && labelCell.cellIndex >= range.s.c && labelCell.cellIndex <= range.e.c);
+    const nextColumn = (labelMerge?.e.c ?? labelCell.cellIndex) + 1;
+    const candidateMerge = (sheet?.['!merges'] || []).find(range => rowIndex >= range.s.r && rowIndex <= range.e.r && nextColumn >= range.s.c && nextColumn <= range.e.c);
+    const targetColumn = candidateMerge?.s.c ?? nextColumn;
+    return row?.cells.find(cell => cell.cellIndex === targetColumn);
+  }
+
   function detectTemplateBindings() {
     const bindings = {}, rows = templateRows(), detailFields = BUSINESS_FIELDS.filter(field => field.kind === 'detail');
     let bestHeader = null;
@@ -443,7 +453,7 @@
         if (score > 0 && (!best || score > best.score)) best = { target, score };
       }
       if (!best) continue;
-      const row = locateRow(best.target.rowKey), next = row?.cells.find(cell => cell.cellIndex === best.target.cellIndex + 1);
+      const row = locateRow(best.target.rowKey), next = nextWritableTemplateCell(row, best.target);
       const canUseNext = next && !usedTargets.has(next.id) && (!bestDefinition(next.value)?.score || /待填|填写|空白/.test(C.text(next.value)));
       if (RIGHT_SIDE_VALUE_FIELDS.has(definition.key) && !canUseNext) continue;
       const target = canUseNext ? next : best.target;
