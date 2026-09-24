@@ -39,6 +39,18 @@ test('订单有序号列时按序号行生成明细并排除交货信息行', ()
   assert.deepEqual(detail.map(row => row._row), [3, 4]);
 });
 
+test('含税运总金额按整数分汇总并同步生成小写和人民币大写', () => {
+  const total = C.sumAmountField([
+    { _row: 3, 金额: '400.00' },
+    { _row: 4, 金额: '800' },
+    { _row: 5, 金额: '0.05' },
+  ], '金额');
+  assert.deepEqual(total, { cents: 120005n, lower: '1200.05', upper: '壹仟贰佰元零伍分' });
+  assert.deepEqual(C.sumAmountField([{ _row: 3, 金额: '0' }], '金额'), { cents: 0n, lower: '0.00', upper: '零元整' });
+  assert.throws(() => C.sumAmountField([{ _row: 8, 金额: '1.001' }], '金额'), /第 8 行金额须为非负数，且最多两位小数/);
+  assert.throws(() => C.sumAmountField([{ _row: 9, 金额: '' }], '金额'), /第 9 行金额须为非负数/);
+});
+
 test('合同编号、交货地点和交货时间读取标签右侧内容', () => {
   const values = C.extractAdjacentLabelValues([
     ['合同编号：', 'HT-001', '', '交货地点', '杭州仓'],

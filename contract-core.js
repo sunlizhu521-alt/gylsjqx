@@ -6,6 +6,7 @@
   'use strict';
 
   const INVALID_FILE_NAME = /[\\/:*?"<>|\x00-\x1f]/g;
+  const MAX_AMOUNT_CENTS = 99999999999999n;
 
   function text(value) {
     return value === null || value === undefined ? '' : String(value);
@@ -141,6 +142,63 @@
     return Number.isFinite(number) ? number : null;
   }
 
+  function amountCents(value) {
+    if (typeof value !== 'string' && typeof value !== 'number') throw new Error('金额不能为空或非数字');
+    let normalized = String(value).trim().replace(/^[￥¥]\s*/, '');
+    if (/^\d{1,3}([,，]\d{3})+(\.\d{1,2})?$/.test(normalized)) normalized = normalized.replace(/[,，]/g, '');
+    if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) throw new Error('金额须为非负数，且最多两位小数');
+    const [yuan, decimal = ''] = normalized.split('.');
+    const cents = BigInt(yuan) * 100n + BigInt(decimal.padEnd(2, '0'));
+    if (cents > MAX_AMOUNT_CENTS) throw new Error('金额超出支持范围（最高 9999 亿元）');
+    return cents;
+  }
+
+  function formatAmountCents(cents) {
+    return `${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')}`;
+  }
+
+  function amountUpper(cents) {
+    if (cents < 0n || cents > MAX_AMOUNT_CENTS) throw new Error('大写金额超出范围');
+    const digits = '零壹贰叁肆伍陆柒捌玖';
+    const four = value => {
+      const source = String(value), units = ['', '拾', '佰', '仟'];
+      let output = '', pendingZero = false;
+      [...source].forEach((digit, index) => {
+        if (digit === '0') { if (output) pendingZero = true; return; }
+        output += (pendingZero ? '零' : '') + digits[Number(digit)] + units[source.length - index - 1];
+        pendingZero = false;
+      });
+      return output;
+    };
+    let yuan = cents / 100n, output = '';
+    const groups = [];
+    while (yuan) { groups.unshift(Number(yuan % 10000n)); yuan /= 10000n; }
+    let pendingZero = false;
+    groups.forEach((value, index) => {
+      if (!value) { if (output) pendingZero = true; return; }
+      if (output && (pendingZero || value < 1000)) output += '零';
+      output += four(value) + ['', '万', '亿'][groups.length - index - 1];
+      pendingZero = false;
+    });
+    output = (output || '零') + '元';
+    const jiao = Number(cents % 100n / 10n), fen = Number(cents % 10n);
+    if (!jiao && !fen) return output + '整';
+    if (jiao) output += digits[jiao] + '角';
+    if (fen) output += (!jiao && cents >= 100n ? '零' : '') + digits[fen] + '分';
+    return output;
+  }
+
+  function sumAmountField(rows, field) {
+    if (!field) throw new Error('请先为“含税运总金额（元）”选择订单明细列');
+    let total = 0n;
+    for (const row of rows || []) {
+      try { total += amountCents(row[field]); }
+      catch (error) { throw new Error(`${field} 第 ${row._row || '?'} 行${error.message}`); }
+      if (total > MAX_AMOUNT_CENTS) throw new Error(`${field} 汇总金额超出支持范围（最高 9999 亿元）`);
+    }
+    return { cents: total, lower: formatAmountCents(total), upper: amountUpper(total) };
+  }
+
   function formatNumber(value) {
     if (!Number.isFinite(value)) return '';
     return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(10)));
@@ -185,6 +243,10 @@
     distinctValues,
     selectDetailRows,
     parseNumber,
+    amountCents,
+    formatAmountCents,
+    amountUpper,
+    sumAmountField,
     resolveField,
     mappingIssues,
   };

@@ -29,7 +29,7 @@
   const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
   const CONTRACT_TERMS_MARKERS = ['乙方应根据甲方要求进行包装', '产品所有权及风险转移到甲方', '有权向甲方所在地有管辖权的人民法院提起诉讼', '本合同一式二份'];
   const BUSINESS_FIELDS = [
-    { key: 'sequence', label: '序号', aliases: ['序号', '行号'], kind: 'detail', automatic: true },
+    { key: 'sequence', label: '序号', aliases: ['序号', '行号'], kind: 'detail', automatic: '@sequence', automaticLabel: '自动生成 1、2、3…', writeMode: '按订单逐行写入' },
     { key: 'materialCode', label: '物料编码', aliases: ['物料编码', '产品编码', '商品编码', '货号'], kind: 'detail' },
     { key: 'materialName', label: '物料名称', aliases: ['物料名称', '物料', '产品名称', '商品名称', '品名'], kind: 'detail' },
     { key: 'specification', label: '规格型号', aliases: ['规格型号', '规格', '型号'], kind: 'detail' },
@@ -41,8 +41,8 @@
     { key: 'taxRate', label: '税率', aliases: ['税率', '增值税率'], kind: 'detail' },
     { key: 'deliveryTime', label: '交货时间', aliases: ['交货时间', '交期', '要求货好时间', '要求交货日期'], kind: 'single' },
     { key: 'remark', label: '备注', aliases: ['备注', '说明'], kind: 'detail' },
-    { key: 'taxTotalLower', label: '含税运合计（小写）', aliases: ['含税运合计（小写）', '含税运合计小写', '合计（小写）', '合计小写', '小写合计'], kind: 'single' },
-    { key: 'taxTotalUpper', label: '含税运合计（大写）', aliases: ['含税运合计（大写）', '含税运合计大写', '合计（大写）', '合计大写', '大写合计'], kind: 'single' },
+    { key: 'taxTotalLower', label: '含税运合计（小写）', aliases: ['含税运合计（小写）', '含税运合计小写', '合计（小写）', '合计小写', '小写合计'], kind: 'single', automatic: '@tax-total-lower', automaticLabel: '自动汇总含税运总金额（元）', writeMode: '自动汇总' },
+    { key: 'taxTotalUpper', label: '含税运合计（大写）', aliases: ['含税运合计（大写）', '含税运合计大写', '合计（大写）', '合计大写', '大写合计'], kind: 'single', automatic: '@tax-total-upper', automaticLabel: '由小写合计自动转人民币大写', writeMode: '自动转大写' },
     { key: 'contractNumber', label: '合同编号', aliases: ['合同编号', '合同号'], kind: 'single' },
     { key: 'orderNumber', label: '订单编号', aliases: ['订单编号', '采购订单号', '采购单号', '订单号'], kind: 'single' },
     { key: 'buyer', label: '采购方（甲方）', aliases: ['采购方（甲方）', '采购方', '甲方', '买方'], kind: 'single' },
@@ -464,7 +464,7 @@
     const signature = `${state.fingerprint}:${state.templateSheet}:${state.orderSheet}:${state.order.headers.join('|')}`;
     if (state.mappingSignature !== signature) {
       for (const definition of BUSINESS_FIELDS) {
-        if (definition.automatic) state.fieldSelections[definition.key] = '@sequence';
+        if (definition.automatic) state.fieldSelections[definition.key] = definition.automatic;
         else if (!state.fieldSelections[definition.key] || !state.order.headers.includes(state.fieldSelections[definition.key])) state.fieldSelections[definition.key] = bestOrderHeader(definition);
       }
       state.mappingSignature = signature;
@@ -477,7 +477,7 @@
     for (const definition of BUSINESS_FIELDS) {
       const binding = state.templateBindings[definition.key], field = state.fieldSelections[definition.key];
       if (!binding || !field) continue;
-      const values = field === '@sequence' ? [] : C.distinctValues(state.order.rows, field);
+      const values = field.startsWith('@') ? [] : C.distinctValues(state.order.rows, field);
       mappings[binding.targetId] = {
         field, mode: binding.mode, businessKey: definition.key, preserveLabel: !!binding.preserveLabel, labelText: binding.labelText || '',
         strategy: binding.mode === 'single' ? (values.length <= 1 ? 'first' : (state.fieldStrategies?.[definition.key] || '')) : '',
@@ -498,17 +498,17 @@
       const values = selection && selection !== '@sequence' ? C.distinctValues(state.order.rows, selection) : [];
       const conflict = definition.kind === 'single' && values.length > 1;
       const options = definition.automatic
-        ? '<option value="@sequence">自动生成 1、2、3…</option>'
+        ? `<option value="${definition.automatic}">${esc(definition.automaticLabel)}</option>`
         : `<option value="">不填写</option>${state.order.headers.map(header => `<option value="${esc(header)}" ${header === selection ? 'selected' : ''}>${esc(header)}</option>`).join('')}`;
       const strategy = conflict ? `<select class="business-field-select business-strategy-select" data-strategy-key="${definition.key}" aria-label="${esc(definition.label)}多值处理"><option value="">该列有多个值，请选择处理方式</option><option value="first" ${state.fieldStrategies[definition.key] === 'first' ? 'selected' : ''}>取第一条非空值</option><option value="merge" ${state.fieldStrategies[definition.key] === 'merge' ? 'selected' : ''}>合并去重值</option><option value="sum" ${state.fieldStrategies[definition.key] === 'sum' ? 'selected' : ''}>求和</option></select>` : '';
       const success = !!(binding && selection && mapped.has(definition.key));
       const templateField = binding?.templateLabel || '未识别到对应字段';
       return `<div class="business-mapping-row" role="row" data-business-key="${definition.key}">
-        <div class="business-field-name" role="cell" data-cell-label="映射字段"><strong>${esc(definition.label)}</strong><small>${definition.automatic ? '序号由系统生成' : esc(definition.aliases.slice(0, 3).join('、'))}</small></div>
+        <div class="business-field-name" role="cell" data-cell-label="映射字段"><strong>${esc(definition.label)}</strong><small>${definition.automatic ? esc(definition.automaticLabel) : esc(definition.aliases.slice(0, 3).join('、'))}</small></div>
         <div class="business-order-field" role="cell" data-cell-label="订单明细"><select class="business-field-select" data-field-key="${definition.key}" ${definition.automatic ? 'disabled' : ''} aria-label="${esc(definition.label)}对应订单列">${options}</select>${strategy}</div>
         <span class="business-template-field" role="cell" data-cell-label="合同模板">${esc(templateField)}</span>
         <span class="template-detection ${success ? 'detected' : ''}" role="cell"><span class="mobile-cell-label" aria-hidden="true">是否识别：</span><span class="detection-text">${success ? '识别成功' : '未识别'}</span></span>
-        <span class="business-write-mode" role="cell" data-cell-label="写入方式">${definition.kind === 'detail' ? '按订单逐行写入' : '填充内容'}</span>
+        <span class="business-write-mode" role="cell" data-cell-label="写入方式">${esc(definition.writeMode || (definition.kind === 'detail' ? '按订单逐行写入' : '填充内容'))}</span>
       </div>`;
     }).join('');
     $('businessMappingRows').querySelectorAll('[data-field-key]').forEach(select => select.addEventListener('change', event => {
@@ -577,6 +577,10 @@
     const outputName = C.sanitizeFileName($('outputName').value);
     if (!$('outputName').value.trim()) issues.push('请填写合同文件名称');
     const detailRows = detailRecords();
+    if ((state.templateBindings.taxTotalLower || state.templateBindings.taxTotalUpper) && !state.fieldSelections.taxAmount) issues.push('请为“含税运总金额（元）”选择订单明细列，才能自动计算合同合计');
+    if ((state.templateBindings.taxTotalLower || state.templateBindings.taxTotalUpper) && state.fieldSelections.taxAmount) {
+      try { contractTotals(); } catch (error) { issues.push(error.message); }
+    }
     $('confirmSummary').innerHTML = `订单：<strong>${esc(state.orderSheet)}</strong>，识别 ${detailRows.length} 条物料明细${detailRows.length !== state.order.rows.length ? `（原表 ${state.order.rows.length} 行）` : ''}；模板：<strong>${esc(state.templateFile.name)}</strong>${state.templateSheet ? `，合同Sheet：<strong>${esc(state.templateSheet)}</strong>` : ''}；输出：<strong>${esc(outputName)}.${state.templateType}</strong>`;
     const warnings = notDetected.length ? `<div class="warnings">模板中未识别：${esc(notDetected.join('、'))}；这些字段本次不会写入。</div>` : '';
     $('contractIssues').innerHTML = `${issues.length ? `<ul>${issues.map(issue => `<li>${esc(issue)}</li>`).join('')}</ul>` : '<div class="ready">映射检查通过，可以生成PDF预览。</div>'}${warnings}`;
@@ -1283,7 +1287,12 @@
     }
   }
 
-  function resolveMapping(mapping) { return C.resolveField(state.order.rows, mapping.field, mapping.strategy || 'first', mapping.manual || ''); }
+  function contractTotals() { return C.sumAmountField(detailRecords(), state.fieldSelections.taxAmount); }
+  function resolveMapping(mapping) {
+    if (mapping.businessKey === 'taxTotalLower') return contractTotals().lower;
+    if (mapping.businessKey === 'taxTotalUpper') return contractTotals().upper;
+    return C.resolveField(state.order.rows, mapping.field, mapping.strategy || 'first', mapping.manual || '');
+  }
   function detailValue(mapping, record, index) { return mapping.field === '@sequence' ? String(index + 1) : C.text(record[mapping.field]); }
   function labeledValue(label, value) {
     const source = C.text(label), output = C.text(value);
