@@ -39,6 +39,19 @@ test('订单有序号列时按序号行生成明细并排除交货信息行', ()
   assert.deepEqual(detail.map(row => row._row), [3, 4]);
 });
 
+test('合同模板连续预留的空白序号行会作为一个明细区整体替换', () => {
+  const rows = [
+    { rowKey: 'word:0:0', cells: [{ value: '序号' }, { value: '物料名称' }] },
+    { rowKey: 'word:0:1', cells: [{ value: '1' }, { value: '待填写' }] },
+    { rowKey: 'word:0:2', cells: [{ value: '2' }, { value: '' }] },
+    { rowKey: 'word:0:3', cells: [{ value: '3' }, { value: '空白位置' }] },
+    { rowKey: 'word:0:4', cells: [{ value: '含税合计' }, { value: '' }] },
+  ];
+  assert.equal(C.reservedDetailRowCount(rows, 'word:0:1', 0), 3);
+  rows[2].cells[1].value = '模板固定内容';
+  assert.equal(C.reservedDetailRowCount(rows, 'word:0:1', 0), 1);
+});
+
 test('含税运总金额按整数分汇总并同步生成小写和人民币大写', () => {
   const total = C.sumAmountField([
     { _row: 3, 金额: '400.00' },

@@ -415,6 +415,14 @@
     return C.selectDetailRows(state.order?.rows || [], state.order?.headers || [], state.fieldSelections);
   }
 
+  function detailTemplateRowCount() {
+    if (!state.detailRow) return 1;
+    const sequenceTargetId = mappedEntries().find(([, mapping]) => mapping.mode === 'detail' && mapping.businessKey === 'sequence')?.[0]
+      || state.templateBindings?.sequence?.targetId;
+    const sequenceTarget = sequenceTargetId ? findTarget(sequenceTargetId) : null;
+    return C.reservedDetailRowCount(templateRows(), state.detailRow, sequenceTarget?.cellIndex || 0);
+  }
+
   function templateRows() {
     if (state.templateModel.type === 'docx') return state.templateModel.blocks.filter(block => block.type === 'table').flatMap(block => block.rows);
     return state.templateModel.rows;
@@ -883,8 +891,9 @@
     }
     if (state.detailRow) {
       const match = state.detailRow.match(/^word:(\d+):(\d+)$/); if (!match) throw new Error('Word明细模板行无效');
-      const table = direct(all(doc, 'body')[0], 'tbl')[Number(match[1])], row = direct(table, 'tr')[Number(match[2])];
+      const table = direct(all(doc, 'body')[0], 'tbl')[Number(match[1])], tableRows = direct(table, 'tr'), row = tableRows[Number(match[2])];
       if (!row) throw new Error('找不到Word明细模板行');
+      const reservedRows = tableRows.slice(Number(match[2]), Number(match[2]) + detailTemplateRowCount());
       const rowMappings = mappedEntries().filter(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow);
       for (const [recordIndex, record] of detailRecords().entries()) {
         const clone = row.cloneNode(true), cells = direct(clone, 'tc');
@@ -894,7 +903,7 @@
         }
         row.parentNode.insertBefore(clone, row);
       }
-      row.remove();
+      reservedRows.forEach(item => item.remove());
     }
     normalizeWordContractTerms(doc);
     zip.file('word/document.xml', new XMLSerializer().serializeToString(doc));
@@ -973,8 +982,8 @@
   }
 
   function shiftedTemplateAddress(address) {
-    const point = XLSX.utils.decode_cell(address), detailRow = Number(state.detailRow?.split(':')[1] || 0), delta = detailRecords().length - 1;
-    if (detailRow && delta > 0 && point.r + 1 > detailRow) point.r += delta;
+    const point = XLSX.utils.decode_cell(address), detailRow = Number(state.detailRow?.split(':')[1] || 0), delta = detailRecords().length - detailTemplateRowCount();
+    if (detailRow && delta !== 0 && point.r + 1 > detailRow) point.r += delta;
     return XLSX.utils.encode_cell(point);
   }
 
@@ -1113,10 +1122,12 @@
   async function expandExcelDetailRowXml(zip, context, rowNumber, records, rowMappings) {
     const data = sheetData(context.sheetDoc), rows = direct(data, 'row', S), prototype = rows.find(row => rowNumberOf(row) === rowNumber);
     if (!prototype) throw new Error('找不到Excel明细模板行');
-    const delta = records.length - 1;
-    if (delta > 0) {
+    const reservedCount = detailTemplateRowCount();
+    const reservedRows = rows.filter(row => rowNumberOf(row) >= rowNumber && rowNumberOf(row) < rowNumber + reservedCount);
+    const delta = records.length - reservedCount;
+    if (delta !== 0) {
       const mergeRefs = all(context.sheetDoc, 'mergeCell', S).map(item => item.getAttribute('ref')).filter(Boolean);
-      if (mergeRefs.some(ref => rangeTouchesRow(ref, rowNumber))) throw new Error('Excel明细模板行包含合并单元格，浏览器版不能安全扩展');
+      if (mergeRefs.some(ref => Array.from({ length: reservedCount }, (_, offset) => rowNumber + offset).some(targetRow => rangeTouchesRow(ref, targetRow)))) throw new Error('Excel明细模板行包含合并单元格，浏览器版不能安全扩展');
       validateExpandableFormulas(context.sheetDoc, rowNumber);
       adjustFormulasForInsertedRows(context.sheetDoc, state.templateSheet, rowNumber, delta, prototype);
       await adjustOtherSheetFormulas(zip, context, state.templateSheet, rowNumber, delta);
@@ -1146,7 +1157,7 @@
       }
       data.insertBefore(clone, prototype);
     });
-    prototype.remove();
+    reservedRows.forEach(row => row.remove());
   }
 
   async function loadSheetRelationships(zip, sheetPath) {

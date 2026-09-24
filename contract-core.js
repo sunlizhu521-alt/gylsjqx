@@ -135,6 +135,27 @@
     return sourceRows;
   }
 
+  function reservedDetailRowCount(rows, detailRowKey, sequenceCellIndex = 0) {
+    const sourceRows = Array.isArray(rows) ? rows : [];
+    const start = sourceRows.findIndex(row => row?.rowKey === detailRowKey);
+    if (start < 0) return 1;
+    const rowScope = text(detailRowKey).replace(/:\d+$/, '');
+    let count = 1;
+    for (let index = start + 1; index < sourceRows.length; index += 1) {
+      if (!text(sourceRows[index]?.rowKey).startsWith(`${rowScope}:`)) break;
+      const values = (sourceRows[index]?.cells || []).map(cell => cleanHeader(cell?.value));
+      const sequence = values[sequenceCellIndex] || '';
+      if (!/^\d+(?:\.0+)?$/.test(sequence) || Number(sequence) <= 0) break;
+      const hasBusinessContent = values.some((value, cellIndex) => {
+        if (cellIndex === sequenceCellIndex || !value) return false;
+        return !/^(?:待填写|填写|空白位置|空白|[-—/])$/.test(value);
+      });
+      if (hasBusinessContent) break;
+      count += 1;
+    }
+    return count;
+  }
+
   function parseNumber(value) {
     const normalized = text(value).trim().replace(/[￥¥,，\s]/g, '');
     if (!normalized || !/^-?(?:\d+\.?\d*|\.\d+)$/.test(normalized)) return null;
@@ -242,6 +263,7 @@
     extractAdjacentLabelValues,
     distinctValues,
     selectDetailRows,
+    reservedDetailRowCount,
     parseNumber,
     amountCents,
     formatAmountCents,
