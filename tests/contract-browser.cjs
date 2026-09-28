@@ -74,10 +74,11 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const reservedDetailRows = [2, 3].map(sequence => `<w:tr>${headers.map((_, index) => `<w:tc><w:p><w:r><w:t>${index === 0 ? sequence : ''}</w:t></w:r></w:p></w:tc>`).join('')}</w:tr>`).join('');
       const deliveryRow = headers.map((_, index) => `<w:tc><w:p><w:r><w:t>${index === 7 ? '交货时间：' : (index === 8 ? '待填写' : '')}</w:t></w:r></w:p></w:tc>`).join('');
       const labeledRow = (label, placeholder = '待填写') => `<w:tr><w:tc><w:p><w:r><w:t>${label}</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>${placeholder}</w:t></w:r></w:p></w:tc></w:tr>`;
+      const signatureRows = '<w:tr><w:tc><w:p><w:r><w:t>甲方</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t></w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>乙方</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t></w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>签署时间：</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>待填写</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>签署时间：</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>待填写</w:t></w:r></w:p></w:tc></w:tr>';
       const totalRow = '<w:tr><w:tc><w:p><w:r><w:t>含税合计</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t xml:space="preserve">人民币小写：            元</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t xml:space="preserve">人民币大写：              圆整</w:t></w:r></w:p></w:tc></w:tr>';
       const incompleteTerms = terms.slice(1).join('\n').replace('复印件与本合同原件具有同等法律效力。', '复印件与本合同原件');
       const termsRow = `<w:tr><w:trPr><w:trHeight w:val="2600" w:hRule="exact"/><w:cantSplit/></w:trPr><w:tc><w:p><w:r><w:t>合同条款</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:keepLines/></w:pPr><w:r><w:t xml:space="preserve">${incompleteTerms}</w:t></w:r></w:p></w:tc></w:tr>`;
-      zip.folder('word').file('document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>采购合同</w:t></w:r></w:p><w:p><w:r><w:t>合同编号：</w:t></w:r></w:p><w:p><w:r><w:t>供应商名称：</w:t></w:r></w:p><w:tbl><w:tr>${headerRow}</w:tr><w:tr>${detailRow}</w:tr>${reservedDetailRows}<w:tr>${deliveryRow}</w:tr>${labeledRow('合同编号：')}${labeledRow('交货地点：')}${totalRow}${termsRow}</w:tbl>${extraParagraphs}<w:sectPr/></w:body></w:document>`);
+      zip.folder('word').file('document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>采购合同</w:t></w:r></w:p><w:p><w:r><w:t>合同编号：</w:t></w:r></w:p><w:p><w:r><w:t>供应商名称：</w:t></w:r></w:p><w:tbl><w:tr>${headerRow}</w:tr><w:tr>${detailRow}</w:tr>${reservedDetailRows}<w:tr>${deliveryRow}</w:tr>${labeledRow('合同编号：')}${labeledRow('交货地点：')}${signatureRows}${totalRow}${termsRow}</w:tbl>${extraParagraphs}<w:sectPr/></w:body></w:document>`);
       return Array.from(await zip.generateAsync({ type: 'uint8array' }));
     }, CONTRACT_TERMS);
     await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from(orderBytes) });
@@ -96,6 +97,10 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     for (const [key, field] of [['materialCode', '物料编码'], ['materialName', '物料名称'], ['specification', '规格型号'], ['sku', 'SKU'], ['unit', '单位'], ['quantity', '数量'], ['taxUnitPrice', '含税单价 (元)'], ['taxAmount', '含税总金额 (元)'], ['remark', '备注'], ['deliveryTime', '交货时间（右侧内容）'], ['contractNumber', '合同编号（右侧内容）'], ['deliveryPlace', '交货地点（右侧内容）'], ['supplier', '供应商']]) {
       assert.equal(await page.locator(`[data-field-key="${key}"]`).inputValue(), field);
     }
+    assert.equal(await page.locator('[data-business-key="signDate"] strong').innerText(), '甲方签署日期');
+    assert.equal(await page.locator('[data-business-key="signDate"] .business-template-field').innerText(), '签署时间： → 右侧填写位置');
+    assert.equal(await page.locator('[data-business-key="signDate"] .template-detection').innerText(), '识别成功');
+    assert.equal(await page.locator('[data-manual-key="signDate"]').inputValue(), '');
     assert.match(await page.locator('#templateDetectionSummary').innerText(), /序号按 2 条物料明细自动生成/);
     assert.equal(await page.locator('[data-business-key="materialCode"] .business-template-field').innerText(), '物料编码');
     assert.equal(await page.locator('[data-business-key="materialCode"] .template-detection').innerText(), '识别成功');
@@ -116,6 +121,10 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     await page.locator('#outputName').fill('虚构采购合同');
     assert.match(await page.locator('#confirmSummary').innerText(), /识别 2 条物料明细/);
     await page.locator('#confirmGenerate').check();
+    assert.match(await page.locator('#contractIssues').innerText(), /请选择甲方签署日期/);
+    assert.equal(await page.locator('#generateContract').isDisabled(), true);
+    await page.locator('#confirmStage').screenshot({ path: path.join(out, 'contract-sign-date-required.png') });
+    await page.locator('[data-manual-key="signDate"]').fill('2026-09-24');
     assert.equal(await page.locator('#generateContract').isDisabled(), false);
     await page.evaluate(bytes => {
       let calls = 0;
@@ -167,9 +176,10 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.equal(download.suggestedFilename(), '虚构采购合同.docx');
     const docxPath = path.join(out, '虚构采购合同.docx'); await download.saveAs(docxPath);
     const generatedXml = await page.evaluate(async bytes => (await (await JSZip.loadAsync(new Uint8Array(bytes))).file('word/document.xml').async('string')), [...await fs.readFile(docxPath)]);
-    for (const value of ['供应商名称：甲公司', '交货时间：', '>2026-10-01<', '合同编号：', '>HT-TEST-001<', '交货地点：', '>虚构交货地点<', '人民币小写：81.00元', '人民币大写：捌拾壹圆整', 'MAT-001', 'MAT-002', '产品A', '产品B', 'SKU-A', 'SKU-B', '>1<', '>2<', '>3<']) assert.ok(generatedXml.includes(value), value);
+    for (const value of ['供应商名称：甲公司', '交货时间：', '>2026-10-01<', '合同编号：', '>HT-TEST-001<', '交货地点：', '>虚构交货地点<', '签署时间：', '>2026年9月24日<', '人民币小写：81.00元', '人民币大写：捌拾壹圆整', 'MAT-001', 'MAT-002', '产品A', '产品B', 'SKU-A', 'SKU-B', '>1<', '>2<', '>3<']) assert.ok(generatedXml.includes(value), value);
     assert.doesNotMatch(generatedXml, /合同编号：HT-TEST-001|交货地点：虚构交货地点|交货时间：2026-10-01/);
-    assert.equal((generatedXml.match(/<w:tr(?:\s|>)/g) || []).length, 8);
+    assert.equal((generatedXml.match(/2026年9月24日/g) || []).length, 1);
+    assert.equal((generatedXml.match(/<w:tr(?:\s|>)/g) || []).length, 10);
     for (const term of CONTRACT_TERMS) assert.ok(generatedXml.includes(term), term.slice(0, 24));
     assert.doesNotMatch(generatedXml, /<w:trHeight\b/);
     assert.doesNotMatch(generatedXml, /<w:cantSplit\b|<w:keepLines\b/);
@@ -350,6 +360,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       assert.equal(await page.locator('[data-field-key="contractNumber"]').inputValue(), '合同编号（右侧内容）');
       assert.equal(await page.locator('[data-business-key="contractNumber"] .template-detection').innerText(), '识别成功');
       assert.match(await page.locator('[data-business-key="contractNumber"] .business-template-field').innerText(), /右侧填写位置/);
+      await page.locator('[data-manual-key="signDate"]').fill('2026-09-24');
       await page.locator('#outputName').fill('真实订单合同编号测试');
       await page.locator('#confirmGenerate').check();
       await page.evaluate(bytes => {
@@ -362,7 +373,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const realDocxPath = path.join(out, '真实订单合同编号测试.docx'); await realDownload.saveAs(realDocxPath);
       const realXml = await page.evaluate(async bytes => (await (await JSZip.loadAsync(new Uint8Array(bytes))).file('word/document.xml').async('string')), [...await fs.readFile(realDocxPath)]);
       if (expectedContractNumber) assert.match(realXml, new RegExp(`>${expectedContractNumber}<`));
-      if (expectedDetailRows) assert.equal((realXml.match(/<w:tr(?:\s|>)/g) || []).length, expectedDetailRows + 6);
+      if (expectedDetailRows) assert.equal((realXml.match(/<w:tr(?:\s|>)/g) || []).length, expectedDetailRows + 8);
       await page.locator('#mappingStage').screenshot({ path: path.join(out, 'contract-real-order-number.png') });
     }
 
@@ -370,6 +381,6 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.deepEqual(consoleErrors.filter(message => !message.includes('Failed to load resource: the server responded with a status of 404')), []);
     assert.deepEqual(httpErrors, []);
     assert.deepEqual(mutatingRequests, []);
-    console.log(JSON.stringify({ status: 'PASS', output: out, screenshots: ['contract-pdf-page2.png', 'contract-legacy-preview.png', 'contract-pdfium-preview.png', 'contract-field-mapping.png', 'contract-desktop.png', 'contract-complex-upload.png', 'contract-excel.png'] }));
+    console.log(JSON.stringify({ status: 'PASS', output: out, screenshots: ['contract-sign-date-required.png', 'contract-pdf-page2.png', 'contract-legacy-preview.png', 'contract-pdfium-preview.png', 'contract-field-mapping.png', 'contract-desktop.png', 'contract-complex-upload.png', 'contract-excel.png'] }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

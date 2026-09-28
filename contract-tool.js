@@ -14,7 +14,7 @@
   const ONLYOFFICE_ORIGIN = 'https://edit.chaxus.com';
   const CONVERSION_TIMEOUT = 240000;
   const NUMERIC_BUSINESS_FIELDS = new Set(['sequence', 'quantity', 'taxUnitPrice', 'taxAmount', 'taxRate']);
-  const RIGHT_SIDE_VALUE_FIELDS = new Set(['contractNumber', 'deliveryPlace', 'deliveryTime']);
+  const RIGHT_SIDE_VALUE_FIELDS = new Set(['contractNumber', 'deliveryPlace', 'deliveryTime', 'signDate']);
   const CONTRACT_TERMS = [
     '1、采购合同所述价格为甲方在本合同项下应向乙方支付的最终价格，其中已经包括所有的安装费、售后服务费和税费等，除合同金额外，甲方不再支付任何其他费用。',
     '2、乙方应根据甲方要求进行包装并确保产品交付给甲方时包装完好无损，按照甲方要求进行必要的标识贴附工作并承担相关费用。',
@@ -47,7 +47,7 @@
     { key: 'orderNumber', label: '订单编号', aliases: ['订单编号', '采购订单号', '采购单号', '订单号'], kind: 'single' },
     { key: 'buyer', label: '采购方（甲方）', aliases: ['采购方（甲方）', '采购方', '甲方', '买方'], kind: 'single' },
     { key: 'supplier', label: '供应商（乙方）', aliases: ['供应商名称', '供应商（乙方）', '供应商', '乙方', '卖方'], kind: 'single' },
-    { key: 'signDate', label: '签订日期', aliases: ['签订日期', '合同日期', '签约日期'], kind: 'single' },
+    { key: 'signDate', label: '甲方签署日期', aliases: ['甲方签署日期', '甲方签署时间', '签署时间', '签署日期', '签订日期', '合同日期', '签约日期'], kind: 'single', automatic: '@sign-date', automaticLabel: '请选择日期', manualInput: 'date', writeMode: '选择后填充' },
     { key: 'deliveryPlace', label: '交货地点', aliases: ['交货地点', '送货地址', '交付地点'], kind: 'single' },
     { key: 'paymentTerms', label: '付款方式', aliases: ['付款方式', '付款条件', '结算方式', '结算条件'], kind: 'single' },
   ];
@@ -62,7 +62,7 @@
     orderFile: null, orderBytes: null, orderBook: null, orderSheet: '', order: null,
     templateFile: null, templateBytes: null, templateType: '', templateBook: null, templateSheet: '', templateModel: null, templateFeatures: [], fingerprint: '',
     previewDocument: null, previewPdfiumDocument: null, previewMode: '', previewPageCount: 0, previewPage: 0, previewRenderToken: 0,
-    mappings: {}, detailRow: '', fieldSelections: {}, fieldStrategies: {}, templateBindings: {}, mappingSignature: '', output: null, outputFileName: '', outputPdf: null, outputPdfFileName: '', busy: false,
+    mappings: {}, detailRow: '', fieldSelections: {}, fieldStrategies: {}, manualValues: {}, templateBindings: {}, mappingSignature: '', output: null, outputFileName: '', outputPdf: null, outputPdfFileName: '', busy: false,
   };
   const $ = id => document.getElementById(id);
   const esc = value => C.text(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -147,7 +147,7 @@
       const bytes = await file.arrayBuffer();
       const book = XLSX.read(bytes, { type: 'array', cellDates: false, cellFormula: true });
       if (!book.SheetNames.length) throw new Error('订单文件中没有工作表');
-      state.orderFile = file; state.orderBytes = bytes; state.orderBook = book; state.orderSheet = book.SheetNames[0];
+      state.orderFile = file; state.orderBytes = bytes; state.orderBook = book; state.orderSheet = book.SheetNames[0]; state.manualValues = {};
       setOptions($('orderSheet'), book.SheetNames, state.orderSheet); $('orderSheet').disabled = false;
       analyzeOrder();
       if (state.templateModel) restoreMapping();
@@ -172,7 +172,7 @@
       [state.order.headerIndex],
     );
     state.order.rightSideFields = {};
-    for (const definition of BUSINESS_FIELDS.filter(field => RIGHT_SIDE_VALUE_FIELDS.has(field.key))) {
+    for (const definition of BUSINESS_FIELDS.filter(field => RIGHT_SIDE_VALUE_FIELDS.has(field.key) && !field.manualInput)) {
       const value = rightSideValues[definition.key];
       if (!C.text(value).trim()) continue;
       const header = `${definition.label}（右侧内容）`;
@@ -194,7 +194,7 @@
       const type = file.name.toLowerCase().endsWith('.docx') ? 'docx' : 'xlsx';
       const zip = await validateOoxml(bytes, type);
       state.templateFile = file; state.templateBytes = bytes; state.templateType = type; state.fingerprint = await sha256(bytes);
-      state.templateBook = null; state.templateSheet = ''; state.mappings = {}; state.detailRow = ''; state.fieldSelections = {}; state.fieldStrategies = {}; state.templateBindings = {}; state.mappingSignature = '';
+      state.templateBook = null; state.templateSheet = ''; state.mappings = {}; state.detailRow = ''; state.fieldSelections = {}; state.fieldStrategies = {}; state.manualValues = {}; state.templateBindings = {}; state.mappingSignature = '';
       if (type === 'docx') await parseDocx(zip);
       else parseXlsx();
       $('templateFileName').textContent = file.name; $('templateDrop').classList.add('loaded');
@@ -440,6 +440,26 @@
     return row?.cells.find(cell => cell.cellIndex === targetColumn);
   }
 
+  function templatePartyForTarget(target) {
+    const ownText = normalizeBusinessLabel(target?.value);
+    if (ownText.includes('甲方')) return 'buyer';
+    if (ownText.includes('乙方')) return 'supplier';
+    const rows = templateRows(), rowIndex = rows.findIndex(row => row.rowKey === target?.rowKey);
+    const scope = C.text(target?.rowKey).replace(/:\d+$/, '');
+    for (let index = rowIndex - 1, distance = 1; index >= 0 && distance <= 3; index -= 1, distance += 1) {
+      const row = rows[index];
+      if (!C.text(row?.rowKey).startsWith(`${scope}:`)) break;
+      const nearby = [...(row.cells || [])].sort((left, right) => Math.abs(left.cellIndex - target.cellIndex) - Math.abs(right.cellIndex - target.cellIndex));
+      for (const cell of nearby) {
+        if (Math.abs(cell.cellIndex - target.cellIndex) > 1) continue;
+        const text = normalizeBusinessLabel(cell.value);
+        if (text.includes('甲方')) return 'buyer';
+        if (text.includes('乙方')) return 'supplier';
+      }
+    }
+    return '';
+  }
+
   function detectTemplateBindings() {
     const bindings = {}, rows = templateRows(), detailFields = BUSINESS_FIELDS.filter(field => field.kind === 'detail');
     let bestHeader = null;
@@ -468,8 +488,13 @@
       let best = null;
       for (const labelTarget of state.templateModel.targets) {
         if (excludedRows.has(labelTarget.rowKey)) continue;
-        const score = fieldMatchScore(labelTarget.value, definition);
+        let score = fieldMatchScore(labelTarget.value, definition);
         if (score <= 0) continue;
+        if (definition.key === 'signDate') {
+          const party = templatePartyForTarget(labelTarget);
+          if (party === 'supplier') continue;
+          if (party === 'buyer') score += 1000;
+        }
         const inline = inlineTotalTemplate(definition, labelTarget.value);
         const row = locateRow(labelTarget.rowKey), next = nextWritableTemplateCell(row, labelTarget);
         const canUseNext = next && !usedTargets.has(next.id) && (!bestDefinition(next.value)?.score || /待填|填写|空白/.test(C.text(next.value)));
@@ -535,12 +560,15 @@
       const options = definition.automatic
         ? `<option value="${definition.automatic}">${esc(definition.automaticLabel)}</option>`
         : `<option value="">不填写</option>${state.order.headers.map(header => `<option value="${esc(header)}" ${header === selection ? 'selected' : ''}>${esc(header)}</option>`).join('')}`;
+      const inputControl = definition.manualInput === 'date'
+        ? `<input class="business-field-select business-date-input" type="date" data-manual-key="${definition.key}" value="${esc(state.manualValues?.[definition.key] || '')}" ${binding ? '' : 'disabled'} aria-label="请选择${esc(definition.label)}" />`
+        : `<select class="business-field-select" data-field-key="${definition.key}" ${definition.automatic ? 'disabled' : ''} aria-label="${esc(definition.label)}对应订单列">${options}</select>`;
       const strategy = conflict ? `<select class="business-field-select business-strategy-select" data-strategy-key="${definition.key}" aria-label="${esc(definition.label)}多值处理"><option value="">该列有多个值，请选择处理方式</option><option value="first" ${state.fieldStrategies[definition.key] === 'first' ? 'selected' : ''}>取第一条非空值</option><option value="merge" ${state.fieldStrategies[definition.key] === 'merge' ? 'selected' : ''}>合并去重值</option><option value="sum" ${state.fieldStrategies[definition.key] === 'sum' ? 'selected' : ''}>求和</option></select>` : '';
       const success = !!(binding && selection && mapped.has(definition.key));
       const templateField = binding?.templateLabel || '未识别到对应字段';
       return `<div class="business-mapping-row" role="row" data-business-key="${definition.key}">
         <div class="business-field-name" role="cell" data-cell-label="映射字段"><strong>${esc(definition.label)}</strong><small>${definition.automatic ? esc(definition.automaticLabel) : esc(definition.aliases.slice(0, 3).join('、'))}</small></div>
-        <div class="business-order-field" role="cell" data-cell-label="订单明细"><select class="business-field-select" data-field-key="${definition.key}" ${definition.automatic ? 'disabled' : ''} aria-label="${esc(definition.label)}对应订单列">${options}</select>${strategy}</div>
+        <div class="business-order-field" role="cell" data-cell-label="订单明细">${inputControl}${strategy}</div>
         <span class="business-template-field" role="cell" data-cell-label="合同模板">${esc(templateField)}</span>
         <span class="template-detection ${success ? 'detected' : ''}" role="cell"><span class="mobile-cell-label" aria-hidden="true">是否识别：</span><span class="detection-text">${success ? '识别成功' : '未识别'}</span></span>
         <span class="business-write-mode" role="cell" data-cell-label="写入方式">${esc(definition.writeMode || (definition.kind === 'detail' ? '按订单逐行写入' : '填充内容'))}</span>
@@ -553,6 +581,10 @@
     $('businessMappingRows').querySelectorAll('[data-strategy-key]').forEach(select => select.addEventListener('change', event => {
       state.fieldStrategies[event.target.dataset.strategyKey] = event.target.value;
       invalidateOutput(); rebuildMappings(); saveMapping(); updateAll();
+    }));
+    $('businessMappingRows').querySelectorAll('[data-manual-key]').forEach(input => input.addEventListener('input', event => {
+      state.manualValues[event.target.dataset.manualKey] = event.target.value;
+      invalidateOutput(); rebuildMappings(); updateAll();
     }));
   }
 
@@ -611,6 +643,7 @@
     const notDetected = BUSINESS_FIELDS.filter(field => state.fieldSelections[field.key] && !state.templateBindings[field.key]).map(field => field.label);
     const outputName = C.sanitizeFileName($('outputName').value);
     if (!$('outputName').value.trim()) issues.push('请填写合同文件名称');
+    if (state.templateBindings.signDate && !C.text(state.manualValues?.signDate).trim()) issues.push('请选择甲方签署日期，选择后才能生成PDF预览');
     const detailRows = detailRecords();
     if ((state.templateBindings.taxTotalLower || state.templateBindings.taxTotalUpper) && !state.fieldSelections.taxAmount) issues.push('请为“含税运总金额（元）”选择订单明细列，才能自动计算合同合计');
     if ((state.templateBindings.taxTotalLower || state.templateBindings.taxTotalUpper) && state.fieldSelections.taxAmount) {
@@ -1329,7 +1362,12 @@
   function resolveMapping(mapping) {
     if (mapping.businessKey === 'taxTotalLower') return contractTotals().lower;
     if (mapping.businessKey === 'taxTotalUpper') return contractTotals().upper;
+    if (mapping.businessKey === 'signDate') return formatChineseDate(state.manualValues?.signDate);
     return C.resolveField(state.order.rows, mapping.field, mapping.strategy || 'first', mapping.manual || '');
+  }
+  function formatChineseDate(value) {
+    const match = C.text(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return match ? `${match[1]}年${Number(match[2])}月${Number(match[3])}日` : C.text(value);
   }
   function detailValue(mapping, record, index) { return mapping.field === '@sequence' ? String(index + 1) : C.text(record[mapping.field]); }
   function templateValue(mapping, value) {
@@ -1394,7 +1432,7 @@
     const fields = new Set(state.order?.headers || []), selections = {};
     for (const definition of BUSINESS_FIELDS) {
       const value = payload.fieldSelections?.[definition.key];
-      if (definition.automatic) selections[definition.key] = '@sequence';
+      if (definition.automatic) selections[definition.key] = definition.automatic;
       else if (fields.has(value)) selections[definition.key] = value;
     }
     state.fieldSelections = selections; state.fieldStrategies = { ...(payload.fieldStrategies || {}) }; state.mappingSignature = '';
@@ -1404,7 +1442,7 @@
   function saveMapping() { try { const key = mappingKey(); if (key) localStorage.setItem(key, JSON.stringify(mappingPayload())); } catch (_) {} }
   function restoreMapping() {
     try { const key = mappingKey(), raw = key && localStorage.getItem(key); if (raw) applyMappingPayload(JSON.parse(raw)); }
-    catch (_) { state.mappings = {}; state.detailRow = ''; state.fieldSelections = {}; state.fieldStrategies = {}; state.mappingSignature = ''; }
+    catch (_) { state.mappings = {}; state.detailRow = ''; state.fieldSelections = {}; state.fieldStrategies = {}; state.manualValues = {}; state.mappingSignature = ''; }
   }
 
   function parseXml(xml) {
