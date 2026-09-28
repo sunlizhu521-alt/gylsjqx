@@ -47,11 +47,12 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
         ['1', 'MAT-001', '产品A', '', 'A型', 'SKU-A', '件', '2', '10.5', '21', '首批', '甲公司'],
         ['2', 'MAT-002', '产品B', '', 'B型', 'SKU-B', '件', '3', '20', '60', '', '甲公司'],
         ['交货地点', '虚构交货地点', '', '', '', '', '', '', '交货时间', '2026-10-01', '', ''],
-      ]);
+      ], { origin: 'B3' });
       sheet['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 8 } },
-        { s: { r: 1, c: 2 }, e: { r: 1, c: 3 } },
+        { s: { r: 2, c: 1 }, e: { r: 2, c: 9 } },
+        { s: { r: 3, c: 3 }, e: { r: 3, c: 4 } },
       ];
+      sheet['!ref'] = 'B3:M7';
       const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, '订单');
       return Array.from(new Uint8Array(XLSX.write(book, { type: 'array', bookType: 'biff8' })));
     });
@@ -372,6 +373,9 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const realDownloadPromise = page.waitForEvent('download'); await page.locator('#downloadContract').click(); const realDownload = await realDownloadPromise;
       const realDocxPath = path.join(out, '真实订单合同编号测试.docx'); await realDownload.saveAs(realDocxPath);
       const realXml = await page.evaluate(async bytes => (await (await JSZip.loadAsync(new Uint8Array(bytes))).file('word/document.xml').async('string')), [...await fs.readFile(realDocxPath)]);
+      if (process.env.EXPECTED_TOTAL) assert.ok(realXml.includes(process.env.EXPECTED_TOTAL));
+      if (process.env.EXPECTED_SUPPLIER) assert.ok(realXml.includes(process.env.EXPECTED_SUPPLIER));
+      if (process.env.EXPECTED_SHEET) assert.equal(await page.locator('#orderSheet').inputValue(), process.env.EXPECTED_SHEET);
       if (expectedContractNumber) assert.match(realXml, new RegExp(`>${expectedContractNumber}<`));
       if (expectedDetailRows) assert.equal((realXml.match(/<w:tr(?:\s|>)/g) || []).length, expectedDetailRows + 8);
       await page.locator('#mappingStage').screenshot({ path: path.join(out, 'contract-real-order-number.png') });

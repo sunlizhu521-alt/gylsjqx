@@ -15,6 +15,7 @@
   const CONVERSION_TIMEOUT = 240000;
   const NUMERIC_BUSINESS_FIELDS = new Set(['sequence', 'quantity', 'taxUnitPrice', 'taxAmount', 'taxRate']);
   const RIGHT_SIDE_VALUE_FIELDS = new Set(['contractNumber', 'deliveryPlace', 'deliveryTime', 'signDate']);
+  const ORDER_RIGHT_SIDE_FIELDS = new Set([...RIGHT_SIDE_VALUE_FIELDS, 'buyer', 'supplier']);
   const CONTRACT_TERMS = [
     '1、采购合同所述价格为甲方在本合同项下应向乙方支付的最终价格，其中已经包括所有的安装费、售后服务费和税费等，除合同金额外，甲方不再支付任何其他费用。',
     '2、乙方应根据甲方要求进行包装并确保产品交付给甲方时包装完好无损，按照甲方要求进行必要的标识贴附工作并承担相关费用。',
@@ -46,7 +47,7 @@
     { key: 'contractNumber', label: '合同编号', aliases: ['合同编号', '合同号'], kind: 'single' },
     { key: 'orderNumber', label: '订单编号', aliases: ['订单编号', '采购订单号', '采购单号', '订单号'], kind: 'single' },
     { key: 'buyer', label: '采购方（甲方）', aliases: ['采购方（甲方）', '采购方', '甲方', '买方'], kind: 'single' },
-    { key: 'supplier', label: '供应商（乙方）', aliases: ['供应商名称', '供应商（乙方）', '供应商', '乙方', '卖方'], kind: 'single' },
+    { key: 'supplier', label: '供应商（乙方）', aliases: ['供应方（乙方）', '供应方', '供应商名称', '供应商（乙方）', '供应商', '乙方', '卖方'], kind: 'single' },
     { key: 'signDate', label: '甲方签署日期', aliases: ['甲方签署日期', '甲方签署时间', '签署时间', '签署日期', '签订日期', '合同日期', '签约日期'], kind: 'single', automatic: '@sign-date', automaticLabel: '请选择日期', manualInput: 'date', writeMode: '选择后填充' },
     { key: 'deliveryPlace', label: '交货地点', aliases: ['交货地点', '送货地址', '交付地点'], kind: 'single' },
     { key: 'paymentTerms', label: '付款方式', aliases: ['付款方式', '付款条件', '结算方式', '结算条件'], kind: 'single' },
@@ -163,7 +164,9 @@
   function analyzeOrder() {
     const sheet = state.orderBook?.Sheets[state.orderSheet];
     if (!sheet) throw new Error('找不到选中的订单工作表');
-    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, blankrows: true });
+    // Anchor at A1 so matrix indexes agree with absolute merged-cell coordinates.
+    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, blankrows: true, range: { s: { r: 0, c: 0 }, e: range.e } });
     state.order = C.analyzeMatrix(matrix, 1000);
     const rightSideValues = C.extractAdjacentLabelValues(
       matrix,
@@ -172,7 +175,7 @@
       [state.order.headerIndex],
     );
     state.order.rightSideFields = {};
-    for (const definition of BUSINESS_FIELDS.filter(field => RIGHT_SIDE_VALUE_FIELDS.has(field.key) && !field.manualInput)) {
+    for (const definition of BUSINESS_FIELDS.filter(field => ORDER_RIGHT_SIDE_FIELDS.has(field.key) && !field.manualInput)) {
       const value = rightSideValues[definition.key];
       if (!C.text(value).trim()) continue;
       const header = `${definition.label}（右侧内容）`;
