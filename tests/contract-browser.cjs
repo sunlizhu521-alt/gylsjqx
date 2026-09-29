@@ -81,7 +81,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const totalRow = '<w:tr><w:tc><w:p><w:r><w:t>含税合计</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t xml:space="preserve">人民币小写：            元</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t xml:space="preserve">人民币大写：              圆整</w:t></w:r></w:p></w:tc></w:tr>';
       const incompleteTerms = terms.slice(1).join('\n').replace('复印件与本合同原件具有同等法律效力。', '复印件与本合同原件');
       const termsRow = `<w:tr><w:trPr><w:trHeight w:val="2600" w:hRule="exact"/><w:cantSplit/></w:trPr><w:tc><w:p><w:r><w:t>合同条款</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:keepLines/></w:pPr><w:r><w:t xml:space="preserve">${incompleteTerms}</w:t></w:r></w:p></w:tc></w:tr>`;
-      zip.folder('word').file('document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>采购合同</w:t></w:r></w:p><w:p><w:r><w:t>合同编号：</w:t></w:r></w:p><w:p><w:r><w:t>供应商名称：</w:t></w:r></w:p><w:tbl><w:tblPr><w:tblW w:w="8700" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single" w:sz="4"/><w:bottom w:val="single" w:sz="4"/><w:insideH w:val="single" w:sz="4"/><w:insideV w:val="single" w:sz="4"/></w:tblBorders></w:tblPr><w:tblGrid>${widths.map(width => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid><w:tr>${headerRow}</w:tr><w:tr>${detailRow}</w:tr>${reservedDetailRows}<w:tr>${deliveryRow}</w:tr>${labeledRow('合同编号：')}${labeledRow('交货地点：')}${signatureRows}${totalRow}${termsRow}</w:tbl><w:p><w:r><w:br w:type="page"/></w:r></w:p>${extraParagraphs}<w:sectPr/></w:body></w:document>`);
+      zip.folder('word').file('document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>采购合同</w:t></w:r></w:p><w:p><w:r><w:t>合同编号：</w:t></w:r></w:p><w:p><w:r><w:t>供应商名称：</w:t></w:r></w:p><w:tbl><w:tblPr><w:tblW w:w="8700" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single" w:sz="4"/><w:bottom w:val="single" w:sz="4"/><w:insideH w:val="single" w:sz="4"/><w:insideV w:val="single" w:sz="4"/></w:tblBorders></w:tblPr><w:tblGrid>${widths.map(width => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid><w:tr>${headerRow}</w:tr><w:tr>${detailRow}</w:tr>${reservedDetailRows}<w:tr>${deliveryRow}</w:tr>${labeledRow('合同编号：')}${labeledRow('交货地点：')}${signatureRows}${totalRow}${termsRow}</w:tbl><w:p><w:r><w:br w:type="page"/></w:r></w:p>${extraParagraphs}<w:p><w:r><w:t>附件一：供应方廉洁诚信承诺书</w:t></w:r></w:p><w:p><w:r><w:t>供应方廉洁诚信承诺书</w:t></w:r></w:p><w:p><w:pPr><w:spacing w:after="160" w:line="360" w:lineRule="auto"/><w:ind w:firstLineChars="200"/></w:pPr><w:r><w:t>虚构附件内容完整保留。</w:t></w:r></w:p><w:sectPr/></w:body></w:document>`);
       return Array.from(await zip.generateAsync({ type: 'uint8array' }));
     }, CONTRACT_TERMS);
     await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from(orderBytes) });
@@ -211,6 +211,20 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
         return ['left', 'right', 'firstLineChars'].map(key => indent?.getAttributeNS(ns, key));
       });
     }, generatedXml);
+    const appendixLayout = await page.evaluate(xml => {
+      const doc = new DOMParser().parseFromString(xml, 'application/xml'), ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+      const paragraphs = [...doc.getElementsByTagNameNS(ns, 'p')];
+      return ['附件一：供应方廉洁诚信承诺书', '供应方廉洁诚信承诺书', '虚构附件内容完整保留。'].map(text => {
+        const p = paragraphs.find(p => p.textContent === text);
+        return { pageBreak: p?.getElementsByTagNameNS(ns, 'pageBreakBefore')[0]?.getAttributeNS(ns, 'val'),
+          line: p?.getElementsByTagNameNS(ns, 'spacing')[0]?.getAttributeNS(ns, 'line'),
+          indent: p?.getElementsByTagNameNS(ns, 'ind')[0]?.getAttributeNS(ns, 'firstLineChars') };
+      });
+    }, generatedXml);
+    assert.equal(appendixLayout[0].pageBreak, '1');
+    assert.equal(appendixLayout[1].pageBreak, '0');
+    assert.equal(appendixLayout[2].line, '360');
+    assert.equal(appendixLayout[2].indent, '200');
     assert.equal(proseIndents.length, 50);
     assert.ok(proseIndents.every(values => values.join(',') === '0,0,100'), '正文取消左右缩进、首行缩进一字');
 

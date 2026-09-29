@@ -989,9 +989,24 @@
 
   function compactWordContractLayout(doc) {
     const body = all(doc, 'body')[0];
+    let inIntegrityAppendix = false;
     for (const paragraph of all(body, 'p')) {
       let properties = direct(paragraph, 'pPr')[0];
       if (!properties) { properties = wordNode(doc, 'pPr'); paragraph.prepend(properties); }
+      const appendixText = normalizeBusinessLabel(wordText(paragraph));
+      const appendixHeading = /^(?:附件[一1])?供应方廉洁诚信承诺书$/.test(appendixText);
+      if (paragraph.parentNode === body && appendixHeading) {
+        let pageBreak = direct(properties, 'pageBreakBefore')[0];
+        if (!pageBreak) { pageBreak = wordNode(doc, 'pageBreakBefore'); properties.append(pageBreak); }
+        // The attachment label and its title belong on the same new page.
+        pageBreak.setAttributeNS(W, 'w:val', inIntegrityAppendix ? '0' : '1');
+        let keep = direct(properties, 'keepNext')[0];
+        if (!keep) { keep = wordNode(doc, 'keepNext'); properties.append(keep); }
+        keep.setAttributeNS(W, 'w:val', '1');
+        inIntegrityAppendix = true;
+      }
+      // Preserve the appendix's original paragraph spacing and indentation.
+      if (inIntegrityAppendix) continue;
       let snap = direct(properties, 'snapToGrid')[0];
       if (!snap) { snap = wordNode(doc, 'snapToGrid'); properties.append(snap); }
       snap.setAttributeNS(W, 'w:val', '0');
