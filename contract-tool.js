@@ -1222,7 +1222,7 @@
     const strings = all(shared, 'si', S).map(node => all(node, 't', S).map(item => item.textContent).join(''));
     const xfs = direct(all(styles, 'cellXfs', S)[0], 'xf', S), fonts = direct(all(styles, 'fonts', S)[0], 'font', S);
     const columns = all(doc, 'col', S), merges = all(doc, 'mergeCell', S).map(node => XLSX.utils.decode_range(node.getAttribute('ref')));
-    const canvas = document.createElement('canvas').getContext('2d'), clonedStyles = new Map();
+    const canvas = document.createElement('canvas').getContext('2d'), clonedStyles = new Map(), overflow = [];
     const columnWidth = column => {
       const item = columns.find(node => column + 1 >= Number(node.getAttribute('min')) && column + 1 <= Number(node.getAttribute('max')));
       return Number(item?.getAttribute('width') || 8.43) * 7 + 5;
@@ -1248,9 +1248,32 @@
         const endRow = (merge?.e.r ?? point.r) + 1;
         let existing = 0;
         for (let r = point.r + 1; r <= endRow; r += 1) existing += Number(ensureSheetRow(doc, r).getAttribute('ht') || 15);
-        const target = ensureSheetRow(doc, endRow), height = Number(target.getAttribute('ht') || 15) + Math.max(0, needed - existing);
-        if (height > 409.5) throw new Error(`模板 ${cellAddressOf(cell)} 内容过多，无法完整显示；请加宽该列或拆分该单元格`);
-        target.setAttribute('ht', String(height)); target.setAttribute('customHeight', '1');
+        const canContinue = !direct(cell, 'f', S).length && ['s', 'str', 'inlineStr'].includes(type);
+        let fittedHeight = needed;
+        if (needed > 390 && canContinue) {
+          // Continuation rows keep the original font and all characters. They can
+          // paginate normally, unlike one oversized vertically merged cell.
+          const maxLines = Math.max(1, Math.floor((360 - 6) / (size * 1.5)));
+          const chunks = []; let chunk = '', lineWidth = 0, lineCount = 1;
+          for (const character of value) {
+            const advance = canvas.measureText(character).width * 1.2;
+            const newLine = character === '\n' || (lineWidth > 0 && lineWidth + advance > width);
+            if (newLine && lineCount >= maxLines && chunk) { chunks.push(chunk); chunk = ''; lineWidth = 0; lineCount = 1; }
+            else if (newLine) { lineCount += 1; lineWidth = 0; }
+            chunk += character;
+            if (character !== '\n' && character !== '\r') lineWidth += advance;
+          }
+          if (chunk) chunks.push(chunk);
+          if (chunks.length > 1) overflow.push({ cell, chunks, height: Math.min(390, maxLines * size * 1.5 + 6) });
+          fittedHeight = Math.min(390, maxLines * size * 1.5 + 6);
+        }
+        // Spread merged-cell height across its rows instead of overflowing the last row.
+        let remaining = Math.max(0, fittedHeight - existing);
+        for (let r = point.r + 1; r <= endRow; r += 1) {
+          const target = ensureSheetRow(doc, r), current = Math.min(409.5, Number(target.getAttribute('ht') || 15));
+          const addition = Math.min(409.5 - current, remaining / (endRow - r + 1));
+          target.setAttribute('ht', String(current + addition)); target.setAttribute('customHeight', '1'); remaining -= addition;
+        }
         if (xf && !singleLine && ['s', 'str', 'inlineStr'].includes(type)) {
           if (!clonedStyles.has(styleIndex)) {
             const clone = xf.cloneNode(true); let align = direct(clone, 'alignment', S)[0];
@@ -1263,6 +1286,55 @@
       }
     }
     if (styles) zip.file('xl/styles.xml', new XMLSerializer().serializeToString(styles));
+    for (const item of overflow.sort((a, b) => rowNumberFromAddress(cellAddressOf(b.cell)) - rowNumberFromAddress(cellAddressOf(a.cell)))) {
+      await addExcelTextContinuation(zip, context, item);
+    }
+  }
+
+  async function addExcelTextContinuation(zip, context, { cell, chunks, height }) {
+    const doc = context.sheetDoc, point = XLSX.utils.decode_cell(cellAddressOf(cell));
+    let mergeList = all(doc, 'mergeCells', S)[0];
+    const mergeNode = all(mergeList, 'mergeCell', S).find(n => {
+      const range = XLSX.utils.decode_range(n.getAttribute('ref')); return range.s.r === point.r && range.s.c === point.c;
+    });
+    const originalMerge = mergeNode?.getAttribute('ref');
+    const merge = originalMerge ? XLSX.utils.decode_range(originalMerge) : null;
+    const afterRow = (merge?.e.r ?? point.r) + 1, delta = chunks.length - 1;
+    validateExpandableFormulas(doc, afterRow);
+    const relationships = await loadSheetRelationships(zip, context.sheetPath);
+    if (relationships.some(item => /\/pivotTable$/i.test(item.type))) throw new Error('超长文字所在工作表含数据透视表，无法安全自动扩展；请使用普通合同工作表');
+    adjustFormulasForInsertedRows(doc, state.templateSheet, afterRow, delta, null);
+    await adjustOtherSheetFormulas(zip, context, state.templateSheet, afterRow, delta);
+    for (const row of direct(sheetData(doc), 'row', S)) {
+      if (rowNumberOf(row) <= afterRow) continue;
+      row.setAttribute('r', String(rowNumberOf(row) + delta));
+      for (const item of direct(row, 'c', S)) item.setAttribute('r', shiftCellAddress(cellAddressOf(item), delta));
+    }
+    shiftSheetRanges(doc, afterRow, delta);
+    // This cell is split into independent chunks, not one growing vertical merge.
+    if (mergeNode) mergeNode.setAttribute('ref', originalMerge);
+    await shiftRelatedExcelParts(zip, relationships, afterRow, delta);
+    shiftWorkbookNames(context.workbookDoc, state.templateSheet, afterRow, delta);
+    writeCellValue(cell, chunks[0]);
+    for (let i = 1; i < chunks.length; i++) {
+      const number = afterRow + i, row = ensureSheetRow(doc, number);
+      row.setAttribute('ht', String(height)); row.setAttribute('customHeight', '1');
+      const target = ensureRowCell(row, XLSX.utils.encode_cell({ r: number - 1, c: point.c }));
+      if (cell.hasAttribute('s')) target.setAttribute('s', cell.getAttribute('s'));
+      target.setAttribute('t', 'inlineStr'); writeCellValue(target, chunks[i]);
+      if (merge && merge.e.c > point.c) {
+        if (!mergeList) { mergeList = doc.createElementNS(S, 'mergeCells'); doc.documentElement.insertBefore(mergeList, sheetData(doc).nextSibling); }
+        const node = doc.createElementNS(S, 'mergeCell');
+        node.setAttribute('ref', XLSX.utils.encode_range({ s: { r: number - 1, c: point.c }, e: { r: number - 1, c: merge.e.c } }));
+        mergeList.append(node);
+      }
+    }
+    if (mergeList) mergeList.setAttribute('count', String(direct(mergeList, 'mergeCell', S).length));
+    const dimension = all(doc, 'dimension', S)[0];
+    if (dimension) {
+      const range = XLSX.utils.decode_range(dimension.getAttribute('ref'));
+      range.e.r = Math.max(range.e.r, afterRow + delta - 1); dimension.setAttribute('ref', XLSX.utils.encode_range(range));
+    }
   }
 
   function widenWordSkuColumn(table, prototype, mappings, records) {
@@ -1485,7 +1557,7 @@
     const lines = CONTRACT_TERMS.reduce((total, clause) => total + Math.max(1, Math.ceil(weightedLength(clause) / usableWidth)), 0);
     let fontSize = 10, height = Math.ceil(lines * fontSize * 1.38 + 8);
     if (height > 409.5) { fontSize = Math.max(8, Number((fontSize * 409.5 / height).toFixed(1))); height = Math.ceil(lines * fontSize * 1.38 + 8); }
-    if (height > 409.5) throw new Error('合同条款区域过窄，无法完整显示1—9条；请扩大模板中“合同条款”右侧内容区域');
+    // The row fitter creates readable continuation rows if the text still exceeds Excel's row limit.
     return { fontSize, height: Math.min(409.5, Math.max(15, height)) };
   }
 
@@ -1536,7 +1608,7 @@
     const oldColumns = direct(columnList, 'col', S);
     const widths = Array.from({ length: lastUsedColumn + 1 }, (_, i) => Number(oldColumns.find(n => i + 1 >= Number(n.getAttribute('min')) && i + 1 <= Number(n.getAttribute('max')))?.getAttribute('width') || 8.43));
     const formWidth = widths.reduce((sum, width) => sum + (width * 7 + 5) * 0.75, 0);
-    const expand = Math.max(1, Math.min(2.5, height * usableWidth / Math.max(1, usableHeight * formWidth)));
+    const expand = height <= usableHeight / 0.65 ? Math.max(1, Math.min(2.5, height * usableWidth / Math.max(1, usableHeight * formWidth))) : 1;
     if (expand > 1.02) {
       const newColumns = widths.map((width, i) => {
         const original = oldColumns.find(n => i + 1 >= Number(n.getAttribute('min')) && i + 1 <= Number(n.getAttribute('max')));
@@ -1569,7 +1641,7 @@
     // Excel ignores manual section breaks in fit-to-page mode; use explicit print scale.
     direct(direct(worksheet, 'sheetPr', S)[0], 'pageSetUpPr', S)[0].setAttribute('fitToPage', '0');
     const cells = rows.flatMap(row => direct(row, 'c', S));
-    const lastColumn = Math.max(0, ...cells.map(cell => XLSX.utils.decode_cell(cellAddressOf(cell)).c));
+    const lastColumn = Math.max(lastUsedColumn, ...cells.map(cell => XLSX.utils.decode_cell(cellAddressOf(cell)).c));
     const columns = all(doc, 'col', S);
     const styleDoc = zip.file('xl/styles.xml') ? parseXml(await zip.file('xl/styles.xml').async('string')) : null;
     const defaultFont = all(styleDoc, 'font', S)[0];
