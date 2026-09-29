@@ -67,7 +67,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     const previewPdfBytes = await previewPdf.save();
     const docxBytes = await page.evaluate(async terms => {
       const zip = new JSZip();
-      const extraParagraphs = Array.from({ length: 50 }, (_, index) => `<w:p><w:r><w:t>附加条款 ${index + 1}：本条为A4分页预览测试内容。</w:t></w:r></w:p>`).join('');
+      const extraParagraphs = Array.from({ length: 50 }, (_, index) => `<w:p><w:pPr><w:ind w:left="720" w:right="720" w:firstLineChars="300"/></w:pPr><w:r><w:t>附加条款 ${index + 1}：本条为A4分页预览测试内容。</w:t></w:r></w:p>`).join('');
       zip.file('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
       zip.folder('_rels').file('.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
       const headers = ['序号', '物料编码', '物料名称', '规格型号', 'SKU', '单位', '数量', '含税运单价（元）', '含税运总金额（元）', '备注'];
@@ -204,6 +204,16 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.doesNotMatch(generatedXml, /<w:br w:type="page"/);
     assert.match(generatedXml, /<w:pageBreakBefore w:val="1"/);
     assert.match(generatedXml, /<w:snapToGrid w:val="0"/);
+    const proseIndents = await page.evaluate(xml => {
+      const doc = new DOMParser().parseFromString(xml, 'application/xml'), ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+      return [...doc.getElementsByTagNameNS(ns, 'p')].filter(p => p.textContent.startsWith('附加条款')).map(p => {
+        const indent = p.getElementsByTagNameNS(ns, 'ind')[0];
+        return ['left', 'right', 'firstLineChars'].map(key => indent?.getAttributeNS(ns, key));
+      });
+    }, generatedXml);
+    assert.equal(proseIndents.length, 50);
+    assert.ok(proseIndents.every(values => values.join(',') === '0,0,100'), '正文取消左右缩进、首行缩进一字');
+
     assert.equal((generatedXml.match(/附加条款 \d+：/g) || []).length, 50, '紧凑排版必须保留全部条款');
 
     const fittedGrid = await page.evaluate(xml => {

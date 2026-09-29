@@ -1001,6 +1001,19 @@
       spacing.setAttributeNS(W, 'w:before', '0'); spacing.setAttributeNS(W, 'w:after', '0');
       const sizes = all(paragraph, 'sz').map(node => Number(node.getAttributeNS(W, 'val')) / 2).filter(size => size > 0);
       const fontSize = sizes.length ? Math.max(...sizes) : 11;
+      const text = wordText(paragraph).trim();
+      const alignment = direct(properties, 'jc')[0]?.getAttributeNS(W, 'val');
+      if (paragraph.parentNode === body && text && !['center', 'right', 'end'].includes(alignment)
+          && !direct(properties, 'numPr').length && !/盖章|签署日期|授权代表|^年\s*月\s*日$/.test(text)) {
+        // Reclaim horizontal space in prose without changing list numbering or signature layout.
+        let indent = direct(properties, 'ind')[0];
+        if (!indent) { indent = wordNode(doc, 'ind'); properties.append(indent); }
+        for (const attribute of [...indent.attributes]) indent.removeAttributeNode(attribute);
+        for (const key of ['left', 'right', 'start', 'end', 'leftChars', 'rightChars', 'hanging', 'hangingChars']) indent.setAttributeNS(W, `w:${key}`, '0');
+        const numbered = /^(?:[一二三四五六七八九十百]+[、．.]|[（(]?\d+[）)、．.])/.test(text);
+        indent.setAttributeNS(W, 'w:firstLine', numbered ? '0' : String(Math.round(fontSize * 20)));
+        indent.setAttributeNS(W, 'w:firstLineChars', numbered ? '0' : '100');
+      }
       const line = Math.max(paragraph.parentNode.localName === 'tc' ? 220 : 240, Math.ceil(fontSize * 1.3 * 20));
       spacing.setAttributeNS(W, 'w:line', String(line));
       spacing.setAttributeNS(W, 'w:lineRule', 'exact');
