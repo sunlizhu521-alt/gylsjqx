@@ -998,6 +998,7 @@
     }
     normalizeWordContractTerms(doc);
     compactWordContractLayout(doc);
+    preventWordTextClipping(doc);
     zip.file('word/document.xml', new XMLSerializer().serializeToString(doc));
     return zip.generateAsync({ type: 'blob', mimeType: MIME.docx, compression: 'DEFLATE' });
   }
@@ -1046,7 +1047,7 @@
       }
       const line = Math.max(paragraph.parentNode.localName === 'tc' ? 220 : 240, Math.ceil(fontSize * 1.3 * 20));
       spacing.setAttributeNS(W, 'w:line', String(line));
-      spacing.setAttributeNS(W, 'w:lineRule', 'exact');
+      spacing.setAttributeNS(W, 'w:lineRule', 'atLeast');
       // Move standalone page breaks onto the following heading; an overflowing empty
       // break paragraph otherwise creates an entirely blank page after a full table.
       if (!wordText(paragraph).trim() && !all(paragraph, 'sectPr').length && all(paragraph, 'br').some(node => node.getAttributeNS(W, 'type') === 'page')) {
@@ -1083,6 +1084,71 @@
       if (!isDetail) continue;
       for (const height of all(table, 'trHeight')) height.remove();
     }
+  }
+
+  function preventWordTextClipping(doc) {
+    const body = all(doc, 'body')[0];
+    // An exact template row height clips wrapped headings; retain it only as a minimum.
+    for (const height of all(body, 'trHeight')) height.setAttributeNS(W, 'w:hRule', 'atLeast');
+    for (const paragraph of all(body, 'p')) {
+      let properties = direct(paragraph, 'pPr')[0];
+      if (!properties) { properties = wordNode(doc, 'pPr'); paragraph.prepend(properties); }
+      let spacing = direct(properties, 'spacing')[0];
+      if (!spacing) { spacing = wordNode(doc, 'spacing'); properties.append(spacing); }
+      const rule = spacing.getAttributeNS(W, 'lineRule');
+      if (rule === 'exact') spacing.setAttributeNS(W, 'w:lineRule', 'atLeast');
+      else if (!rule) { spacing.setAttributeNS(W, 'w:lineRule', 'auto'); spacing.setAttributeNS(W, 'w:line', '240'); }
+    }
+  }
+
+  async function fitExcelRowHeights(zip, context) {
+    const doc = context.sheetDoc;
+    const styles = zip.file('xl/styles.xml') ? parseXml(await zip.file('xl/styles.xml').async('string')) : null;
+    const shared = zip.file('xl/sharedStrings.xml') ? parseXml(await zip.file('xl/sharedStrings.xml').async('string')) : null;
+    const strings = all(shared, 'si', S).map(node => all(node, 't', S).map(item => item.textContent).join(''));
+    const xfs = direct(all(styles, 'cellXfs', S)[0], 'xf', S), fonts = direct(all(styles, 'fonts', S)[0], 'font', S);
+    const columns = all(doc, 'col', S), merges = all(doc, 'mergeCell', S).map(node => XLSX.utils.decode_range(node.getAttribute('ref')));
+    const canvas = document.createElement('canvas').getContext('2d'), clonedStyles = new Map();
+    const columnWidth = column => {
+      const item = columns.find(node => column + 1 >= Number(node.getAttribute('min')) && column + 1 <= Number(node.getAttribute('max')));
+      return Number(item?.getAttribute('width') || 8.43) * 7 + 5;
+    };
+    for (const row of direct(sheetData(doc), 'row', S)) {
+      if (row.getAttribute('hidden') === '1') continue;
+      for (const cell of direct(row, 'c', S)) {
+        const type = cell.getAttribute('t'), raw = direct(cell, 'v', S)[0]?.textContent || '';
+        const value = type === 's' ? strings[Number(raw)] : type === 'inlineStr' ? all(cell, 't', S).map(node => node.textContent).join('') : raw;
+        if (!value) continue;
+        const point = XLSX.utils.decode_cell(cellAddressOf(cell));
+        const merge = merges.find(range => range.s.r === point.r && range.s.c === point.c);
+        const styleIndex = Number(cell.getAttribute('s') || 0), xf = xfs[styleIndex] || xfs[0];
+        const font = fonts[Number(xf?.getAttribute('fontId') || 0)], size = Number(direct(font, 'sz', S)[0]?.getAttribute('val') || 11);
+        const alignment = direct(xf, 'alignment', S)[0], singleLine = alignment?.getAttribute('shrinkToFit') === '1';
+        const name = direct(font, 'name', S)[0]?.getAttribute('val') || 'Arial';
+        canvas.font = `${direct(font, 'b', S).length ? 'bold ' : ''}${size * 4 / 3}px "${name}"`;
+        let width = 0;
+        for (let c = point.c; c <= (merge?.e.c ?? point.c); c += 1) width += columnWidth(c);
+        width = Math.max(4, width - 10 - Number(alignment?.getAttribute('indent') || 0) * size * 4);
+        const lines = value.split(/\r?\n/).reduce((sum, text) => sum + (singleLine ? 1 : Math.max(1, Math.ceil(canvas.measureText(text).width * 1.15 / width))), 0);
+        const needed = Math.ceil(lines * size * 1.5 + 6);
+        const endRow = (merge?.e.r ?? point.r) + 1;
+        let existing = 0;
+        for (let r = point.r + 1; r <= endRow; r += 1) existing += Number(ensureSheetRow(doc, r).getAttribute('ht') || 15);
+        const target = ensureSheetRow(doc, endRow), height = Number(target.getAttribute('ht') || 15) + Math.max(0, needed - existing);
+        if (height > 409.5) throw new Error(`模板 ${cellAddressOf(cell)} 内容过多，无法完整显示；请加宽该列或拆分该单元格`);
+        target.setAttribute('ht', String(height)); target.setAttribute('customHeight', '1');
+        if (xf && !singleLine && ['s', 'str', 'inlineStr'].includes(type)) {
+          if (!clonedStyles.has(styleIndex)) {
+            const clone = xf.cloneNode(true); let align = direct(clone, 'alignment', S)[0];
+            if (!align) { align = styles.createElementNS(S, 'alignment'); clone.append(align); }
+            align.setAttribute('wrapText', '1'); clone.setAttribute('applyAlignment', '1');
+            const list = all(styles, 'cellXfs', S)[0]; clonedStyles.set(styleIndex, direct(list, 'xf', S).length); list.append(clone); list.setAttribute('count', String(direct(list, 'xf', S).length));
+          }
+          cell.setAttribute('s', String(clonedStyles.get(styleIndex)));
+        }
+      }
+    }
+    if (styles) zip.file('xl/styles.xml', new XMLSerializer().serializeToString(styles));
   }
 
   function widenWordSkuColumn(table, prototype, mappings, records) {
@@ -1230,6 +1296,8 @@
       await expandExcelDetailRowXml(zip, context, rowNumber, detailRecords(), rowMappings);
     }
     await normalizeExcelContractTerms(zip, context);
+    await fitExcelRowHeights(zip, context);
+    configureExcelContractPrint(context.sheetDoc, false);
     await forceWorkbookRecalculation(zip, context);
     zip.file(context.sheetPath, new XMLSerializer().serializeToString(context.sheetDoc));
     return zip.generateAsync({ type: 'blob', mimeType: MIME.xlsx, compression: 'DEFLATE' });

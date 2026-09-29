@@ -72,7 +72,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       zip.folder('_rels').file('.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
       const headers = ['序号', '物料编码', '物料名称', '规格型号', 'SKU', '单位', '数量', '含税运单价（元）', '含税运总金额（元）', '备注'];
       const widths = [400, 1100, 1800, 1550, 500, 400, 500, 950, 1000, 500];
-      const headerRow = headers.map(value => `<w:tc><w:p><w:r><w:t>${value}</w:t></w:r></w:p></w:tc>`).join('');
+      const headerRow = headers.map(value => `<w:tc><w:p><w:pPr><w:spacing w:line="60" w:lineRule="exact"/></w:pPr><w:r><w:t>${value}</w:t></w:r></w:p></w:tc>`).join('');
       const detailRow = headers.map((_, index) => `<w:tc><w:tcPr><w:tcW w:w="${widths[index]}" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:ind w:firstLine="200"/></w:pPr><w:r><w:rPr><w:sz w:val="28"/></w:rPr><w:t>待填写</w:t></w:r></w:p></w:tc>`).join('');
       const reservedDetailRows = [2, 3].map(sequence => `<w:tr>${headers.map((_, index) => `<w:tc><w:p><w:r><w:t>${index === 0 ? sequence : ''}</w:t></w:r></w:p></w:tc>`).join('')}</w:tr>`).join('');
       const deliveryRow = headers.map((_, index) => `<w:tc><w:p><w:r><w:t>${index === 7 ? '交货时间：' : (index === 8 ? '待填写' : '')}</w:t></w:r></w:p></w:tc>`).join('');
@@ -209,6 +209,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     }, generatedXml);
     assert.equal(singleLine.length, 8);
     assert.doesNotMatch(generatedXml, /<w:tcFitText/);
+    assert.doesNotMatch(generatedXml, /w:lineRule="exact"/);
     assert.doesNotMatch(generatedXml, /<w:br w:type="page"/);
     assert.match(generatedXml, /<w:pageBreakBefore w:val="1"/);
     assert.match(generatedXml, /<w:snapToGrid w:val="0"/);
@@ -278,7 +279,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       sheet.D3 = { t: 'n', f: 'C3*10+$C$1+参考!A3+IF(A3="A1",0,0)', v: 0 };
       sheet.D6 = { t: 'n', f: 'SUM(D3:D5)+参考!A4+LOG10(100)', v: 0 };
       sheet['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
-      sheet['!rows'] = Array.from({ length: 34 }, (_, index) => index === 33 ? { hpt: 90 } : null);
+      sheet['!rows'] = Array.from({ length: 34 }, (_, index) => index === 33 ? { hpt: 90 } : index === 1 ? { hpt: 6 } : null);
       sheet['!merges'] = [
         { s: { r: 6, c: 1 }, e: { r: 6, c: 4 } },
         { s: { r: 6, c: 5 }, e: { r: 6, c: 9 } },
@@ -418,7 +419,8 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.match(preservedParts.pivot, /PIVOT-MARKER/);
     assert.match(preservedParts.sheet, /<row[^>]*r="33"[^>]*ht="(?:[2-3]\d\d|40\d)(?:\.\d+)?"[^>]*customHeight="1"/);
     assert.match(preservedParts.sheet, /<pageSetUpPr[^>]*fitToPage="1"[^>]*autoPageBreaks="0"/);
-    assert.match(preservedParts.sheet, /<pageSetup[^>]*paperSize="9"[^>]*fitToWidth="1"[^>]*fitToHeight="1"/);
+    assert.match(preservedParts.sheet, /<row[^>]*r="2"[^>]*ht="(?:[2-9]\d|\d{3})(?:\.\d+)?"/);
+    assert.match(preservedParts.sheet, /<pageSetup[^>]*paperSize="9"[^>]*fitToWidth="1"[^>]*fitToHeight="0"/);
     assert.match(preservedParts.styles, /<alignment[^>]*wrapText="1"[^>]*vertical="top"/);
     const fittedExcelCells = await page.evaluate(({ sheet, styles }) => {
       const parser = new DOMParser(), ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
