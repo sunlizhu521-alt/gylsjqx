@@ -65,7 +65,7 @@
     orderFile: null, orderBytes: null, orderBook: null, orderSheet: '', order: null,
     templateFile: null, templateBytes: null, templateType: '', templateBook: null, templateSheet: '', templateModel: null, templateFeatures: [], fingerprint: '',
     previewDocument: null, previewPdfiumDocument: null, previewMode: '', previewPageCount: 0, previewPage: 0, previewRenderToken: 0,
-    mappings: {}, detailRow: '', fieldSelections: {}, fieldStrategies: {}, manualValues: {}, templateBindings: {}, mappingSignature: '', output: null, outputFileName: '', outputPdf: null, outputPdfFileName: '', busy: false,
+    mappings: {}, detailRow: '', fieldSelections: {}, fieldStrategies: {}, manualValues: {}, templateBindings: {}, mappingSignature: '', customOutputName: false, output: null, outputFileName: '', outputPdf: null, outputPdfFileName: '', busy: false,
   };
   const $ = id => document.getElementById(id);
   const esc = value => C.text(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -82,7 +82,8 @@
     $('templateSheet').addEventListener('change', event => { state.templateSheet = event.target.value; buildExcelModel(); state.mappings = {}; state.detailRow = ''; state.templateBindings = {}; state.mappingSignature = ''; invalidateOutput(); restoreMapping(); updateAll(); });
     $('resultPrevious').addEventListener('click', () => changePreviewPage(-1));
     $('resultNext').addEventListener('click', () => changePreviewPage(1));
-    $('outputName').addEventListener('input', () => { invalidateOutput(); updateConfirmation(); });
+    $('outputName').addEventListener('input', () => { state.customOutputName = true; invalidateOutput(); updateConfirmation(); });
+    $('outputParties').addEventListener('input', () => { state.customOutputName = false; invalidateOutput(); updateConfirmation(); });
     $('confirmGenerate').addEventListener('change', updateConfirmation);
     $('generateContract').addEventListener('click', generate);
     $('downloadContract').addEventListener('click', downloadOutput);
@@ -209,7 +210,8 @@
       if (type === 'docx') await parseDocx(zip);
       else parseXlsx();
       $('templateFileName').textContent = file.name; $('templateDrop').classList.add('loaded');
-      if (!$('outputName').value.trim()) $('outputName').value = file.name.replace(/\.[^.]+$/, '') + '-生成合同';
+      $('outputParties').value = file.name.replace(/\.[^.]+$/, '').replace(/[（(][^）)]*[）)]/g, '').replace(/-生成合同$/, '').trim();
+      state.customOutputName = false;
       restoreMapping();
       const featureNote = state.templateFeatures.length ? `；已识别并保留${state.templateFeatures.join('、')}` : '';
       status(`模板检查通过：${type === 'docx' ? 'Word' : 'Excel'}，指纹 ${state.fingerprint.slice(0, 12)}${featureNote}`, 'success');
@@ -671,8 +673,21 @@
   function mappedEntries() { return Object.entries(state.mappings).filter(([, mapping]) => mapping?.field); }
   function findTarget(id) { return state.templateModel?.targets.find(target => target.id === id); }
 
+  function updateAutomaticOutputName() {
+    if (state.customOutputName) return;
+    let amount = '', number = '';
+    try { amount = contractTotals().lower; } catch (_) { /* Invalid amounts are reported by confirmation validation. */ }
+    const field = state.fieldSelections.contractNumber;
+    if (field) {
+      try { number = C.resolveField(state.order.rows, field, state.fieldStrategies.contractNumber || 'first', ''); } catch (_) { /* No fabricated number on conflicting records. */ }
+    }
+    const parts = [$('outputParties').value.trim(), state.manualValues.signDate || '', amount, number];
+    $('outputName').value = parts.map(value => C.text(value).trim()).filter(Boolean).join('-');
+  }
+
   function updateConfirmation() {
     if (!state.order || !state.templateModel) { $('generateContract').disabled = true; return; }
+    updateAutomaticOutputName();
     const issues = C.mappingIssues(state.order.rows, state.mappings, state.detailRow);
     if (state.detailRow && !mappedEntries().some(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow)) issues.push('明细模板行还没有映射任何订单字段');
     const notDetected = ACTIVE_FIELDS.filter(field => state.fieldSelections[field.key] && !state.templateBindings[field.key]).map(field => field.label);

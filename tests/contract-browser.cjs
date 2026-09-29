@@ -138,6 +138,14 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.equal(await dateInput.evaluate(input => input.isConnected), true);
     assert.equal(await page.locator('#generateContract').isDisabled(), false);
     assert.match(await page.locator('#contractIssues').innerText(), /原表含税合计 0.00 与明细计算合计 81.00 不一致/);
+    assert.equal(await page.locator('#outputName').inputValue(), '虚构采购合同', '手动文件名应保留');
+    await page.locator('#outputParties').fill('亿恒&迈德斯特');
+    assert.equal(await page.locator('#outputName').inputValue(), '亿恒&迈德斯特-2026-09-24-81.00-HT-TEST-001');
+    await page.locator('[data-manual-key="signDate"]').fill('2026-09-29');
+    assert.equal(await page.locator('#outputName').inputValue(), '亿恒&迈德斯特-2026-09-29-81.00-HT-TEST-001');
+    await page.locator('[data-manual-key="signDate"]').fill('2026-09-24');
+    await page.locator('#outputName').fill('虚构采购合同');
+
     await page.evaluate(bytes => {
       let calls = 0;
       window.__CONTRACT_PDF_CONVERTER__ = async () => {

@@ -104,7 +104,8 @@
       <section class="contract-card confirm-stage" id="confirmStage" hidden aria-labelledby="confirmHeading">
         <div class="contract-section-heading"><div><h2 id="confirmHeading">生成PDF预览</h2><p>核对文件名、映射和冲突处理规则后，生成合同副本并转换为PDF。</p></div></div>
         <div class="confirm-grid">
-          <label class="contract-name-field">合同文件名称<input id="outputName" maxlength="100" placeholder="例如：杭州某公司采购合同" /></label>
+          <label class="contract-name-field">供应商简称&amp;付款主体简称<input id="outputParties" maxlength="60" placeholder="例如：亿恒&amp;迈德斯特" /><small>从模板文件名带入，可修改简称。</small></label>
+          <label class="contract-name-field">合同文件名称<input id="outputName" maxlength="180" placeholder="亿恒&amp;迈德斯特-2026-09-29-87612.00-CGDD015074" /><small>简称-签署日期-金额-合同编码；自动带入，也可手动修改完整名称。</small></label>
           <div class="confirm-summary" id="confirmSummary"></div>
         </div>
         <div class="contract-issues" id="contractIssues"></div>
@@ -137,6 +138,6 @@
   <script src="vendor/jszip.min.js"></script>
   <script src="vendor/pdf-lib.min.js"></script>
   <script src="contract-core.js?v=6"></script>
-  <script src="contract-tool.js?v=27"></script>
+  <script src="contract-tool.js?v=28"></script>
 </body>
 </html>
