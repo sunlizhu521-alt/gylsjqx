@@ -45,11 +45,11 @@
     { key: 'remark', label: '备注', aliases: ['备注', '说明'], kind: 'detail' },
     { key: 'taxTotalLower', label: '含税运合计（小写）', aliases: ['含税运合计（小写）', '含税运合计小写', '合计（小写）', '合计小写', '小写合计', '人民币小写', '人民币小写金额'], kind: 'single', automatic: '@tax-total-lower', automaticLabel: '逐行计算数量 × 含税单价后汇总', writeMode: '自动汇总' },
     { key: 'taxTotalUpper', label: '含税运合计（大写）', aliases: ['含税运合计（大写）', '含税运合计大写', '合计（大写）', '合计大写', '大写合计', '人民币大写', '人民币大写金额'], kind: 'single', automatic: '@tax-total-upper', automaticLabel: '由小写合计自动转人民币大写', writeMode: '自动转大写' },
-    { key: 'contractNumber', label: '合同编号', aliases: ['合同编号', '合同号'], kind: 'single' },
+    { key: 'contractNumber', label: '合同编号', aliases: ['合同编号', '合同编码', '合同号'], kind: 'single' },
     { key: 'orderNumber', label: '订单编号', aliases: ['订单编号', '采购订单号', '采购单号', '订单号'], kind: 'single' },
     { key: 'buyer', label: '采购方（甲方）', aliases: ['采购方（甲方）', '采购方', '甲方', '买方'], kind: 'single' },
     { key: 'supplier', label: '供应商（乙方）', aliases: ['供应方（乙方）', '供应方', '供应商名称', '供应商（乙方）', '供应商', '乙方', '卖方'], kind: 'single' },
-    { key: 'signDate', label: '甲方签署日期', aliases: ['甲方签署日期', '甲方签署时间', '签署时间', '签署日期', '签订日期', '合同日期', '签约日期'], kind: 'single', automatic: '@sign-date', automaticLabel: '请选择日期', manualInput: 'date', writeMode: '选择后填充' },
+    { key: 'signDate', label: '甲方签署日期', aliases: ['甲方签署日期', '甲方签署时间', '签署时间', '签署日期', '签订日期', '签订时间', '签字日期', '合同日期', '签约日期'], kind: 'single', automatic: '@sign-date', automaticLabel: '请选择日期', manualInput: 'date', writeMode: '选择后填充' },
     { key: 'deliveryPlace', label: '交货地点', aliases: ['交货地点', '送货地址', '交付地点'], kind: 'single' },
     { key: 'paymentTerms', label: '付款方式', aliases: ['付款方式', '付款条件', '结算方式', '结算条件'], kind: 'single' },
   ];
@@ -411,6 +411,23 @@
     return match ? { prefix: match[1].trimEnd(), suffix: match[2] } : null;
   }
 
+  function inlineSingleTemplate(definition, value) {
+    if (!['contractNumber', 'signDate'].includes(definition.key)) return null;
+    const source = C.text(value);
+    // Only replace a recognizable value slot; preserve surrounding signature text.
+    for (const alias of [...definition.aliases].sort((a, b) => b.length - a.length)) {
+      const label = [...alias].join('\\s*');
+      const match = new RegExp(`(${label}[ \t]*[：:]?)([^\\n\\r]*)`).exec(source);
+      if (!match) continue;
+      const tail = match[2].trim();
+      const placeholder = /^[\s_＿—－.·…/年月日{}【】\[\]（）()0-9-]*$/.test(tail) || /^(待填写?|请选择|填写日期|填写时间)$/.test(tail);
+      const identifier = definition.key === 'contractNumber' && /^[A-Za-z0-9][A-Za-z0-9_./-]*$/.test(tail);
+      if (!placeholder && !identifier) continue;
+      return { prefix: source.slice(0, match.index) + match[1].trimEnd() + (/[：:]$/.test(match[1].trimEnd()) ? '' : '：'), suffix: source.slice(match.index + match[0].length), hasValue: !!tail };
+    }
+    return null;
+  }
+
   function bestDefinition(value, kind = '') {
     return BUSINESS_FIELDS.filter(field => !kind || field.kind === kind).map(field => ({ field, score: fieldMatchScore(value, field) })).sort((a, b) => b.score - a.score)[0];
   }
@@ -453,6 +470,7 @@
 
   function templatePartyForTarget(target) {
     const ownText = normalizeBusinessLabel(target?.value);
+    if (ownText.includes('甲方') && ownText.includes('乙方')) return 'ambiguous';
     if (ownText.includes('甲方')) return 'buyer';
     if (ownText.includes('乙方')) return 'supplier';
     const rows = templateRows(), rowIndex = rows.findIndex(row => row.rowKey === target?.rowKey);
@@ -503,13 +521,16 @@
         if (score <= 0) continue;
         if (definition.key === 'signDate') {
           const party = templatePartyForTarget(labelTarget);
-          if (party === 'supplier') continue;
+          if (party === 'supplier' || party === 'ambiguous') continue;
           if (party === 'buyer') score += 1000;
         }
-        const inline = inlineTotalTemplate(definition, labelTarget.value);
+        let inline = inlineTotalTemplate(definition, labelTarget.value);
         const row = locateRow(labelTarget.rowKey), next = nextWritableTemplateCell(row, labelTarget);
         const canUseNext = next && !usedTargets.has(next.id) && (!bestDefinition(next.value)?.score || /待填|填写|空白/.test(C.text(next.value)));
-        if (RIGHT_SIDE_VALUE_FIELDS.has(definition.key) && !canUseNext) continue;
+        const inlineSingle = inlineSingleTemplate(definition, labelTarget.value);
+        if (inlineSingle && (!canUseNext || inlineSingle.hasValue)) inline = inlineSingle;
+        if (RIGHT_SIDE_VALUE_FIELDS.has(definition.key) && !canUseNext && !inline) continue;
+        if (canUseNext && !inline) score += 10;
         const target = inline ? labelTarget : (canUseNext ? next : labelTarget);
         if (usedTargets.has(target.id)) continue;
         if (!best || score > best.score) best = { labelTarget, target, score, inline };
@@ -523,7 +544,7 @@
         labelText: labelTarget.value,
         inlinePrefix: best.inline?.prefix || '',
         inlineSuffix: best.inline?.suffix || '',
-        templateLabel: RIGHT_SIDE_VALUE_FIELDS.has(definition.key) ? `${labelTarget.value} → 右侧填写位置` : labelTarget.value,
+        templateLabel: best.inline ? `${labelTarget.value} → 标签后填写` : (RIGHT_SIDE_VALUE_FIELDS.has(definition.key) ? `${labelTarget.value} → 右侧填写位置` : labelTarget.value),
       };
       usedTargets.add(target.id);
     }
@@ -930,6 +951,8 @@
     }
   }
 
+  const SINGLE_LINE_DETAIL_FIELDS = new Set(['materialCode', 'sku', 'taxUnitPrice', 'taxAmount']);
+
   async function generateDocx() {
     const zip = await JSZip.loadAsync(state.templateBytes), xml = await zip.file('word/document.xml').async('string'), doc = parseXml(xml);
     for (const [targetId, mapping] of mappedEntries()) {
@@ -948,7 +971,10 @@
         const clone = row.cloneNode(true), cells = direct(clone, 'tc');
         for (const [targetId, mapping] of rowMappings) {
           const cellIndex = Number(targetId.match(/:c:(\d+)$/)?.[1]);
-          if (cells[cellIndex]) putWordText(cells[cellIndex], detailValue(mapping, record, recordIndex));
+          if (cells[cellIndex]) {
+            putWordText(cells[cellIndex], detailValue(mapping, record, recordIndex));
+            if (SINGLE_LINE_DETAIL_FIELDS.has(mapping.businessKey)) fitWordDetailCell(cells[cellIndex], table);
+          }
         }
         row.parentNode.insertBefore(clone, row);
       }
@@ -957,6 +983,74 @@
     normalizeWordContractTerms(doc);
     zip.file('word/document.xml', new XMLSerializer().serializeToString(doc));
     return zip.generateAsync({ type: 'blob', mimeType: MIME.docx, compression: 'DEFLATE' });
+  }
+
+  // Keep identifiers and money on one line without widening the template table.
+  function fitWordDetailCell(cell, table) {
+    const doc = cell.ownerDocument;
+    const ensure = (parent, name) => {
+      let node = direct(parent, name)[0];
+      if (!node) { node = wordNode(doc, name); if (name === 'pPr' || name === 'rPr') parent.prepend(node); else parent.append(node); }
+      return node;
+    };
+    let properties = direct(cell, 'tcPr')[0];
+    if (!properties) { properties = wordNode(doc, 'tcPr'); cell.prepend(properties); }
+    ensure(properties, 'noWrap').setAttributeNS(W, 'w:val', '1');
+    ensure(properties, 'tcFitText').setAttributeNS(W, 'w:val', '1');
+    const widthNode = direct(properties, 'tcW')[0];
+    let width = widthNode?.getAttributeNS(W, 'type') === 'dxa' ? Number(widthNode.getAttributeNS(W, 'w')) : 0;
+    if (!width) {
+      const siblings = direct(cell.parentNode, 'tc');
+      const span = item => Number(all(item, 'gridSpan')[0]?.getAttributeNS(W, 'val') || 1);
+      const start = siblings.slice(0, siblings.indexOf(cell)).reduce((sum, item) => sum + span(item), 0);
+      width = direct(direct(table, 'tblGrid')[0], 'gridCol').slice(start, start + span(cell))
+        .reduce((sum, item) => sum + Number(item.getAttributeNS(W, 'w') || 0), 0);
+    }
+    const tableMargins = all(direct(table, 'tblPr')[0], 'tblCellMar')[0];
+    const cellMargins = direct(properties, 'tcMar')[0];
+    const margin = side => Number((direct(cellMargins, side)[0] || direct(tableMargins, side)[0])?.getAttributeNS(W, 'w') ?? 108);
+    const available = (width - margin('left') - margin('right')) / 20 - 2;
+    const canvas = document.createElement('canvas'), context = canvas.getContext('2d');
+    for (const paragraph of direct(cell, 'p')) {
+      const paragraphProperties = ensure(paragraph, 'pPr');
+      // Template first-line/hanging indents must not steal space from a short field.
+      direct(paragraphProperties, 'ind').forEach(node => node.remove());
+      ensure(paragraphProperties, 'wordWrap').setAttributeNS(W, 'w:val', '0');
+      for (const run of direct(paragraph, 'r')) {
+        const rp = ensure(run, 'rPr'), fonts = direct(rp, 'rFonts')[0];
+        const size = Number(direct(rp, 'sz')[0]?.getAttributeNS(W, 'val') || 22) / 2;
+        const font = fonts?.getAttributeNS(W, 'ascii') || 'Times New Roman';
+        context.font = `${direct(rp, 'b').length ? 'bold ' : ''}${size}px "${font}"`;
+        const measured = context.measureText(all(run, 't').map(node => node.textContent).join('')).width;
+        for (const name of ['sz', 'szCs']) ensure(rp, name).setAttributeNS(W, 'w:val', String(size * 2));
+        if (available > 0 && measured > available) {
+          const fitted = Math.max(1, Math.floor(size * available / measured * 0.95 * 2)) / 2;
+          for (const name of ['sz', 'szCs']) ensure(rp, name).setAttributeNS(W, 'w:val', String(fitted * 2));
+        }
+      }
+    }
+  }
+
+  async function fitExcelDetailCells(zip, cells) {
+    if (!cells.length || !zip.file('xl/styles.xml')) return;
+    const doc = parseXml(await zip.file('xl/styles.xml').async('string'));
+    const xfs = all(doc, 'cellXfs', S)[0];
+    if (!xfs) return;
+    const originals = direct(xfs, 'xf', S), styles = new Map();
+    for (const cell of cells) {
+      const index = Number(cell.getAttribute('s') || 0);
+      if (!styles.has(index)) {
+        const xf = (originals[index] || originals[0]).cloneNode(true);
+        let alignment = direct(xf, 'alignment', S)[0];
+        if (!alignment) { alignment = doc.createElementNS(S, 'alignment'); xf.append(alignment); }
+        alignment.setAttribute('wrapText', '0'); alignment.setAttribute('shrinkToFit', '1');
+        xf.setAttribute('applyAlignment', '1');
+        styles.set(index, direct(xfs, 'xf', S).length); xfs.append(xf);
+      }
+      cell.setAttribute('s', String(styles.get(index)));
+    }
+    xfs.setAttribute('count', String(direct(xfs, 'xf', S).length));
+    zip.file('xl/styles.xml', new XMLSerializer().serializeToString(doc));
   }
 
   async function generateXlsx() {
@@ -1191,6 +1285,7 @@
       await shiftRelatedExcelParts(zip, relationships, rowNumber, delta);
       shiftWorkbookNames(context.workbookDoc, state.templateSheet, rowNumber, delta);
     }
+    const singleLineCells = [];
     records.forEach((record, offset) => {
       const clone = prototype.cloneNode(true), targetRow = rowNumber + offset; clone.setAttribute('r', String(targetRow));
       for (const cell of direct(clone, 'c', S)) {
@@ -1202,11 +1297,14 @@
       }
       for (const [targetId, mapping] of rowMappings) {
         const source = XLSX.utils.decode_cell(targetId.slice(2)), address = XLSX.utils.encode_cell({ r: targetRow - 1, c: source.c });
-        writeCellValue(ensureRowCell(clone, address), detailValue(mapping, record, offset), { forceNumber: NUMERIC_BUSINESS_FIELDS.has(mapping.businessKey) });
+        const cell = ensureRowCell(clone, address);
+        writeCellValue(cell, detailValue(mapping, record, offset), { forceNumber: NUMERIC_BUSINESS_FIELDS.has(mapping.businessKey) });
+        if (SINGLE_LINE_DETAIL_FIELDS.has(mapping.businessKey)) singleLineCells.push(cell);
       }
       data.insertBefore(clone, prototype);
     });
     reservedRows.forEach(row => row.remove());
+    await fitExcelDetailCells(zip, singleLineCells);
   }
 
   async function loadSheetRelationships(zip, sheetPath) {
