@@ -81,7 +81,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const totalRow = '<w:tr><w:tc><w:p><w:r><w:t>含税合计</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t xml:space="preserve">人民币小写：            元</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t xml:space="preserve">人民币大写：              圆整</w:t></w:r></w:p></w:tc></w:tr>';
       const incompleteTerms = terms.slice(1).join('\n').replace('复印件与本合同原件具有同等法律效力。', '复印件与本合同原件');
       const termsRow = `<w:tr><w:trPr><w:trHeight w:val="2600" w:hRule="exact"/><w:cantSplit/></w:trPr><w:tc><w:p><w:r><w:t>合同条款</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vAlign w:val="center"/></w:tcPr><w:p><w:pPr><w:keepLines/></w:pPr><w:r><w:t xml:space="preserve">${incompleteTerms}</w:t></w:r></w:p></w:tc></w:tr>`;
-      zip.folder('word').file('document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>采购合同</w:t></w:r></w:p><w:p><w:r><w:t>合同编号：</w:t></w:r></w:p><w:p><w:r><w:t>供应商名称：</w:t></w:r></w:p><w:tbl><w:tblPr><w:tblW w:w="8700" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single" w:sz="4"/><w:bottom w:val="single" w:sz="4"/><w:insideH w:val="single" w:sz="4"/><w:insideV w:val="single" w:sz="4"/></w:tblBorders></w:tblPr><w:tblGrid>${widths.map(width => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid><w:tr>${headerRow}</w:tr><w:tr>${detailRow}</w:tr>${reservedDetailRows}<w:tr>${deliveryRow}</w:tr>${labeledRow('合同编号：')}${labeledRow('交货地点：')}${signatureRows}${totalRow}${termsRow}</w:tbl>${extraParagraphs}<w:sectPr/></w:body></w:document>`);
+      zip.folder('word').file('document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>采购合同</w:t></w:r></w:p><w:p><w:r><w:t>合同编号：</w:t></w:r></w:p><w:p><w:r><w:t>供应商名称：</w:t></w:r></w:p><w:tbl><w:tblPr><w:tblW w:w="8700" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single" w:sz="4"/><w:bottom w:val="single" w:sz="4"/><w:insideH w:val="single" w:sz="4"/><w:insideV w:val="single" w:sz="4"/></w:tblBorders></w:tblPr><w:tblGrid>${widths.map(width => `<w:gridCol w:w="${width}"/>`).join('')}</w:tblGrid><w:tr>${headerRow}</w:tr><w:tr>${detailRow}</w:tr>${reservedDetailRows}<w:tr>${deliveryRow}</w:tr>${labeledRow('合同编号：')}${labeledRow('交货地点：')}${signatureRows}${totalRow}${termsRow}</w:tbl><w:p><w:r><w:br w:type="page"/></w:r></w:p>${extraParagraphs}<w:sectPr/></w:body></w:document>`);
       return Array.from(await zip.generateAsync({ type: 'uint8array' }));
     }, CONTRACT_TERMS);
     await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from(orderBytes) });
@@ -201,6 +201,11 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     }, generatedXml);
     assert.equal(singleLine.length, 8);
     assert.doesNotMatch(generatedXml, /<w:tcFitText/);
+    assert.doesNotMatch(generatedXml, /<w:br w:type="page"/);
+    assert.match(generatedXml, /<w:pageBreakBefore w:val="1"/);
+    assert.match(generatedXml, /<w:snapToGrid w:val="0"/);
+    assert.equal((generatedXml.match(/附加条款 \d+：/g) || []).length, 50, '紧凑排版必须保留全部条款');
+
     const fittedGrid = await page.evaluate(xml => {
       const doc = new DOMParser().parseFromString(xml, 'application/xml'), ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
       return [...doc.getElementsByTagNameNS(ns, 'gridCol')].map(node => Number(node.getAttributeNS(ns, 'w')));

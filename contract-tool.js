@@ -982,8 +982,64 @@
       reservedRows.forEach(item => item.remove());
     }
     normalizeWordContractTerms(doc);
+    compactWordContractLayout(doc);
     zip.file('word/document.xml', new XMLSerializer().serializeToString(doc));
     return zip.generateAsync({ type: 'blob', mimeType: MIME.docx, compression: 'DEFLATE' });
+  }
+
+  function compactWordContractLayout(doc) {
+    const body = all(doc, 'body')[0];
+    for (const paragraph of all(body, 'p')) {
+      let properties = direct(paragraph, 'pPr')[0];
+      if (!properties) { properties = wordNode(doc, 'pPr'); paragraph.prepend(properties); }
+      let snap = direct(properties, 'snapToGrid')[0];
+      if (!snap) { snap = wordNode(doc, 'snapToGrid'); properties.append(snap); }
+      snap.setAttributeNS(W, 'w:val', '0');
+      let spacing = direct(properties, 'spacing')[0];
+      if (!spacing) { spacing = wordNode(doc, 'spacing'); properties.append(spacing); }
+      for (const key of ['beforeLines', 'afterLines', 'beforeAutospacing', 'afterAutospacing']) spacing.removeAttributeNS(W, key);
+      spacing.setAttributeNS(W, 'w:before', '0'); spacing.setAttributeNS(W, 'w:after', '0');
+      const sizes = all(paragraph, 'sz').map(node => Number(node.getAttributeNS(W, 'val')) / 2).filter(size => size > 0);
+      const fontSize = sizes.length ? Math.max(...sizes) : 11;
+      const line = Math.max(paragraph.parentNode.localName === 'tc' ? 220 : 240, Math.ceil(fontSize * 1.3 * 20));
+      spacing.setAttributeNS(W, 'w:line', String(line));
+      spacing.setAttributeNS(W, 'w:lineRule', 'exact');
+      // Move standalone page breaks onto the following heading; an overflowing empty
+      // break paragraph otherwise creates an entirely blank page after a full table.
+      if (!wordText(paragraph).trim() && !all(paragraph, 'sectPr').length && all(paragraph, 'br').some(node => node.getAttributeNS(W, 'type') === 'page')) {
+        const next = paragraph.nextElementSibling;
+        if (next?.localName === 'p' && wordText(next).trim()) {
+          let nextProperties = direct(next, 'pPr')[0];
+          if (!nextProperties) { nextProperties = wordNode(doc, 'pPr'); next.prepend(nextProperties); }
+          let pageBreak = direct(nextProperties, 'pageBreakBefore')[0];
+          if (!pageBreak) { pageBreak = wordNode(doc, 'pageBreakBefore'); nextProperties.append(pageBreak); }
+          pageBreak.setAttributeNS(W, 'w:val', '1'); paragraph.remove(); continue;
+        }
+      }
+      // Empty spacers may carry section breaks or signature space: retain those.
+      if (!wordText(paragraph).trim() && !all(paragraph, 'sectPr').length && !all(paragraph, 'br').length && paragraph.parentNode === body) {
+        const previous = paragraph.previousElementSibling;
+        if (previous?.localName === 'p' && !wordText(previous).trim() && !all(previous, 'sectPr').length && !all(previous, 'br').length) paragraph.remove();
+      }
+    }
+    const sections = all(body, 'sectPr');
+    const pageShapes = sections.map(section => {
+      const page = direct(section, 'pgSz')[0];
+      return ['w', 'h', 'orient'].map(key => page?.getAttributeNS(W, key) || '').join(':');
+    });
+    if (new Set(pageShapes).size === 1) {
+      for (const section of sections) {
+        let type = direct(section, 'type')[0];
+        if (!type) { type = wordNode(doc, 'type'); section.prepend(type); }
+        type.setAttributeNS(W, 'w:val', 'continuous');
+      }
+    }
+    for (const table of direct(body, 'tbl')) {
+      // Keep stamping/signature rows spacious; remove minimum heights only from detail forms.
+      const isDetail = direct(table, 'tr').some(row => direct(row, 'tc').some(cell => normalizeBusinessLabel(wordCellText(cell)) === 'SKU'));
+      if (!isDetail) continue;
+      for (const height of all(table, 'trHeight')) height.remove();
+    }
   }
 
   function widenWordSkuColumn(table, prototype, mappings, records) {
