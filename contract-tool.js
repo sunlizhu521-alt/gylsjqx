@@ -1130,6 +1130,28 @@
     }
     const availableWidth = (Number(page.getAttributeNS(W, 'w')) - Number(margins.getAttributeNS(W, 'left')) - Number(margins.getAttributeNS(W, 'right'))) / 20;
     const availableHeight = (Number(page.getAttributeNS(W, 'h')) - Number(margins.getAttributeNS(W, 'top')) - Number(margins.getAttributeNS(W, 'bottom'))) / 20 - 24;
+    // Use the printable width before sizing text; a narrow template must not remain
+    // a small strip on the left of an A4 page.
+    for (const table of blocks.filter(block => block.localName === 'tbl')) {
+      const grid = direct(direct(table, 'tblGrid')[0], 'gridCol');
+      const total = grid.reduce((sum, n) => sum + Number(n.getAttributeNS(W, 'w')), 0);
+      if (!total) continue;
+      const ratio = availableWidth * 20 / total;
+      for (const column of grid) column.setAttributeNS(W, 'w:w', String(Math.round(Number(column.getAttributeNS(W, 'w')) * ratio)));
+      const properties = ensure(table, 'tblPr');
+      const tableWidth = ensure(properties, 'tblW');
+      tableWidth.setAttributeNS(W, 'w:type', 'dxa'); tableWidth.setAttributeNS(W, 'w:w', String(Math.round(availableWidth * 20)));
+      const indent = ensure(properties, 'tblInd'); indent.setAttributeNS(W, 'w:w', '0'); indent.setAttributeNS(W, 'w:type', 'dxa');
+      for (const row of direct(table, 'tr')) {
+        if (direct(row, 'tc').reduce((sum, cell) => sum + Number(all(cell, 'gridSpan')[0]?.getAttributeNS(W, 'val') || 1), 0) !== grid.length) continue;
+        let offset = 0;
+        for (const cell of direct(row, 'tc')) {
+          const cp = ensure(cell, 'tcPr'), span = Number(direct(cp, 'gridSpan')[0]?.getAttributeNS(W, 'val') || 1);
+          const width = grid.slice(offset, offset + span).reduce((sum, n) => sum + Number(n.getAttributeNS(W, 'w')), 0);
+          const cw = ensure(cp, 'tcW'); cw.setAttributeNS(W, 'w:type', 'dxa'); cw.setAttributeNS(W, 'w:w', String(width)); offset += span;
+        }
+      }
+    }
     const canvas = document.createElement('canvas').getContext('2d');
     const paragraphs = block => block.localName === 'p' ? [block] : all(block, 'p');
     const originalSizes = new Map();
@@ -1159,7 +1181,7 @@
         return height + Math.max(minimum, ...heights);
       }, 0);
     }, 0);
-    let cap = 10;
+    let cap = 12;
     while (cap > 8 && estimate(cap) > availableHeight) cap -= 0.5;
     for (const block of blocks) for (const p of paragraphs(block)) {
       let pp = direct(p, 'pPr')[0];
@@ -1504,6 +1526,31 @@
     for (const side of ['header', 'footer']) if (!margins.hasAttribute(side)) margins.setAttribute(side, '0.2');
     const usableHeight = (landscape ? 595.28 : 841.89) - (Number(margins.getAttribute('top')) + Number(margins.getAttribute('bottom'))) * 72 - 12;
     const usableWidth = (landscape ? 841.89 : 595.28) - (Number(margins.getAttribute('left')) + Number(margins.getAttribute('right'))) * 72 - 12;
+    // Match the main form's aspect ratio to the printable page before print scaling.
+    // Widen columns rather than enlarging a tall, narrow form uniformly off the page.
+    const usedCells = rows.flatMap(row => direct(row, 'c', S));
+    const lastUsedColumn = Math.max(0, ...usedCells.map(cell => XLSX.utils.decode_cell(cellAddressOf(cell)).c),
+      ...all(doc, 'mergeCell', S).map(n => XLSX.utils.decode_range(n.getAttribute('ref')).e.c));
+    let columnList = direct(worksheet, 'cols', S)[0];
+    if (!columnList) { columnList = doc.createElementNS(S, 'cols'); worksheet.insertBefore(columnList, sheetData(doc)); }
+    const oldColumns = direct(columnList, 'col', S);
+    const widths = Array.from({ length: lastUsedColumn + 1 }, (_, i) => Number(oldColumns.find(n => i + 1 >= Number(n.getAttribute('min')) && i + 1 <= Number(n.getAttribute('max')))?.getAttribute('width') || 8.43));
+    const formWidth = widths.reduce((sum, width) => sum + (width * 7 + 5) * 0.75, 0);
+    const expand = Math.max(1, Math.min(2.5, height * usableWidth / Math.max(1, usableHeight * formWidth)));
+    if (expand > 1.02) {
+      const newColumns = widths.map((width, i) => {
+        const original = oldColumns.find(n => i + 1 >= Number(n.getAttribute('min')) && i + 1 <= Number(n.getAttribute('max')));
+        const column = original?.cloneNode(true) || doc.createElementNS(S, 'col');
+        column.setAttribute('min', String(i + 1)); column.setAttribute('max', String(i + 1));
+        column.setAttribute('width', String(Math.min(255, ((width * 7 + 5) * expand - 5) / 7)));
+        column.setAttribute('customWidth', '1'); return column;
+      });
+      // Keep formatting for columns beyond the printed form.
+      const trailing = oldColumns.filter(n => Number(n.getAttribute('max')) > lastUsedColumn + 1).map(n => {
+        const clone = n.cloneNode(true); clone.setAttribute('min', String(Math.max(lastUsedColumn + 2, Number(clone.getAttribute('min'))))); return clone;
+      });
+      columnList.replaceChildren(...newColumns, ...trailing);
+    }
     if (!boundaries.length) {
       // Fit a modest main form to one page; very large orders retain readable pagination.
       setup.setAttribute('fitToHeight', height <= usableHeight / 0.65 ? '1' : '0');

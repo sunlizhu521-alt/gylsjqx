@@ -250,7 +250,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const doc = new DOMParser().parseFromString(xml, 'application/xml'), ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
       return [...doc.getElementsByTagNameNS(ns, 'gridCol')].map(node => Number(node.getAttributeNS(ns, 'w')));
     }, generatedXml);
-    assert.equal(fittedGrid.reduce((sum, width) => sum + width, 0), 8700, '调整SKU列不改变表格总宽');
+    assert.ok(Math.abs(fittedGrid.reduce((sum, width) => sum + width, 0) - 10466) <= 5, '主体表格铺满A4可打印宽度');
     assert.ok(fittedGrid[4] > 500, '窄SKU列应先加宽');
 
     assert.ok(singleLine.filter(cell => /SKU/.test(cell.text)).every(cell => cell.size >= 16), 'SKU字号不得小于8pt');
