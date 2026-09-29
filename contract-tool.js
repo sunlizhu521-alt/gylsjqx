@@ -698,7 +698,14 @@
     if (state.templateBindings.taxAmount || state.templateBindings.taxTotalLower || state.templateBindings.taxTotalUpper) {
       try { contractTotals(); } catch (error) { issues.push(error.message); }
     }
-    $('confirmSummary').innerHTML = `订单：<strong>${esc(state.orderSheet)}</strong>，识别 ${detailRows.length} 条物料明细${detailRows.length !== state.order.rows.length ? `（原表 ${state.order.rows.length} 行）` : ''}；模板：<strong>${esc(state.templateFile.name)}</strong>${state.templateSheet ? `，合同Sheet：<strong>${esc(state.templateSheet)}</strong>` : ''}；输出：<strong>${esc(outputName)}.${state.templateType}</strong>`;
+    const summaryRows = [
+      ['订单工作表', state.orderSheet],
+      ['物料明细', `识别 ${detailRows.length} 条物料明细${detailRows.length !== state.order.rows.length ? `（原表 ${state.order.rows.length} 行）` : ''}`],
+      ['合同模板', state.templateFile.name],
+      ...(state.templateSheet ? [['合同工作表', state.templateSheet]] : []),
+      ['输出文件', `${outputName}.${state.templateType}`],
+    ];
+    $('confirmSummary').innerHTML = summaryRows.map(([label, value]) => `<div class="confirm-summary-row"><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('');
     let totalWarnings = [];
     try { totalWarnings = C.compareSourceTotals(state.order.sourceTotals, contractTotals()); } catch (_) {}
     const sourceWarnings = totalWarnings.length ? `<div class="warnings">${totalWarnings.map(esc).join('<br>')}；合同仍按数量 × 含税单价计算。</div>` : '';

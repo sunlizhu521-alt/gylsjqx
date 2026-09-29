@@ -6,7 +6,7 @@
   <title>合同生成｜供应链数据清洗</title>
   <meta name="description" content="在浏览器本地解析订单并填写用户上传的 Word 或 Excel 合同模板。" />
   <link rel="stylesheet" href="styles-merge14.css" />
-  <link rel="stylesheet" href="contract.css?v=11" />
+  <link rel="stylesheet" href="contract.css?v=12" />
 </head>
 <body>
   <header class="app-header">
@@ -106,7 +106,7 @@
         <div class="confirm-grid">
           <label class="contract-name-field">供应商简称&amp;付款主体简称<input id="outputParties" maxlength="60" placeholder="例如：亿恒&amp;迈德斯特" /><small>从模板文件名带入，可修改简称。</small></label>
           <label class="contract-name-field">合同文件名称<input id="outputName" maxlength="180" placeholder="亿恒&amp;迈德斯特-2026-09-29-87612.00-CGDD015074" /><small>简称-签署日期-金额-合同编码；自动带入，也可手动修改完整名称。</small></label>
-          <div class="confirm-summary" id="confirmSummary"></div>
+          <dl class="confirm-summary" id="confirmSummary"></dl>
         </div>
         <div class="contract-issues" id="contractIssues"></div>
         <label class="confirm-check"><input id="confirmGenerate" type="checkbox" /> 我已核对订单 Sheet、合同字段映射及冲突处理规则</label>
@@ -138,6 +138,6 @@
   <script src="vendor/jszip.min.js"></script>
   <script src="vendor/pdf-lib.min.js"></script>
   <script src="contract-core.js?v=6"></script>
-  <script src="contract-tool.js?v=29"></script>
+  <script src="contract-tool.js?v=30"></script>
 </body>
 </html>
