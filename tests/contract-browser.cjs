@@ -28,6 +28,8 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
     const page = await context.newPage();
+    // OCR is unrelated to contracts; its external loader must not delay this regression.
+    await page.route('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js', route => route.fulfill({ contentType: 'application/javascript', body: '/* OCR unused in contract tests */' }));
     const errors = [], consoleErrors = [], httpErrors = [], mutatingRequests = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
@@ -302,8 +304,8 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const zip = await JSZip.loadAsync(XLSX.write(book, { type: 'array', bookType: 'xlsx' }));
       const sheetPath = 'xl/worksheets/sheet1.xml';
       let sheetXml = await zip.file(sheetPath).async('string');
-      sheetXml = sheetXml.replace('<worksheet ', '<worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ')
-        .replace('</worksheet>', '<tableParts count="1"><tablePart r:id="rIdTable1"/></tableParts></worksheet>');
+      if (!sheetXml.includes('xmlns:r=')) sheetXml = sheetXml.replace('<worksheet ', '<worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ');
+      sheetXml = sheetXml.replace('</worksheet>', '<tableParts count="1"><tablePart r:id="rIdTable1"/></tableParts></worksheet>');
       zip.file(sheetPath, sheetXml);
       zip.file('xl/worksheets/_rels/sheet1.xml.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdTable1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>');
       zip.file('xl/tables/table1.xml', '<?xml version="1.0"?><table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="ContractTable" displayName="ContractTable" ref="A1:D6" totalsRowShown="0"><autoFilter ref="A1:D6"/><tableColumns count="4"><tableColumn id="1" name="序号"/><tableColumn id="2" name="物料名称"/><tableColumn id="3" name="数量"/><tableColumn id="4" name="行金额"/></tableColumns><tableStyleInfo name="TableStyleMedium2" showFirstColumn="0" showLastColumn="0" showRowStripes="1" showColumnStripes="0"/></table>');

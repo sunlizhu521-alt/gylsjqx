@@ -1251,8 +1251,32 @@
         let existing = 0;
         for (let r = point.r + 1; r <= endRow; r += 1) existing += Number(ensureSheetRow(doc, r).getAttribute('ht') || 15);
         const canContinue = !direct(cell, 'f', S).length && ['s', 'str', 'inlineStr'].includes(type);
-        let fittedHeight = needed;
-        if (needed > 390 && canContinue) {
+        let fittedHeight = needed, mergedStyle = null;
+        if (needed > 390 && merge) {
+          // A template merge is an indivisible layout region: retain its text and range.
+          const capacity = Math.min(760, (endRow - point.r) * 390);
+          let fittedSize = size;
+          const measure = () => {
+            canvas.font = `${direct(font, 'b', S).length ? 'bold ' : ''}${fittedSize * 4 / 3}px "${name}"`;
+            return Math.ceil(value.split(/\r?\n/).reduce((sum, text) => sum + Math.max(1, Math.ceil(canvas.measureText(text).width * 1.2 / width)), 0) * fittedSize * 1.5 + 6);
+          };
+          while (fittedSize > 6 && measure() > capacity) fittedSize = Math.max(6, fittedSize - 0.5);
+          fittedHeight = measure();
+          if (fittedHeight > capacity) throw new Error(`合并区域 ${XLSX.utils.encode_range(merge)} 内容超过可读排版容量，已保留原合并结构；请减少内容或扩大该合并区域`);
+          if (fittedSize < size && styles && xf && font) {
+            const fontList = all(styles, 'fonts', S)[0], newFont = font.cloneNode(true);
+            direct(newFont, 'sz', S)[0].setAttribute('val', String(fittedSize));
+            const fontId = direct(fontList, 'font', S).length; fontList.append(newFont); fontList.setAttribute('count', String(fontId + 1));
+            const newXf = xf.cloneNode(true); newXf.setAttribute('fontId', String(fontId)); newXf.setAttribute('applyFont', '1');
+            let align = direct(newXf, 'alignment', S)[0];
+            if (!align) { align = styles.createElementNS(S, 'alignment'); newXf.append(align); }
+            align.setAttribute('wrapText', '1'); align.setAttribute('vertical', 'top'); align.removeAttribute('shrinkToFit'); newXf.setAttribute('applyAlignment', '1');
+            const list = all(styles, 'cellXfs', S)[0]; mergedStyle = direct(list, 'xf', S).length;
+            list.append(newXf); list.setAttribute('count', String(mergedStyle + 1));
+          }
+          for (let r = point.r + 1; r <= endRow; r++) compactRows.add(r);
+        }
+        if (needed > 390 && canContinue && !merge) {
           // Continuation rows keep the original font and all characters. They can
           // paginate normally, unlike one oversized vertically merged cell.
           const maxLines = Math.max(1, Math.floor((220 - 6) / (size * 1.5)));
@@ -1300,6 +1324,7 @@
           }
           cell.setAttribute('s', String(clonedStyles.get(styleIndex)));
         }
+        if (mergedStyle !== null) cell.setAttribute('s', String(mergedStyle));
       }
     }
     context.compactTextRows ||= new Set();

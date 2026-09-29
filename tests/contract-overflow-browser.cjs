@@ -24,7 +24,7 @@ const assert = require('node:assert/strict');
     await page.waitForFunction(() => window.layoutTest && window.XLSX);
     for (const mode of ['single', 'horizontal', 'vertical', 'multiple']) {
       const result = await page.evaluate(async mode => {
-        const text = '完整保留条款：交货验收与付款约定，禁止丢失任何文字。\n'.repeat(90);
+        const text = '完整保留条款：交货验收与付款约定，禁止丢失任何文字。\n'.repeat(['horizontal','vertical'].includes(mode) ? 32 : 90);
         const sheet = XLSX.utils.aoa_to_sheet([['虚构合同']]);
         sheet.C18 = { t: 's', v: text };
         sheet.A24 = { t: 's', v: '通用条款' };
@@ -55,10 +55,14 @@ const assert = require('node:assert/strict');
         const a=result.merges[i],b=result.merges[j];
         assert.ok(a.e.r<b.s.r || b.e.r<a.s.r || a.e.c<b.s.c || b.e.c<a.s.c, '续排合并区域不得重叠');
       }
-      assert.ok(result.row>23);
+      if (['horizontal','vertical'].includes(mode)) {
+        assert.equal(result.row,23,'原合并区域不得拆分或插入续排行');
+        assert.equal(result.merges.length,1);
+        assert.equal(result.chunks.length,1);
+      } else assert.ok(result.row>23);
       assert.equal(result.formula,`SUM(A${result.row}:A${result.row+1})`);
       assert.equal(result.reference,`合同!B${result.row}`);
-      assert.ok(result.heights.every(h=>h<=220), '续排行高必须按实际内容计算，不保留固定大空白');
+      assert.ok(result.heights.every(h=>h<=(['horizontal','vertical'].includes(mode)?409.5:220)), '续排行高必须按实际内容计算，不保留固定大空白');
       assert.ok(result.chunks.every(t=>t.startsWith('完整保留条款：')&&t.endsWith('\n')), '可容纳的完整段落不得从中间截开');
       assert.ok(result.breaks.includes(result.row));
       assert.ok(result.breaks.includes(result.row+1));
