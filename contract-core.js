@@ -125,7 +125,12 @@
   }
 
   function selectDetailRows(rows, headers = [], fieldSelections = {}) {
-    const sourceRows = (Array.isArray(rows) ? rows : []).filter(record => {
+    const inputRows = Array.isArray(rows) ? rows : [];
+    const endIndex = inputRows.findIndex(record => {
+      const first = headers.map(header => text(record[header]).trim()).find(Boolean) || '';
+      return /^(?:含税(?:运)?合计|价税合计|总计|合计)(?:[（(]?[大小]写[）)]?)?[：:]?$/.test(first);
+    });
+    const sourceRows = (endIndex >= 0 ? inputRows.slice(0, endIndex) : inputRows).filter(record => {
       const first = headers.map(header => text(record[header]).trim()).find(Boolean) || '';
       return !/^(?:合计|总计|小计|创建人|创建日期|审核人|审核日期|制单人|制单日期)[：:]?$/.test(first);
     });

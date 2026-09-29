@@ -465,8 +465,9 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       await page.locator('#templateFile').setInputFiles({ name: '虚构合同模板.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: Buffer.from(docxBytes) });
       await page.waitForFunction(() => !document.querySelector('#mappingStage').hidden);
       if (expectedDetailRows) assert.match(await page.locator('#templateDetectionSummary').innerText(), new RegExp(`序号按 ${expectedDetailRows} 条物料明细自动生成`));
-      assert.equal(await page.locator('[data-field-key="contractNumber"]').inputValue(), '合同编号（右侧内容）');
-      assert.equal(await page.locator('[data-business-key="contractNumber"] .template-detection').innerText(), '识别成功');
+      assert.equal(await page.locator('[data-field-key="contractNumber"]').inputValue(), process.env.EXPECTED_EMPTY_CONTRACT_NUMBER ? '' : '合同编号（右侧内容）');
+      if (process.env.EXPECTED_DELIVERY_FIELD) assert.equal(await page.locator('[data-field-key="deliveryTime"]').inputValue(), process.env.EXPECTED_DELIVERY_FIELD);
+      assert.equal(await page.locator('[data-business-key="contractNumber"] .template-detection').innerText(), process.env.EXPECTED_EMPTY_CONTRACT_NUMBER ? '未识别' : '识别成功');
       assert.match(await page.locator('[data-business-key="contractNumber"] .business-template-field').innerText(), /右侧填写位置/);
       await page.locator('[data-manual-key="signDate"]').fill('2026-09-24');
       await page.locator('#outputName').fill('真实订单合同编号测试');
@@ -483,7 +484,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       if (process.env.EXPECTED_TOTAL) assert.ok(realXml.includes(process.env.EXPECTED_TOTAL));
       if (process.env.EXPECTED_DELIVERY_DATE) {
         assert.ok(realXml.includes(process.env.EXPECTED_DELIVERY_DATE));
-        assert.doesNotMatch(realXml, /23:59:59/);
+        assert.doesNotMatch(realXml, /23:59:59|00:00:00|详见备注/);
       }
       if (process.env.EXPECTED_SUPPLIER) assert.ok(realXml.includes(process.env.EXPECTED_SUPPLIER));
       if (process.env.EXPECTED_SHEET) assert.equal(await page.locator('#orderSheet').inputValue(), process.env.EXPECTED_SHEET);

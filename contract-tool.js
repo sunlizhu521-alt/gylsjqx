@@ -43,8 +43,8 @@
     { key: 'taxRate', label: '税率', aliases: ['税率', '增值税率'], kind: 'detail' },
     { key: 'deliveryTime', label: '交货时间', aliases: ['交货时间', '交货日期', '交期', '要求货好时间', '要求交货日期'], kind: 'single' },
     { key: 'remark', label: '备注', aliases: ['备注', '说明'], kind: 'detail' },
-    { key: 'taxTotalLower', label: '含税运合计（小写）', aliases: ['含税运合计（小写）', '含税运合计小写', '合计（小写）', '合计小写', '小写合计', '人民币小写', '人民币小写金额'], kind: 'single', automatic: '@tax-total-lower', automaticLabel: '逐行计算数量 × 含税单价后汇总', writeMode: '自动汇总' },
-    { key: 'taxTotalUpper', label: '含税运合计（大写）', aliases: ['含税运合计（大写）', '含税运合计大写', '合计（大写）', '合计大写', '大写合计', '人民币大写', '人民币大写金额'], kind: 'single', automatic: '@tax-total-upper', automaticLabel: '由小写合计自动转人民币大写', writeMode: '自动转大写' },
+    { key: 'taxTotalLower', label: '含税运合计（小写）', aliases: ['含税运合计（小写）', '含税运合计小写', '合计（小写）', '合计小写', '小写合计', '含税合计（小写）', '人民币小写', '人民币小写金额'], kind: 'single', automatic: '@tax-total-lower', automaticLabel: '逐行计算数量 × 含税单价后汇总', writeMode: '自动汇总' },
+    { key: 'taxTotalUpper', label: '含税运合计（大写）', aliases: ['含税运合计（大写）', '含税运合计大写', '合计（大写）', '合计大写', '大写合计', '含税合计（大写）', '人民币大写', '人民币大写金额'], kind: 'single', automatic: '@tax-total-upper', automaticLabel: '由小写合计自动转人民币大写', writeMode: '自动转大写' },
     { key: 'contractNumber', label: '合同编号', aliases: ['合同编号', '合同编码', '合同号', '单据编号'], kind: 'single' },
     { key: 'orderNumber', label: '订单编号', aliases: ['订单编号', '采购订单号', '采购单号', '订单号'], kind: 'single' },
     { key: 'buyer', label: '采购方（甲方）', aliases: ['采购方（甲方）', '采购方', '甲方', '买方'], kind: 'single' },
@@ -207,6 +207,17 @@
       }
       return Object.fromEntries([['_row', row._row], ...state.order.headers.map(header => [header, row[header]])]);
     });
+    // This printed order puts delivery dates in remarks and says 'see remarks' below the table.
+    const remarkHeader = selections.remark;
+    if (/详见备注|见备注/.test(C.text(rightSideValues.deliveryTime)) && remarkHeader) {
+      const oldHeader = state.order.rightSideFields.deliveryTime;
+      state.order.headers = state.order.headers.filter(header => header !== oldHeader);
+      state.order.rows.forEach(record => {
+        record[remarkHeader] = C.dateOnly(record[remarkHeader]);
+        if (oldHeader) delete record[oldHeader];
+      });
+      state.order.rightSideFields.deliveryTime = remarkHeader;
+    }
     const allowed = new Set(state.order.headers);
     for (const [target, mapping] of Object.entries(state.mappings)) if (!allowed.has(mapping.field)) delete state.mappings[target];
   }

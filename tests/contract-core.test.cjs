@@ -178,3 +178,18 @@ test('价税合计换算含税单价精确四舍五入到三位，不截断', ()
   const roundedTotal = C.sumAmountField([{amount: C.formatAmountCents(C.lineAmountCents('16', C.taxPriceFromAmount('1.00','16')))}], 'amount');
   assert.equal(C.compareSourceTotals({lower:'1.00'}, roundedTotal).length, 1);
 });
+
+test('合同式订单序号空白时，合计之后的银行和条款不进入明细', () => {
+  const headers = ['序号','物料编码','物料名称','数量','备注'];
+  const values = [
+    ['', 'MAT01', '商品甲', '2500', '2026/10/6 00:00:00'],
+    ['', 'MAT02', '商品乙', '1000', '2026/10/6 00:00:00'],
+    ['含税合计（小写）：', '', '186.00', '', ''],
+    ['交货地点','','乙方工厂','',''], ['', '', '开户行：', '', ''],
+    ['合同条款','','这里是合同条款','',''],
+  ];
+  const rows = values.map((row,i) => Object.fromEntries([['_row',i+10], ...headers.map((key,j) => [key,row[j]])]));
+  const result = C.selectDetailRows(rows, headers, {materialCode:'物料编码',materialName:'物料名称'});
+  assert.deepEqual(result.map(row => row._row), [10,11]);
+  assert.equal(C.dateOnly(result[0].备注),'2026/10/6');
+});
