@@ -530,7 +530,9 @@
         const row = locateRow(labelTarget.rowKey), next = nextWritableTemplateCell(row, labelTarget);
         const canUseNext = next && !usedTargets.has(next.id) && (!bestDefinition(next.value)?.score || /待填|填写|空白/.test(C.text(next.value)));
         const inlineSingle = inlineSingleTemplate(definition, labelTarget.value);
-        if (inlineSingle && (!canUseNext || inlineSingle.hasValue)) inline = inlineSingle;
+        const identifierMerge = definition.key === 'contractNumber' && state.templateType === 'xlsx'
+          && (state.templateBook?.Sheets[state.templateSheet]?.['!merges'] || []).some(range => range.s.r === labelTarget.rowIndex && range.s.c === labelTarget.cellIndex && range.e.c > range.s.c);
+        if (inlineSingle && (!canUseNext || inlineSingle.hasValue || identifierMerge)) inline = inlineSingle;
         if (RIGHT_SIDE_VALUE_FIELDS.has(definition.key) && !canUseNext && !inline) continue;
         if (canUseNext && !inline) score += 10;
         const target = inline ? labelTarget : (canUseNext ? next : labelTarget);
@@ -1222,7 +1224,7 @@
     const strings = all(shared, 'si', S).map(node => all(node, 't', S).map(item => item.textContent).join(''));
     const xfs = direct(all(styles, 'cellXfs', S)[0], 'xf', S), fonts = direct(all(styles, 'fonts', S)[0], 'font', S);
     const columns = all(doc, 'col', S), merges = all(doc, 'mergeCell', S).map(node => XLSX.utils.decode_range(node.getAttribute('ref')));
-    const canvas = document.createElement('canvas').getContext('2d'), clonedStyles = new Map(), overflow = [];
+    const canvas = document.createElement('canvas').getContext('2d'), clonedStyles = new Map(), overflow = [], compactRows = new Set([...(context.compactTextRows || [])].map(rowNumberOf)), requiredHeights = new Map();
     const columnWidth = column => {
       const item = columns.find(node => column + 1 >= Number(node.getAttribute('min')) && column + 1 <= Number(node.getAttribute('max')));
       return Number(item?.getAttribute('width') || 8.43) * 7 + 5;
@@ -1253,20 +1255,35 @@
         if (needed > 390 && canContinue) {
           // Continuation rows keep the original font and all characters. They can
           // paginate normally, unlike one oversized vertically merged cell.
-          const maxLines = Math.max(1, Math.floor((360 - 6) / (size * 1.5)));
-          const chunks = []; let chunk = '', lineWidth = 0, lineCount = 1;
-          for (const character of value) {
-            const advance = canvas.measureText(character).width * 1.2;
-            const newLine = character === '\n' || (lineWidth > 0 && lineWidth + advance > width);
-            if (newLine && lineCount >= maxLines && chunk) { chunks.push(chunk); chunk = ''; lineWidth = 0; lineCount = 1; }
-            else if (newLine) { lineCount += 1; lineWidth = 0; }
-            chunk += character;
-            if (character !== '\n' && character !== '\r') lineWidth += advance;
+          const maxLines = Math.max(1, Math.floor((220 - 6) / (size * 1.5)));
+          const lineCount = text => {
+            const parts = text.replace(/\r?\n$/, '').split(/\r?\n/);
+            return parts.reduce((sum, part) => sum + Math.max(1, Math.ceil(canvas.measureText(part).width * 1.2 / width)), 0);
+          };
+          const chunks = []; let chunk = '';
+          const flush = () => { if (chunk) chunks.push(chunk); chunk = ''; };
+          for (const paragraph of value.match(/[^\n]*\n|[^\n]+$/g) || [value]) {
+            if (lineCount(paragraph) <= maxLines) {
+              if (chunk && lineCount(chunk + paragraph) > maxLines) flush();
+              chunk += paragraph;
+            } else {
+              flush();
+              for (const character of paragraph) {
+                if (chunk && lineCount(chunk + character) > maxLines) flush();
+                chunk += character;
+              }
+              flush();
+            }
           }
-          if (chunk) chunks.push(chunk);
-          if (chunks.length > 1) overflow.push({ cell, chunks, height: Math.min(390, maxLines * size * 1.5 + 6) });
-          fittedHeight = Math.min(390, maxLines * size * 1.5 + 6);
+          flush();
+          const heights = chunks.map(text => Math.min(390, Math.ceil(lineCount(text) * size * 1.5 + 6)));
+          if (chunks.length > 1) {
+            overflow.push({ cell, chunks, heights });
+            for (let r = point.r + 1; r <= endRow; r++) compactRows.add(r);
+          }
+          fittedHeight = heights[0] || needed;
         }
+        for (let r = point.r + 1; r <= endRow; r++) requiredHeights.set(r, Math.max(requiredHeights.get(r) || 0, fittedHeight / (endRow - point.r)));
         // Spread merged-cell height across its rows instead of overflowing the last row.
         let remaining = Math.max(0, fittedHeight - existing);
         for (let r = point.r + 1; r <= endRow; r += 1) {
@@ -1285,13 +1302,19 @@
         }
       }
     }
+    context.compactTextRows ||= new Set();
+    for (const r of compactRows) {
+      const row = ensureSheetRow(doc, r); context.compactTextRows.add(row);
+      row.setAttribute('ht', String(Math.min(409.5, Math.max(18, Math.ceil(requiredHeights.get(r) || 18)))));
+      row.setAttribute('customHeight', '1');
+    }
     if (styles) zip.file('xl/styles.xml', new XMLSerializer().serializeToString(styles));
     for (const item of overflow.sort((a, b) => rowNumberFromAddress(cellAddressOf(b.cell)) - rowNumberFromAddress(cellAddressOf(a.cell)))) {
       await addExcelTextContinuation(zip, context, item);
     }
   }
 
-  async function addExcelTextContinuation(zip, context, { cell, chunks, height }) {
+  async function addExcelTextContinuation(zip, context, { cell, chunks, heights }) {
     const doc = context.sheetDoc, point = XLSX.utils.decode_cell(cellAddressOf(cell));
     let mergeList = all(doc, 'mergeCells', S)[0];
     const mergeNode = all(mergeList, 'mergeCell', S).find(n => {
@@ -1318,11 +1341,18 @@
     writeCellValue(cell, chunks[0]);
     for (let i = 1; i < chunks.length; i++) {
       const number = afterRow + i, row = ensureSheetRow(doc, number);
-      row.setAttribute('ht', String(height)); row.setAttribute('customHeight', '1');
+      context.compactTextRows.add(row);
+      row.setAttribute('ht', String(heights[i])); row.setAttribute('customHeight', '1');
       const target = ensureRowCell(row, XLSX.utils.encode_cell({ r: number - 1, c: point.c }));
       if (cell.hasAttribute('s')) target.setAttribute('s', cell.getAttribute('s'));
       target.setAttribute('t', 'inlineStr'); writeCellValue(target, chunks[i]);
       if (merge && merge.e.c > point.c) {
+        for (let column = point.c + 1; column <= merge.e.c; column++) {
+          const sourceAddress = XLSX.utils.encode_cell({ r: point.r, c: column });
+          const sourceCell = direct(cell.parentElement, 'c', S).find(n => cellAddressOf(n) === sourceAddress);
+          const continuationCell = ensureRowCell(row, XLSX.utils.encode_cell({ r: number - 1, c: column }));
+          if (sourceCell?.hasAttribute('s')) continuationCell.setAttribute('s', sourceCell.getAttribute('s'));
+        }
         if (!mergeList) { mergeList = doc.createElementNS(S, 'mergeCells'); doc.documentElement.insertBefore(mergeList, sheetData(doc).nextSibling); }
         const node = doc.createElementNS(S, 'mergeCell');
         node.setAttribute('ref', XLSX.utils.encode_range({ s: { r: number - 1, c: point.c }, e: { r: number - 1, c: merge.e.c } }));
@@ -1471,11 +1501,14 @@
   async function generateXlsx() {
     const zip = await JSZip.loadAsync(state.templateBytes);
     const context = await locateXlsxSheet(zip, state.templateSheet);
+    const identifiers = [];
     for (const [targetId, mapping] of mappedEntries()) {
       if (mapping.mode === 'detail') continue;
       const value = resolveMapping(mapping);
       writeSheetCell(context.sheetDoc, targetId.slice(2), templateValue(mapping, value), { forceNumber: NUMERIC_BUSINESS_FIELDS.has(mapping.businessKey) && !mapping.preserveLabel });
+      if (mapping.businessKey === 'contractNumber') identifiers.push(all(context.sheetDoc, 'c', S).find(cell => cellAddressOf(cell) === targetId.slice(2)));
     }
+    await fitExcelDetailCells(zip, identifiers.filter(Boolean));
     if (state.detailRow) {
       const rowNumber = Number(state.detailRow.split(':')[1]);
       const rowMappings = mappedEntries().filter(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow);
@@ -1587,7 +1620,7 @@
       if (appendix) appendixStarted = true;
     }
     const firstBoundary = Math.min(...boundaries.filter(n => n > 0), Infinity);
-    const height = rows.filter(row => Number(row.getAttribute('r')) <= firstBoundary && row.getAttribute('hidden') !== '1')
+    let height = rows.filter(row => Number(row.getAttribute('r')) <= firstBoundary && row.getAttribute('hidden') !== '1')
       .reduce((sum, row) => sum + Number(row.getAttribute('ht') || 15), 0);
     configureExcelContractPrint(doc, false);
     const setup = direct(worksheet, 'pageSetup', S)[0];
@@ -1600,9 +1633,23 @@
     const usableWidth = (landscape ? 841.89 : 595.28) - (Number(margins.getAttribute('left')) + Number(margins.getAttribute('right'))) * 72 - 12;
     // Match the main form's aspect ratio to the printable page before print scaling.
     // Widen columns rather than enlarging a tall, narrow form uniformly off the page.
-    const usedCells = rows.flatMap(row => direct(row, 'c', S));
-    const lastUsedColumn = Math.max(0, ...usedCells.map(cell => XLSX.utils.decode_cell(cellAddressOf(cell)).c),
-      ...all(doc, 'mergeCell', S).map(n => XLSX.utils.decode_range(n.getAttribute('ref')).e.c));
+    const usedCells = rows.flatMap(row => direct(row, 'c', S)).filter(cell => direct(cell, 'f', S).length || (cell.getAttribute('t') === 's' ? strings[Number(direct(cell, 'v', S)[0]?.textContent)] : cell.getAttribute('t') === 'inlineStr' ? all(cell, 't', S).map(n => n.textContent).join('') : direct(cell, 'v', S)[0]?.textContent || '').trim());
+    const usedAddresses = new Set(usedCells.map(cellAddressOf));
+    const contentMerges = all(doc, 'mergeCell', S).map(n => XLSX.utils.decode_range(n.getAttribute('ref'))).filter(range => usedAddresses.has(XLSX.utils.encode_cell(range.s)));
+    let lastUsedColumn = Math.max(0, ...usedCells.map(cell => XLSX.utils.decode_cell(cellAddressOf(cell)).c), ...contentMerges.map(range => range.e.c));
+    let lastUsedRow = Math.max(0, ...usedCells.map(cell => XLSX.utils.decode_cell(cellAddressOf(cell)).r), ...contentMerges.map(range => range.e.r));
+    for (const relation of await loadSheetRelationships(zip, context.sheetPath)) {
+      if (!/\/drawing$/i.test(relation.type) || !zip.file(relation.path)) continue;
+      const drawing = parseXml(await zip.file(relation.path).async('string'));
+      for (const marker of [...drawing.getElementsByTagNameNS('*', 'col')]) lastUsedColumn = Math.max(lastUsedColumn, Number(marker.textContent) || 0);
+      for (const marker of [...drawing.getElementsByTagNameNS('*', 'row')]) lastUsedRow = Math.max(lastUsedRow, Number(marker.textContent) || 0);
+    }
+    // Styled-but-empty columns must not create a blank strip beside the contract.
+    let names = all(context.workbookDoc, 'definedNames', S)[0];
+    if (!names) { names = context.workbookDoc.createElementNS(S, 'definedNames'); const calc = all(context.workbookDoc, 'calcPr', S)[0]; context.workbookDoc.documentElement.insertBefore(names, calc || null); }
+    let printArea = direct(names, 'definedName', S).find(n => n.getAttribute('name') === '_xlnm.Print_Area' && Number(n.getAttribute('localSheetId')) === context.sheetIndex);
+    if (!printArea) { printArea = context.workbookDoc.createElementNS(S, 'definedName'); printArea.setAttribute('name', '_xlnm.Print_Area'); printArea.setAttribute('localSheetId', String(context.sheetIndex)); names.append(printArea); }
+    printArea.textContent = `'${state.templateSheet.replace(/'/g, "''")}'!$A$1:$${XLSX.utils.encode_col(lastUsedColumn)}$${lastUsedRow + 1}`;
     let columnList = direct(worksheet, 'cols', S)[0];
     if (!columnList) { columnList = doc.createElementNS(S, 'cols'); worksheet.insertBefore(columnList, sheetData(doc)); }
     const oldColumns = direct(columnList, 'col', S);
@@ -1622,11 +1669,17 @@
         const clone = n.cloneNode(true); clone.setAttribute('min', String(Math.max(lastUsedColumn + 2, Number(clone.getAttribute('min'))))); return clone;
       });
       columnList.replaceChildren(...newColumns, ...trailing);
+      // Column widening changes wrapping: recalculate continuation heights once more.
+      if (context.compactTextRows?.size) {
+        await fitExcelRowHeights(zip, context);
+        height = rows.filter(row => Number(row.getAttribute('r')) <= firstBoundary && row.getAttribute('hidden') !== '1').reduce((sum, row) => sum + Number(row.getAttribute('ht') || 15), 0);
+      }
     }
     if (!boundaries.length) {
       // Fit a modest main form to one page; very large orders retain readable pagination.
-      setup.setAttribute('fitToHeight', height <= usableHeight / 0.65 ? '1' : '0');
-      return;
+      if (height <= usableHeight / 0.65) { setup.setAttribute('fitToHeight', '1'); return; }
+      // Large forms use explicit scale so the signature block can stay together.
+
     }
     let breaks = direct(worksheet, 'rowBreaks', S)[0];
     if (!breaks) { breaks = doc.createElementNS(S, 'rowBreaks'); worksheet.insertBefore(breaks, [...worksheet.children].find(n => ['colBreaks', 'customProperties', 'cellWatches', 'ignoredErrors', 'smartTags', 'drawing', 'legacyDrawing', 'picture', 'oleObjects', 'controls', 'webPublishItems', 'tableParts', 'extLst'].includes(n.localName)) || null); }
@@ -1640,8 +1693,7 @@
     breaks.setAttribute('count', String(ids.size)); breaks.setAttribute('manualBreakCount', String(ids.size));
     // Excel ignores manual section breaks in fit-to-page mode; use explicit print scale.
     direct(direct(worksheet, 'sheetPr', S)[0], 'pageSetUpPr', S)[0].setAttribute('fitToPage', '0');
-    const cells = rows.flatMap(row => direct(row, 'c', S));
-    const lastColumn = Math.max(lastUsedColumn, ...cells.map(cell => XLSX.utils.decode_cell(cellAddressOf(cell)).c));
+    const lastColumn = lastUsedColumn;
     const columns = all(doc, 'col', S);
     const styleDoc = zip.file('xl/styles.xml') ? parseXml(await zip.file('xl/styles.xml').async('string')) : null;
     const defaultFont = all(styleDoc, 'font', S)[0];
@@ -1653,7 +1705,28 @@
       width += (Number(column?.getAttribute('width') || 8.43) * digitWidth + 5) * 0.75;
     }
     setup.removeAttribute('fitToWidth'); setup.removeAttribute('fitToHeight');
-    setup.setAttribute('scale', String(Math.max(10, Math.floor(Math.min(1, usableWidth / width * 0.96, Math.max(0.65, usableHeight / Math.max(1, height))) * 100))));
+    const printScale = Math.max(10, Math.floor(Math.min(1, usableWidth / width * 0.96, Math.max(0.65, usableHeight / Math.max(1, height))) * 100));
+    setup.setAttribute('scale', String(printScale));
+    const rowText = row => direct(row, 'c', S).map(cell => cell.getAttribute('t') === 's' ? strings[Number(direct(cell, 'v', S)[0]?.textContent)] : cell.getAttribute('t') === 'inlineStr' ? all(cell, 't', S).map(n => n.textContent).join('') : direct(cell, 'v', S)[0]?.textContent || '').join('');
+    const signature = rows.find(row => Number(row.getAttribute('r')) <= firstBoundary && /[甲乙]方盖章/.test(normalizeBusinessLabel(rowText(row))));
+    if (signature) {
+      const start = Number(signature.getAttribute('r'));
+      const end = Math.min(firstBoundary, Math.max(...rows.map(row => Number(row.getAttribute('r')))));
+      const previousBreak = Math.max(0, ...[...ids].filter(id => id < start));
+      const rowHeights = new Map(rows.map(row => [Number(row.getAttribute('r')), row.getAttribute('hidden') === '1' ? 0 : Number(row.getAttribute('ht') || 15)]));
+      let before = 0, signatureHeight = 0;
+      for (let r = previousBreak + 1; r <= end; r++) {
+        const h = (rowHeights.get(r) ?? 15) * printScale / 100;
+        if (r < start) before += h; else signatureHeight += h;
+      }
+      if (signatureHeight < usableHeight && before % usableHeight + signatureHeight > usableHeight - 12 && !ids.has(start - 1)) {
+        const node = doc.createElementNS(S, 'brk');
+        for (const [key, value] of Object.entries({ id: start - 1, min: 0, max: 16383, man: 1 })) node.setAttribute(key, String(value));
+        breaks.append(node); ids.add(start - 1);
+        const nodes = direct(breaks, 'brk', S).sort((a, b) => Number(a.getAttribute('id')) - Number(b.getAttribute('id')));
+        breaks.replaceChildren(...nodes); breaks.setAttribute('count', String(ids.size)); breaks.setAttribute('manualBreakCount', String(ids.size));
+      }
+    }
   }
 
   function configureExcelContractPrint(doc, fitOnePage) {

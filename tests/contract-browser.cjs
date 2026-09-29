@@ -282,12 +282,15 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const incompleteTerms = terms.slice(1).join('\n').replace('复印件与本合同原件具有同等法律效力。', '复印件与本合同原件');
       matrix.push(['合同条款', incompleteTerms, '', '', '', '', '', '', '', '']);
       const sheet = XLSX.utils.aoa_to_sheet(matrix);
+      sheet.H1 = { t: 's', v: '合同编号：' };
+      sheet.N34 = { t: 's', v: '' }; sheet['!ref'] = 'A1:N34';
       sheet.D1 = { t: 'n', f: 'SUM(D3:D5)', v: 0 };
       sheet.D3 = { t: 'n', f: 'C3*10+$C$1+参考!A3+IF(A3="A1",0,0)', v: 0 };
       sheet.D6 = { t: 'n', f: 'SUM(D3:D5)+参考!A4+LOG10(100)', v: 0 };
       sheet['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
       sheet['!rows'] = Array.from({ length: 34 }, (_, index) => index === 33 ? { hpt: 90 } : index === 1 ? { hpt: 6 } : null);
       sheet['!merges'] = [
+        { s: { r: 0, c: 7 }, e: { r: 0, c: 9 } },
         { s: { r: 6, c: 1 }, e: { r: 6, c: 4 } },
         { s: { r: 6, c: 5 }, e: { r: 6, c: 9 } },
         { s: { r: 33, c: 1 }, e: { r: 33, c: 9 } },
@@ -393,6 +396,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     const generatedCells = await page.evaluate(bytes => {
       const book = XLSX.read(new Uint8Array(bytes), { type: 'array' }), sheet = book.Sheets['合同'];
       return {
+        contractNumber: sheet.H1?.v, outsideCode: sheet.K1?.v,
         details: ['A3', 'B3', 'C3', 'A4', 'B4', 'C4', 'A5'].map(address => sheet[address]?.v),
         totalLower: sheet.B6?.v,
         totalUpper: sheet.F6?.v,
@@ -400,6 +404,8 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
         terms: sheet.B33?.v,
       };
     }, [...await fs.readFile(xlsxPath)]);
+    assert.equal(generatedCells.contractNumber, '合同编号：HT-TEST-001');
+    assert.equal(generatedCells.outsideCode, undefined, '编号不得写到表格外');
     assert.deepEqual(generatedCells.details, [1, '产品A', 2, 2, '产品B', 3, '合计']);
     assert.equal(generatedCells.totalLower, '人民币小写：81.00元');
     assert.equal(generatedCells.totalUpper, '人民币大写：捌拾壹圆整');
@@ -409,6 +415,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const zip = await JSZip.loadAsync(new Uint8Array(bytes));
       return {
         sheet: await zip.file('xl/worksheets/sheet1.xml').async('string'),
+        workbook: await zip.file('xl/workbook.xml').async('string'),
         referenceSheet: await zip.file('xl/worksheets/sheet2.xml').async('string'),
         table: await zip.file('xl/tables/table1.xml').async('string'),
         drawing: await zip.file('xl/drawings/drawing-contract.xml').async('string'),
@@ -416,6 +423,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
         styles: await zip.file('xl/styles.xml').async('string'),
       };
     }, [...await fs.readFile(xlsxPath)]);
+    assert.match(preservedParts.workbook, /_xlnm.Print_Area[^>]*>[^<]*\$J\$33/);
     assert.match(preservedParts.sheet, /<c r="D1"><f>SUM\(D3:D4\)<\/f><\/c>/);
     assert.match(preservedParts.sheet, /<c r="D3"><f>C3\*10\+\$C\$1\+参考!A3\+IF\(A3="A1",0,0\)<\/f><\/c>/);
     assert.match(preservedParts.sheet, /<c r="D4"><f>C4\*10\+\$C\$1\+参考!A4\+IF\(A4="A1",0,0\)<\/f><\/c>/);

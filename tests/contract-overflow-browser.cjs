@@ -43,7 +43,7 @@ const assert = require('node:assert/strict');
         const signature=Object.keys(target).find(a=>target[a]?.v==='后续签署日期'), row=Number(signature.slice(1));
         const zip=await JSZip.loadAsync(new Uint8Array(output)), xml=await zip.file('xl/worksheets/sheet1.xml').async('string');
         const doc=new DOMParser().parseFromString(xml,'application/xml'), ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-        return {output, text, c:texts('C'), d:mode==='multiple'?texts('D'):null, row,
+        return {output, text, chunks:Object.entries(target).filter(([a,c])=>/^C\d+$/.test(a)&&c.t==='s'&&c.v!=='后续签署日期').map(([,c])=>c.v), c:texts('C'), d:mode==='multiple'?texts('D'):null, row,
           formula:[...doc.getElementsByTagNameNS(ns,'c')].find(n=>n.getAttribute('r')==='B'+row)?.getElementsByTagNameNS(ns,'f')[0]?.textContent, reference:(await zip.file('xl/worksheets/sheet2.xml').async('string')).match(/<f>(.*?)<\/f>/)?.[1],
           heights:[...doc.getElementsByTagNameNS(ns,'row')].map(n=>Number(n.getAttribute('ht')||15)),
           merges:[...doc.getElementsByTagNameNS(ns,'mergeCell')].map(n=>XLSX.utils.decode_range(n.getAttribute('ref'))),
@@ -58,7 +58,8 @@ const assert = require('node:assert/strict');
       assert.ok(result.row>23);
       assert.equal(result.formula,`SUM(A${result.row}:A${result.row+1})`);
       assert.equal(result.reference,`合同!B${result.row}`);
-      assert.ok(result.heights.every(h=>h<=409.5));
+      assert.ok(result.heights.every(h=>h<=220), '续排行高必须按实际内容计算，不保留固定大空白');
+      assert.ok(result.chunks.every(t=>t.startsWith('完整保留条款：')&&t.endsWith('\n')), '可容纳的完整段落不得从中间截开');
       assert.ok(result.breaks.includes(result.row));
       assert.ok(result.breaks.includes(result.row+1));
       if(mode==='horizontal' && process.env.QA_OUTPUT) {await fs.mkdir(process.env.QA_OUTPUT,{recursive:true}); await fs.writeFile(path.join(process.env.QA_OUTPUT,'overflow.xlsx'),Buffer.from(result.output));}
