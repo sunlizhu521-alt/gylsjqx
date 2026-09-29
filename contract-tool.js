@@ -15,7 +15,8 @@
   const CONVERSION_TIMEOUT = 240000;
   const NUMERIC_BUSINESS_FIELDS = new Set(['sequence', 'quantity', 'taxUnitPrice', 'taxAmount', 'taxRate']);
   const RIGHT_SIDE_VALUE_FIELDS = new Set(['contractNumber', 'deliveryPlace', 'deliveryTime', 'signDate']);
-  const ORDER_RIGHT_SIDE_FIELDS = new Set([...RIGHT_SIDE_VALUE_FIELDS, 'buyer', 'supplier']);
+  const ORDER_RIGHT_SIDE_FIELDS = new Set(['contractNumber', 'deliveryTime', 'taxTotalLower', 'taxTotalUpper']);
+  const ORDER_FIELD_KEYS = new Set(['contractNumber', 'sequence', 'materialCode', 'materialName', 'specification', 'sku', 'unit', 'quantity', 'taxUnitPrice', 'remark', 'deliveryTime', 'taxTotalLower', 'taxTotalUpper']);
   const CONTRACT_TERMS = [
     '1、采购合同所述价格为甲方在本合同项下应向乙方支付的最终价格，其中已经包括所有的安装费、售后服务费和税费等，除合同金额外，甲方不再支付任何其他费用。',
     '2、乙方应根据甲方要求进行包装并确保产品交付给甲方时包装完好无损，按照甲方要求进行必要的标识贴附工作并承担相关费用。',
@@ -32,17 +33,17 @@
   const BUSINESS_FIELDS = [
     { key: 'sequence', label: '序号', aliases: ['序号', '行号'], kind: 'detail', automatic: '@sequence', automaticLabel: '自动生成 1、2、3…', writeMode: '按订单逐行写入' },
     { key: 'materialCode', label: '物料编码', aliases: ['物料编码', '产品编码', '商品编码', '货号'], kind: 'detail' },
-    { key: 'materialName', label: '物料名称', aliases: ['物料名称', '物料', '产品名称', '商品名称', '品名'], kind: 'detail' },
+    { key: 'materialName', label: '物料名称', aliases: ['名称', '物料名称', '物料', '产品名称', '商品名称', '品名'], kind: 'detail' },
     { key: 'specification', label: '规格型号', aliases: ['规格型号', '规格', '型号'], kind: 'detail' },
     { key: 'sku', label: 'SKU', aliases: ['SKU', 'SKU编码'], kind: 'detail' },
     { key: 'unit', label: '单位', aliases: ['单位', '计量单位'], kind: 'detail' },
     { key: 'quantity', label: '数量', aliases: ['数量', '采购数量', '订单数量'], kind: 'detail' },
     { key: 'taxUnitPrice', label: '含税运单价（元）', aliases: ['含税运单价（元）', '含税运单价', '含税单价（元）', '含税单价', '单价'], kind: 'detail' },
-    { key: 'taxAmount', label: '含税运总金额（元）', aliases: ['含税运总金额（元）', '含税运总金额', '含税总金额（元）', '含税总金额', '含税金额', '金额'], kind: 'detail' },
+    { key: 'taxAmount', label: '含税运总金额（元）', aliases: ['含税运总金额（元）', '含税运总金额', '含税总金额（元）', '含税总金额', '含税金额', '金额'], kind: 'detail', automatic: '@line-amount', automaticLabel: '数量 × 含税单价', writeMode: '自动计算（两位小数）' },
     { key: 'taxRate', label: '税率', aliases: ['税率', '增值税率'], kind: 'detail' },
     { key: 'deliveryTime', label: '交货时间', aliases: ['交货时间', '交期', '要求货好时间', '要求交货日期'], kind: 'single' },
     { key: 'remark', label: '备注', aliases: ['备注', '说明'], kind: 'detail' },
-    { key: 'taxTotalLower', label: '含税运合计（小写）', aliases: ['含税运合计（小写）', '含税运合计小写', '合计（小写）', '合计小写', '小写合计', '人民币小写', '人民币小写金额'], kind: 'single', automatic: '@tax-total-lower', automaticLabel: '自动汇总含税运总金额（元）', writeMode: '自动汇总' },
+    { key: 'taxTotalLower', label: '含税运合计（小写）', aliases: ['含税运合计（小写）', '含税运合计小写', '合计（小写）', '合计小写', '小写合计', '人民币小写', '人民币小写金额'], kind: 'single', automatic: '@tax-total-lower', automaticLabel: '逐行计算数量 × 含税单价后汇总', writeMode: '自动汇总' },
     { key: 'taxTotalUpper', label: '含税运合计（大写）', aliases: ['含税运合计（大写）', '含税运合计大写', '合计（大写）', '合计大写', '大写合计', '人民币大写', '人民币大写金额'], kind: 'single', automatic: '@tax-total-upper', automaticLabel: '由小写合计自动转人民币大写', writeMode: '自动转大写' },
     { key: 'contractNumber', label: '合同编号', aliases: ['合同编号', '合同号'], kind: 'single' },
     { key: 'orderNumber', label: '订单编号', aliases: ['订单编号', '采购订单号', '采购单号', '订单号'], kind: 'single' },
@@ -52,6 +53,7 @@
     { key: 'deliveryPlace', label: '交货地点', aliases: ['交货地点', '送货地址', '交付地点'], kind: 'single' },
     { key: 'paymentTerms', label: '付款方式', aliases: ['付款方式', '付款条件', '结算方式', '结算条件'], kind: 'single' },
   ];
+  const ACTIVE_FIELDS = BUSINESS_FIELDS.filter(field => ORDER_FIELD_KEYS.has(field.key) || ['taxAmount', 'taxTotalLower', 'taxTotalUpper', 'signDate'].includes(field.key));
   let pdfJsPromise = null;
   let legacyPdfJsPromise = null;
   let pdfiumPromise = null;
@@ -170,10 +172,11 @@
     state.order = C.analyzeMatrix(matrix, 1000);
     const rightSideValues = C.extractAdjacentLabelValues(
       matrix,
-      Object.fromEntries(BUSINESS_FIELDS.map(field => [field.key, field.aliases])),
+      Object.fromEntries(BUSINESS_FIELDS.map(field => [field.key, field.key === 'taxTotalLower' ? [...field.aliases, '含税合计'] : field.aliases])),
       sheet['!merges'] || [],
       [state.order.headerIndex],
     );
+    state.order.sourceTotals = { lower: rightSideValues.taxTotalLower || '', upper: rightSideValues.taxTotalUpper || '' };
     state.order.rightSideFields = {};
     for (const definition of BUSINESS_FIELDS.filter(field => ORDER_RIGHT_SIDE_FIELDS.has(field.key) && !field.manualInput)) {
       const value = rightSideValues[definition.key];
@@ -183,6 +186,11 @@
       state.order.rows.forEach(record => { record[header] = value; });
       state.order.rightSideFields[definition.key] = header;
     }
+    const allowedHeaders = new Set(BUSINESS_FIELDS.filter(field => ORDER_FIELD_KEYS.has(field.key)).flatMap(field => field.aliases.map(normalizeBusinessLabel)));
+    const adjacentHeaders = new Set(Object.values(state.order.rightSideFields));
+    state.order.headers = state.order.headers.filter(header => allowedHeaders.has(normalizeBusinessLabel(header)) || adjacentHeaders.has(header));
+    const selections = Object.fromEntries(BUSINESS_FIELDS.filter(field => ORDER_FIELD_KEYS.has(field.key)).map(field => [field.key, bestOrderHeader(field)]));
+    state.order.rows = C.selectDetailRows(state.order.rows, state.order.headers, selections).map(row => Object.fromEntries([['_row', row._row], ...state.order.headers.map(header => [header, row[header]])]));
     const allowed = new Set(state.order.headers);
     for (const [target, mapping] of Object.entries(state.mappings)) if (!allowed.has(mapping.field)) delete state.mappings[target];
   }
@@ -371,7 +379,7 @@
     if (state.orderFile) summary.push(`订单：${state.orderFile.name}（${state.order.rows.length}行）`);
     if (state.templateFile) summary.push(`模板：${state.templateFile.name}`);
     $('fileSummary').textContent = summary.join('；') || '等待上传订单和合同模板';
-    const selectedCount = BUSINESS_FIELDS.filter(field => field.automatic || state.fieldSelections[field.key]).length;
+    const selectedCount = ACTIVE_FIELDS.filter(field => field.automatic || state.fieldSelections[field.key]).length;
     $('mappingStatus').textContent = ready ? `${mappedEntries().length} / ${selectedCount} 已识别` : '0 个映射';
     updateConfirmation(); updateSteps();
   }
@@ -487,7 +495,7 @@
     }
     const excludedRows = new Set([bestHeader ? rows[bestHeader.index].rowKey : '', state.detailRow].filter(Boolean));
     const usedTargets = new Set(Object.values(bindings).map(binding => binding.targetId));
-    for (const definition of BUSINESS_FIELDS.filter(field => field.kind === 'single')) {
+    for (const definition of ACTIVE_FIELDS.filter(field => field.kind === 'single')) {
       let best = null;
       for (const labelTarget of state.templateModel.targets) {
         if (excludedRows.has(labelTarget.rowKey)) continue;
@@ -525,7 +533,7 @@
   function ensureBusinessMappings() {
     const signature = `${state.fingerprint}:${state.templateSheet}:${state.orderSheet}:${state.order.headers.join('|')}`;
     if (state.mappingSignature !== signature) {
-      for (const definition of BUSINESS_FIELDS) {
+      for (const definition of ACTIVE_FIELDS) {
         if (definition.automatic) state.fieldSelections[definition.key] = definition.automatic;
         else if (!state.fieldSelections[definition.key] || !state.order.headers.includes(state.fieldSelections[definition.key])) state.fieldSelections[definition.key] = bestOrderHeader(definition);
       }
@@ -536,7 +544,7 @@
 
   function rebuildMappings() {
     const mappings = {};
-    for (const definition of BUSINESS_FIELDS) {
+    for (const definition of ACTIVE_FIELDS) {
       const binding = state.templateBindings[definition.key], field = state.fieldSelections[definition.key];
       if (!binding || !field) continue;
       const values = field.startsWith('@') ? [] : C.distinctValues(state.order.rows, field);
@@ -556,7 +564,7 @@
     const detailRows = detailRecords();
     const termsSummary = hasStandardContractTermsTemplate() ? '；标准合同条款 1—9 已识别，生成时将完整写入' : '';
     $('templateDetectionSummary').textContent = `模板自动识别 ${detected} 个可写字段；序号按 ${detailRows.length} 条物料明细自动生成${termsSummary}`;
-    $('businessMappingRows').innerHTML = BUSINESS_FIELDS.map(definition => {
+    $('businessMappingRows').innerHTML = ACTIVE_FIELDS.map(definition => {
       const selection = state.fieldSelections[definition.key] || '', binding = state.templateBindings[definition.key];
       const values = selection && selection !== '@sequence' ? C.distinctValues(state.order.rows, selection) : [];
       const conflict = definition.kind === 'single' && values.length > 1;
@@ -564,14 +572,16 @@
         ? `<option value="${definition.automatic}">${esc(definition.automaticLabel)}</option>`
         : `<option value="">不填写</option>${state.order.headers.map(header => `<option value="${esc(header)}" ${header === selection ? 'selected' : ''}>${esc(header)}</option>`).join('')}`;
       const inputControl = definition.manualInput === 'date'
-        ? `<input class="business-field-select business-date-input" type="date" data-manual-key="${definition.key}" value="${esc(state.manualValues?.[definition.key] || '')}" ${binding ? '' : 'disabled'} aria-label="请选择${esc(definition.label)}" />`
+        ? `<input class="business-field-select business-date-input" type="date" data-manual-key="${definition.key}" value="${esc(state.manualValues?.[definition.key] || '')}" aria-label="请选择${esc(definition.label)}" />`
         : `<select class="business-field-select" data-field-key="${definition.key}" ${definition.automatic ? 'disabled' : ''} aria-label="${esc(definition.label)}对应订单列">${options}</select>`;
       const strategy = conflict ? `<select class="business-field-select business-strategy-select" data-strategy-key="${definition.key}" aria-label="${esc(definition.label)}多值处理"><option value="">该列有多个值，请选择处理方式</option><option value="first" ${state.fieldStrategies[definition.key] === 'first' ? 'selected' : ''}>取第一条非空值</option><option value="merge" ${state.fieldStrategies[definition.key] === 'merge' ? 'selected' : ''}>合并去重值</option><option value="sum" ${state.fieldStrategies[definition.key] === 'sum' ? 'selected' : ''}>求和</option></select>` : '';
       const success = !!(binding && selection && mapped.has(definition.key));
-      const templateField = binding?.templateLabel || '未识别到对应字段';
+      const sourceTotal = definition.key === 'taxTotalLower' ? state.order.sourceTotals?.lower : definition.key === 'taxTotalUpper' ? state.order.sourceTotals?.upper : undefined;
+      const sourceNote = sourceTotal !== undefined ? `<small class="business-source-total">原表核对值：${esc(sourceTotal || '未提供')}</small>` : '';
+      const templateField = binding?.templateLabel || (definition.manualInput === 'date' ? '未识别到日期填写位置，所选日期暂不写入模板' : '未识别到对应字段');
       return `<div class="business-mapping-row" role="row" data-business-key="${definition.key}">
         <div class="business-field-name" role="cell" data-cell-label="映射字段"><strong>${esc(definition.label)}</strong><small>${definition.automatic ? esc(definition.automaticLabel) : esc(definition.aliases.slice(0, 3).join('、'))}</small></div>
-        <div class="business-order-field" role="cell" data-cell-label="订单明细">${inputControl}${strategy}</div>
+        <div class="business-order-field" role="cell" data-cell-label="订单明细">${inputControl}${strategy}${sourceNote}</div>
         <span class="business-template-field" role="cell" data-cell-label="合同模板">${esc(templateField)}</span>
         <span class="template-detection ${success ? 'detected' : ''}" role="cell"><span class="mobile-cell-label" aria-hidden="true">是否识别：</span><span class="detection-text">${success ? '识别成功' : '未识别'}</span></span>
         <span class="business-write-mode" role="cell" data-cell-label="写入方式">${esc(definition.writeMode || (definition.kind === 'detail' ? '按订单逐行写入' : '填充内容'))}</span>
@@ -587,7 +597,8 @@
     }));
     $('businessMappingRows').querySelectorAll('[data-manual-key]').forEach(input => input.addEventListener('input', event => {
       state.manualValues[event.target.dataset.manualKey] = event.target.value;
-      invalidateOutput(); rebuildMappings(); updateAll();
+      // Keep the native date input mounted while the calendar/keyboard is active.
+      invalidateOutput(); rebuildMappings(); updateConfirmation(); updateSteps();
     }));
   }
 
@@ -643,18 +654,20 @@
     if (!state.order || !state.templateModel) { $('generateContract').disabled = true; return; }
     const issues = C.mappingIssues(state.order.rows, state.mappings, state.detailRow);
     if (state.detailRow && !mappedEntries().some(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow)) issues.push('明细模板行还没有映射任何订单字段');
-    const notDetected = BUSINESS_FIELDS.filter(field => state.fieldSelections[field.key] && !state.templateBindings[field.key]).map(field => field.label);
+    const notDetected = ACTIVE_FIELDS.filter(field => state.fieldSelections[field.key] && !state.templateBindings[field.key]).map(field => field.label);
     const outputName = C.sanitizeFileName($('outputName').value);
     if (!$('outputName').value.trim()) issues.push('请填写合同文件名称');
     if (state.templateBindings.signDate && !C.text(state.manualValues?.signDate).trim()) issues.push('请选择甲方签署日期，选择后才能生成PDF预览');
     const detailRows = detailRecords();
-    if ((state.templateBindings.taxTotalLower || state.templateBindings.taxTotalUpper) && !state.fieldSelections.taxAmount) issues.push('请为“含税运总金额（元）”选择订单明细列，才能自动计算合同合计');
-    if ((state.templateBindings.taxTotalLower || state.templateBindings.taxTotalUpper) && state.fieldSelections.taxAmount) {
+    if (state.templateBindings.taxAmount || state.templateBindings.taxTotalLower || state.templateBindings.taxTotalUpper) {
       try { contractTotals(); } catch (error) { issues.push(error.message); }
     }
     $('confirmSummary').innerHTML = `订单：<strong>${esc(state.orderSheet)}</strong>，识别 ${detailRows.length} 条物料明细${detailRows.length !== state.order.rows.length ? `（原表 ${state.order.rows.length} 行）` : ''}；模板：<strong>${esc(state.templateFile.name)}</strong>${state.templateSheet ? `，合同Sheet：<strong>${esc(state.templateSheet)}</strong>` : ''}；输出：<strong>${esc(outputName)}.${state.templateType}</strong>`;
+    let totalWarnings = [];
+    try { totalWarnings = C.compareSourceTotals(state.order.sourceTotals, contractTotals()); } catch (_) {}
+    const sourceWarnings = totalWarnings.length ? `<div class="warnings">${totalWarnings.map(esc).join('<br>')}；合同仍按数量 × 含税单价计算。</div>` : '';
     const warnings = notDetected.length ? `<div class="warnings">模板中未识别：${esc(notDetected.join('、'))}；这些字段本次不会写入。</div>` : '';
-    $('contractIssues').innerHTML = `${issues.length ? `<ul>${issues.map(issue => `<li>${esc(issue)}</li>`).join('')}</ul>` : '<div class="ready">映射检查通过，可以生成PDF预览。</div>'}${warnings}`;
+    $('contractIssues').innerHTML = `${issues.length ? `<ul>${issues.map(issue => `<li>${esc(issue)}</li>`).join('')}</ul>` : '<div class="ready">映射检查通过，可以生成PDF预览。</div>'}${warnings}${sourceWarnings}`;
     $('generateContract').disabled = state.busy || issues.length > 0 || !$('confirmGenerate').checked;
   }
 
@@ -1361,7 +1374,13 @@
     }
   }
 
-  function contractTotals() { return C.sumAmountField(detailRecords(), state.fieldSelections.taxAmount); }
+  function calculatedAmount(record) {
+    try { return C.formatAmountCents(C.lineAmountCents(record[state.fieldSelections.quantity], record[state.fieldSelections.taxUnitPrice])); }
+    catch (e) { throw new Error(`订单第 ${record._row} 行：${e.message}`); }
+  }
+  function contractTotals() {
+    return C.sumAmountField(detailRecords().map(record => ({ _row: record._row, calculated: calculatedAmount(record) })), 'calculated');
+  }
   function resolveMapping(mapping) {
     if (mapping.businessKey === 'taxTotalLower') return contractTotals().lower;
     if (mapping.businessKey === 'taxTotalUpper') return contractTotals().upper;
@@ -1372,7 +1391,7 @@
     const match = C.text(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
     return match ? `${match[1]}年${Number(match[2])}月${Number(match[3])}日` : C.text(value);
   }
-  function detailValue(mapping, record, index) { return mapping.field === '@sequence' ? String(index + 1) : C.text(record[mapping.field]); }
+  function detailValue(mapping, record, index) { if (mapping.field === '@line-amount') return calculatedAmount(record); return mapping.field === '@sequence' ? String(index + 1) : C.text(record[mapping.field]); }
   function templateValue(mapping, value) {
     if (mapping.inlinePrefix || mapping.inlineSuffix) {
       let output = C.text(value);
@@ -1433,7 +1452,7 @@
   function applyMappingPayload(payload) {
     if (payload?.version !== 2 || payload.fingerprint !== state.fingerprint || payload.templateType !== state.templateType || (payload.templateSheet || '') !== (state.templateSheet || '')) throw new Error('映射文件与当前合同模板不完全一致');
     const fields = new Set(state.order?.headers || []), selections = {};
-    for (const definition of BUSINESS_FIELDS) {
+    for (const definition of ACTIVE_FIELDS) {
       const value = payload.fieldSelections?.[definition.key];
       if (definition.automatic) selections[definition.key] = definition.automatic;
       else if (fields.has(value)) selections[definition.key] = value;

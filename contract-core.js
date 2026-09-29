@@ -209,6 +209,33 @@
     return output;
   }
 
+  function lineAmountCents(quantity, price) {
+    function decimal(value, label) {
+      let input = text(value).trim();
+      if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(input)) input = input.replace(/,/g, '');
+      if (!/^\d{1,15}(\.\d{1,8})?$/.test(input)) throw new Error(`${label}须为非负数字，最多8位小数，不能为空`);
+      const [whole, fraction = ''] = input.split('.');
+      return { integer: BigInt(whole + fraction), scale: 10n ** BigInt(fraction.length) };
+    }
+    const q = decimal(quantity, '数量'), p = decimal(price, '含税单价');
+    const divisor = q.scale * p.scale, scaled = q.integer * p.integer * 100n;
+    const result = (scaled * 2n + divisor) / (divisor * 2n);
+    if (result > MAX_AMOUNT_CENTS) throw new Error('明细金额超出支持范围');
+    return result;
+  }
+
+  function compareSourceTotals(source, calculated) {
+    const warnings = [];
+    const lower = text(source?.lower).trim(), upper = text(source?.upper).trim();
+    if (lower) {
+      try { if (amountCents(lower) !== calculated.cents) warnings.push(`原表含税合计 ${lower} 与明细计算合计 ${calculated.lower} 不一致`); }
+      catch (_) { warnings.push(`原表含税合计 ${lower} 无法识别，请核对`); }
+    }
+    const normalizeUpper = value => text(value).replace(/\s/g, '').replace(/^人民币[：:]?/, '').replace(/[圆圓]/g, '元').replace(/点零零$/, '元整').replace(/元正$/, '元整');
+    if (upper && normalizeUpper(upper) !== normalizeUpper(calculated.upper)) warnings.push(`原表人民币大写 ${upper} 与明细计算大写 ${calculated.upper} 不一致，请核对`);
+    return warnings;
+  }
+
   function sumAmountField(rows, field) {
     if (!field) throw new Error('请先为“含税运总金额（元）”选择订单明细列');
     let total = 0n;
@@ -269,6 +296,8 @@
     formatAmountCents,
     amountUpper,
     sumAmountField,
+    lineAmountCents,
+    compareSourceTotals,
     resolveField,
     mappingIssues,
   };

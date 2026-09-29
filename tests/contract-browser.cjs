@@ -44,15 +44,16 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const sheet = XLSX.utils.aoa_to_sheet([
         ['合同编号：', '', '', '', '', '', '', '', '', 'HT-TEST-001', '', ''],
         ['序号', '物料编码', '物料名称', '', '规格型号', 'SKU', '单位', '数量', '含税单价\n(元)', '含税总金额\n(元)', '备注', '供应商'],
-        ['1', 'MAT-001', '产品A', '', 'A型', 'SKU-A', '件', '2', '10.5', '21', '首批', '甲公司'],
-        ['2', 'MAT-002', '产品B', '', 'B型', 'SKU-B', '件', '3', '20', '60', '', '甲公司'],
+        ['1', 'MAT-001', '产品A', '', 'A型', 'SKU-A', '件', '2', '10.5', '9999', '首批', '甲公司'],
+        ['2', 'MAT-002', '产品B', '', 'B型', 'SKU-B', '件', '3', '20', '9999', '', '甲公司'],
         ['交货地点', '虚构交货地点', '', '', '', '', '', '', '交货时间', '2026-10-01', '', ''],
+        ['含税合计', '人民币小写', '0.00', '', '人民币大写', '零元整'],
       ], { origin: 'B3' });
       sheet['!merges'] = [
         { s: { r: 2, c: 1 }, e: { r: 2, c: 9 } },
         { s: { r: 3, c: 3 }, e: { r: 3, c: 4 } },
       ];
-      sheet['!ref'] = 'B3:M7';
+      sheet['!ref'] = 'B3:M8';
       const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, '订单');
       return Array.from(new Uint8Array(XLSX.write(book, { type: 'array', bookType: 'biff8' })));
     });
@@ -90,12 +91,12 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.equal(await page.locator('.contract-upload').count(), 2);
     assert.equal(await page.locator('#templatePreview').count(), 0);
     assert.equal(await page.locator('#mappingInspector').count(), 0);
-    assert.equal(await page.locator('.business-mapping-row').count(), 21);
+    assert.equal(await page.locator('.business-mapping-row').count(), 15);
     assert.deepEqual(await page.locator('.business-mapping-head [role="columnheader"]').allTextContents(), ['映射字段', '订单明细', '合同模板', '是否识别', '写入方式']);
     assert.equal(await page.locator('[data-field-key="materialCode"] option').allTextContents().then(items => items.includes('采购合同')), false);
     assert.equal(await page.locator('[data-field-key="sequence"]').inputValue(), '@sequence');
     assert.equal(await page.locator('[data-field-key="sequence"]').isDisabled(), true);
-    for (const [key, field] of [['materialCode', '物料编码'], ['materialName', '物料名称'], ['specification', '规格型号'], ['sku', 'SKU'], ['unit', '单位'], ['quantity', '数量'], ['taxUnitPrice', '含税单价 (元)'], ['taxAmount', '含税总金额 (元)'], ['remark', '备注'], ['deliveryTime', '交货时间（右侧内容）'], ['contractNumber', '合同编号（右侧内容）'], ['deliveryPlace', '交货地点（右侧内容）'], ['supplier', '供应商']]) {
+    for (const [key, field] of [['materialCode', '物料编码'], ['materialName', '物料名称'], ['specification', '规格型号'], ['sku', 'SKU'], ['unit', '单位'], ['quantity', '数量'], ['taxUnitPrice', '含税单价 (元)'], ['taxAmount', '@line-amount'], ['remark', '备注'], ['deliveryTime', '交货时间（右侧内容）'], ['contractNumber', '合同编号（右侧内容）']]) {
       assert.equal(await page.locator(`[data-field-key="${key}"]`).inputValue(), field);
     }
     assert.equal(await page.locator('[data-business-key="signDate"] strong').innerText(), '甲方签署日期');
@@ -110,7 +111,8 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.equal(await page.locator('[data-business-key="deliveryTime"] .template-detection').innerText(), '识别成功');
     assert.equal(await page.locator('[data-business-key="deliveryTime"] .business-write-mode').innerText(), '填充内容');
     assert.match(await page.locator('[data-business-key="contractNumber"] .business-template-field').innerText(), /右侧填写位置/);
-    assert.match(await page.locator('[data-business-key="deliveryPlace"] .business-template-field').innerText(), /右侧填写位置/);
+    for (const key of ['supplier','buyer','deliveryPlace','paymentTerms','taxRate','orderNumber']) assert.equal(await page.locator(`[data-business-key="${key}"]`).count(),0);
+    assert.doesNotMatch(await page.locator('[data-field-key="quantity"]').innerText(), /供应商|含税总金额/);
     assert.equal(await page.locator('[data-field-key="taxTotalLower"]').inputValue(), '@tax-total-lower');
     assert.equal(await page.locator('[data-field-key="taxTotalLower"]').isDisabled(), true);
     assert.equal(await page.locator('[data-business-key="taxTotalLower"] .business-write-mode').innerText(), '自动汇总');
@@ -125,8 +127,16 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.match(await page.locator('#contractIssues').innerText(), /请选择甲方签署日期/);
     assert.equal(await page.locator('#generateContract').isDisabled(), true);
     await page.locator('#confirmStage').screenshot({ path: path.join(out, 'contract-sign-date-required.png') });
+    const dateInput = await page.locator('[data-manual-key="signDate"]').elementHandle();
     await page.locator('[data-manual-key="signDate"]').fill('2026-09-24');
+    assert.equal(await dateInput.evaluate(input => input.isConnected), true, '日期输入期间不得重建控件');
+    await page.locator('[data-manual-key="signDate"]').fill('');
+    assert.equal(await page.locator('#generateContract').isDisabled(), true);
+    assert.match(await page.locator('#contractIssues').innerText(), /请选择甲方签署日期/);
+    await page.locator('[data-manual-key="signDate"]').fill('2026-09-24');
+    assert.equal(await dateInput.evaluate(input => input.isConnected), true);
     assert.equal(await page.locator('#generateContract').isDisabled(), false);
+    assert.match(await page.locator('#contractIssues').innerText(), /原表含税合计 0.00 与明细计算合计 81.00 不一致/);
     await page.evaluate(bytes => {
       let calls = 0;
       window.__CONTRACT_PDF_CONVERTER__ = async () => {
@@ -177,7 +187,9 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.equal(download.suggestedFilename(), '虚构采购合同.docx');
     const docxPath = path.join(out, '虚构采购合同.docx'); await download.saveAs(docxPath);
     const generatedXml = await page.evaluate(async bytes => (await (await JSZip.loadAsync(new Uint8Array(bytes))).file('word/document.xml').async('string')), [...await fs.readFile(docxPath)]);
-    for (const value of ['供应商名称：甲公司', '交货时间：', '>2026-10-01<', '合同编号：', '>HT-TEST-001<', '交货地点：', '>虚构交货地点<', '签署时间：', '>2026年9月24日<', '人民币小写：81.00元', '人民币大写：捌拾壹圆整', 'MAT-001', 'MAT-002', '产品A', '产品B', 'SKU-A', 'SKU-B', '>1<', '>2<', '>3<']) assert.ok(generatedXml.includes(value), value);
+    for (const value of ['交货时间：', '>2026-10-01<', '合同编号：', '>HT-TEST-001<', '交货地点：', '签署时间：', '>2026年9月24日<', '人民币小写：81.00元', '人民币大写：捌拾壹圆整', 'MAT-001', 'MAT-002', '产品A', '产品B', 'SKU-A', 'SKU-B', '>1<', '>2<', '>3<']) assert.ok(generatedXml.includes(value), value);
+    assert.doesNotMatch(generatedXml, /9999|甲公司|虚构交货地点/);
+    assert.ok(generatedXml.includes('>21.00<')); assert.ok(generatedXml.includes('>60.00<'));
     assert.doesNotMatch(generatedXml, /合同编号：HT-TEST-001|交货地点：虚构交货地点|交货时间：2026-10-01/);
     assert.equal((generatedXml.match(/2026年9月24日/g) || []).length, 1);
     assert.equal((generatedXml.match(/<w:tr(?:\s|>)/g) || []).length, 10);
@@ -381,6 +393,18 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       await page.locator('#mappingStage').screenshot({ path: path.join(out, 'contract-real-order-number.png') });
     }
 
+    // Even an unrecognized date target must not lock the manual date picker.
+    const noDateTemplate = await page.evaluate(async bytes => {
+      const zip = await JSZip.loadAsync(new Uint8Array(bytes));
+      zip.file('word/document.xml', (await zip.file('word/document.xml').async('string')).replaceAll('签署时间：', '日期位置未标注：'));
+      return Array.from(await zip.generateAsync({type:'uint8array'}));
+    }, Array.from(docxBytes));
+    await page.locator('#templateFile').setInputFiles({name:'无日期标识模板.docx',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',buffer:Buffer.from(noDateTemplate)});
+    await page.waitForFunction(()=>document.querySelector('#templateFileName').textContent === '无日期标识模板.docx');
+    assert.equal(await page.locator('[data-manual-key="signDate"]').isEnabled(),true);
+    await page.locator('[data-manual-key="signDate"]').fill('2026-09-29');
+    assert.equal(await page.locator('[data-manual-key="signDate"]').inputValue(),'2026-09-29');
+    assert.match(await page.locator('[data-business-key="signDate"]').innerText(),/未识别到日期填写位置/);
     assert.deepEqual(errors, []);
     assert.deepEqual(consoleErrors.filter(message => !message.includes('Failed to load resource: the server responded with a status of 404')), []);
     assert.deepEqual(httpErrors, []);

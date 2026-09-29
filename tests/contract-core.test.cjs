@@ -125,3 +125,24 @@ test('自定义合同文件名只过滤系统非法字符', () => {
   assert.equal(C.sanitizeFileName(' 杭州/采购:合同*2026 '), '杭州_采购_合同_2026');
   assert.equal(C.sanitizeFileName(''), '合同');
 });
+
+test('数量乘单价使用十进制定点运算并逐行四舍五入到分', () => {
+  assert.equal(C.lineAmountCents('3','0.1'),30n);
+  assert.equal(C.lineAmountCents('0','100'),0n);
+  assert.equal(C.lineAmountCents('1','0.005'),1n);
+  assert.equal(C.lineAmountCents('1','0.0049'),0n);
+  assert.equal(C.lineAmountCents('1.25','10.50'),1313n);
+  assert.equal(C.lineAmountCents('1,000','2.25'),225000n);
+  for(const v of ['',null,'bad','-1','1,23','Infinity','0.000000001']) assert.throws(()=>C.lineAmountCents(v,'1'));
+  assert.throws(()=>C.lineAmountCents('1',''));
+  assert.throws(()=>C.lineAmountCents('999999999999999','999999999999999'));
+});
+
+test('原表合计仅核对，兼容圆元与系统点零零写法', () => {
+ const calculated={cents:8761200n,lower:'87612.00',upper:C.amountUpper(8761200n)};
+ assert.deepEqual(C.compareSourceTotals({lower:'87,612.00',upper:'捌万柒仟陆佰壹拾贰点零零'},calculated),[]);
+ assert.deepEqual(C.compareSourceTotals({},calculated),[]);
+ assert.equal(C.compareSourceTotals({lower:'0',upper:'零元整'},calculated).length,2);
+ assert.equal(C.compareSourceTotals({lower:'错误'},calculated).length,1);
+ assert.equal(calculated.cents,8761200n);
+});
