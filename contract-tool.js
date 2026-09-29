@@ -1005,6 +1005,7 @@
     }
     normalizeWordContractTerms(doc);
     compactWordContractLayout(doc);
+    fitWordContractMainPage(doc);
     preventWordTextClipping(doc);
     zip.file('word/document.xml', new XMLSerializer().serializeToString(doc));
     return zip.generateAsync({ type: 'blob', mimeType: MIME.docx, compression: 'DEFLATE' });
@@ -1017,6 +1018,14 @@
       let properties = direct(paragraph, 'pPr')[0];
       if (!properties) { properties = wordNode(doc, 'pPr'); paragraph.prepend(properties); }
       const appendixText = normalizeBusinessLabel(wordText(paragraph));
+      if (paragraph.parentNode === body && appendixText === '通用条款') {
+        let pageBreak = direct(properties, 'pageBreakBefore')[0];
+        if (!pageBreak) { pageBreak = wordNode(doc, 'pageBreakBefore'); properties.append(pageBreak); }
+        pageBreak.setAttributeNS(W, 'w:val', '1');
+        let keep = direct(properties, 'keepNext')[0];
+        if (!keep) { keep = wordNode(doc, 'keepNext'); properties.append(keep); }
+        keep.setAttributeNS(W, 'w:val', '1');
+      }
       const appendixHeading = /^(?:附件[一1])?供应方廉洁诚信承诺书$/.test(appendixText);
       if (paragraph.parentNode === body && appendixHeading) {
         let pageBreak = direct(properties, 'pageBreakBefore')[0];
@@ -1090,6 +1099,82 @@
       const isDetail = direct(table, 'tr').some(row => direct(row, 'tc').some(cell => normalizeBusinessLabel(wordCellText(cell)) === 'SKU'));
       if (!isDetail) continue;
       for (const height of all(table, 'trHeight')) height.remove();
+    }
+  }
+
+  function isSeparateContractHeading(text) {
+    return /^(?:通用条款|(?:附件[一1])?供应方廉洁诚信承诺书)$/.test(normalizeBusinessLabel(text));
+  }
+
+  function fitWordContractMainPage(doc) {
+    const body = all(doc, 'body')[0], blocks = [];
+    for (const block of [...body.children]) {
+      if (all(block, 'p').some(p => isSeparateContractHeading(wordText(p)))
+          || (block.localName === 'p' && isSeparateContractHeading(wordText(block)))) break;
+      if (block.localName !== 'sectPr') blocks.push(block);
+    }
+    if (!blocks.length) return;
+    const ensure = (parent, name) => {
+      let node = direct(parent, name)[0];
+      if (!node) { node = wordNode(doc, name); parent.append(node); }
+      return node;
+    };
+    const section = all(body, 'sectPr')[0];
+    if (!section) return;
+    const page = ensure(section, 'pgSz'), landscape = page.getAttributeNS(W, 'orient') === 'landscape';
+    page.setAttributeNS(W, 'w:w', landscape ? '16838' : '11906');
+    page.setAttributeNS(W, 'w:h', landscape ? '11906' : '16838');
+    const margins = ensure(section, 'pgMar');
+    for (const side of ['top', 'bottom', 'left', 'right']) {
+      margins.setAttributeNS(W, `w:${side}`, String(Math.min(720, Number(margins.getAttributeNS(W, side) || 720))));
+    }
+    const availableWidth = (Number(page.getAttributeNS(W, 'w')) - Number(margins.getAttributeNS(W, 'left')) - Number(margins.getAttributeNS(W, 'right'))) / 20;
+    const availableHeight = (Number(page.getAttributeNS(W, 'h')) - Number(margins.getAttributeNS(W, 'top')) - Number(margins.getAttributeNS(W, 'bottom'))) / 20 - 24;
+    const canvas = document.createElement('canvas').getContext('2d');
+    const paragraphs = block => block.localName === 'p' ? [block] : all(block, 'p');
+    const originalSizes = new Map();
+    for (const block of blocks) for (const p of paragraphs(block)) {
+      for (const run of all(p, 'r')) originalSizes.set(run, Number(all(run, 'sz')[0]?.getAttributeNS(W, 'val') || 22) / 2);
+    }
+    const sizeFor = (p, cap) => Math.min(cap, Math.max(8, ...all(p, 'r').map(r => originalSizes.get(r) || 11)));
+    const paragraphHeight = (p, width, cap) => {
+      const size = sizeFor(p, cap);
+      canvas.font = `${size}px "宋体", serif`;
+      const lines = wordText(p).split(/\r?\n/).reduce((sum, text) => sum + Math.max(1, Math.ceil(canvas.measureText(text).width * 1.18 / Math.max(12, width - 12))), 0);
+      const imageHeight = Math.max(0, ...[...p.getElementsByTagNameNS('*', 'extent')].map(n => Number(n.getAttribute('cy') || 0) / 12700));
+      return Math.max(lines * size * 1.22, imageHeight);
+    };
+    const estimate = cap => blocks.reduce((sum, block) => {
+      if (block.localName !== 'tbl') return sum + paragraphs(block).reduce((h, p) => h + paragraphHeight(p, availableWidth, cap), 0);
+      const grid = all(direct(block, 'tblGrid')[0], 'gridCol').map(n => Number(n.getAttributeNS(W, 'w')) / 20);
+      return sum + direct(block, 'tr').reduce((height, row) => {
+        let column = 0;
+        const heights = direct(row, 'tc').map(cell => {
+          const span = Number(all(cell, 'gridSpan')[0]?.getAttributeNS(W, 'val') || 1);
+          const width = grid.slice(column, column + span).reduce((a, b) => a + b, 0) || availableWidth / Math.max(1, direct(row, 'tc').length);
+          column += span;
+          return all(cell, 'p').reduce((h, p) => h + paragraphHeight(p, width, cap), 0) + 4;
+        });
+        const minimum = Math.max(0, ...all(direct(row, 'trPr')[0], 'trHeight').map(n => Number(n.getAttributeNS(W, 'val')) / 20));
+        return height + Math.max(minimum, ...heights);
+      }, 0);
+    }, 0);
+    let cap = 10;
+    while (cap > 8 && estimate(cap) > availableHeight) cap -= 0.5;
+    for (const block of blocks) for (const p of paragraphs(block)) {
+      let pp = direct(p, 'pPr')[0];
+      if (!pp) { pp = wordNode(doc, 'pPr'); p.prepend(pp); }
+      const spacing = ensure(pp, 'spacing');
+      spacing.setAttributeNS(W, 'w:line', String(Math.ceil(sizeFor(p, cap) * 1.22 * 20)));
+      spacing.setAttributeNS(W, 'w:lineRule', 'atLeast');
+      spacing.setAttributeNS(W, 'w:before', '0'); spacing.setAttributeNS(W, 'w:after', '0');
+      // Keep all text in normal flow; never use fixed heights or clip overflowing content.
+      for (const run of all(p, 'r')) {
+        let rp = direct(run, 'rPr')[0];
+        if (!rp) { rp = wordNode(doc, 'rPr'); run.prepend(rp); }
+        const size = Math.min(originalSizes.get(run) || 11, cap);
+        for (const name of ['sz', 'szCs']) ensure(rp, name).setAttributeNS(W, 'w:val', String(size * 2));
+      }
     }
   }
 
@@ -1304,7 +1389,7 @@
     }
     await normalizeExcelContractTerms(zip, context);
     await fitExcelRowHeights(zip, context);
-    configureExcelContractPrint(context.sheetDoc, false);
+    await fitExcelContractMainPage(zip, context);
     await forceWorkbookRecalculation(zip, context);
     zip.file(context.sheetPath, new XMLSerializer().serializeToString(context.sheetDoc));
     return zip.generateAsync({ type: 'blob', mimeType: MIME.xlsx, compression: 'DEFLATE' });
@@ -1394,6 +1479,64 @@
     return true;
   }
 
+  async function fitExcelContractMainPage(zip, context) {
+    const doc = context.sheetDoc, worksheet = doc.documentElement;
+    const shared = zip.file('xl/sharedStrings.xml') ? parseXml(await zip.file('xl/sharedStrings.xml').async('string')) : null;
+    const strings = all(shared, 'si', S).map(n => all(n, 't', S).map(t => t.textContent).join(''));
+    const rows = direct(sheetData(doc), 'row', S), boundaries = [];
+    let appendixStarted = false;
+    for (const row of rows) for (const cell of direct(row, 'c', S)) {
+      const value = cell.getAttribute('t') === 's' ? strings[Number(direct(cell, 'v', S)[0]?.textContent)] : cell.getAttribute('t') === 'inlineStr' ? all(cell, 't', S).map(n => n.textContent).join('') : direct(cell, 'v', S)[0]?.textContent || '';
+      if (!isSeparateContractHeading(value)) continue;
+      const appendix = normalizeBusinessLabel(value) !== '通用条款';
+      if (!appendix || !appendixStarted) boundaries.push(Number(row.getAttribute('r')) - 1);
+      if (appendix) appendixStarted = true;
+    }
+    const firstBoundary = Math.min(...boundaries.filter(n => n > 0), Infinity);
+    const height = rows.filter(row => Number(row.getAttribute('r')) <= firstBoundary && row.getAttribute('hidden') !== '1')
+      .reduce((sum, row) => sum + Number(row.getAttribute('ht') || 15), 0);
+    configureExcelContractPrint(doc, false);
+    const setup = direct(worksheet, 'pageSetup', S)[0];
+    const landscape = setup.getAttribute('orientation') === 'landscape';
+    let margins = direct(worksheet, 'pageMargins', S)[0];
+    if (!margins) { margins = doc.createElementNS(S, 'pageMargins'); worksheet.insertBefore(margins, setup); }
+    for (const side of ['left', 'right', 'top', 'bottom']) margins.setAttribute(side, String(Math.min(0.4, Number(margins.getAttribute(side) || 0.4))));
+    for (const side of ['header', 'footer']) if (!margins.hasAttribute(side)) margins.setAttribute(side, '0.2');
+    const usableHeight = (landscape ? 595.28 : 841.89) - (Number(margins.getAttribute('top')) + Number(margins.getAttribute('bottom'))) * 72 - 12;
+    const usableWidth = (landscape ? 841.89 : 595.28) - (Number(margins.getAttribute('left')) + Number(margins.getAttribute('right'))) * 72 - 12;
+    if (!boundaries.length) {
+      // Fit a modest main form to one page; very large orders retain readable pagination.
+      setup.setAttribute('fitToHeight', height <= usableHeight / 0.65 ? '1' : '0');
+      return;
+    }
+    let breaks = direct(worksheet, 'rowBreaks', S)[0];
+    if (!breaks) { breaks = doc.createElementNS(S, 'rowBreaks'); worksheet.insertBefore(breaks, [...worksheet.children].find(n => ['colBreaks', 'customProperties', 'cellWatches', 'ignoredErrors', 'smartTags', 'drawing', 'legacyDrawing', 'picture', 'oleObjects', 'controls', 'webPublishItems', 'tableParts', 'extLst'].includes(n.localName)) || null); }
+    const ids = new Set([...direct(breaks, 'brk', S).map(n => Number(n.getAttribute('id'))), ...boundaries.filter(n => n > 0)]);
+    breaks.replaceChildren();
+    for (const id of [...ids].sort((a, b) => a - b)) {
+      const node = doc.createElementNS(S, 'brk');
+      for (const [key, value] of Object.entries({ id, min: 0, max: 16383, man: 1 })) node.setAttribute(key, String(value));
+      breaks.append(node);
+    }
+    breaks.setAttribute('count', String(ids.size)); breaks.setAttribute('manualBreakCount', String(ids.size));
+    // Excel ignores manual section breaks in fit-to-page mode; use explicit print scale.
+    direct(direct(worksheet, 'sheetPr', S)[0], 'pageSetUpPr', S)[0].setAttribute('fitToPage', '0');
+    const cells = rows.flatMap(row => direct(row, 'c', S));
+    const lastColumn = Math.max(0, ...cells.map(cell => XLSX.utils.decode_cell(cellAddressOf(cell)).c));
+    const columns = all(doc, 'col', S);
+    const styleDoc = zip.file('xl/styles.xml') ? parseXml(await zip.file('xl/styles.xml').async('string')) : null;
+    const defaultFont = all(styleDoc, 'font', S)[0];
+    // Column units depend on the workbook's normal font, not a fixed 11-point font.
+    const digitWidth = Math.max(7, Number(direct(defaultFont, 'sz', S)[0]?.getAttribute('val') || 11) * 0.75);
+    let width = 0;
+    for (let c = 1; c <= lastColumn + 1; c++) {
+      const column = columns.find(n => c >= Number(n.getAttribute('min')) && c <= Number(n.getAttribute('max')));
+      width += (Number(column?.getAttribute('width') || 8.43) * digitWidth + 5) * 0.75;
+    }
+    setup.removeAttribute('fitToWidth'); setup.removeAttribute('fitToHeight');
+    setup.setAttribute('scale', String(Math.max(10, Math.floor(Math.min(1, usableWidth / width * 0.96, Math.max(0.65, usableHeight / Math.max(1, height))) * 100))));
+  }
+
   function configureExcelContractPrint(doc, fitOnePage) {
     const worksheet = doc.documentElement;
     let sheetProperties = direct(worksheet, 'sheetPr', S)[0];
@@ -1405,7 +1548,7 @@
     if (!pageSetup) {
       pageSetup = doc.createElementNS(S, 'pageSetup');
       const margins = direct(worksheet, 'pageMargins', S)[0];
-      worksheet.insertBefore(pageSetup, margins?.nextSibling || null);
+      worksheet.insertBefore(pageSetup, margins?.nextSibling || [...worksheet.children].find(n => ['headerFooter', 'rowBreaks', 'colBreaks', 'customProperties', 'cellWatches', 'ignoredErrors', 'smartTags', 'drawing', 'legacyDrawing', 'picture', 'oleObjects', 'controls', 'webPublishItems', 'tableParts', 'extLst'].includes(n.localName)) || null);
     }
     pageSetup.setAttribute('paperSize', '9'); pageSetup.setAttribute('fitToWidth', '1'); pageSetup.setAttribute('fitToHeight', fitOnePage ? '1' : '0'); pageSetup.removeAttribute('scale');
   }
