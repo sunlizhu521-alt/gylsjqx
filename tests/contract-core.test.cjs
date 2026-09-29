@@ -146,3 +146,35 @@ test('原表合计仅核对，兼容圆元与系统点零零写法', () => {
  assert.equal(C.compareSourceTotals({lower:'错误'},calculated).length,1);
  assert.equal(calculated.cents,8761200n);
 });
+
+test('无序号订单排除合计及创建审核页脚，保留四条物料', () => {
+  const headers = ['物料编码', '物料名称', '数量', '单价'];
+  const rows = [
+    ['1201', '螺丝A', '2500', '0.017699'], ['1202', '螺丝B', '1000', '0.028319'],
+    ['1203', '螺丝C', '1000', '0.033628'], ['1204', '螺丝D', '3000', '0.019469'],
+    ['合计', '', '7500', ''], ['创建人', '测试人员', '', ''], ['创建日期', '2026/9/29', '', ''],
+  ].map(values => Object.fromEntries(headers.map((header, i) => [header, values[i]])));
+  assert.equal(C.selectDetailRows(rows, headers, { materialCode: '物料编码', materialName: '物料名称' }).length, 4);
+});
+
+test('交货日期只去除时间且不跨时区换日', () => {
+  for (const [input, expected] of [
+    ['2026/10/6 23:59:59', '2026/10/6'], ['2026-10-06T23:59:59Z', '2026-10-06'],
+    ['2026年10月6日 23:59', '2026年10月6日'], ['2026-10-06', '2026-10-06'],
+    ['', ''], ['另行约定', '另行约定'],
+  ]) assert.equal(C.dateOnly(input), expected);
+});
+
+test('价税合计换算含税单价精确四舍五入到三位，不截断', () => {
+  assert.deepEqual([[50,2500],[32,1000],[38,1000],[66,3000]].map(([a,q]) => C.taxPriceFromAmount(a,q)), ['0.02','0.032','0.038','0.022']);
+  assert.equal(C.taxPriceFromAmount('1.00', '3'), '0.333');
+  assert.equal(C.taxPriceFromAmount('1.00', '16'), '0.063');
+  assert.equal(C.taxPriceFromAmount('1.00', '0.5'), '2');
+  assert.equal(C.taxPriceFromAmount('0.00', '10'), '0');
+  for (const q of ['', '0', '-1', '无']) assert.throws(() => C.taxPriceFromAmount('1.00', q));
+  for (const a of ['', '-1', '无']) assert.throws(() => C.taxPriceFromAmount(a, '2'));
+  const cents = C.lineAmountCents('3', C.taxPriceFromAmount('1.00', '3'));
+  assert.equal(cents, 100n);
+  const roundedTotal = C.sumAmountField([{amount: C.formatAmountCents(C.lineAmountCents('16', C.taxPriceFromAmount('1.00','16')))}], 'amount');
+  assert.equal(C.compareSourceTotals({lower:'1.00'}, roundedTotal).length, 1);
+});

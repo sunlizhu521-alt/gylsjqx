@@ -107,8 +107,28 @@
     return values;
   }
 
+  function taxPriceFromAmount(amount, quantity) {
+    const cents = amountCents(amount);
+    const source = text(quantity).trim().replace(/[,，\s]/g, '');
+    if (!/^\d+(?:\.\d+)?$/.test(source)) throw new Error('数量须为正数，无法换算含税单价');
+    const [whole, fraction = ''] = source.split('.');
+    const units = BigInt(whole + fraction);
+    if (!units) throw new Error('数量为零，无法换算含税单价');
+    const numerator = cents * 10n * (10n ** BigInt(fraction.length));
+    const mills = (2n * numerator + units) / (2n * units);
+    return `${mills / 1000n}.${String(mills % 1000n).padStart(3, '0')}`.replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  function dateOnly(value) {
+    const source = text(value).trim();
+    return source.replace(/^(\d{4}[年\/.-]\d{1,2}[月\/.-]\d{1,2}日?)(?:[T\s]+\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)$/, '$1');
+  }
+
   function selectDetailRows(rows, headers = [], fieldSelections = {}) {
-    const sourceRows = Array.isArray(rows) ? rows : [];
+    const sourceRows = (Array.isArray(rows) ? rows : []).filter(record => {
+      const first = headers.map(header => text(record[header]).trim()).find(Boolean) || '';
+      return !/^(?:合计|总计|小计|创建人|创建日期|审核人|审核日期|制单人|制单日期)[：:]?$/.test(first);
+    });
     const sequenceField = (headers || []).find(header => /^(?:序号|行号|明细序号)$/.test(normalizeLabel(header)));
     if (sequenceField) {
       const sequenced = sourceRows.filter(row => {
@@ -290,6 +310,8 @@
     extractAdjacentLabelValues,
     distinctValues,
     selectDetailRows,
+    dateOnly,
+    taxPriceFromAmount,
     reservedDetailRowCount,
     parseNumber,
     amountCents,

@@ -481,6 +481,10 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const realDocxPath = path.join(out, '真实订单合同编号测试.docx'); await realDownload.saveAs(realDocxPath);
       const realXml = await page.evaluate(async bytes => (await (await JSZip.loadAsync(new Uint8Array(bytes))).file('word/document.xml').async('string')), [...await fs.readFile(realDocxPath)]);
       if (process.env.EXPECTED_TOTAL) assert.ok(realXml.includes(process.env.EXPECTED_TOTAL));
+      if (process.env.EXPECTED_DELIVERY_DATE) {
+        assert.ok(realXml.includes(process.env.EXPECTED_DELIVERY_DATE));
+        assert.doesNotMatch(realXml, /23:59:59/);
+      }
       if (process.env.EXPECTED_SUPPLIER) assert.ok(realXml.includes(process.env.EXPECTED_SUPPLIER));
       if (process.env.EXPECTED_SHEET) assert.equal(await page.locator('#orderSheet').inputValue(), process.env.EXPECTED_SHEET);
       if (expectedContractNumber) assert.match(realXml, new RegExp(`>${expectedContractNumber}<`));

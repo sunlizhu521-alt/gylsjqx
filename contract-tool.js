@@ -41,11 +41,11 @@
     { key: 'taxUnitPrice', label: '含税运单价（元）', aliases: ['含税运单价（元）', '含税运单价', '含税单价（元）', '含税单价', '单价'], kind: 'detail' },
     { key: 'taxAmount', label: '含税运总金额（元）', aliases: ['含税运总金额（元）', '含税运总金额', '含税总金额（元）', '含税总金额', '含税金额', '金额'], kind: 'detail', automatic: '@line-amount', automaticLabel: '数量 × 含税单价', writeMode: '自动计算（两位小数）' },
     { key: 'taxRate', label: '税率', aliases: ['税率', '增值税率'], kind: 'detail' },
-    { key: 'deliveryTime', label: '交货时间', aliases: ['交货时间', '交期', '要求货好时间', '要求交货日期'], kind: 'single' },
+    { key: 'deliveryTime', label: '交货时间', aliases: ['交货时间', '交货日期', '交期', '要求货好时间', '要求交货日期'], kind: 'single' },
     { key: 'remark', label: '备注', aliases: ['备注', '说明'], kind: 'detail' },
     { key: 'taxTotalLower', label: '含税运合计（小写）', aliases: ['含税运合计（小写）', '含税运合计小写', '合计（小写）', '合计小写', '小写合计', '人民币小写', '人民币小写金额'], kind: 'single', automatic: '@tax-total-lower', automaticLabel: '逐行计算数量 × 含税单价后汇总', writeMode: '自动汇总' },
     { key: 'taxTotalUpper', label: '含税运合计（大写）', aliases: ['含税运合计（大写）', '含税运合计大写', '合计（大写）', '合计大写', '大写合计', '人民币大写', '人民币大写金额'], kind: 'single', automatic: '@tax-total-upper', automaticLabel: '由小写合计自动转人民币大写', writeMode: '自动转大写' },
-    { key: 'contractNumber', label: '合同编号', aliases: ['合同编号', '合同编码', '合同号'], kind: 'single' },
+    { key: 'contractNumber', label: '合同编号', aliases: ['合同编号', '合同编码', '合同号', '单据编号'], kind: 'single' },
     { key: 'orderNumber', label: '订单编号', aliases: ['订单编号', '采购订单号', '采购单号', '订单号'], kind: 'single' },
     { key: 'buyer', label: '采购方（甲方）', aliases: ['采购方（甲方）', '采购方', '甲方', '买方'], kind: 'single' },
     { key: 'supplier', label: '供应商（乙方）', aliases: ['供应方（乙方）', '供应方', '供应商名称', '供应商（乙方）', '供应商', '乙方', '卖方'], kind: 'single' },
@@ -171,27 +171,42 @@
     const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
     const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, blankrows: true, range: { s: { r: 0, c: 0 }, e: range.e } });
     state.order = C.analyzeMatrix(matrix, 1000);
+    const dateHeaders = state.order.headers.filter(header => BUSINESS_FIELDS.find(field => field.key === 'deliveryTime').aliases.some(alias => normalizeBusinessLabel(alias) === normalizeBusinessLabel(header)));
+    state.order.rows.forEach(record => dateHeaders.forEach(header => { record[header] = C.dateOnly(record[header]); }));
     const rightSideValues = C.extractAdjacentLabelValues(
       matrix,
-      Object.fromEntries(BUSINESS_FIELDS.map(field => [field.key, field.key === 'taxTotalLower' ? [...field.aliases, '含税合计'] : field.aliases])),
+      Object.fromEntries(BUSINESS_FIELDS.map(field => [field.key, field.key === 'taxTotalLower' ? [...field.aliases, '含税合计', '价税合计'] : field.aliases])),
       sheet['!merges'] || [],
       [state.order.headerIndex],
     );
     state.order.sourceTotals = { lower: rightSideValues.taxTotalLower || '', upper: rightSideValues.taxTotalUpper || '' };
     state.order.rightSideFields = {};
     for (const definition of BUSINESS_FIELDS.filter(field => ORDER_RIGHT_SIDE_FIELDS.has(field.key) && !field.manualInput)) {
-      const value = rightSideValues[definition.key];
+      const value = definition.key === 'deliveryTime' ? C.dateOnly(rightSideValues[definition.key]) : rightSideValues[definition.key];
       if (!C.text(value).trim()) continue;
       const header = `${definition.label}（右侧内容）`;
       state.order.headers.push(header);
       state.order.rows.forEach(record => { record[header] = value; });
       state.order.rightSideFields[definition.key] = header;
     }
+    const taxAmountHeader = state.order.headers.find(header => normalizeBusinessLabel(header) === '价税合计');
+    const explicitTaxPrice = state.order.headers.some(header => /含税.*单价/.test(normalizeBusinessLabel(header)));
+    const deriveTaxPrice = taxAmountHeader && !explicitTaxPrice;
+    if (deriveTaxPrice) {
+      state.order.headers = state.order.headers.filter(header => normalizeBusinessLabel(header) !== '单价');
+      state.order.headers.push('含税单价');
+    }
     const allowedHeaders = new Set(BUSINESS_FIELDS.filter(field => ORDER_FIELD_KEYS.has(field.key)).flatMap(field => field.aliases.map(normalizeBusinessLabel)));
     const adjacentHeaders = new Set(Object.values(state.order.rightSideFields));
     state.order.headers = state.order.headers.filter(header => allowedHeaders.has(normalizeBusinessLabel(header)) || adjacentHeaders.has(header));
     const selections = Object.fromEntries(BUSINESS_FIELDS.filter(field => ORDER_FIELD_KEYS.has(field.key)).map(field => [field.key, bestOrderHeader(field)]));
-    state.order.rows = C.selectDetailRows(state.order.rows, state.order.headers, selections).map(row => Object.fromEntries([['_row', row._row], ...state.order.headers.map(header => [header, row[header]])]));
+    state.order.rows = C.selectDetailRows(state.order.rows, state.order.headers, selections).map(row => {
+      if (deriveTaxPrice) {
+        try { row['含税单价'] = C.taxPriceFromAmount(row[taxAmountHeader], row[selections.quantity]); }
+        catch (error) { throw new Error(`订单第 ${row._row} 行：${error.message}`); }
+      }
+      return Object.fromEntries([['_row', row._row], ...state.order.headers.map(header => [header, row[header]])]);
+    });
     const allowed = new Set(state.order.headers);
     for (const [target, mapping] of Object.entries(state.mappings)) if (!allowed.has(mapping.field)) delete state.mappings[target];
   }
