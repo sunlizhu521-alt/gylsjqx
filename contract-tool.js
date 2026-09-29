@@ -967,13 +967,14 @@
       if (!row) throw new Error('找不到Word明细模板行');
       const reservedRows = tableRows.slice(Number(match[2]), Number(match[2]) + detailTemplateRowCount());
       const rowMappings = mappedEntries().filter(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow);
+      widenWordSkuColumn(table, row, rowMappings, detailRecords());
       for (const [recordIndex, record] of detailRecords().entries()) {
         const clone = row.cloneNode(true), cells = direct(clone, 'tc');
         for (const [targetId, mapping] of rowMappings) {
           const cellIndex = Number(targetId.match(/:c:(\d+)$/)?.[1]);
           if (cells[cellIndex]) {
             putWordText(cells[cellIndex], detailValue(mapping, record, recordIndex));
-            if (SINGLE_LINE_DETAIL_FIELDS.has(mapping.businessKey)) fitWordDetailCell(cells[cellIndex], table);
+            if (SINGLE_LINE_DETAIL_FIELDS.has(mapping.businessKey)) fitWordDetailCell(cells[cellIndex], table, mapping.businessKey);
           }
         }
         row.parentNode.insertBefore(clone, row);
@@ -985,8 +986,67 @@
     return zip.generateAsync({ type: 'blob', mimeType: MIME.docx, compression: 'DEFLATE' });
   }
 
+  function widenWordSkuColumn(table, prototype, mappings, records) {
+    const skuMapping = mappings.find(([, mapping]) => mapping.businessKey === 'sku');
+    if (!skuMapping) return;
+    const cells = direct(prototype, 'tc'), indexOf = id => Number(id.match(/:c:(\d+)$/)?.[1]);
+    const skuIndex = indexOf(skuMapping[0]), skuCell = cells[skuIndex];
+    if (!skuCell) return;
+    const grid = direct(direct(table, 'tblGrid')[0], 'gridCol');
+    if (!grid.length) return;
+    const spans = cell => Number(all(cell, 'gridSpan')[0]?.getAttributeNS(W, 'val') || 1);
+    const offset = (rowCells, index) => rowCells.slice(0, index).reduce((sum, cell) => sum + spans(cell), 0);
+    const widths = grid.map(node => Number(node.getAttributeNS(W, 'w') || 0));
+    const start = offset(cells, skuIndex), count = spans(skuCell);
+    const current = widths.slice(start, start + count).reduce((sum, width) => sum + width, 0);
+    const context = document.createElement('canvas').getContext('2d');
+    const rp = all(skuCell, 'rPr')[0], fonts = direct(rp, 'rFonts')[0];
+    const font = fonts?.getAttributeNS(W, 'ascii') || 'Times New Roman';
+    context.font = `${direct(rp, 'b').length ? 'bold ' : ''}8px "${font}"`;
+    const tableMargins = all(direct(table, 'tblPr')[0], 'tblCellMar')[0];
+    const margins = all(skuCell, 'tcMar')[0];
+    const padding = ['left', 'right'].reduce((sum, side) => sum + Number((direct(margins, side)[0] || direct(tableMargins, side)[0])?.getAttributeNS(W, 'w') ?? 108), 0);
+    const textWidth = Math.max(0, ...records.map((record, index) => context.measureText(detailValue(skuMapping[1], record, index)).width));
+    const needed = Math.ceil(textWidth / 0.95 * 20 + padding + 60);
+    let remaining = Math.max(0, needed - current);
+    if (!remaining) return;
+    // Borrow only from descriptive columns; preserve the total table width and merged-cell boundaries.
+    for (const [key, minimum] of [['specification', 600], ['remark', 500], ['materialName', 1600]]) {
+      const mapping = mappings.find(([, item]) => item.businessKey === key);
+      if (!mapping) continue;
+      const index = indexOf(mapping[0]), cell = cells[index];
+      if (!cell) continue;
+      const donorStart = offset(cells, index), donorCount = spans(cell);
+      const total = widths.slice(donorStart, donorStart + donorCount).reduce((sum, width) => sum + width, 0);
+      const take = Math.min(remaining, Math.max(0, total - minimum));
+      if (!take) continue;
+      let deducted = 0;
+      for (let i = donorStart; i < donorStart + donorCount; i += 1) {
+        const amount = i === donorStart + donorCount - 1 ? take - deducted : Math.floor(take * widths[i] / total);
+        widths[i] -= amount; deducted += amount;
+      }
+      widths[start + count - 1] += take; remaining -= take;
+      if (!remaining) break;
+    }
+    if (remaining) throw new Error('SKU列过窄，无法在保持清晰字号的同时单行显示，请加宽模板中的SKU列');
+    grid.forEach((node, index) => node.setAttributeNS(W, 'w:w', String(widths[index])));
+    for (const row of direct(table, 'tr')) {
+      let column = Number(all(direct(row, 'trPr')[0], 'gridBefore')[0]?.getAttributeNS(W, 'val') || 0);
+      for (const cell of direct(row, 'tc')) {
+        const count = spans(cell), width = widths.slice(column, column + count).reduce((sum, width) => sum + width, 0);
+        column += count;
+        if (!width) continue;
+        let properties = direct(cell, 'tcPr')[0];
+        if (!properties) { properties = wordNode(cell.ownerDocument, 'tcPr'); cell.prepend(properties); }
+        let node = direct(properties, 'tcW')[0];
+        if (!node) { node = wordNode(cell.ownerDocument, 'tcW'); properties.prepend(node); }
+        node.setAttributeNS(W, 'w:type', 'dxa'); node.setAttributeNS(W, 'w:w', String(width));
+      }
+    }
+  }
+
   // Keep identifiers and money on one line without widening the template table.
-  function fitWordDetailCell(cell, table) {
+  function fitWordDetailCell(cell, table, businessKey) {
     const doc = cell.ownerDocument;
     const ensure = (parent, name) => {
       let node = direct(parent, name)[0];
@@ -996,7 +1056,8 @@
     let properties = direct(cell, 'tcPr')[0];
     if (!properties) { properties = wordNode(doc, 'tcPr'); cell.prepend(properties); }
     ensure(properties, 'noWrap').setAttributeNS(W, 'w:val', '1');
-    ensure(properties, 'tcFitText').setAttributeNS(W, 'w:val', '1');
+    // Font size is fitted explicitly; native fit-text can compress it again in PDF conversion.
+    direct(properties, 'tcFitText').forEach(node => node.remove());
     const widthNode = direct(properties, 'tcW')[0];
     let width = widthNode?.getAttributeNS(W, 'type') === 'dxa' ? Number(widthNode.getAttributeNS(W, 'w')) : 0;
     if (!width) {
@@ -1017,14 +1078,17 @@
       direct(paragraphProperties, 'ind').forEach(node => node.remove());
       ensure(paragraphProperties, 'wordWrap').setAttributeNS(W, 'w:val', '0');
       for (const run of direct(paragraph, 'r')) {
-        const rp = ensure(run, 'rPr'), fonts = direct(rp, 'rFonts')[0];
-        const size = Number(direct(rp, 'sz')[0]?.getAttributeNS(W, 'val') || 22) / 2;
+        const rp = ensure(run, 'rPr');
+        for (const name of ['fitText', 'w', 'spacing']) direct(rp, name).forEach(node => node.remove());
+        const fonts = direct(rp, 'rFonts')[0];
+        const size = Math.max(businessKey === 'sku' ? 8 : 0, Number(direct(rp, 'sz')[0]?.getAttributeNS(W, 'val') || 22) / 2);
         const font = fonts?.getAttributeNS(W, 'ascii') || 'Times New Roman';
         context.font = `${direct(rp, 'b').length ? 'bold ' : ''}${size}px "${font}"`;
         const measured = context.measureText(all(run, 't').map(node => node.textContent).join('')).width;
         for (const name of ['sz', 'szCs']) ensure(rp, name).setAttributeNS(W, 'w:val', String(size * 2));
         if (available > 0 && measured > available) {
           const fitted = Math.max(1, Math.floor(size * available / measured * 0.95 * 2)) / 2;
+          if (businessKey === 'sku' && fitted < 8) throw new Error('SKU列宽不足以清晰单行显示，请加宽模板中的SKU列后重新生成');
           for (const name of ['sz', 'szCs']) ensure(rp, name).setAttributeNS(W, 'w:val', String(fitted * 2));
         }
       }

@@ -71,7 +71,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       zip.file('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
       zip.folder('_rels').file('.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
       const headers = ['序号', '物料编码', '物料名称', '规格型号', 'SKU', '单位', '数量', '含税运单价（元）', '含税运总金额（元）', '备注'];
-      const widths = [400, 1100, 1800, 850, 1200, 400, 500, 950, 1000, 500];
+      const widths = [400, 1100, 1800, 1550, 500, 400, 500, 950, 1000, 500];
       const headerRow = headers.map(value => `<w:tc><w:p><w:r><w:t>${value}</w:t></w:r></w:p></w:tc>`).join('');
       const detailRow = headers.map((_, index) => `<w:tc><w:tcPr><w:tcW w:w="${widths[index]}" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:ind w:firstLine="200"/></w:pPr><w:r><w:rPr><w:sz w:val="28"/></w:rPr><w:t>待填写</w:t></w:r></w:p></w:tc>`).join('');
       const reservedDetailRows = [2, 3].map(sequence => `<w:tr>${headers.map((_, index) => `<w:tc><w:p><w:r><w:t>${index === 0 ? sequence : ''}</w:t></w:r></w:p></w:tc>`).join('')}</w:tr>`).join('');
@@ -192,7 +192,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.doesNotMatch(generatedXml, /9999|甲公司|虚构交货地点/);
     const singleLine = await page.evaluate(xml => {
       const doc = new DOMParser().parseFromString(xml, 'application/xml'), ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
-      return [...doc.getElementsByTagNameNS(ns, 'tc')].filter(cell => cell.getElementsByTagNameNS(ns, 'tcFitText').length).map(cell => ({
+      return [...doc.getElementsByTagNameNS(ns, 'tc')].filter(cell => cell.getElementsByTagNameNS(ns, 'noWrap').length).map(cell => ({
         text: [...cell.getElementsByTagNameNS(ns, 't')].map(node => node.textContent).join(''),
         noWrap: cell.getElementsByTagNameNS(ns, 'noWrap')[0]?.getAttributeNS(ns, 'val'),
         indentCount: cell.getElementsByTagNameNS(ns, 'ind').length,
@@ -200,6 +200,15 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       }));
     }, generatedXml);
     assert.equal(singleLine.length, 8);
+    assert.doesNotMatch(generatedXml, /<w:tcFitText/);
+    const fittedGrid = await page.evaluate(xml => {
+      const doc = new DOMParser().parseFromString(xml, 'application/xml'), ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+      return [...doc.getElementsByTagNameNS(ns, 'gridCol')].map(node => Number(node.getAttributeNS(ns, 'w')));
+    }, generatedXml);
+    assert.equal(fittedGrid.reduce((sum, width) => sum + width, 0), 8700, '调整SKU列不改变表格总宽');
+    assert.ok(fittedGrid[4] > 500, '窄SKU列应先加宽');
+
+    assert.ok(singleLine.filter(cell => /SKU/.test(cell.text)).every(cell => cell.size >= 16), 'SKU字号不得小于8pt');
     assert.deepEqual(singleLine.filter(cell => /MAT|SKU/.test(cell.text)).map(cell => cell.text), ['MAT-001', 'SKU-A', 'MAT-002', 'SKU-B']);
     for (const cell of singleLine) { assert.equal(cell.noWrap, '1'); assert.equal(cell.indentCount, 0); assert.ok(cell.size > 0 && cell.size <= 28); }
     assert.ok(singleLine.some(cell => cell.size < 28), '窄列应自动缩小字号');
