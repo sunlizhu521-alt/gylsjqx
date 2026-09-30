@@ -450,7 +450,7 @@
       const tail = match[2].trim();
       const placeholder = /^[\s_＿—－.·…/年月日{}【】\[\]（）()0-9-]*$/.test(tail) || /^(待填写?|请选择|填写日期|填写时间)$/.test(tail);
       const identifier = definition.key === 'contractNumber' && /^[A-Za-z0-9][A-Za-z0-9_./-]*$/.test(tail);
-      if (!placeholder && !identifier) continue;
+      if (!placeholder && !identifier && definition.key !== 'contractNumber') continue;
       return { prefix: source.slice(0, match.index) + match[1].trimEnd() + (/[：:]$/.test(match[1].trimEnd()) ? '' : '：'), suffix: source.slice(match.index + match[0].length), hasValue: !!tail };
     }
     return null;
@@ -596,7 +596,7 @@
   function rebuildMappings() {
     const mappings = {};
     for (const definition of ACTIVE_FIELDS) {
-      const binding = state.templateBindings[definition.key], field = state.fieldSelections[definition.key];
+      const binding = state.templateBindings[definition.key], field = definition.key === 'contractNumber' ? '@empty-contract-number' : state.fieldSelections[definition.key];
       if (!binding || !field) continue;
       const values = field.startsWith('@') ? [] : C.distinctValues(state.order.rows, field);
       mappings[binding.targetId] = {
@@ -618,13 +618,13 @@
     $('businessMappingRows').innerHTML = ACTIVE_FIELDS.map(definition => {
       const selection = state.fieldSelections[definition.key] || '', binding = state.templateBindings[definition.key];
       const values = selection && selection !== '@sequence' ? C.distinctValues(state.order.rows, selection) : [];
-      const conflict = definition.kind === 'single' && values.length > 1;
-      const options = definition.automatic
+      const conflict = definition.key !== 'contractNumber' && definition.kind === 'single' && values.length > 1;
+      const options = definition.key === 'contractNumber' ? `<option value="${esc(selection)}">固定留空（清除模板原编号）</option>` : definition.automatic
         ? `<option value="${definition.automatic}">${esc(definition.automaticLabel)}</option>`
         : `<option value="">不填写</option>${state.order.headers.map(header => `<option value="${esc(header)}" ${header === selection ? 'selected' : ''}>${esc(header)}</option>`).join('')}`;
       const inputControl = definition.manualInput === 'date'
         ? `<input class="business-field-select business-date-input" type="date" data-manual-key="${definition.key}" value="${esc(state.manualValues?.[definition.key] || '')}" aria-label="请选择${esc(definition.label)}" />`
-        : `<select class="business-field-select" data-field-key="${definition.key}" ${definition.automatic ? 'disabled' : ''} aria-label="${esc(definition.label)}对应订单列">${options}</select>`;
+        : `<select class="business-field-select" data-field-key="${definition.key}" ${definition.automatic || definition.key === 'contractNumber' ? 'disabled' : ''} aria-label="${esc(definition.label)}对应订单列">${options}</select>`;
       const strategy = conflict ? `<select class="business-field-select business-strategy-select" data-strategy-key="${definition.key}" aria-label="${esc(definition.label)}多值处理"><option value="">该列有多个值，请选择处理方式</option><option value="first" ${state.fieldStrategies[definition.key] === 'first' ? 'selected' : ''}>取第一条非空值</option><option value="merge" ${state.fieldStrategies[definition.key] === 'merge' ? 'selected' : ''}>合并去重值</option><option value="sum" ${state.fieldStrategies[definition.key] === 'sum' ? 'selected' : ''}>求和</option></select>` : '';
       const success = !!(binding && selection && mapped.has(definition.key));
       const sourceTotal = definition.key === 'taxTotalLower' ? state.order.sourceTotals?.lower : definition.key === 'taxTotalUpper' ? state.order.sourceTotals?.upper : undefined;
@@ -1003,8 +1003,27 @@
 
   const SINGLE_LINE_DETAIL_FIELDS = new Set(['materialCode', 'sku', 'taxUnitPrice', 'taxAmount']);
 
+  function contractNumberClearings() {
+    const definition = BUSINESS_FIELDS.find(field => field.key === 'contractNumber');
+    const clearings = new Map();
+    for (const target of state.templateModel.targets) {
+      const inline = inlineSingleTemplate(definition, target.value);
+      if (!inline) continue;
+      clearings.set(target.id, inline.prefix + inline.suffix);
+      if (!inline.hasValue) {
+        const next = nextWritableTemplateCell(locateRow(target.rowKey), target);
+        if (next && !bestDefinition(next.value)?.score) clearings.set(next.id, '');
+      }
+    }
+    return clearings;
+  }
+
   async function generateDocx() {
     const zip = await JSZip.loadAsync(state.templateBytes), xml = await zip.file('word/document.xml').async('string'), doc = parseXml(xml);
+    for (const [id, value] of contractNumberClearings()) {
+      const target = locateWordTarget(doc, id);
+      if (target) putWordText(target, value);
+    }
     for (const [targetId, mapping] of mappedEntries()) {
       if (mapping.mode === 'detail') continue;
       const target = locateWordTarget(doc, targetId); if (!target) throw new Error(`模板位置已变化：${targetId}`);
@@ -1552,6 +1571,7 @@
   async function generateXlsx() {
     const zip = await JSZip.loadAsync(state.templateBytes);
     const context = await locateXlsxSheet(zip, state.templateSheet);
+    for (const [id, value] of contractNumberClearings()) writeSheetCell(context.sheetDoc, id.slice(2), value);
     const identifiers = [];
     for (const [targetId, mapping] of mappedEntries()) {
       if (mapping.mode === 'detail') continue;
@@ -2104,6 +2124,7 @@
     return C.sumAmountField(detailRecords().map(record => ({ _row: record._row, calculated: calculatedAmount(record) })), 'calculated');
   }
   function resolveMapping(mapping) {
+    if (mapping.businessKey === 'contractNumber') return '';
     if (mapping.businessKey === 'taxTotalLower') return contractTotals().lower;
     if (mapping.businessKey === 'taxTotalUpper') return contractTotals().upper;
     if (mapping.businessKey === 'signDate') return formatChineseDate(state.manualValues?.signDate);
