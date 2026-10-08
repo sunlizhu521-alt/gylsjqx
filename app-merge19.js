@@ -1,4 +1,5 @@
 const tools = [
+  { id: 'fulfillment', icon: '履', title: '订单履约表整理', status: '可用', desc: '合并五位采购人员的履约明细，保留指定列并统一日期格式。', href: 'fulfillment.html' },
   { id: 'contract', icon: '合', title: '合同生成', status: '可用', desc: '上传订单与合同模板，确认字段映射后在浏览器本地生成合同。', href: 'contract.html' },
   { id: 'payment', icon: '付', title: '付款申请单整理', status: '可用', desc: '按付款主体整理明细，每主体一页，导出 Word 和 PDF。' },
   { id: 'merge', icon: '▦', title: '报表合并', status: '可用-陈燕', desc: '多个文件按映射列合并，保留明细行。' },

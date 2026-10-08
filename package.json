@@ -3,8 +3,8 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "test": "node --test tests/payment-core.test.cjs tests/contract-core.test.cjs",
-    "check": "node --check payment-cache.js && node --check payment-core.js && node --check payment-document.js && node --check payment-tool.js && node --check contract-core.js && node --check contract-tool.js && node --check app-merge19.js",
+    "test": "node --test tests/payment-core.test.cjs tests/contract-core.test.cjs tests/fulfillment-core.test.cjs",
+    "check": "node --check payment-cache.js && node --check payment-core.js && node --check payment-document.js && node --check payment-tool.js && node --check contract-core.js && node --check contract-tool.js && node --check app-merge19.js && node --check fulfillment-core.js && node --check fulfillment-tool.js",
     "test:browser": "node tests/payment-browser.cjs",
     "test:contract-browser": "node tests/contract-browser.cjs"
   }
