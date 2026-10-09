@@ -33,6 +33,7 @@ function merge(book){
  return {rows,sources,counts,warnings};
 }
 function columnWidth(key){return key==='物料名称'?42:['合同约定交期','生产中交付时间','未生产预计交付时间'].includes(key)?23:key==='SKU'?26:20;}
+function exportFilename(input){const base=String(input??'').trim().replace(/\.xlsx?$/i,'').trim()||'订单履约表';return (/更新版$/.test(base)?base.replace(/更新版$/,'汇总版'):/汇总版$/.test(base)?base:base+'汇总版')+'.xlsx';}
 function workbook(result){const s=X.utils.aoa_to_sheet([COLUMNS]);result.rows.forEach((row,r)=>row.forEach((cell,c)=>s[X.utils.encode_cell({r:r+1,c})]={...cell}));s['!ref']=`A1:${X.utils.encode_col(COLUMNS.length-1)}${result.rows.length+1}`;s['!autofilter']={ref:s['!ref']};s['!cols']=COLUMNS.map((key,col)=>({wch:[key,...result.rows.map(row=>row[col].z?X.SSF.format(row[col].z,row[col].v):String(row[col].v))].reduce((max,text)=>Math.max(max,[...text].reduce((width,ch)=>width+(ch.charCodeAt(0)>255?2:1),0)+4),columnWidth(key))}));const w=X.utils.book_new();X.utils.book_append_sheet(w,s,'汇总表');return w;}
-return {SHEETS,COLUMNS,DATE_FORMAT,columnWidth,dateCell,merge,workbook};
+return {SHEETS,COLUMNS,DATE_FORMAT,columnWidth,dateCell,merge,workbook,exportFilename};
 });
