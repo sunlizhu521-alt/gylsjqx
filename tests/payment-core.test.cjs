@@ -121,7 +121,7 @@ test('directory payee mapping, blanks, precision and formula issues are explicit
  }
 });
 test('directory bank name and receiving account stay together; subjects support explicit alias',()=>{
- const d=C.buildDirectory([{supplier:'甲',subject:'浙江迈德斯特医疗器械科技有限公司',account:'001 234',bankName:'测试支行',row:2},{supplier:'甲',subject:'其他公司',account:'999',bankName:'其他支行',row:3}]);
+ const d=C.buildDirectory([{supplier:'甲',subject:'浙江迈德斯特医疗器械科技有限公司',account:'001 234',bankName:'测试支行',row:2},{supplier:'甲',subject:'其他公司',account:'001 234',bankName:'测试支行',row:3}]);
  const r=C.resolveBank({'供应商全称':'甲','付款主体':'迈德斯特'},d);
  assert.equal(r.error,'');assert.equal(r.value,'银行名称:测试支行\n卡号:001 234');assert.equal(C.bankSummary(r.value).value,r.value);
  assert.equal(C.subjectName('浙江迈德斯特医疗器械科技有限公司'),'迈德斯特');
@@ -146,4 +146,14 @@ test('exact zero payment rows are omitted; order, nonzero cents and source data 
  assert.deepEqual(a.groups[0].rows.map(r=>r._row),[4,5]);assert.equal(a.groups[0].total,221n);assert.equal(rows.length,4);
  const zero=C.analyze(C.required,[row({本次申请付款金额:'￥0.00'})]);assert.equal(zero.groups.length,0);assert.match(zero.errors[0],/均为 0/);
  for(const value of ['',null,'bad','-1','0.001']) assert.ok(C.analyze(C.required,[row({本次申请付款金额:value})]).errors.length);
+});
+
+test('directory ignores payer subject but still blocks ambiguous accounts',()=>{
+ const entries=[{supplier:'测试供应商',subject:'杭州国源养老科技有限公司',account:'001234',bankName:'测试支行',row:171}];
+ for(const subject of ['国源','其他主体','']){
+  const result=C.resolveBank({'供应商全称':'测试供应商','付款主体':subject,'开户银行及账号':''},C.buildDirectory(entries));
+  assert.equal(result.error,'');assert.equal(result.source,'供应商名录第 171 行');assert.equal(result.value,'银行名称:测试支行\n卡号:001234');
+ }
+ const conflict=C.buildDirectory([...entries,{...entries[0],subject:'其他主体',account:'009999',row:172}]);
+ assert.match(C.resolveBank({'供应商全称':'测试供应商','付款主体':'杭州国源养老科技有限公司'},conflict).error,/不同/);
 });

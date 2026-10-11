@@ -210,8 +210,8 @@
     if (errors.length) return { errors, index: new Map() };
     return C.buildDirectory(state.directoryRows.map(r => {
       const bankField = C.text(r['收款银行']).trim() ? '收款银行' : '收款银行名称';
-      return { supplier: r[mapping.supplier], subject: r['付款主体'], account: r['收款账号'], bankName: r[bankField], row: r._row,
-        error: [mapping.supplier, '付款主体', '收款账号', bankField].map(k => r._errors[k] ? `${k}：${r._errors[k]}` : '').filter(Boolean).join('；') };
+      return { supplier: r[mapping.supplier], account: r['收款账号'], bankName: r[bankField], row: r._row,
+        error: [mapping.supplier, '收款账号', bankField].map(k => r._errors[k] ? `${k}：${r._errors[k]}` : '').filter(Boolean).join('；') };
     }));
   }
   function renderDirectorySettings() {
@@ -225,7 +225,7 @@
       <p>银行名称：收款银行，空白时取收款银行名称<br>卡号：只取收款账号<br>合并填入“开户银行及账号”列</p>
       </div><label>引用规则 <select id="paymentBankPolicy"><option value="directory" ${state.bankPolicy === 'directory' ? 'selected' : ''}>优先供应商名录，差异需核实</option><option value="fill" ${state.bankPolicy === 'fill' ? 'selected' : ''}>仅补全付款明细中的空白银行信息</option></select></label>
       <button id="paymentClearDirectory" class="secondary-button">移除名录</button>
-      <p class="payment-hint">按供应商全称精确匹配；名录有付款主体时同时核对主体。浙江迈德斯特医疗器械科技有限公司支持简称“迈德斯特”。同名不同账号会拦截，原始明细保留不变。引用时间为本次成功读取时间。</p>
+      <p class="payment-hint">按供应商全称精确匹配；只获取银行信息，不校验名录中的付款主体。浙江迈德斯特医疗器械科技有限公司支持简称“迈德斯特”。同名不同账号会拦截，原始明细保留不变。引用时间为本次成功读取时间。</p>
       ${directory.errors.length ? `<p class="payment-error">${directory.errors.map(esc).join('<br>')}</p>` : `<p>已读取 ${state.directoryRows.length} 条名录记录</p>`}</section>`;
     host.querySelector('#paymentDirectorySheet').addEventListener('change', e => { invalidate(); state.directorySheet = e.target.value; readDirectorySheet(); refreshPayments(); render(); });
     host.querySelectorAll('[data-directory-field]').forEach(input => input.addEventListener('change', () => { invalidate(); state.directoryMap[input.dataset.directoryField] = input.value; refreshPayments(); render(); }));

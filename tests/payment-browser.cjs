@@ -130,7 +130,7 @@ const base = (extra = {}) => ({
       await page.waitForFunction(()=>!document.querySelector('[data-reference="directory"]').textContent.includes('正在读取'));
     }
     await upload([base({'开户银行及账号':''})]);
-    await uploadDirectory([['测试供应商有限公司','0099  0011']]);
+    await uploadDirectory([['测试供应商有限公司','0099  0011','测试银行支行','名录另一付款主体']],['供应商全称','收款账号','收款银行名称','付款主体']);
     assert.doesNotMatch(await page.locator('[data-reference="detail"]').innerText(), /未引用|正在读取/);
     assert.doesNotMatch(await page.locator('[data-reference="directory"]').innerText(), /未引用|正在读取/);
     const directoryTime = await page.locator('[data-reference="directory"]').innerText();

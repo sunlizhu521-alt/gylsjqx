@@ -107,9 +107,7 @@
     const result = { value: original, source: '付款明细', notice: '', error: '', conflict: false };
     if (!directory) return result;
     if (policy === 'fill' && original.trim() && original.trim() !== '/') return result;
-    const candidates = directory.index.get(name) || [];
-    const scoped = candidates.filter(e => e.subject);
-    const matches = scoped.length ? candidates.filter(e => e.subject === subjectName(record['付款主体'])) : candidates;
+    const matches = directory.index.get(name) || [];
     if (!matches.length) {
       result.notice = '名录未匹配，沿用付款明细';
       if (!original.trim() || original.trim() === '/') result.error = '名录未匹配且付款明细银行信息为空';
