@@ -157,3 +157,10 @@ test('directory ignores payer subject but still blocks ambiguous accounts',()=>{
  const conflict=C.buildDirectory([...entries,{...entries[0],subject:'其他主体',account:'009999',row:172}]);
  assert.match(C.resolveBank({'供应商全称':'测试供应商','付款主体':'杭州国源养老科技有限公司'},conflict).error,/不同/);
 });
+
+test('付款总金额列可以完全缺失，总额仅取本次申请付款金额',()=>{
+ assert.ok(!C.required.includes('付款总金额'));
+ const record=row();delete record['付款总金额'];
+ const a=C.analyze(C.required,[record]);assert.deepEqual(a.errors,[]);assert.equal(a.groups[0].total,220500n);
+ const b=C.analyze([...C.required,'付款总金额'],[row({付款总金额:'#DIV/0!'})]);assert.deepEqual(b.errors,[]);assert.equal(b.groups[0].total,220500n);
+});

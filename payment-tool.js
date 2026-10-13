@@ -244,11 +244,12 @@
     const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true, blankrows: true });
     const first = matrix.findIndex(row => row.some(v => C.text(v).trim()));
     if (first < 0) { state.analysis = { errors: ['工作表没有付款明细'], groups: [] }; return; }
-    const headers = matrix[first].map(v => C.text(v).trim()), records = [], errors = [];
+    const headers = matrix[first].map(v => C.text(v).trim()).map(h => h === '付款总金额' ? '' : h), records = [], errors = [];
     for (let i = first + 1; i < matrix.length; i++) {
-      if (!matrix[i].some(v => C.text(v).trim())) continue;
+      if (!matrix[i].some((v, j) => headers[j] && C.text(v).trim())) continue;
       const record = { _row: range.s.r + i + 1 };
       headers.forEach((h, j) => {
+        if (!h) return;
         let value = matrix[i][j] ?? '';
         const cell = sheet[XLSX.utils.encode_cell({ r: range.s.r + i, c: range.s.c + j })];
         if (cell?.t === 'e' || (cell?.f && cell.v == null)) errors.push(`第 ${record._row} 行 ${h}：公式错误或缺少计算结果，请在 Excel 中重算保存`);

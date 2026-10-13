@@ -29,10 +29,11 @@ const base = (extra = {}) => ({
       await page.waitForFunction(() => !document.querySelector('#paymentExcel').disabled);
       const array = await page.evaluate(({ rows, headers, options }) => {
         const ws = XLSX.utils.aoa_to_sheet([headers, ...rows.map(r => headers.map(h => r[h] ?? ''))]);
+        if (options.ignoredTotalError) ws[XLSX.utils.encode_cell({r:1,c:headers.indexOf('付款总金额')})] = {t:'e',v:7,f:'1/0'};
         if (options.formulaError) ws.L2 = { t: 'e', v: 15, f: '1/0' };
         const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '付款明细');
         return Array.from(new Uint8Array(XLSX.write(wb, { type: 'array', bookType: options.xls ? 'biff8' : 'xlsx' })));
-      }, { rows, headers: ['填写时间', ...C.required.filter(h => !options.noBank || h !== '开户银行及账号')], options });
+      }, { rows, headers: ['填写时间', ...C.required.filter(h => !options.noBank || h !== '开户银行及账号'), ...(options.ignoredTotalError ? ['付款总金额'] : [])], options });
       await page.locator('#paymentExcel').setInputFiles({ name: options.xls ? '测试.xls' : '测试.xlsx', mimeType: 'application/octet-stream', buffer: Buffer.from(array) });
       await page.waitForFunction(() => !document.querySelector('[data-reference="detail"]').textContent.includes('正在读取') && document.querySelector('#paymentGroups').textContent.length > 0);
       for (const input of await page.locator('[data-field="计划付款日期"]').all()) await input.fill('2026-09-25');
@@ -116,6 +117,8 @@ const base = (extra = {}) => ({
     assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
     await upload([base()], { formulaError: true });
     assert.match(await page.locator('#paymentGroups').innerText(), /公式错误/);
+    await upload([base()], { ignoredTotalError: true }); await generate();
+    assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
     // Directory enrichment, timestamps, explicit account conflict handling.
     assert.match(await page.locator('label.payment-upload').nth(1).innerText(), /付款申请模板/);
     assert.doesNotMatch(await page.locator('[data-reference="template"]').innerText(), /未引用|正在读取/);

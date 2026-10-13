@@ -1,7 +1,7 @@
 (function (root) {
   'use strict';
   const fields = ['供应商全称', '开户银行及账号', '合同编号', '合同总金额', '已付金额', '本次申请付款金额', '票据状态', '付款事由', '备注'];
-  const required = ['申请日期', '付款主体', '申请部门', '经办人', '付款总金额', ...fields];
+  const required = ['申请日期', '付款主体', '申请部门', '经办人', ...fields];
   const infoFields = ['申请日期', '申请部门', '经办人'];
   const MAX_CENTS = 99999999999999n;
   function cents(value) {
