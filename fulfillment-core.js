@@ -32,8 +32,49 @@ function merge(book){
  counts.push({sheet:name,count});}
  return {rows,sources,counts,warnings};
 }
+
+const DIFF_COLUMNS=['采购下单人','供应商','物料编码','SKU','物料名称','未交付数量'];
+function aggregate(result){
+ const groups=new Map();
+ for(const [i,row] of result.rows.entries()){
+  const code=String(row[7].v??'').trim(),raw=String(row[10].v??'').trim();
+  const at=result.sources?.[i],where=at?`${at.sheet}第 ${at.row} 行`:`第 ${i+1} 条`;
+  const value=raw===''?'0':raw;
+  if(!/^[+-]?\d+(?:\.\d+)?$/.test(value))throw Error(`${where}：未交付数量“${raw}”不是有效数字，未更新历史数据`);
+  const parts=value.replace(/^[+-]/,'').split('.'),scale=(parts[1]||'').length;
+  const units=BigInt(parts.join(''))*(value.startsWith('-')?-1n:1n);
+  if(!code){if(units!==0n)throw Error(`${where}：物料编码为空，无法对比，未更新历史数据`);continue;}
+  if(!groups.has(code))groups.set(code,{units:0n,scale:0,values:[new Set(),new Set(),new Set(),new Set(),new Set()]});
+  const g=groups.get(code),nextScale=Math.max(g.scale,scale);
+  g.units=g.units*10n**BigInt(nextScale-g.scale)+units*10n**BigInt(nextScale-scale);g.scale=nextScale;
+  [0,4,7,8,9].forEach((col,j)=>{const v=String(row[col].v??'').trim();if(v)g.values[j].add(v);});
+ }
+ return groups;
+}
+function difference(previous,current){
+ const before=previous?aggregate(previous):new Map(),after=aggregate(current),rows=[];
+ if(!previous)return rows;
+ for(const code of new Set([...after.keys(),...before.keys()])){
+  const a=before.get(code),b=after.get(code),scale=Math.max(a?.scale||0,b?.scale||0);
+  const delta=(b?b.units*10n**BigInt(scale-b.scale):0n)-(a?a.units*10n**BigInt(scale-a.scale):0n);
+  if(delta===0n)continue;
+  const number=Number(delta)/10**scale;
+  if(!Number.isFinite(number)||Math.abs(Number(delta))>Number.MAX_SAFE_INTEGER)throw Error(`物料 ${code}：数量超出精确计算范围，未更新历史数据`);
+  const values=(b||a).values.map(v=>({t:'s',v:[...v].join(' / ')}));
+  rows.push([...values,{t:'n',v:number}]);
+ }
+ return rows;
+}
+function advance(history,current){
+ aggregate(current.result);
+ if(history&&JSON.stringify(history.current.result.rows)===JSON.stringify(current.result.rows))return history;
+ const previous=history?.current||null;
+ difference(previous?.result,current.result);
+ return {version:1,previous,current};
+}
+
 function columnWidth(key){return key==='物料名称'?42:['合同约定交期','生产中交付时间','未生产预计交付时间'].includes(key)?23:key==='SKU'?26:20;}
 function exportFilename(input){const base=String(input??'').trim().replace(/\.xlsx?$/i,'').trim()||'订单履约表';return (/更新版$/.test(base)?base.replace(/更新版$/,'汇总版'):/汇总版$/.test(base)?base:base+'汇总版')+'.xlsx';}
-function workbook(result){const s=X.utils.aoa_to_sheet([COLUMNS]);result.rows.forEach((row,r)=>row.forEach((cell,c)=>s[X.utils.encode_cell({r:r+1,c})]={...cell}));s['!ref']=`A1:${X.utils.encode_col(COLUMNS.length-1)}${result.rows.length+1}`;s['!autofilter']={ref:s['!ref']};s['!cols']=COLUMNS.map((key,col)=>({wch:[key,...result.rows.map(row=>row[col].z?X.SSF.format(row[col].z,row[col].v):String(row[col].v))].reduce((max,text)=>Math.max(max,[...text].reduce((width,ch)=>width+(ch.charCodeAt(0)>255?2:1),0)+4),columnWidth(key))}));const w=X.utils.book_new();X.utils.book_append_sheet(w,s,'汇总表');return w;}
-return {SHEETS,COLUMNS,DATE_FORMAT,columnWidth,dateCell,merge,workbook,exportFilename};
+function workbook(result){const s=X.utils.aoa_to_sheet([COLUMNS]);result.rows.forEach((row,r)=>row.forEach((cell,c)=>s[X.utils.encode_cell({r:r+1,c})]={...cell}));s['!ref']=`A1:${X.utils.encode_col(COLUMNS.length-1)}${result.rows.length+1}`;s['!autofilter']={ref:s['!ref']};s['!cols']=COLUMNS.map((key,col)=>({wch:[key,...result.rows.map(row=>row[col].z?X.SSF.format(row[col].z,row[col].v):String(row[col].v))].reduce((max,text)=>Math.max(max,[...text].reduce((width,ch)=>width+(ch.charCodeAt(0)>255?2:1),0)+4),columnWidth(key))}));const w=X.utils.book_new();X.utils.book_append_sheet(w,s,'汇总表');if(result.differences){const d=X.utils.aoa_to_sheet([DIFF_COLUMNS]);result.differences.forEach((row,r)=>row.forEach((cell,c)=>d[X.utils.encode_cell({r:r+1,c})]={...cell}));d['!ref']=`A1:F${result.differences.length+1}`;d['!autofilter']={ref:d['!ref']};d['!cols']=DIFF_COLUMNS.map((key,col)=>({wch:Math.max(20,...[key,...result.differences.map(r=>String(r[col].v))].map(v=>[...v].reduce((n,c)=>n+(c.charCodeAt(0)>255?2:1),4)))}));X.utils.book_append_sheet(w,d,'差异');}return w;}
+return {DIFF_COLUMNS,aggregate,difference,advance,SHEETS,COLUMNS,DATE_FORMAT,columnWidth,dateCell,merge,workbook,exportFilename};
 });

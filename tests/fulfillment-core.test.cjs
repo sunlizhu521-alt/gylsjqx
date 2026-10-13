@@ -9,3 +9,22 @@ test('导出名称使用上传名称和日期，更新版替换为汇总版',()=
  assert.equal(C.exportFilename('订单2026.10.8.xlsx'),'订单2026.10.8汇总版.xlsx');
  assert.equal(C.exportFilename('订单汇总版.xlsx'),'订单汇总版.xlsx');
 });
+function snapshot(items){return {rows:items.map(([code,qty,owner='采购员',supplier='供应商'])=>C.COLUMNS.map(k=>({t:k==='未交付数量'&&typeof qty==='number'?'n':'s',v:({'物料编码':code,'未交付数量':qty,'采购下单人':owner,'供应商简称':supplier,'SKU':'SKU-'+code,'物料名称':'物料'+code})[k]??''}))),counts:[],sources:[],warnings:[]};}
+test('差异按物料汇总，保留多采购员及供应商，精确小数、新增、删除和零',()=>{
+ const old=snapshot([['001',0.1],['001',0.2],['002',5],['003',0],['004',10]]);
+ const now=snapshot([['001',0.3],['004',2,'甲','厂甲'],['004',3,'乙','厂乙'],['005',4],['006','']]);
+ const diff=C.difference(old,now);assert.deepEqual(diff.map(r=>[r[2].v,r[5].v]),[['004',-5],['005',4],['002',-5]]);
+ assert.equal(diff[0][0].v,'甲 / 乙');assert.equal(diff[0][1].v,'厂甲 / 厂乙');
+ assert.deepEqual(C.difference(null,now),[]);
+ const book=C.workbook({...now,differences:diff});assert.deepEqual(book.SheetNames,['汇总表','差异']);assert.equal(book.Sheets.差异.F2.v,-5);assert.equal(book.Sheets.差异['!autofilter'].ref,'A1:F4');
+});
+test('首次基准、重复上传、历史推进及异常不修改旧快照',()=>{
+ const a={filename:'a.xlsx',result:snapshot([['001',5]])},b={filename:'b.xlsx',result:snapshot([['001',3]])};
+ const first=C.advance(null,a);assert.equal(first.previous,null);
+ assert.equal(C.advance(first,{...a,filename:'副本.xlsx'}),first);
+ const second=C.advance(first,b);assert.equal(second.previous,a);assert.equal(C.advance(second,b),second);
+ assert.throws(()=>C.advance(second,{result:snapshot([['001','待定']])}),/不是有效数字/);
+ assert.throws(()=>C.advance(second,{result:snapshot([['',2]])}),/物料编码为空/);
+ assert.equal(second.current,b);assert.equal(second.previous,a);
+ assert.deepEqual(C.difference(snapshot([['001',1]]),snapshot([['001','']])).map(r=>r[5].v),[-1]);
+});
