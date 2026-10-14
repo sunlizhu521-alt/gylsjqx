@@ -1,6 +1,5 @@
-const DB_NAME = "beihuo-demand-allocation-library";
-const DB_VERSION = 1;
-const STORE_NAME = "file-slots";
+// Files live only in this page session; never read or write persisted uploads.
+const sessionFiles = new Map();
 
 const slots = [
   { id: "file-1", label: "Dim-YL医疗器械商品分类" },
@@ -101,9 +100,6 @@ const state = {
 async function init() {
   bindEvents();
   renderFilterControls();
-  if (window.ensureSharedLibraryLoaded) {
-    await window.ensureSharedLibraryLoaded();
-  }
   await refresh();
 }
 
@@ -173,6 +169,7 @@ async function refresh() {
 
 async function savePendingFile(slotId, file) {
   if (!file) return;
+  await deleteSlot(slotId);
   const invalidMessage = getInvalidFileMessage(file);
   if (invalidMessage) {
     setLibraryState(invalidMessage);
@@ -181,10 +178,18 @@ async function savePendingFile(slotId, file) {
   }
 
   const now = new Date().toISOString();
-  const existing = state.records.get(slotId) || { id: slotId };
+  const existing = { id: slotId };
   const record = {
     ...existing,
     id: slotId,
+    applied: true,
+    appliedAt: now,
+    file,
+    name: file.name,
+    size: file.size,
+    typeLabel: getFileTypeLabel(file),
+    refreshMonth: getRefreshMonth(file.name, now),
+    savedAt: now,
     pendingFile: file,
     pendingName: file.name,
     pendingSize: file.size,
@@ -194,7 +199,7 @@ async function savePendingFile(slotId, file) {
   };
 
   const db = await openDb();
-  await putRecord(db, record);
+  await putRecord(db, clearPendingFields(record));
   db.close();
   await refresh();
 }
@@ -274,7 +279,7 @@ async function deleteSlot(slotId) {
 }
 
 async function clearLibraryCache() {
-  const confirmed = window.confirm("确认清除当前浏览器里的备货需求分配文件缓存吗？清除后需要重新上传并应用文件。");
+  const confirmed = window.confirm("确认清空本次上传的文件吗？清空后需要重新上传。");
   if (!confirmed) return;
 
   if (els.clearCacheButton) els.clearCacheButton.disabled = true;
@@ -286,17 +291,22 @@ async function clearLibraryCache() {
     state.filteredRows = [];
     resetAllFilterState();
     renderShell();
-    setLibraryState("已清除缓存");
+    setLibraryState("已清空本次文件");
   } catch (error) {
     console.warn("clear library cache failed", error);
     setLibraryState("清除失败");
-    window.alert(error.message || "清除缓存失败，请关闭其他备货需求分配页面后重试。");
+    window.alert(error.message || "清空本次文件失败，请重试。");
   } finally {
     if (els.clearCacheButton) els.clearCacheButton.disabled = false;
   }
 }
 
+let dashboardRevision = 0;
 async function refreshDemandDashboard() {
+  const revision = ++dashboardRevision;
+  state.demandRows = [];
+  state.filteredRows = [];
+  renderDemandDashboard("正在读取本次文件…");
   state.currentPage = 1;
   if (!window.XLSX) {
     state.demandRows = [];
@@ -312,17 +322,20 @@ async function refreshDemandDashboard() {
     })
   );
 
-  if (!records.demand) {
+  if (Object.values(records).some(record => !record)) {
     state.demandRows = [];
     state.filteredRows = [];
     resetAllFilterState();
-    renderDemandDashboard("上传并应用表格后显示明细");
+    renderDemandDashboard("请上传本次最新的全部 4 份文件后生成明细");
     return;
   }
 
   try {
-    state.demandRows = await buildDemandAllocationRows(records);
+    const rows = await buildDemandAllocationRows(records);
+    if (revision !== dashboardRevision) return;
+    state.demandRows = rows;
   } catch (error) {
+    if (revision !== dashboardRevision) return;
     console.warn("build demand allocation failed", error);
     state.demandRows = [];
   }
@@ -776,10 +789,10 @@ function renderShell() {
   if (els.slotCount) els.slotCount.textContent = String(slots.length);
   if (els.uploadedCount) els.uploadedCount.textContent = String(countUploadedRecords());
   if (els.appliedCount) els.appliedCount.textContent = String(countAppliedRecords());
-  if (els.sourceNote) els.sourceNote.textContent = `本地文件库｜引用时间：${getLatestAppliedTime()}`;
+  if (els.sourceNote) els.sourceNote.textContent = `本次上传（不使用缓存）｜引用时间：${getLatestAppliedTime()}`;
   if (els.slotGrid) els.slotGrid.innerHTML = slots.map(renderSlot).join("");
   renderDemandDashboard();
-  setLibraryState("本地文件库");
+  setLibraryState("仅引用本次上传");
   updateApplyAllButton();
 }
 
@@ -949,7 +962,7 @@ function renderDemandTable(emptyMessage) {
   const rows = getCurrentPageRows();
   els.detailTableBody.innerHTML = rows.map(renderDemandTableRow).join("");
   els.detailEmpty.hidden = state.filteredRows.length > 0;
-  els.detailEmpty.textContent = state.demandRows.length ? emptyMessage : "上传并应用表格后显示明细";
+  els.detailEmpty.textContent = state.demandRows.length ? emptyMessage : "请上传本次最新的全部 4 份文件后生成明细";
   if (els.detailState) {
     const startRow = (state.currentPage - 1) * DETAIL_PAGE_SIZE + 1;
     const endRow = Math.min(state.currentPage * DETAIL_PAGE_SIZE, state.filteredRows.length);
@@ -1382,50 +1395,12 @@ function escapeHtml(value) {
   })[char]);
 }
 
-function openDb() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: "id" });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function getRecord(db, key) {
-  return runStoreRequest(db, "readonly", (store) => store.get(key));
-}
-
-function putRecord(db, record) {
-  return runStoreRequest(db, "readwrite", (store) => store.put(record));
-}
-
-function deleteRecord(db, key) {
-  return runStoreRequest(db, "readwrite", (store) => store.delete(key));
-}
-
-function runStoreRequest(db, mode, createRequest) {
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, mode);
-    const request = createRequest(transaction.objectStore(STORE_NAME));
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    transaction.onerror = () => reject(transaction.error);
-  });
-}
-
-function deleteLibraryDatabase() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.deleteDatabase(DB_NAME);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-    request.onblocked = () => reject(new Error("文件库正被其他备货需求分配页面占用，请关闭其他备货需求分配页面后重试。"));
-  });
-}
+// Keep storage helpers asynchronous so the existing upload/apply flow stays unchanged.
+async function openDb() { return { close() {} }; }
+async function getRecord(db, key) { return sessionFiles.get(key); }
+async function putRecord(db, record) { sessionFiles.set(record.id, record); }
+async function deleteRecord(db, key) { sessionFiles.delete(key); }
+async function deleteLibraryDatabase() { sessionFiles.clear(); }
 
 init().catch((error) => {
   console.error(error);
