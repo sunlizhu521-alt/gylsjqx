@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>备货分配｜供应链数据清洗</title>
+    <link rel="stylesheet" href="./styles.css?v=20260717-2" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="备货需求分配">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">BH</span>
+          <div>
+            <strong>备货需求分配</strong>
+            <span>需求分配工作台</span>
+          </div>
+        </div>
+        <nav class="nav-list">
+          <a href="../index.html">← 返回供应链数据清洗</a>
+          <a class="active" aria-current="page" href="./index.html">备货分配</a>
+        </nav>
+      </aside>
+
+      <main class="dashboard">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">File Library</p>
+            <h1>备货分配</h1>
+            <small class="source-note" id="librarySourceNote">本地文件库｜引用时间：--</small>
+          </div>
+          <div class="topbar-actions">
+            <button id="applyAllButton" class="primary-button" type="button">一键刷新应用</button>
+            <button id="clearCacheButton" class="danger-button" type="button">一键清除缓存</button>
+          </div>
+        </header>
+
+        <section class="summary-grid" aria-label="文件库概览">
+          <article class="metric">
+            <span>文件槽位</span>
+            <strong id="slotCount">4</strong>
+            <small>分配文件</small>
+          </article>
+          <article class="metric">
+            <span>已上传</span>
+            <strong id="uploadedCount">0</strong>
+            <small>含待应用文件</small>
+          </article>
+          <article class="metric">
+            <span>已引用</span>
+            <strong id="appliedCount">0</strong>
+            <small>当前生效文件</small>
+          </article>
+          <article class="metric result-metric">
+            <span>备货总数</span>
+            <strong id="beihuoTotal">0</strong>
+            <small>按筛选后数量</small>
+          </article>
+          <article class="metric result-metric">
+            <span>供应商数量</span>
+            <strong id="supplierCount">0</strong>
+            <small>按供应商简称去重</small>
+          </article>
+        </section>
+
+        <section class="panel library-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Files</p>
+              <h2>文件上传与应用</h2>
+            </div>
+            <span class="upload-state" id="libraryState">读取中</span>
+          </div>
+          <div class="slot-grid" id="slotGrid"></div>
+        </section>
+
+        <section class="panel detail-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Details</p>
+              <h2>备货需求分配明细 <span class="inline-total" id="quantityTotal">数量合计：0</span></h2>
+            </div>
+            <div class="detail-actions">
+              <button id="downloadDetailButton" class="secondary-button" type="button" disabled>下载表格</button>
+              <span class="upload-state" id="detailState">暂无数据</span>
+            </div>
+          </div>
+          <div class="detail-filter-row" aria-label="明细筛选器">
+            <div class="filter-toolbar" id="filterToolbar">
+              <div class="multi-filter" data-filter="businessUnit"></div>
+              <div class="multi-filter" data-filter="productLine"></div>
+              <div class="multi-filter" data-filter="salesSeries"></div>
+              <div class="multi-filter" data-filter="purchaseGroup"></div>
+              <div class="multi-filter" data-filter="buyer"></div>
+              <div class="multi-filter" data-filter="supplierShortName"></div>
+            </div>
+            <button id="clearFiltersButton" type="button">重置筛选</button>
+          </div>
+          <div class="table-wrap">
+            <table class="detail-table">
+              <thead>
+                <tr>
+                  <th>采购单订单下单人</th>
+                  <th>事业部</th>
+                  <th>申请人</th>
+                  <th>供应商简称</th>
+                  <th>物料编码</th>
+                  <th>SKU</th>
+                  <th>物料名称</th>
+                  <th>数量</th>
+                  <th>OA备货流程号</th>
+                  <th>采购主体</th>
+                  <th>采购分工明细是否存在</th>
+                  <th>供应商反馈交期</th>
+                  <th>采购单订单号</th>
+                  <th>要求货好时间</th>
+                  <th>起订量</th>
+                  <th>起订量是否满足</th>
+                  <th>备货原因</th>
+                </tr>
+              </thead>
+              <tbody id="detailTableBody"></tbody>
+            </table>
+            <div class="empty-state" id="detailEmpty">上传并应用表格后显示明细</div>
+          </div>
+          <nav class="pagination-controls" id="paginationControls" aria-label="备货需求分配明细分页" hidden>
+            <span id="paginationInfo">第 1 / 1 页</span>
+            <div class="pagination-actions">
+              <button id="previousPageButton" type="button" aria-label="上一页">上一页</button>
+              <button id="nextPageButton" type="button" aria-label="下一页">下一页</button>
+            </div>
+          </nav>
+        </section>
+
+        <section class="panel field-source-panel" aria-labelledby="fieldSourceTitle">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Field Sources</p>
+              <h2 id="fieldSourceTitle">备货需求分配明细字段来源</h2>
+            </div>
+          </div>
+          <p class="field-source-note">
+            备货需求表按物料编码合并为一行，数量相加，OA备货流程号去重后用“/”连接；其他不同字段值用“、”保留。维度和采购分工信息按物料编码匹配，事业部按申请人匹配。筛选与导出均使用合并后的明细。
+          </p>
+          <div class="table-wrap">
+            <table class="field-source-table">
+              <thead>
+                <tr>
+                  <th>明细字段</th>
+                  <th>来源文件</th>
+                  <th>原始字段 / 位置</th>
+                  <th>取值与匹配规则</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>采购单订单下单人</td><td>Dim-采购部分工明细</td><td>采购单订单下单人</td><td>优先按“采购组＋物料编码”匹配；无结果时按物料编码匹配，多个结果用“、”合并。</td></tr>
+                <tr><td>事业部</td><td>Dim-花名册（姓名&amp;一级部门）</td><td>姓名、一级部门（A、B列）</td><td>使用备货需求表的申请人匹配花名册姓名，返回一级部门。</td></tr>
+                <tr><td>申请人</td><td>备货需求表</td><td>创建人 / 申请人 / OA申请人 / 流程申请人</td><td>直接读取匹配到的申请人字段。</td></tr>
+                <tr><td>供应商简称</td><td>Dim-采购部分工明细</td><td>供应商简称</td><td>按物料编码匹配，多个供应商用“、”合并。</td></tr>
+                <tr><td>物料编码</td><td>备货需求表</td><td>识别码 / 物料编码等</td><td>作为明细主匹配键，用于关联商品分类表和采购分工明细。</td></tr>
+                <tr><td>SKU</td><td>Dim-YL医疗器械商品分类</td><td>SKU（C列）</td><td>按物料编码匹配商品分类表后取得。</td></tr>
+                <tr><td>物料名称</td><td>Dim-YL医疗器械商品分类</td><td>金蝶名称 / 物料名称（D列）</td><td>按物料编码匹配商品分类表后取得。</td></tr>
+                <tr><td>数量</td><td>备货需求表</td><td>数量</td><td>读取“数量”列；存在同名列时，读取紧邻“要求货好时间”前的明细数量。缺失、无法定位或非数字时留空并提示待核对，不从其他字段取数。同一物料数量相加，任一来源数量缺失或无效时，合计留空并提示待核对。</td></tr>
+                <tr><td>OA备货流程号</td><td>备货需求表</td><td>流程号 / OA备货流程号等</td><td>同一物料编码的流程号去重后按来源顺序用“/”连接。</td></tr>
+                <tr><td>采购主体</td><td>备货需求表</td><td>采购主体 / 采购公司 / 采购组织等</td><td>直接读取采购主体类字段。</td></tr>
+                <tr><td>采购分工明细是否存在</td><td>系统计算</td><td>物料编码</td><td>物料编码存在于 Dim-采购部分工明细时显示“是”，否则显示“否”。</td></tr>
+                <tr><td>供应商反馈交期</td><td>人工填写</td><td>—</td><td>默认留空，供导出后填写供应商反馈交期。</td></tr>
+                <tr><td>采购单订单号</td><td>人工填写</td><td>—</td><td>默认留空，供导出后填写采购单订单号。</td></tr>
+                <tr><td>要求货好时间</td><td>备货需求表</td><td>要求货好时间 / 要求货好日期等</td><td>直接读取要求货好时间类字段。</td></tr>
+                <tr><td>起订量</td><td>Dim-采购部分工明细</td><td>“产品线明细”工作表 J列</td><td>仅从名称包含“产品线明细”的工作表读取，按物料编码匹配。</td></tr>
+                <tr><td>起订量是否满足</td><td>系统计算</td><td>数量、起订量</td><td>同一物料合计数量大于或等于起订量时显示“满足”，否则显示“不满足”；缺少任一数值时留空。</td></tr>
+                <tr><td>备货原因</td><td>备货需求表</td><td>备货原因 / 申请原因 / 需求原因等</td><td>直接读取原因类字段。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./vendor/xlsx.full.min.js?v=20260601-1"></script>
+    <script src="./vendor/jszip.min.js?v=20260609-1"></script>
+    <script src="./shared-library.js?v=20260609-3"></script>
+    <script src="./file-library.js?v=20261014-numeric-quantity"></script>
+  </body>
+</html>
