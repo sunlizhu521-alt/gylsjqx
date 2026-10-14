@@ -27,15 +27,15 @@
           <div>
             <p class="eyebrow">File Library</p>
             <h1>备货分配</h1>
-            <small class="source-note" id="librarySourceNote">本次上传（不使用缓存）｜引用时间：--</small>
+            <small class="source-note" id="librarySourceNote">最近上传（浏览器已保存）｜引用时间：--</small>
           </div>
           <div class="topbar-actions">
             <button id="applyAllButton" class="primary-button" type="button">一键刷新应用</button>
-            <button id="clearCacheButton" class="danger-button" type="button">清空本次文件</button>
+            <button id="clearCacheButton" class="danger-button" type="button">清空保存的文件</button>
           </div>
         </header>
 
-        <p class="source-note">采购分工文件仅引用“产品线明细”sheet。每次打开或刷新页面，请重新上传全部 4 份最新文件。替换后立即引用本次选择的文件，不读取历史缓存；本地文件后续修改后需重新选择。</p>
+        <p class="source-note">采购分工文件仅引用“产品线明细”sheet。每个上传位置自动保存最后一次上传的文件，重新打开或刷新页面时恢复。上传新文件后立即替换旧文件；本地文件后续修改后需重新选择上传。</p>
         <section class="summary-grid" aria-label="文件库概览">
           <article class="metric">
             <span>文件槽位</span>
@@ -181,6 +181,6 @@
     <script src="./vendor/xlsx.full.min.js?v=20260601-1"></script>
     <script src="./vendor/jszip.min.js?v=20260609-1"></script>
 
-    <script src="./file-library.js?v=20261014-division-sheet"></script>
+    <script src="./file-library.js?v=20261014-latest-cache"></script>
   </body>
 </html>

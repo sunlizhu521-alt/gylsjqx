@@ -1,5 +1,6 @@
-// Files live only in this page session; never read or write persisted uploads.
-const sessionFiles = new Map();
+// Isolated toolbox cache: one latest file per upload slot.
+const DB_NAME = "gylsjqx-beihuo-latest-files";
+const STORE_NAME = "files";
 
 const slots = [
   { id: "file-1", label: "Dim-YL医疗器械商品分类" },
@@ -169,7 +170,6 @@ async function refresh() {
 
 async function savePendingFile(slotId, file) {
   if (!file) return;
-  await deleteSlot(slotId);
   const invalidMessage = getInvalidFileMessage(file);
   if (invalidMessage) {
     setLibraryState(invalidMessage);
@@ -199,8 +199,12 @@ async function savePendingFile(slotId, file) {
   };
 
   const db = await openDb();
-  await putRecord(db, clearPendingFields(record));
-  db.close();
+  try {
+    await putRecord(db, clearPendingFields(record));
+  } catch (error) {
+    setLibraryState("文件保存失败，原文件保留：" + error.message);
+    return;
+  } finally { db.close(); }
   await refresh();
 }
 
@@ -279,7 +283,7 @@ async function deleteSlot(slotId) {
 }
 
 async function clearLibraryCache() {
-  const confirmed = window.confirm("确认清空本次上传的文件吗？清空后需要重新上传。");
+  const confirmed = window.confirm("确认清空此工具保存的文件吗？清空后需要重新上传。");
   if (!confirmed) return;
 
   if (els.clearCacheButton) els.clearCacheButton.disabled = true;
@@ -291,7 +295,7 @@ async function clearLibraryCache() {
     state.filteredRows = [];
     resetAllFilterState();
     renderShell();
-    setLibraryState("已清空本次文件");
+    setLibraryState("已清空保存的文件");
   } catch (error) {
     console.warn("clear library cache failed", error);
     setLibraryState("清除失败");
@@ -326,7 +330,7 @@ async function refreshDemandDashboard() {
     state.demandRows = [];
     state.filteredRows = [];
     resetAllFilterState();
-    renderDemandDashboard("请上传本次最新的全部 4 份文件后生成明细");
+    renderDemandDashboard("请上传全部 4 份文件后生成明细");
     return;
   }
 
@@ -796,10 +800,10 @@ function renderShell() {
   if (els.slotCount) els.slotCount.textContent = String(slots.length);
   if (els.uploadedCount) els.uploadedCount.textContent = String(countUploadedRecords());
   if (els.appliedCount) els.appliedCount.textContent = String(countAppliedRecords());
-  if (els.sourceNote) els.sourceNote.textContent = `本次上传（不使用缓存）｜引用时间：${getLatestAppliedTime()}`;
+  if (els.sourceNote) els.sourceNote.textContent = `最近上传（浏览器已保存）｜引用时间：${getLatestAppliedTime()}`;
   if (els.slotGrid) els.slotGrid.innerHTML = slots.map(renderSlot).join("");
   renderDemandDashboard();
-  setLibraryState("仅引用本次上传");
+  setLibraryState("已恢复最近上传文件");
   updateApplyAllButton();
 }
 
@@ -969,7 +973,7 @@ function renderDemandTable(emptyMessage) {
   const rows = getCurrentPageRows();
   els.detailTableBody.innerHTML = rows.map(renderDemandTableRow).join("");
   els.detailEmpty.hidden = state.filteredRows.length > 0;
-  els.detailEmpty.textContent = state.demandRows.length ? emptyMessage : "请上传本次最新的全部 4 份文件后生成明细";
+  els.detailEmpty.textContent = state.demandRows.length ? emptyMessage : "请上传全部 4 份文件后生成明细";
   if (els.detailState) {
     const startRow = (state.currentPage - 1) * DETAIL_PAGE_SIZE + 1;
     const endRow = Math.min(state.currentPage * DETAIL_PAGE_SIZE, state.filteredRows.length);
@@ -1402,12 +1406,28 @@ function escapeHtml(value) {
   })[char]);
 }
 
-// Keep storage helpers asynchronous so the existing upload/apply flow stays unchanged.
-async function openDb() { return { close() {} }; }
-async function getRecord(db, key) { return sessionFiles.get(key); }
-async function putRecord(db, record) { sessionFiles.set(record.id, record); }
-async function deleteRecord(db, key) { sessionFiles.delete(key); }
-async function deleteLibraryDatabase() { sessionFiles.clear(); }
+function openDb() {
+  return new Promise((resolve,reject)=>{
+    const request=indexedDB.open(DB_NAME,1);
+    request.onupgradeneeded=()=>request.result.createObjectStore(STORE_NAME,{keyPath:'id'});
+    request.onerror=()=>reject(request.error);
+    request.onblocked=()=>reject(new Error('文件缓存被其他窗口占用，请关闭其他窗口后重试'));
+    request.onsuccess=()=>{const db=request.result;db.onversionchange=()=>db.close();resolve(db);};
+  });
+}
+function runStoreRequest(db,mode,action){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(STORE_NAME,mode);let result;
+    const request=action(tx.objectStore(STORE_NAME));
+    request.onsuccess=()=>{result=request.result;};
+    tx.oncomplete=()=>resolve(result);
+    tx.onerror=tx.onabort=()=>reject(tx.error||new Error('文件保存未完成'));
+  });
+}
+function getRecord(db,key){return runStoreRequest(db,'readonly',store=>store.get(key));}
+function putRecord(db,record){return runStoreRequest(db,'readwrite',store=>store.put(record));}
+function deleteRecord(db,key){return runStoreRequest(db,'readwrite',store=>store.delete(key));}
+async function deleteLibraryDatabase(){const db=await openDb();try{await runStoreRequest(db,'readwrite',store=>store.clear());}finally{db.close();}}
 
 init().catch((error) => {
   console.error(error);

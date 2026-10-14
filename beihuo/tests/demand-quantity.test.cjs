@@ -235,22 +235,6 @@ test('workbook import, rows, metrics, minimum-order comparison and export use de
   assert.equal(elements.get('#beihuoTotal').textContent, '0');
 });
 
-test('file records are session-only and never reuse persisted browser uploads', async () => {
-  const first=loadApp();
-  assert.equal(await first.run("getRecord(null,'file-1')"),undefined);
-  await first.run("putRecord(null,{id:'file-1',name:'旧.xlsx'})");
-  await first.run("putRecord(null,{id:'file-1',name:'新.xlsx'})");
-  assert.equal((await first.run("getRecord(null,'file-1')")).name,'新.xlsx');
-  const reopened=loadApp();
-  assert.equal(await reopened.run("getRecord(null,'file-1')"),undefined);
-  await first.run('deleteLibraryDatabase()');
-  assert.equal(await first.run("getRecord(null,'file-1')"),undefined);
-  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
-  assert.doesNotMatch(html,/<script[^>]*shared-library\.js/);
-  const code=fs.readFileSync(path.join(__dirname,'../file-library.js'),'utf8');
-  assert.doesNotMatch(code,/indexedDB|localStorage|sessionStorage/);
-});
-
 test('采购分工只读取产品线明细，不混入整理或同名副本，缺表明确报错', async () => {
   const {context,run}=loadApp();
   const division=XLSX.utils.book_new();
