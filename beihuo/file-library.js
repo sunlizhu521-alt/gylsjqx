@@ -858,7 +858,12 @@ function getFilteredDemandRows() {
       if (!selected?.size) return true;
       return getRowFilterValues(row, filter.key).some((value) => selected.has(value));
     })
-  );
+  ).sort((left, right) => {
+    const a = String(left.supplierShortName ?? "").trim();
+    const b = String(right.supplierShortName ?? "").trim();
+    if (!a || !b) return a ? -1 : b ? 1 : 0;
+    return a.localeCompare(b, "zh-CN", { numeric: true });
+  });
 }
 
 function updateDemandMetrics() {

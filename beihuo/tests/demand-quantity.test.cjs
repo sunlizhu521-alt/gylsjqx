@@ -249,3 +249,16 @@ test('采购分工只读取产品线明细，不混入整理或同名副本，�
   context.records.purchaseDivision=record(division);
   await assert.rejects(run('buildDemandAllocationRows(records)'),/缺少“产品线明细”/);
 });
+
+test('供应商按中文名称排序，空值最后，同名稳定，导出与页面一致', async () => {
+ const {context,run}=loadApp();
+ context.rows=['中山','鸿诚','阿明','鸿诚','供应商10','供应商2',''].map((supplierShortName,i)=>({supplierShortName,materialCode:String(i),quantityNumber:i}));
+ run('state.demandRows=rows; state.filteredRows=getFilteredDemandRows()');
+ const sorted=run('state.filteredRows');assert.deepEqual(Array.from(sorted,r=>r.supplierShortName),['阿明','供应商2','供应商10','鸿诚','鸿诚','中山','']);
+ assert.deepEqual(Array.from(sorted.filter(r=>r.supplierShortName==='鸿诚'),r=>r.materialCode),['1','3']);
+ assert.equal(context.rows[0].supplierShortName,'中山');
+ let book;context.window.XLSX.writeFile=w=>{book=w;};await run('downloadDetailWorkbook()');
+ const data=XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]],{header:1});
+ assert.deepEqual(data.slice(1).map(r=>r[3]),Array.from(sorted,r=>r.supplierShortName));
+ run('state.filters.get("supplierShortName").add("鸿诚")');assert.deepEqual(Array.from(run('getFilteredDemandRows()'),r=>r.materialCode),['1','3']);
+});
