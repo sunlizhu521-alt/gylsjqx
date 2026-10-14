@@ -338,6 +338,10 @@ async function refreshDemandDashboard() {
     if (revision !== dashboardRevision) return;
     console.warn("build demand allocation failed", error);
     state.demandRows = [];
+    resetAllFilterState();
+    renderDemandDashboard(error.message || "文件读取失败");
+    setLibraryState(error.message || "文件读取失败");
+    return;
   }
   rebuildFilterOptions();
   pruneFilterSelections();
@@ -347,7 +351,7 @@ async function refreshDemandDashboard() {
 async function buildDemandAllocationRows(records) {
   const [categoryRows, divisionRows, rosterRows, demandRows] = await Promise.all([
     readTableRows(records.category, "Dim-YL医疗器械商品分类"),
-    readTableRows(records.purchaseDivision),
+    readTableRows(records.purchaseDivision, "产品线明细", true),
     readTableRows(records.roster),
     readTableRows(records.demand),
   ]);
@@ -468,10 +472,13 @@ function mergeDemandRowsByMaterial(rows) {
   });
 }
 
-async function readTableRows(record, preferredSheetName = "") {
+async function readTableRows(record, preferredSheetName = "", onlyExactSheet = false) {
   if (!record) return [];
   const workbook = await readWorkbook(record.file);
-  const sheetNames = getOrderedSheetNames(workbook, preferredSheetName);
+  if (onlyExactSheet && !workbook.SheetNames.includes(preferredSheetName)) {
+    throw new Error(`${record.name}：缺少“${preferredSheetName}”工作表，请上传正确文件；不会读取其他 sheet`);
+  }
+  const sheetNames = onlyExactSheet ? [preferredSheetName] : getOrderedSheetNames(workbook, preferredSheetName);
   return sheetNames.map((sheetName) => ({
     rows: sheetToRows(workbook.Sheets[sheetName]),
     source: {

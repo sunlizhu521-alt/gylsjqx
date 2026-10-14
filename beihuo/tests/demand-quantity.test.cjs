@@ -250,3 +250,18 @@ test('file records are session-only and never reuse persisted browser uploads', 
   const code=fs.readFileSync(path.join(__dirname,'../file-library.js'),'utf8');
   assert.doesNotMatch(code,/indexedDB|localStorage|sessionStorage/);
 });
+
+test('采购分工只读取产品线明细，不混入整理或同名副本，缺表明确报错', async () => {
+  const {context,run}=loadApp();
+  const division=XLSX.utils.book_new();
+  for(const [name,supplier] of [['整理','错误供应商'],['产品线明细','正确供应商'],['产品线明细旧版','旧供应商']]){
+    XLSX.utils.book_append_sheet(division,XLSX.utils.aoa_to_sheet([['物料编码','供应商简称','采购下单人'],['TEST-ONLY',supplier,'采购员']]),name);
+  }
+  const demand=XLSX.utils.book_new();XLSX.utils.book_append_sheet(demand,XLSX.utils.aoa_to_sheet([['物料编码','数量','申请人'],['TEST-ONLY',5,'申请人']]),'需求');
+  const record=wb=>({name:'测试.xlsx',file:{name:'测试.xlsx',arrayBuffer:async()=>XLSX.write(wb,{type:'buffer',bookType:'xlsx'})}});
+  context.records={purchaseDivision:record(division),demand:record(demand)};
+  const rows=await run('buildDemandAllocationRows(records)');assert.equal(rows[0].supplierShortName,'正确供应商');
+  division.SheetNames=division.SheetNames.filter(n=>n!=='产品线明细');delete division.Sheets.产品线明细;
+  context.records.purchaseDivision=record(division);
+  await assert.rejects(run('buildDemandAllocationRows(records)'),/缺少“产品线明细”/);
+});
