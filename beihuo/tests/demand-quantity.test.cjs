@@ -57,6 +57,7 @@ test('all buyers and pages export into one sheet in display order on both export
   context.window.XLSX.writeFile = workbook => { exported = workbook; };
   await run('downloadDetailWorkbook()');
   const verify = workbook => {
+    assert.equal(workbook.Custprops?.KSOReadingLayout, true, 'WPS native reading highlight is enabled on both export paths');
     assert.deepEqual(Array.from(workbook.SheetNames), ['备货需求分配明细']);
     const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' });
     assert.equal(data.length, 24);

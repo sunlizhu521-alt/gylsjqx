@@ -1080,6 +1080,8 @@ async function downloadDetailWorkbook() {
   }
 
   const workbook = window.XLSX.utils.book_new();
+  // WPS saves its native row/column reading highlight in this boolean custom property.
+  workbook.Custprops = { KSOReadingLayout: true };
   const sheetRows = [
     DETAIL_COLUMNS.map((column) => column.label),
     ...state.filteredRows.map((row) => DETAIL_COLUMNS.map((column) => {
