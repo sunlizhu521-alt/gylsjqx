@@ -897,3 +897,8 @@ h2 {
     font-size: 24px;
   }
 }
+
+.purchase-entity-field { display: grid; gap: 8px; margin: 16px 0 20px; }
+.purchase-entity-field label { font-weight: 600; }
+.purchase-entity-field input { box-sizing: border-box; width: 100%; max-width: 620px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; background: #fff; color: #172033; }
+.purchase-entity-field small { color: #64748b; line-height: 1.6; }

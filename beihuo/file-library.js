@@ -67,6 +67,7 @@ const TABLE_FIELD_ALIASES = {
 };
 
 const els = {
+  purchaseEntityInput: document.querySelector("#purchaseEntityInput"),
   slotGrid: document.querySelector("#slotGrid"),
   applyAllButton: document.querySelector("#applyAllButton"),
   clearCacheButton: document.querySelector("#clearCacheButton"),
@@ -92,6 +93,7 @@ const els = {
 
 const state = {
   records: new Map(),
+  purchaseEntityOverride: "",
   demandRows: [],
   filteredRows: [],
   currentPage: 1,
@@ -106,6 +108,10 @@ async function init() {
 }
 
 function bindEvents() {
+  els.purchaseEntityInput?.addEventListener("input", () => {
+    state.purchaseEntityOverride = els.purchaseEntityInput.value.trim();
+    renderDemandDashboard();
+  });
   els.slotGrid?.addEventListener("change", async (event) => {
     const input = event.target.closest("[data-upload]");
     if (!input) return;
@@ -862,7 +868,9 @@ function getFilteredDemandRows() {
       if (!selected?.size) return true;
       return getRowFilterValues(row, filter.key).some((value) => selected.has(value));
     })
-  ).sort((left, right) => {
+  ).map(row => state.purchaseEntityOverride
+    ? { ...row, purchaseEntity: state.purchaseEntityOverride }
+    : row).sort((left, right) => {
     const a = String(left.supplierShortName ?? "").trim();
     const b = String(right.supplierShortName ?? "").trim();
     if (!a || !b) return a ? -1 : b ? 1 : 0;

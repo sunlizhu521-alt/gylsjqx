@@ -270,3 +270,12 @@ test('规格型号来自商品分类表型号字段，兼容规格型号，缺�
   const index=run('buildCategoryIndex(tables)');assert.equal(index.byMaterial.get('test-spec')?.specification??index.byMaterial.get('TEST-SPEC')?.specification,label==='无此字段'?'':'AB-10');
  }
 });
+
+test('手动采购主体统一覆盖页面和导出，清空后恢复来源且不修改原始数据', async () => {
+ const {context,run}=loadApp();context.rows=[{materialCode:'A',purchaseEntity:'原主体甲'},{materialCode:'B',purchaseEntity:''}];
+ run('state.demandRows=rows;state.purchaseEntityOverride="手填主体";state.filteredRows=getFilteredDemandRows()');
+ assert.deepEqual(Array.from(run('state.filteredRows'),r=>r.purchaseEntity),['手填主体','手填主体']);
+ let book;context.window.XLSX.writeFile=w=>{book=w;};await run('downloadDetailWorkbook()');
+ const data=XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]],{header:1});const col=data[0].indexOf('采购主体');assert.deepEqual(data.slice(1).map(r=>r[col]),['手填主体','手填主体']);
+ run('state.purchaseEntityOverride=""');assert.deepEqual(Array.from(run('getFilteredDemandRows()'),r=>r.purchaseEntity),['原主体甲','']);assert.equal(context.rows[0].purchaseEntity,'原主体甲');
+});
