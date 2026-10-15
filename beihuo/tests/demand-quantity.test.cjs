@@ -281,3 +281,10 @@ test('交期按北京时间加自然日，覆盖零、空值、跨月跨年闰�
  assert.equal(calculate(1,'2028-02-28T00:00:00Z').supplierDeliveryDate,'2028-02-29');
  for(const v of ['',undefined,-1,1.5,'abc',36501])assert.equal(calculate(v,'2026-10-15T00:00:00Z').supplierDeliveryDate,'');
 });
+
+test('下载日期保留TODAY及加天数公式，空值和0均保留，重开不丢失',()=>{
+ const {context,run}=loadApp();context.sheet={};context.rows=[{todayDate:'2026-10-15',deliveryDays:20,supplierDeliveryDate:'2026-11-04'},{todayDate:'2026-10-15',deliveryDays:'',supplierDeliveryDate:''},{todayDate:'2026-10-15',deliveryDays:0,supplierDeliveryDate:'2026-10-15'}];
+ run('addDeliveryFormulas(sheet,rows)');context.sheet['!ref']='A1:S4';
+ const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,context.sheet,'测试');const sheet=XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true}).Sheets.测试;
+ assert.equal(sheet.L2.f,'TODAY()');assert.equal(sheet.N2.f,'IF(M2="","",L2+M2)');assert.equal(sheet.N3.f,'IF(M3="","",L3+M3)');assert.equal(sheet.N3.v,'');assert.equal(sheet.N4.v,sheet.L4.v);assert.equal(XLSX.SSF.format(sheet.N2.z,sheet.N2.v),'2026-11-04');
+});

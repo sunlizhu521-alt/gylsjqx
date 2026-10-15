@@ -1095,6 +1095,8 @@ async function downloadDetailWorkbook() {
     const cell = worksheet[window.XLSX.utils.encode_cell({ r: rowIndex, c: quantityColumn })];
     if (cell?.t === "n") cell.z = "0";
   }
+  addDeliveryFormulas(worksheet, state.filteredRows);
+  workbook.Workbook = { CalcPr: { calcMode: "auto", fullCalcOnLoad: true, forceFullCalc: true } };
   worksheet["!cols"] = getAutoExportColumns(sheetRows);
   window.XLSX.utils.book_append_sheet(workbook, worksheet, "备货需求分配明细");
   const sheetShapes = [{ rowCount: sheetRows.length, columnCount: DETAIL_COLUMNS.length }];
@@ -1111,6 +1113,25 @@ async function downloadDetailWorkbook() {
     console.warn("styled workbook export failed", error);
     window.XLSX.writeFile(workbook, fileName);
   }
+}
+
+function addDeliveryFormulas(sheet, rows) {
+  const X = window.XLSX;
+  const col = key => DETAIL_COLUMNS.findIndex(c => c.key === key);
+  const serial = value => {
+    const [y,m,d] = value.split('-').map(Number);
+    return (Date.UTC(y,m-1,d)-Date.UTC(1899,11,30))/86400000;
+  };
+  rows.forEach((row,index)=>{
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.todayDate || '')) return;
+    const address = key => X.utils.encode_cell({r:index+1,c:col(key)});
+    const today = address('todayDate'), days = address('deliveryDays'), delivery = address('supplierDeliveryDate');
+    sheet[today] = {t:'n',v:serial(row.todayDate),f:'TODAY()',z:'yyyy-mm-dd'};
+    const formula = `IF(${days}="","",${today}+${days})`;
+    sheet[delivery] = row.supplierDeliveryDate
+      ? {t:'n',v:serial(row.supplierDeliveryDate),f:formula,z:'yyyy-mm-dd'}
+      : {t:'s',v:'',f:formula,z:'yyyy-mm-dd'};
+  });
 }
 
 async function writeStyledDetailWorkbook(workbook, sheetShapes, fileName) {
@@ -1139,6 +1160,7 @@ async function writeStyledDetailWorkbook(workbook, sheetShapes, fileName) {
 function buildDetailWorkbookStylesXml() {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/></numFmts>
   <fonts count="2">
     <font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font>
     <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/><family val="2"/></font>
@@ -1159,12 +1181,13 @@ function buildDetailWorkbookStylesXml() {
     </border>
   </borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="5">
+  <cellXfs count="6">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
     <xf numFmtId="1" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
   </cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
   <dxfs count="0"/>
@@ -1187,7 +1210,7 @@ function styleDetailWorksheetXml(xml, shape) {
     const row = ensureWorksheetRow(documentXml, sheetData, rowIndex);
     for (let columnIndex = 1; columnIndex <= shape.columnCount; columnIndex += 1) {
       const cell = ensureWorksheetCell(documentXml, row, rowIndex, columnIndex);
-      const styleId = rowIndex === 1 ? "1" : columnIndex === quantityColumnIndex ? "4" : columnIndex === wrapColumnIndex ? "3" : "2";
+      const styleId = rowIndex === 1 ? "1" : columnIndex === quantityColumnIndex ? "4" : ["todayDate", "supplierDeliveryDate"].includes(DETAIL_COLUMNS[columnIndex-1]?.key) ? "5" : columnIndex === wrapColumnIndex ? "3" : "2";
       cell.setAttribute("s", styleId);
     }
   }

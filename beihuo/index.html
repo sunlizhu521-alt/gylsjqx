@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>备货分配｜供应链数据清洗</title>
-    <link rel="stylesheet" href="./styles.css?v=20261015-delivery-days" />
+    <link rel="stylesheet" href="./styles.css?v=20261015-delivery-formula" />
   </head>
   <body>
     <div class="app-shell">
@@ -91,7 +91,7 @@
             <input id="purchaseEntityInput" type="text" placeholder="例如：浙江迈德斯特医疗器械科技有限公司" aria-describedby="purchaseEntityHint" />
             <small id="purchaseEntityHint">填写后统一用于所有明细及导出表；留空时使用备货需求表中的采购主体。</small>
           </div>
-          <p class="source-note">逐行填写天数后自动计算交期（按自然日，0 表示今天）；留空不计算。</p>
+          <p class="source-note">逐行填写天数后自动计算交期（按自然日，0 表示今天）；留空不计算。下载表格保留 TODAY() 和日期加天数公式，修改天数后自动更新交期。</p>
           <div class="detail-filter-row" aria-label="明细筛选器">
             <div class="filter-toolbar" id="filterToolbar">
               <div class="multi-filter" data-filter="businessUnit"></div>
@@ -191,6 +191,6 @@
     <script src="./vendor/xlsx.full.min.js?v=20260601-1"></script>
     <script src="./vendor/jszip.min.js?v=20260609-1"></script>
 
-    <script src="./file-library.js?v=20261015-delivery-days"></script>
+    <script src="./file-library.js?v=20261015-delivery-formula"></script>
   </body>
 </html>
