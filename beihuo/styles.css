@@ -902,3 +902,5 @@ h2 {
 .purchase-entity-field label { font-weight: 600; }
 .purchase-entity-field input { box-sizing: border-box; width: 100%; max-width: 620px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; background: #fff; color: #172033; }
 .purchase-entity-field small { color: #64748b; line-height: 1.6; }
+
+.delivery-days { width: 100px; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font: inherit; text-align: center; }

@@ -20,21 +20,21 @@ function loadApp() {
   return { context, elements, run: (code) => vm.runInContext(code, context) };
 }
 
-test('all 18 table headers, rendered values and exported cells follow the requested order', async () => {
+test('all 19 table headers, rendered values and exported cells follow the requested order', async () => {
   const { context, run } = loadApp();
   const expected = [
     ['采购单订单下单人', 'buyer'], ['事业部', 'businessUnit'], ['申请人', 'applicant'],
     ['供应商简称', 'supplierShortName'], ['物料编码', 'materialCode'], ['SKU', 'sku'],
-    ['物料名称', 'materialName'], ['规格型号', 'specification'], ['数量', 'quantity'], ['OA备货流程号', 'oaProcessNo'],
+    ['物料名称', 'materialName'], ['数量', 'quantity'], ['OA备货流程号', 'oaProcessNo'],
     ['采购主体', 'purchaseEntity'], ['采购分工明细是否存在', 'materialCodeValid'],
-    ['供应商反馈交期', 'supplierDeliveryDate'], ['采购单订单号', 'purchaseOrderNo'], ['要求货好时间', 'requiredReadyDate'], ['起订量', 'minimumOrderQuantity'],
+    ['今天日期', 'todayDate'], ['天数', 'deliveryDays'], ['供应商反馈交期', 'supplierDeliveryDate'], ['采购单订单号', 'purchaseOrderNo'], ['要求货好时间', 'requiredReadyDate'], ['起订量', 'minimumOrderQuantity'],
     ['起订量是否满足', 'minimumOrderStatus'], ['备货原因', 'stockReason'],
   ];
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const header = html.match(/<table class="detail-table">([\s\S]*?)<\/thead>/)[1];
   assert.deepEqual([...header.matchAll(/<th>(.*?)<\/th>/g)].map(match => match[1]), expected.map(item => item[0]));
   context.row = Object.fromEntries(expected.map(([, key], index) => [key, `value-${index + 1}`]));
-  const cells = [...run('renderDemandTableRow(row)').matchAll(/<td>(.*?)<\/td>/g)].map(match => match[1]);
+  const cells = [...run('renderDemandTableRow(row)').matchAll(/<td>(.*?)<\/td>/g)].map(match => match[1].startsWith('<input') ? match[1].match(/value="([^"]*)"/)[1] : match[1]);
   assert.deepEqual(cells, expected.map((_, index) => `value-${index + 1}`));
   let exported;
   context.window.XLSX.writeFile = (output) => { exported = output; };
@@ -72,7 +72,7 @@ test('all buyers and pages export into one sheet in display order on both export
   run('writeStyledDetailWorkbook = captureStyled');
   await run('downloadDetailWorkbook()');
   assert(styled, 'styled export must receive the single-sheet workbook');
-  assert.deepEqual(JSON.parse(JSON.stringify(styled.shapes)), [{ rowCount: 24, columnCount: 18 }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(styled.shapes)), [{ rowCount: 24, columnCount: 19 }]);
   verify(XLSX.read(XLSX.write(styled.workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' }));
 });
 
@@ -87,14 +87,14 @@ test('quantity exports as numeric cells with zero-decimal formatting and preserv
   const reopened = XLSX.read(XLSX.write(exported, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer', cellNF: true });
   const sheet = reopened.Sheets[reopened.SheetNames[0]];
   for (const [i, value] of [7, 0, -2, 1.5, Number.MAX_SAFE_INTEGER].entries()) {
-    assert.equal(sheet[`I${i + 2}`].t, 'n');
-    assert.equal(sheet[`I${i + 2}`].v, value);
-    assert.equal(sheet[`I${i + 2}`].z, '0');
-    assert(!sheet[`I${i + 2}`].w.includes('.'));
+    assert.equal(sheet[`H${i + 2}`].t, 'n');
+    assert.equal(sheet[`H${i + 2}`].v, value);
+    assert.equal(sheet[`H${i + 2}`].z, '0');
+    assert(!sheet[`H${i + 2}`].w.includes('.'));
   }
-  assert.equal(sheet.I7.v, '');
-  assert.equal(sheet.I8.v, '');
-  assert.equal(sheet.I9.v, 1234);
+  assert.equal(sheet.H7.v, '');
+  assert.equal(sheet.H8.v, '');
+  assert.equal(sheet.H9.v, 1234);
   assert.match(run('buildDetailWorkbookStylesXml()'), /numFmtId="1"[^>]+applyNumberFormat="1"/);
 });
 
@@ -263,14 +263,6 @@ test('供应商按中文名称排序，空值最后，同名稳定，导出与�
  run('state.filters.get("supplierShortName").add("鸿诚")');assert.deepEqual(Array.from(run('getFilteredDemandRows()'),r=>r.materialCode),['1','3']);
 });
 
-test('规格型号来自商品分类表型号字段，兼容规格型号，缺失留空', async () => {
- const {context,run}=loadApp();
- for(const label of ['型号','规格型号','无此字段']){
-  context.tables=[{rows:[['物料编码','领星SKU','SKU','金蝶名称',label],['TEST-SPEC','','SKU-A','物料A',label==='无此字段'?'不能误取':'AB-10']]}];
-  const index=run('buildCategoryIndex(tables)');assert.equal(index.byMaterial.get('test-spec')?.specification??index.byMaterial.get('TEST-SPEC')?.specification,label==='无此字段'?'':'AB-10');
- }
-});
-
 test('手动采购主体统一覆盖页面和导出，清空后恢复来源且不修改原始数据', async () => {
  const {context,run}=loadApp();context.rows=[{materialCode:'A',purchaseEntity:'原主体甲'},{materialCode:'B',purchaseEntity:''}];
  run('state.demandRows=rows;state.purchaseEntityOverride="手填主体";state.filteredRows=getFilteredDemandRows()');
@@ -278,4 +270,14 @@ test('手动采购主体统一覆盖页面和导出，清空后恢复来源且�
  let book;context.window.XLSX.writeFile=w=>{book=w;};await run('downloadDetailWorkbook()');
  const data=XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]],{header:1});const col=data[0].indexOf('采购主体');assert.deepEqual(data.slice(1).map(r=>r[col]),['手填主体','手填主体']);
  run('state.purchaseEntityOverride=""');assert.deepEqual(Array.from(run('getFilteredDemandRows()'),r=>r.purchaseEntity),['原主体甲','']);assert.equal(context.rows[0].purchaseEntity,'原主体甲');
+});
+
+test('交期按北京时间加自然日，覆盖零、空值、跨月跨年闰日及异常',()=>{
+ const {context,run}=loadApp();
+ const calculate=(days,date)=>{context.days=days;context.now=new Date(date);return run('deliveryFields(days,now)');};
+ assert.equal(calculate(0,'2026-10-14T16:01:00Z').supplierDeliveryDate,'2026-10-15');
+ assert.equal(calculate(20,'2026-10-15T00:00:00Z').supplierDeliveryDate,'2026-11-04');
+ assert.equal(calculate(2,'2026-12-31T00:00:00Z').supplierDeliveryDate,'2027-01-02');
+ assert.equal(calculate(1,'2028-02-28T00:00:00Z').supplierDeliveryDate,'2028-02-29');
+ for(const v of ['',undefined,-1,1.5,'abc',36501])assert.equal(calculate(v,'2026-10-15T00:00:00Z').supplierDeliveryDate,'');
 });

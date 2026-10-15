@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>备货分配｜供应链数据清洗</title>
-    <link rel="stylesheet" href="./styles.css?v=20261015-manual-entity" />
+    <link rel="stylesheet" href="./styles.css?v=20261015-delivery-days" />
   </head>
   <body>
     <div class="app-shell">
@@ -91,6 +91,7 @@
             <input id="purchaseEntityInput" type="text" placeholder="例如：浙江迈德斯特医疗器械科技有限公司" aria-describedby="purchaseEntityHint" />
             <small id="purchaseEntityHint">填写后统一用于所有明细及导出表；留空时使用备货需求表中的采购主体。</small>
           </div>
+          <p class="source-note">逐行填写天数后自动计算交期（按自然日，0 表示今天）；留空不计算。</p>
           <div class="detail-filter-row" aria-label="明细筛选器">
             <div class="filter-toolbar" id="filterToolbar">
               <div class="multi-filter" data-filter="businessUnit"></div>
@@ -113,11 +114,12 @@
                   <th>物料编码</th>
                   <th>SKU</th>
                   <th>物料名称</th>
-                  <th>规格型号</th>
                   <th>数量</th>
                   <th>OA备货流程号</th>
                   <th>采购主体</th>
                   <th>采购分工明细是否存在</th>
+                  <th>今天日期</th>
+                  <th>天数</th>
                   <th>供应商反馈交期</th>
                   <th>采购单订单号</th>
                   <th>要求货好时间</th>
@@ -167,12 +169,13 @@
                 <tr><td>物料编码</td><td>备货需求表</td><td>识别码 / 物料编码等</td><td>作为明细主匹配键，用于关联商品分类表和采购分工明细。</td></tr>
                 <tr><td>SKU</td><td>Dim-YL医疗器械商品分类</td><td>SKU（C列）</td><td>按物料编码匹配商品分类表后取得。</td></tr>
                 <tr><td>物料名称</td><td>Dim-YL医疗器械商品分类</td><td>金蝶名称 / 物料名称（D列）</td><td>按物料编码匹配商品分类表后取得。</td></tr>
-                <tr><td>规格型号</td><td>Dim-YL医疗器械商品分类</td><td>规格型号 / 型号</td><td>按物料编码匹配，缺失时留空。</td></tr>
                 <tr><td>数量</td><td>备货需求表</td><td>数量</td><td>读取“数量”列；存在同名列时，读取紧邻“要求货好时间”前的明细数量。缺失、无法定位或非数字时留空并提示待核对，不从其他字段取数。同一物料数量相加，任一来源数量缺失或无效时，合计留空并提示待核对。</td></tr>
                 <tr><td>OA备货流程号</td><td>备货需求表</td><td>流程号 / OA备货流程号等</td><td>同一物料编码的流程号去重后按来源顺序用“/”连接。</td></tr>
                 <tr><td>采购主体</td><td>备货需求表</td><td>采购主体 / 采购公司 / 采购组织等</td><td>优先使用手动填写的采购主体，未填写时读取备货需求表中的采购主体类字段。</td></tr>
                 <tr><td>采购分工明细是否存在</td><td>系统计算</td><td>物料编码</td><td>物料编码存在于 Dim-采购部分工明细时显示“是”，否则显示“否”。</td></tr>
-                <tr><td>供应商反馈交期</td><td>人工填写</td><td>—</td><td>默认留空，供导出后填写供应商反馈交期。</td></tr>
+                <tr><td>今天日期</td><td>系统日期</td><td>北京时间</td><td>自动填写当天日期。</td></tr>
+                <tr><td>天数</td><td>人工填写</td><td>自然日</td><td>输入非负整数，0 表示当天交付。</td></tr>
+                <tr><td>供应商反馈交期</td><td>自动计算</td><td>今天日期＋天数</td><td>天数留空时交期留空。</td></tr>
                 <tr><td>采购单订单号</td><td>人工填写</td><td>—</td><td>默认留空，供导出后填写采购单订单号。</td></tr>
                 <tr><td>要求货好时间</td><td>备货需求表</td><td>要求货好时间 / 要求货好日期等</td><td>直接读取要求货好时间类字段。</td></tr>
                 <tr><td>起订量</td><td>Dim-采购部分工明细</td><td>“产品线明细”工作表 J列</td><td>仅从名称为“产品线明细”的工作表读取，按物料编码匹配。</td></tr>
@@ -188,6 +191,6 @@
     <script src="./vendor/xlsx.full.min.js?v=20260601-1"></script>
     <script src="./vendor/jszip.min.js?v=20260609-1"></script>
 
-    <script src="./file-library.js?v=20261015-manual-entity"></script>
+    <script src="./file-library.js?v=20261015-delivery-days"></script>
   </body>
 </html>

@@ -37,11 +37,12 @@ const DETAIL_COLUMNS = [
   { key: "materialCode", label: "物料编码" },
   { key: "sku", label: "SKU" },
   { key: "materialName", label: "物料名称" },
-  { key: "specification", label: "规格型号" },
   { key: "quantity", label: "数量" },
   { key: "oaProcessNo", label: "OA备货流程号" },
   { key: "purchaseEntity", label: "采购主体" },
   { key: "materialCodeValid", label: "采购分工明细是否存在" },
+  { key: "todayDate", label: "今天日期" },
+  { key: "deliveryDays", label: "天数" },
   { key: "supplierDeliveryDate", label: "供应商反馈交期" },
   { key: "purchaseOrderNo", label: "采购单订单号" },
   { key: "requiredReadyDate", label: "要求货好时间" },
@@ -108,6 +109,15 @@ async function init() {
 }
 
 function bindEvents() {
+  els.detailTableBody?.addEventListener("change", event => {
+    const input = event.target.closest("[data-delivery-days]");
+    if (!input) return;
+    if (!input.checkValidity()) { input.reportValidity(); return; }
+    const row = state.demandRows[Number(input.dataset.deliveryDays)];
+    if (!row) return;
+    row.deliveryDays = input.value === "" ? "" : Number(input.value);
+    renderDemandDashboard();
+  });
   els.purchaseEntityInput?.addEventListener("input", () => {
     state.purchaseEntityOverride = els.purchaseEntityInput.value.trim();
     renderDemandDashboard();
@@ -429,7 +439,6 @@ async function buildDemandAllocationRows(records) {
         sku: category.sku || "",
         materialCodeValid: divisionIndex.materialCodes.has(materialKey) ? "是" : "否",
         materialName: category.materialName || "",
-        specification: category.specification || "",
         quantity,
         requiredReadyDate,
         minimumOrderQuantity,
@@ -547,7 +556,6 @@ function buildCategoryIndex(tables) {
         productLine: TABLE_FIELD_ALIASES.productLine,
         salesSeries: TABLE_FIELD_ALIASES.salesSeries,
         purchaseGroup: TABLE_FIELD_ALIASES.purchaseGroup,
-        specification: ["规格型号", "型号"],
         materialName: ["金蝶名称", "物料名称", "物料名", "商品名称", "品名", "产品名称"],
       })
       : {};
@@ -562,7 +570,6 @@ function buildCategoryIndex(tables) {
         salesSeries: getCellValue(row, columnMap.salesSeries ?? 7),
         purchaseGroup: getCellValue(row, 21) || getCellValue(row, columnMap.purchaseGroup),
         materialName: getCellValue(row, columnMap.materialName ?? 3),
-        specification: getCellValue(row, columnMap.specification),
       });
     });
   });
@@ -861,6 +868,18 @@ function renderDemandDashboard(emptyMessage = "暂无匹配数据") {
   renderPagination();
 }
 
+function deliveryFields(days, now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  const get = type => Number(parts.find(p => p.type === type).value);
+  const y = get('year'), m = get('month'), d = get('day');
+  const format = date => date.toISOString().slice(0,10);
+  const todayDate = format(new Date(Date.UTC(y,m-1,d)));
+  if (days === '' || days == null) return {todayDate, deliveryDays:'', supplierDeliveryDate:''};
+  const n = Number(days);
+  if (!Number.isInteger(n) || n < 0 || n > 36500) return {todayDate, deliveryDays:'', supplierDeliveryDate:''};
+  return {todayDate, deliveryDays:n, supplierDeliveryDate:format(new Date(Date.UTC(y,m-1,d+n)))};
+}
+
 function getFilteredDemandRows() {
   return state.demandRows.filter((row) =>
     FILTER_DEFINITIONS.every((filter) => {
@@ -868,9 +887,10 @@ function getFilteredDemandRows() {
       if (!selected?.size) return true;
       return getRowFilterValues(row, filter.key).some((value) => selected.has(value));
     })
-  ).map(row => state.purchaseEntityOverride
-    ? { ...row, purchaseEntity: state.purchaseEntityOverride }
-    : row).sort((left, right) => {
+  ).map(row => ({ ...row, ...deliveryFields(row.deliveryDays),
+    purchaseEntity: state.purchaseEntityOverride || row.purchaseEntity,
+    deliveryRowIndex: state.demandRows.indexOf(row)
+  })).sort((left, right) => {
     const a = String(left.supplierShortName ?? "").trim();
     const b = String(right.supplierShortName ?? "").trim();
     if (!a || !b) return a ? -1 : b ? 1 : 0;
@@ -1037,12 +1057,19 @@ function renderPagination() {
 function renderDemandTableRow(row) {
   return `
     <tr>
-      ${DETAIL_COLUMNS.map((column) => `<td>${escapeHtml(row[column.key] || "")}</td>`).join("")}
+      ${DETAIL_COLUMNS.map((column) => column.key === "deliveryDays"
+        ? `<td><input class="delivery-days" type="number" min="0" max="36500" step="1" aria-label="${escapeHtml(row.materialCode)} 天数" data-delivery-days="${row.deliveryRowIndex ?? ''}" value="${escapeHtml(row.deliveryDays ?? '')}" placeholder="填写天数"></td>`
+        : `<td>${escapeHtml(row[column.key] ?? "")}</td>`).join("")}
     </tr>
   `;
 }
 
 async function downloadDetailWorkbook() {
+  const invalidDays = document.querySelector('.delivery-days:invalid');
+  if (invalidDays?.reportValidity) { invalidDays.reportValidity(); return; }
+  if (state.filteredRows.some(row => row.deliveryRowIndex !== undefined)) {
+    state.filteredRows = getFilteredDemandRows();
+  }
   if (!state.filteredRows.length) {
     window.alert("暂无可下载的明细数据。");
     return;
@@ -1056,7 +1083,7 @@ async function downloadDetailWorkbook() {
   const sheetRows = [
     DETAIL_COLUMNS.map((column) => column.label),
     ...state.filteredRows.map((row) => DETAIL_COLUMNS.map((column) => {
-      if (column.key !== "quantity") return row[column.key] || "";
+      if (column.key !== "quantity") return row[column.key] ?? "";
       const quantity = Number.isFinite(row.quantityNumber)
         ? row.quantityNumber : getDemandRowQuantity([row.quantity], { quantity: 0 });
       return Number.isFinite(quantity) ? quantity : "";
@@ -1261,8 +1288,10 @@ function getExportColumnWidth(key) {
     materialCode: 18,
     sku: 16,
     materialCodeValid: 18,
+    todayDate: 16,
+    deliveryDays: 12,
+    supplierDeliveryDate: 18,
     materialName: 28,
-    specification: 24,
     quantity: 12,
     requiredReadyDate: 18,
     minimumOrderQuantity: 12,
