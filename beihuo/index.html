@@ -108,6 +108,7 @@
                   <th>物料编码</th>
                   <th>SKU</th>
                   <th>物料名称</th>
+                  <th>规格型号</th>
                   <th>数量</th>
                   <th>OA备货流程号</th>
                   <th>采购主体</th>
@@ -161,6 +162,7 @@
                 <tr><td>物料编码</td><td>备货需求表</td><td>识别码 / 物料编码等</td><td>作为明细主匹配键，用于关联商品分类表和采购分工明细。</td></tr>
                 <tr><td>SKU</td><td>Dim-YL医疗器械商品分类</td><td>SKU（C列）</td><td>按物料编码匹配商品分类表后取得。</td></tr>
                 <tr><td>物料名称</td><td>Dim-YL医疗器械商品分类</td><td>金蝶名称 / 物料名称（D列）</td><td>按物料编码匹配商品分类表后取得。</td></tr>
+                <tr><td>规格型号</td><td>Dim-YL医疗器械商品分类</td><td>规格型号 / 型号</td><td>按物料编码匹配，缺失时留空。</td></tr>
                 <tr><td>数量</td><td>备货需求表</td><td>数量</td><td>读取“数量”列；存在同名列时，读取紧邻“要求货好时间”前的明细数量。缺失、无法定位或非数字时留空并提示待核对，不从其他字段取数。同一物料数量相加，任一来源数量缺失或无效时，合计留空并提示待核对。</td></tr>
                 <tr><td>OA备货流程号</td><td>备货需求表</td><td>流程号 / OA备货流程号等</td><td>同一物料编码的流程号去重后按来源顺序用“/”连接。</td></tr>
                 <tr><td>采购主体</td><td>备货需求表</td><td>采购主体 / 采购公司 / 采购组织等</td><td>直接读取采购主体类字段。</td></tr>
@@ -181,6 +183,6 @@
     <script src="./vendor/xlsx.full.min.js?v=20260601-1"></script>
     <script src="./vendor/jszip.min.js?v=20260609-1"></script>
 
-    <script src="./file-library.js?v=20261014-supplier-sort"></script>
+    <script src="./file-library.js?v=20261015-specification"></script>
   </body>
 </html>

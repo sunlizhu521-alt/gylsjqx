@@ -20,12 +20,12 @@ function loadApp() {
   return { context, elements, run: (code) => vm.runInContext(code, context) };
 }
 
-test('all 17 table headers, rendered values and exported cells follow the requested order', async () => {
+test('all 18 table headers, rendered values and exported cells follow the requested order', async () => {
   const { context, run } = loadApp();
   const expected = [
     ['采购单订单下单人', 'buyer'], ['事业部', 'businessUnit'], ['申请人', 'applicant'],
     ['供应商简称', 'supplierShortName'], ['物料编码', 'materialCode'], ['SKU', 'sku'],
-    ['物料名称', 'materialName'], ['数量', 'quantity'], ['OA备货流程号', 'oaProcessNo'],
+    ['物料名称', 'materialName'], ['规格型号', 'specification'], ['数量', 'quantity'], ['OA备货流程号', 'oaProcessNo'],
     ['采购主体', 'purchaseEntity'], ['采购分工明细是否存在', 'materialCodeValid'],
     ['供应商反馈交期', 'supplierDeliveryDate'], ['采购单订单号', 'purchaseOrderNo'], ['要求货好时间', 'requiredReadyDate'], ['起订量', 'minimumOrderQuantity'],
     ['起订量是否满足', 'minimumOrderStatus'], ['备货原因', 'stockReason'],
@@ -72,7 +72,7 @@ test('all buyers and pages export into one sheet in display order on both export
   run('writeStyledDetailWorkbook = captureStyled');
   await run('downloadDetailWorkbook()');
   assert(styled, 'styled export must receive the single-sheet workbook');
-  assert.deepEqual(JSON.parse(JSON.stringify(styled.shapes)), [{ rowCount: 24, columnCount: 17 }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(styled.shapes)), [{ rowCount: 24, columnCount: 18 }]);
   verify(XLSX.read(XLSX.write(styled.workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' }));
 });
 
@@ -87,14 +87,14 @@ test('quantity exports as numeric cells with zero-decimal formatting and preserv
   const reopened = XLSX.read(XLSX.write(exported, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer', cellNF: true });
   const sheet = reopened.Sheets[reopened.SheetNames[0]];
   for (const [i, value] of [7, 0, -2, 1.5, Number.MAX_SAFE_INTEGER].entries()) {
-    assert.equal(sheet[`H${i + 2}`].t, 'n');
-    assert.equal(sheet[`H${i + 2}`].v, value);
-    assert.equal(sheet[`H${i + 2}`].z, '0');
-    assert(!sheet[`H${i + 2}`].w.includes('.'));
+    assert.equal(sheet[`I${i + 2}`].t, 'n');
+    assert.equal(sheet[`I${i + 2}`].v, value);
+    assert.equal(sheet[`I${i + 2}`].z, '0');
+    assert(!sheet[`I${i + 2}`].w.includes('.'));
   }
-  assert.equal(sheet.H7.v, '');
-  assert.equal(sheet.H8.v, '');
-  assert.equal(sheet.H9.v, 1234);
+  assert.equal(sheet.I7.v, '');
+  assert.equal(sheet.I8.v, '');
+  assert.equal(sheet.I9.v, 1234);
   assert.match(run('buildDetailWorkbookStylesXml()'), /numFmtId="1"[^>]+applyNumberFormat="1"/);
 });
 
@@ -261,4 +261,12 @@ test('供应商按中文名称排序，空值最后，同名稳定，导出与�
  const data=XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]],{header:1});
  assert.deepEqual(data.slice(1).map(r=>r[3]),Array.from(sorted,r=>r.supplierShortName));
  run('state.filters.get("supplierShortName").add("鸿诚")');assert.deepEqual(Array.from(run('getFilteredDemandRows()'),r=>r.materialCode),['1','3']);
+});
+
+test('规格型号来自商品分类表型号字段，兼容规格型号，缺失留空', async () => {
+ const {context,run}=loadApp();
+ for(const label of ['型号','规格型号','无此字段']){
+  context.tables=[{rows:[['物料编码','领星SKU','SKU','金蝶名称',label],['TEST-SPEC','','SKU-A','物料A',label==='无此字段'?'不能误取':'AB-10']]}];
+  const index=run('buildCategoryIndex(tables)');assert.equal(index.byMaterial.get('test-spec')?.specification??index.byMaterial.get('TEST-SPEC')?.specification,label==='无此字段'?'':'AB-10');
+ }
 });

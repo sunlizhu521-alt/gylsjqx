@@ -37,6 +37,7 @@ const DETAIL_COLUMNS = [
   { key: "materialCode", label: "物料编码" },
   { key: "sku", label: "SKU" },
   { key: "materialName", label: "物料名称" },
+  { key: "specification", label: "规格型号" },
   { key: "quantity", label: "数量" },
   { key: "oaProcessNo", label: "OA备货流程号" },
   { key: "purchaseEntity", label: "采购主体" },
@@ -422,6 +423,7 @@ async function buildDemandAllocationRows(records) {
         sku: category.sku || "",
         materialCodeValid: divisionIndex.materialCodes.has(materialKey) ? "是" : "否",
         materialName: category.materialName || "",
+        specification: category.specification || "",
         quantity,
         requiredReadyDate,
         minimumOrderQuantity,
@@ -539,6 +541,7 @@ function buildCategoryIndex(tables) {
         productLine: TABLE_FIELD_ALIASES.productLine,
         salesSeries: TABLE_FIELD_ALIASES.salesSeries,
         purchaseGroup: TABLE_FIELD_ALIASES.purchaseGroup,
+        specification: ["规格型号", "型号"],
         materialName: ["金蝶名称", "物料名称", "物料名", "商品名称", "品名", "产品名称"],
       })
       : {};
@@ -553,6 +556,7 @@ function buildCategoryIndex(tables) {
         salesSeries: getCellValue(row, columnMap.salesSeries ?? 7),
         purchaseGroup: getCellValue(row, 21) || getCellValue(row, columnMap.purchaseGroup),
         materialName: getCellValue(row, columnMap.materialName ?? 3),
+        specification: getCellValue(row, columnMap.specification),
       });
     });
   });
@@ -1250,6 +1254,7 @@ function getExportColumnWidth(key) {
     sku: 16,
     materialCodeValid: 18,
     materialName: 28,
+    specification: 24,
     quantity: 12,
     requiredReadyDate: 18,
     minimumOrderQuantity: 12,
