@@ -1,8 +1,8 @@
 const test=require('node:test'),assert=require('node:assert/strict'),X=require('../vendor/xlsx.full.min.js'),C=require('../fulfillment-core.js');
 function fixture(){const w=X.utils.book_new();for(const name of C.SHEETS){const h=[...C.COLUMNS].reverse();const r=h.map(k=>k==='采购下单人'?'原表采购员':k==='物料编码'?'00123':k==='SKU'?'SKU-001':k==='合同约定交期'?'2026年8月14日':k==='生产中交付时间'?'/':k==='未生产预计交付时间'?'':k==='未交付数量'?0:'样例');X.utils.book_append_sheet(w,X.utils.aoa_to_sheet([['标题'],h,r,r]),name);}return w;}
-test('五表按姓名顺序匹配不同列位，保留重复、零和文本编码',()=>{const r=C.merge(fixture());assert.equal(r.rows.length,10);assert.deepEqual(r.counts.map(x=>x.sheet),C.SHEETS);assert.equal(r.rows[0][0].v,'原表采购员');assert.equal(C.COLUMNS[1],'事业部');assert.equal(r.rows[0][7].v,'00123');assert.equal(r.rows[0][10].v,0);assert.equal(r.rows[0][16].t,'n');assert.equal(r.rows[0][17].v,'/');assert.equal(r.rows[0][18].v,'');const w=X.read(X.write(C.workbook(r),{type:'buffer',bookType:'xlsx'}),{cellNF:true});assert.equal(w.Sheets.汇总表.Q2.z,C.DATE_FORMAT);assert.equal(w.Sheets.汇总表['!autofilter'].ref,'A1:T11');});
+test('五表按姓名顺序匹配不同列位，保留重复、零和文本编码',()=>{const r=C.merge(fixture());assert.equal(r.rows.length,10);assert.deepEqual(r.counts.map(x=>x.sheet),C.SHEETS);assert.equal(r.rows[0][0].v,'原表采购员');assert.equal(C.COLUMNS[1],'事业部');assert.equal(r.rows[0][7].v,'00123');assert.equal(r.rows[0][10].v,0);assert.equal(r.rows[0][16].t,'n');assert.equal(r.rows[0][17].v,'/');assert.equal(r.rows[0][18].v,'');const w=X.read(X.write(C.workbook(r),{type:'buffer',bookType:'xlsx'}),{cellNF:true});assert.equal(w.Sheets.汇总表.Q2.z,C.DATE_FORMAT);assert.equal(w.Sheets.汇总表['!autofilter'].ref,'A1:W11');});
 test('日期真实类型、1904体系、闰日、无效日期与空白',()=>{const c=C.dateCell({v:'2026-08-14 23:59:59'},false);assert.equal(X.SSF.format(c.z,c.v),'2026年8月14日');assert.equal(C.dateCell({v:c.v-1462},true).v,c.v);assert.ok(C.dateCell({v:'2026-02-29'}).invalid);assert.equal(C.dateCell({v:'2024-02-29'}).t,'n');assert.equal(C.dateCell({v:''}).v,'');assert.ok(C.dateCell({v:'10月中旬'}).invalid);});
-test('缺表、缺列、重复列明确阻止导出；日期异常保留且溯源',()=>{let w=fixture();delete w.Sheets.徐英;assert.throws(()=>C.merge(w),/缺少工作表/);w=fixture();w.Sheets.徐英.A2.v='缺失';assert.throws(()=>C.merge(w),/缺少列/);w=fixture();w.Sheets.徐英.U2={t:'s',v:'SKU'};w.Sheets.徐英['!ref']='A1:U4';assert.throws(()=>C.merge(w),/重复列/);w=fixture();w.Sheets.徐英.D3={t:'s',v:'待定'};let r=C.merge(w);assert.equal(r.warnings.length,1);assert.match(r.warnings[0],/徐英!D3/);});
+test('缺表、缺列、重复列明确阻止导出；日期异常保留且溯源',()=>{let w=fixture();delete w.Sheets.徐英;assert.throws(()=>C.merge(w),/缺少工作表/);w=fixture();w.Sheets.徐英.D2.v='缺失';assert.throws(()=>C.merge(w),/缺少列/);w=fixture();w.Sheets.徐英.X2={t:'s',v:'SKU'};w.Sheets.徐英['!ref']='A1:X4';assert.throws(()=>C.merge(w),/重复列/);w=fixture();w.Sheets.徐英.G3={t:'s',v:'待定'};let r=C.merge(w);assert.equal(r.warnings.length,1);assert.match(r.warnings[0],/徐英!G3/);});
 test('导出名称使用上传名称和日期，更新版替换为汇总版',()=>{
  assert.equal(C.exportFilename('订单履约明细跟进表截止2026.10.8-10.10更新版.xlsx'),'订单履约明细跟进表截止2026.10.8-10.10汇总版.xlsx');
  assert.equal(C.exportFilename('订单2026.11.1更新版.XLS'),'订单2026.11.1汇总版.xlsx');
@@ -27,4 +27,14 @@ test('首次基准、重复上传、历史推进及异常不修改旧快照',()=
  assert.throws(()=>C.advance(second,{result:snapshot([['',2]])}),/物料编码为空/);
  assert.equal(second.current,b);assert.equal(second.previous,a);
  assert.deepEqual(C.difference(snapshot([['001',1]]),snapshot([['001','']])).map(r=>r[5].v),[-1]);
+});
+
+test('姓名日期后缀、三列映射、缺列留空及旧历史兼容',()=>{
+ const w=fixture();w.Sheets['邢芳芳1017']=w.Sheets.邢芳芳;delete w.Sheets.邢芳芳;
+ const s=w.Sheets['邢芳芳1017'];s.B2.v='OA备货流程号';s.A3={t:'s',v:'CGDD001'};s.B3={t:'s',v:'OA001'};s.C3={t:'n',v:46275};
+ const r=C.merge(w),row=r.rows[6];assert.equal(row[21].v,'OA001');assert.equal(row[22].v,'CGDD001');assert.equal(X.SSF.format(row[20].z,row[20].v),'2026年9月');
+ assert.equal(r.sources[6].sheet,'邢芳芳1017');
+ for(const col of ['A','B','C'])delete s[col+'2'];const missing=C.merge(w);assert.deepEqual(missing.rows[6].slice(20).map(c=>c.v),['','','']);assert.equal(missing.warnings.length,3);
+ const old={...r,rows:r.rows.map(row=>row.slice(0,20))};assert.deepEqual(C.difference(old,r),[]);assert.doesNotThrow(()=>C.workbook(old));
+ w.Sheets.邢芳芳=s;assert.throws(()=>C.merge(w),/多个工作表/);delete w.Sheets.邢芳芳;w.Sheets['邢芳芳备份']=s;delete w.Sheets['邢芳芳1017'];assert.throws(()=>C.merge(w),/缺少工作表/);
 });
