@@ -146,6 +146,7 @@
       if (!groups.has(subject)) groups.set(subject, { subject, rows: [], total: 0n, info: {}, choices: {}, checks: [] });
       const group = groups.get(subject);
       const row = { ...record };
+      row['备注'] = [record['备注'], record['对接人']].map(v => text(v).trim()).filter(Boolean).join('-');
       try { row._cents = cents(record['本次申请付款金额']); group.total += row._cents; }
       catch (e) { errors.push(`第 ${source} 行：本次申请付款金额${e.message}`); }
       if (group.total > MAX_CENTS) errors.push(`${subject}：合计超出支持范围`);

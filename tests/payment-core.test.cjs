@@ -164,3 +164,12 @@ test('付款总金额列可以完全缺失，总额仅取本次申请付款金�
  const a=C.analyze(C.required,[record]);assert.deepEqual(a.errors,[]);assert.equal(a.groups[0].total,220500n);
  const b=C.analyze([...C.required,'付款总金额'],[row({付款总金额:'#DIV/0!'})]);assert.deepEqual(b.errors,[]);assert.equal(b.groups[0].total,220500n);
 });
+
+test('备注与对接人合并，空值不加连接符且不修改原始记录',()=>{
+ for(const [note,contact,expected] of [['加急','张三','加急-张三'],['','张三','张三'],['加急','','加急'],[null,undefined,''],['  加急  ',' 张三 ','加急-张三'],[0,'张三','0-张三'],['/','张三','/-张三']]){
+  const source=row({备注:note,对接人:contact});
+  const result=C.analyze([...C.required,'对接人'],[source]);
+  assert.deepEqual(result.errors,[]);assert.equal(result.groups[0].rows[0].备注,expected);assert.equal(source.备注,note);
+  assert.equal(C.analyze([...C.required,'对接人'],[source]).groups[0].rows[0].备注,expected);
+ }
+});

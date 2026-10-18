@@ -33,7 +33,7 @@ const base = (extra = {}) => ({
         if (options.formulaError) ws.L2 = { t: 'e', v: 15, f: '1/0' };
         const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '付款明细');
         return Array.from(new Uint8Array(XLSX.write(wb, { type: 'array', bookType: options.xls ? 'biff8' : 'xlsx' })));
-      }, { rows, headers: ['填写时间', ...C.required.filter(h => !options.noBank || h !== '开户银行及账号'), ...(options.ignoredTotalError ? ['付款总金额'] : [])], options });
+      }, { rows, headers: ['填写时间', ...C.required.filter(h => !options.noBank || h !== '开户银行及账号'), '对接人', ...(options.ignoredTotalError ? ['付款总金额'] : [])], options });
       await page.locator('#paymentExcel').setInputFiles({ name: options.xls ? '测试.xls' : '测试.xlsx', mimeType: 'application/octet-stream', buffer: Buffer.from(array) });
       await page.waitForFunction(() => !document.querySelector('[data-reference="detail"]').textContent.includes('正在读取') && document.querySelector('#paymentGroups').textContent.length > 0);
       for (const input of await page.locator('[data-field="计划付款日期"]').all()) await input.fill('2026-09-25');
@@ -52,7 +52,7 @@ const base = (extra = {}) => ({
       if (name === 'synthetic-single') assert.equal(download.suggestedFilename(), `2026-09-25甲公司2205.00.${kind}`);
       const p = path.join(out, `${name}.${kind}`); await download.saveAs(p); return p;
     }
-    await upload([base()]); await generate();
+    await upload([base({备注:'加急',对接人:'张三'})]); await generate();
     assert.match(await page.locator('#paymentStatus').innerText(), /已生成 1 页/);
     const sample = await save('docx', 'synthetic-single'); await save('pdf', 'synthetic-single');
     const docStats = await page.evaluate(async bytes => {
@@ -62,6 +62,7 @@ const base = (extra = {}) => ({
       return { text: [...d.getElementsByTagNameNS(ns, 't')].map(e => e.textContent).join(''), sections: d.getElementsByTagNameNS(ns, 'sectPr').length };
     }, [...await fs.readFile(sample)]);
     assert.equal(docStats.sections, 1);
+    assert.ok(docStats.text.includes('加急-张三'));
     for (const text of ['贰仟贰佰零伍元整', '☑ 采购货款', '☑ 对公转账', '三、审批意见', '四、财务办结记录', '整体付款凭证：详见银行付款单', '0012 3456 7890 1234']) assert.ok(docStats.text.includes(text), text);
     assert.equal((docStats.text.match(/2,205\.00/g) || []).length, 3);
     assert.ok(docStats.text.includes('单位:测试供应商有限公司'));
