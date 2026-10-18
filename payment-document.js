@@ -146,6 +146,20 @@
     const align = title ? 'center' : attr(all(p, 'jc')[0], 'val') || 'left';
     return { element: p, value, size, line, bold, align, lines, height: lines.length * line };
   }
+  function detailWidths(table, width, config, ctx) {
+    const rows = children(table, 'tr').slice(0, -1);
+    ctx.font = `bold ${Math.max(1, Math.floor(config.table * 2) / 2)}px ${FONT}`;
+    const measure = value => Math.max(...String(value).split('\n').map(line => ctx.measureText(line).width));
+    const headers = children(rows[0], 'tc');
+    const minimum = headers.map(cell => measure(cellText(cell)) / .92 + config.pad * 2 + 2);
+    const demand = minimum.map((min, col) => {
+      const longest = Math.max(min, ...rows.slice(1).map(row => measure(cellText(children(row, 'tc')[col])) / .92 + config.pad * 2));
+      return Math.sqrt(Math.max(0, longest - min));
+    });
+    const base = minimum.reduce((a, b) => a + b, 0), total = demand.reduce((a, b) => a + b, 0);
+    if (base >= width) return minimum.map(v => width * v / base);
+    return minimum.map((v, i) => v + (width - base) * (total ? demand[i] / total : 1 / minimum.length));
+  }
   function measureLayout(filled, config) {
     const ctx = document.createElement('canvas').getContext('2d');
     const width = PAGE.width - config.mx * 2, blocks = [];
@@ -159,7 +173,7 @@
         blocks.push({ type: 'p', ...p, gap }); height += p.height + gap;
       } else if (el.localName === 'tbl') {
         const raw = children(children(el, 'tblGrid')[0], 'gridCol').map(e => Number(attr(e, 'w')));
-        const sum = raw.reduce((a, b) => a + b, 0), grid = raw.map(w => width * w / sum);
+        const sum = raw.reduce((a, b) => a + b, 0), grid = tableIndex === 1 ? detailWidths(el, width, config, ctx) : raw.map(w => width * w / sum);
         const rows = children(el, 'tr').map(row => {
           let col = 0;
           const cells = children(row, 'tc').map(cell => {

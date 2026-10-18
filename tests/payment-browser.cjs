@@ -52,17 +52,19 @@ const base = (extra = {}) => ({
       if (name === 'synthetic-single') assert.equal(download.suggestedFilename(), `2026-09-25甲公司2205.00.${kind}`);
       const p = path.join(out, `${name}.${kind}`); await download.saveAs(p); return p;
     }
-    await upload([base({备注:'加急',对接人:'张三'})]); await generate();
+    await upload([base({备注:'加急 AP00027464（￥175714.10） AP00027463（￥7049.90） AP00027462（￥-89156.00）',对接人:'张三'})]); await generate();
     assert.match(await page.locator('#paymentStatus').innerText(), /已生成 1 页/);
     const sample = await save('docx', 'synthetic-single'); await save('pdf', 'synthetic-single');
     const docStats = await page.evaluate(async bytes => {
       const z = await JSZip.loadAsync(new Uint8Array(bytes));
       const d = new DOMParser().parseFromString(await z.file('word/document.xml').async('string'), 'application/xml');
       const ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
-      return { text: [...d.getElementsByTagNameNS(ns, 't')].map(e => e.textContent).join(''), sections: d.getElementsByTagNameNS(ns, 'sectPr').length };
+      return { widths: [...d.getElementsByTagNameNS(ns, 'tbl')[1].getElementsByTagNameNS(ns, 'gridCol')].map(e=>Number(e.getAttributeNS(ns,'w'))), text: [...d.getElementsByTagNameNS(ns, 't')].map(e => e.textContent).join(''), sections: d.getElementsByTagNameNS(ns, 'sectPr').length };
     }, [...await fs.readFile(sample)]);
     assert.equal(docStats.sections, 1);
-    assert.ok(docStats.text.includes('加急-张三'));
+    assert.ok(docStats.text.includes('AP00027462（￥-89156.00）-张三'));
+    assert.ok(docStats.widths[9] > docStats.widths[4], 'long remarks receive more width than empty amount columns');
+    assert.ok(docStats.widths.every(v => v > 0));
     for (const text of ['贰仟贰佰零伍元整', '☑ 采购货款', '☑ 对公转账', '三、审批意见', '四、财务办结记录', '整体付款凭证：详见银行付款单', '0012 3456 7890 1234']) assert.ok(docStats.text.includes(text), text);
     assert.equal((docStats.text.match(/2,205\.00/g) || []).length, 3);
     assert.ok(docStats.text.includes('单位:测试供应商有限公司'));
