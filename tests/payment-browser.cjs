@@ -62,7 +62,7 @@ const base = (extra = {}) => ({
       return { sizes: [...d.getElementsByTagNameNS(ns, 'tbl')[1].getElementsByTagNameNS(ns, 'sz')].filter(e=>e.parentNode.parentNode.localName==='r').map(e=>Number(e.getAttributeNS(ns,'val'))), widths: [...d.getElementsByTagNameNS(ns, 'tbl')[1].getElementsByTagNameNS(ns, 'gridCol')].map(e=>Number(e.getAttributeNS(ns,'w'))), text: [...d.getElementsByTagNameNS(ns, 't')].map(e => e.textContent).join(''), sections: d.getElementsByTagNameNS(ns, 'sectPr').length };
     }, [...await fs.readFile(sample)]);
     assert.equal(docStats.sections, 1);
-    assert.ok(Math.min(...docStats.sizes) >= 22, 'short payment document uses at least 11pt text');
+    assert.ok(docStats.sizes.length > 0 && docStats.sizes.every(size => size === 11), 'payment detail text uses exactly 5.5pt');
     assert.ok(docStats.text.includes('AP00027462（￥-89156.00）-张三'));
     assert.ok(docStats.widths[9] > docStats.widths[4], 'long remarks receive more width than empty amount columns');
     assert.ok(docStats.widths.every(v => v > 0));

@@ -339,7 +339,7 @@
     layouts.forEach((l, i) => {
       const card = document.createElement('section'); card.className = 'payment-preview';
       const label = document.createElement('p');
-      label.textContent = `${groups[i].subject} · 第 ${i + 1} 页 / 共 ${layouts.length} 页 · 正文 ${(Math.floor(l.body * 2) / 2).toFixed(1)} pt，表格 ${(Math.floor(l.table * 2) / 2).toFixed(1)} pt${l.table < 6.5 ? '（明细较多，已继续压缩，请放大核对）' : ''}`;
+      label.textContent = `${groups[i].subject} · 第 ${i + 1} 页 / 共 ${layouts.length} 页 · 正文 ${(Math.floor(l.body * 2) / 2).toFixed(1)} pt，其他表格 ${(Math.floor(l.table * 2) / 2).toFixed(1)} pt，付款明细 ${(Math.floor(Math.min(5.5,l.table) * 2) / 2).toFixed(1)} pt${l.table < 5.5 ? '（明细较多，已继续压缩，请放大核对）' : ''}`;
       const canvas = D.canvas(l); canvas.setAttribute('aria-label', `${groups[i].subject}申请单预览`);
       card.append(label, canvas);
       if (groups.length > 1) {

@@ -172,20 +172,21 @@
         const gap = config.bodyLine * .4;
         blocks.push({ type: 'p', ...p, gap }); height += p.height + gap;
       } else if (el.localName === 'tbl') {
+        const tableConfig = tableIndex === 1 ? { ...config, table: Math.min(5.5, config.table), tableLine: Math.min(7, config.tableLine) } : config;
         const raw = children(children(el, 'tblGrid')[0], 'gridCol').map(e => Number(attr(e, 'w')));
-        const sum = raw.reduce((a, b) => a + b, 0), grid = tableIndex === 1 ? detailWidths(el, width, config, ctx) : raw.map(w => width * w / sum);
+        const sum = raw.reduce((a, b) => a + b, 0), grid = tableIndex === 1 ? detailWidths(el, width, tableConfig, ctx) : raw.map(w => width * w / sum);
         const rows = children(el, 'tr').map(row => {
           let col = 0;
           const cells = children(row, 'tc').map(cell => {
             const span = Number(attr(all(cell, 'gridSpan')[0], 'val') || 1);
             const cw = grid.slice(col, col + span).reduce((a, b) => a + b, 0); col += span;
-            const ps = children(cell, 'p').map(p => paragraphModel(p, config.table, config.tableLine, cw - config.pad * 2, ctx));
+            const ps = children(cell, 'p').map(p => paragraphModel(p, tableConfig.table, tableConfig.tableLine, cw - config.pad * 2, ctx));
             const fill = attr(all(cell, 'shd')[0], 'fill');
             return { element: cell, span, width: cw, ps, height: ps.reduce((a, p) => a + p.height, 0), fill: fill && /^[0-9a-f]{6}$/i.test(fill) ? '#' + fill : '#ffffff' };
           });
           // Space for handwriting remains even on a one-row application.
-          const minimum = tableIndex >= 2 ? config.tableLine * 1.7 : config.tableLine;
-          const contentHeight = Math.max(minimum, ...cells.map(c => c.height)) + config.pad * 2 + config.tableLine * .15;
+          const minimum = tableIndex >= 2 ? tableConfig.tableLine * 1.7 : tableConfig.tableLine;
+          const contentHeight = Math.max(minimum, ...cells.map(c => c.height)) + config.pad * 2 + tableConfig.tableLine * .15;
           // Word adds border geometry outside the minimum trHeight. Account for it
           // in the page budget, rather than applying the allowance twice to the row.
           return { element: row, cells, contentHeight, height: contentHeight + 1.2 };
