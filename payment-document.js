@@ -200,12 +200,12 @@
   async function layout(template, group) {
     await document.fonts.ready;
     const filled = fill(template, group);
-    let config = { body: 8, table: 7, bodyLine: 10, tableLine: 9, mx: 17.01, my: 14.17, pad: 1.4 };
+    let config = { body: 12, table: 11, bodyLine: 15, tableLine: 14, mx: 17.01, my: 14.17, pad: 1.4 };
     for (let attempt = 0; attempt < 60; attempt++) {
       const result = measureLayout(filled, config);
       // Reserve Word's required terminal paragraph and rounding/font differences.
       if (result.height <= PAGE.height - config.my * 2 - 24) return result;
-      if (attempt === 0) config = { body: 7, table: 6.5, bodyLine: 10, tableLine: 9, mx: 11.34, my: 11.34, pad: 1 };
+      if (attempt === 0) config = { ...config, mx: 11.34, my: 11.34, pad: 1 };
       else {
         const factor = Math.min(.94, (PAGE.height - config.my * 2 - 30) / result.height);
         config = { ...config, body: config.body * factor, table: config.table * factor, bodyLine: config.bodyLine * factor, tableLine: config.tableLine * factor, pad: config.pad * factor };
