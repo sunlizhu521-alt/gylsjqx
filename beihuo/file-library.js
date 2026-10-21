@@ -1057,7 +1057,7 @@ function renderPagination() {
 function renderDemandTableRow(row) {
   return `
     <tr>
-      ${DETAIL_COLUMNS.map((column) => column.key === "deliveryDays"
+      ${DETAIL_COLUMNS.filter(column => column.key !== "stockReason").map((column) => column.key === "deliveryDays"
         ? `<td><input class="delivery-days" type="number" min="0" max="36500" step="1" aria-label="${escapeHtml(row.materialCode)} 天数" data-delivery-days="${row.deliveryRowIndex ?? ''}" value="${escapeHtml(row.deliveryDays ?? '')}" placeholder="填写天数"></td>`
         : `<td>${escapeHtml(row[column.key] ?? "")}</td>`).join("")}
     </tr>
@@ -1079,12 +1079,47 @@ async function downloadDetailWorkbook() {
     return;
   }
 
+  const groups = new Map();
+  for (const row of state.filteredRows) {
+    const buyer = String(row.buyer ?? '').trim();
+    if (!groups.has(buyer)) groups.set(buyer, []);
+    groups.get(buyer).push(row);
+  }
+  const stamp = formatFileTimestamp(new Date());
+  if (groups.size > 1 && !window.JSZip) {
+    window.alert('打包组件未加载，请刷新页面后重试。');
+    return;
+  }
+  try {
+    const archive = groups.size > 1 ? new window.JSZip() : null;
+    let index = 0;
+    for (const [buyer, rows] of groups) {
+      const { workbook, sheetShapes } = buildDetailWorkbook(rows);
+      const safeBuyer = (buyer || '未填写采购下单人').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 80);
+      const fileName = `备货需求分配明细_${++index}_${safeBuyer}_${stamp}.xlsx`;
+      if (archive) {
+        const blob = await writeStyledDetailWorkbook(workbook, sheetShapes);
+        archive.file(fileName, await blob.arrayBuffer());
+      } else if (window.JSZip) {
+        await writeStyledDetailWorkbook(workbook, sheetShapes, fileName);
+      } else {
+        window.XLSX.writeFile(workbook, fileName);
+      }
+    }
+    if (archive) downloadBlob(await archive.generateAsync({ type: 'blob' }), `备货需求分配明细_按采购下单人_${stamp}.zip`);
+  } catch (error) {
+    console.error('buyer workbook export failed', error);
+    window.alert('导出失败：' + error.message + '，请重试。');
+  }
+}
+
+function buildDetailWorkbook(rows) {
   const workbook = window.XLSX.utils.book_new();
   // WPS saves its native row/column reading highlight in this boolean custom property.
   workbook.Custprops = { KSOReadingLayout: true };
   const sheetRows = [
     DETAIL_COLUMNS.map((column) => column.label),
-    ...state.filteredRows.map((row) => DETAIL_COLUMNS.map((column) => {
+    ...rows.map((row) => DETAIL_COLUMNS.map((column) => {
       if (column.key !== "quantity") return row[column.key] ?? "";
       const quantity = Number.isFinite(row.quantityNumber)
         ? row.quantityNumber : getDemandRowQuantity([row.quantity], { quantity: 0 });
@@ -1097,24 +1132,13 @@ async function downloadDetailWorkbook() {
     const cell = worksheet[window.XLSX.utils.encode_cell({ r: rowIndex, c: quantityColumn })];
     if (cell?.t === "n") cell.z = "0";
   }
-  addDeliveryFormulas(worksheet, state.filteredRows);
+  addDeliveryFormulas(worksheet, rows);
   workbook.Workbook = { CalcPr: { calcMode: "auto", fullCalcOnLoad: true, forceFullCalc: true } };
   worksheet["!cols"] = getAutoExportColumns(sheetRows);
   window.XLSX.utils.book_append_sheet(workbook, worksheet, "备货需求分配明细");
   const sheetShapes = [{ rowCount: sheetRows.length, columnCount: DETAIL_COLUMNS.length }];
 
-  const fileName = `备货需求分配明细_${formatFileTimestamp(new Date())}.xlsx`;
-  if (!window.JSZip) {
-    window.XLSX.writeFile(workbook, fileName);
-    return;
-  }
-
-  try {
-    await writeStyledDetailWorkbook(workbook, sheetShapes, fileName);
-  } catch (error) {
-    console.warn("styled workbook export failed", error);
-    window.XLSX.writeFile(workbook, fileName);
-  }
+  return { workbook, sheetShapes };
 }
 
 function addDeliveryFormulas(sheet, rows) {
@@ -1156,7 +1180,8 @@ async function writeStyledDetailWorkbook(workbook, sheetShapes, fileName) {
     type: "blob",
     mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
-  downloadBlob(blob, fileName);
+  if (fileName) downloadBlob(blob, fileName);
+  return blob;
 }
 
 function buildDetailWorkbookStylesXml() {

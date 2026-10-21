@@ -32,49 +32,25 @@ test('all 19 table headers, rendered values and exported cells follow the reques
   ];
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const header = html.match(/<table class="detail-table">([\s\S]*?)<\/thead>/)[1];
-  assert.deepEqual([...header.matchAll(/<th>(.*?)<\/th>/g)].map(match => match[1]), expected.map(item => item[0]));
+  assert.deepEqual([...header.matchAll(/<th>(.*?)<\/th>/g)].map(match => match[1]), expected.filter(item => item[1] !== 'stockReason').map(item => item[0]));
   context.row = Object.fromEntries(expected.map(([, key], index) => [key, `value-${index + 1}`]));
   const cells = [...run('renderDemandTableRow(row)').matchAll(/<td>(.*?)<\/td>/g)].map(match => match[1].startsWith('<input') ? match[1].match(/value="([^"]*)"/)[1] : match[1]);
-  assert.deepEqual(cells, expected.map((_, index) => `value-${index + 1}`));
+  assert.deepEqual(cells, expected.slice(0,-1).map((_, index) => `value-${index + 1}`));
   let exported;
   context.window.XLSX.writeFile = (output) => { exported = output; };
   run('state.filteredRows = [row]');
   await run('downloadDetailWorkbook()');
   const output = XLSX.utils.sheet_to_json(exported.Sheets[exported.SheetNames[0]], { header: 1 });
   assert.deepEqual(output[0], expected.map(item => item[0]));
-  assert.deepEqual(output[1], cells.map((value, i) => expected[i][1] === 'quantity' ? '' : value));
+  assert.deepEqual(output[1], expected.map(([,key],i) => key === 'quantity' ? '' : `value-${i+1}`));
 });
 
-test('all buyers and pages export into one sheet in display order on both export paths', async () => {
-  const { context, run } = loadApp();
-  context.rows = Array.from({ length: 23 }, (_, i) => ({
-    buyer: ['采购乙', '采购甲', ''][i % 3],
-    materialCode: `TEST-${i}`, quantity: String(i),
-    purchaseOrderNo: i === 0 ? 'PO001' : '', supplierDeliveryDate: '',
-  }));
-  run('state.filteredRows = rows; state.currentPage = 2');
-  let exported;
-  context.window.XLSX.writeFile = workbook => { exported = workbook; };
-  await run('downloadDetailWorkbook()');
-  const verify = workbook => {
-    assert.equal(workbook.Custprops?.KSOReadingLayout, true, 'WPS native reading highlight is enabled on both export paths');
-    assert.deepEqual(Array.from(workbook.SheetNames), ['备货需求分配明细']);
-    const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' });
-    assert.equal(data.length, 24);
-    for (const key of ['buyer', 'materialCode', 'quantity', 'purchaseOrderNo', 'supplierDeliveryDate']) {
-      const labels = { buyer: '采购单订单下单人', materialCode: '物料编码', quantity: '数量', purchaseOrderNo: '采购单订单号', supplierDeliveryDate: '供应商反馈交期' };
-      assert.deepEqual(data.slice(1).map(row => row[data[0].indexOf(labels[key])]), context.rows.map(row => key === 'quantity' ? Number(row[key]) : row[key]));
-    }
-  };
-  verify(exported);
-  context.window.JSZip = {};
-  let styled;
-  context.captureStyled = (workbook, shapes) => { styled = { workbook, shapes }; };
-  run('writeStyledDetailWorkbook = captureStyled');
-  await run('downloadDetailWorkbook()');
-  assert(styled, 'styled export must receive the single-sheet workbook');
-  assert.deepEqual(JSON.parse(JSON.stringify(styled.shapes)), [{ rowCount: 24, columnCount: 19 }]);
-  verify(XLSX.read(XLSX.write(styled.workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' }));
+test('per-buyer workbooks preserve rows, reasons, formulas and WPS highlight',()=>{
+ const {context,run}=loadApp();
+ context.rows=[{buyer:'甲',quantity:0,stockReason:'需要保留',todayDate:'2026-10-21',deliveryDays:2,supplierDeliveryDate:'2026-10-23'},{buyer:'甲',quantity:3,stockReason:'另一个原因'}];
+ const output=run('buildDetailWorkbook(rows)');
+ const w=XLSX.read(XLSX.write(output.workbook,{type:'buffer',bookType:'xlsx'}),{type:'buffer'});
+ assert.equal(w.Custprops.KSOReadingLayout,true);assert.equal(w.Sheets.备货需求分配明细.S2.v,'需要保留');assert.equal(w.Sheets.备货需求分配明细.H2.v,0);assert.equal(w.Sheets.备货需求分配明细.N2.f,'IF(M2="","",L2+M2)');assert.equal(w.Sheets.备货需求分配明细['!ref'],'A1:S3');
 });
 
 test('quantity exports as numeric cells with zero-decimal formatting and preserves missing values', async () => {

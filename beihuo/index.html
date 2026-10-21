@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>备货分配｜供应链数据清洗</title>
-    <link rel="stylesheet" href="./styles.css?v=20261015-wps-highlight" />
+    <link rel="stylesheet" href="./styles.css?v=20261021-buyer-export" />
   </head>
   <body>
     <div class="app-shell">
@@ -82,7 +82,7 @@
               <h2>备货需求分配明细 <span class="inline-total" id="quantityTotal">数量合计：0</span></h2>
             </div>
             <div class="detail-actions">
-              <button id="downloadDetailButton" class="secondary-button" type="button" disabled>下载表格</button>
+              <button id="downloadDetailButton" class="secondary-button" type="button" disabled>按采购下单人下载</button>
               <span class="upload-state" id="detailState">暂无数据</span>
             </div>
           </div>
@@ -125,7 +125,6 @@
                   <th>要求货好时间</th>
                   <th>起订量</th>
                   <th>起订量是否满足</th>
-                  <th>备货原因</th>
                 </tr>
               </thead>
               <tbody id="detailTableBody"></tbody>
@@ -191,6 +190,6 @@
     <script src="./vendor/xlsx.full.min.js?v=20260601-1"></script>
     <script src="./vendor/jszip.min.js?v=20260609-1"></script>
 
-    <script src="./file-library.js?v=20261015-wps-highlight"></script>
+    <script src="./file-library.js?v=20261021-buyer-export"></script>
   </body>
 </html>
