@@ -24,6 +24,7 @@ const FILTER_DEFINITIONS = [
   { key: "purchaseGroup", label: "采购组" },
   { key: "buyer", label: "采购订单下单人" },
   { key: "supplierShortName", label: "供应商简称" },
+  { key: "materialCodeValid", label: "采购分工明细是否存在" },
 ];
 const LINKED_FILTER_GROUPS = [
   ["productLine", "salesSeries"],
@@ -50,6 +51,7 @@ const DETAIL_COLUMNS = [
   { key: "minimumOrderStatus", label: "起订量是否满足" },
   { key: "stockReason", label: "备货原因" },
 ];
+const EXPORT_COLUMNS = DETAIL_COLUMNS.filter(column => column.key !== "materialCodeValid");
 const TABLE_FIELD_ALIASES = {
   productLine: ["销售产品线", "产品线", "一级产品线", "销售线"],
   salesSeries: ["销售系列", "系列", "产品系列", "销售产品系列"],
@@ -1118,8 +1120,8 @@ function buildDetailWorkbook(rows) {
   // WPS saves its native row/column reading highlight in this boolean custom property.
   workbook.Custprops = { KSOReadingLayout: true };
   const sheetRows = [
-    DETAIL_COLUMNS.map((column) => column.label),
-    ...rows.map((row) => DETAIL_COLUMNS.map((column) => {
+    EXPORT_COLUMNS.map((column) => column.label),
+    ...rows.map((row) => EXPORT_COLUMNS.map((column) => {
       if (column.key !== "quantity") return row[column.key] ?? "";
       const quantity = Number.isFinite(row.quantityNumber)
         ? row.quantityNumber : getDemandRowQuantity([row.quantity], { quantity: 0 });
@@ -1127,7 +1129,7 @@ function buildDetailWorkbook(rows) {
     })),
   ];
   const worksheet = window.XLSX.utils.aoa_to_sheet(sheetRows);
-  const quantityColumn = DETAIL_COLUMNS.findIndex((column) => column.key === "quantity");
+  const quantityColumn = EXPORT_COLUMNS.findIndex((column) => column.key === "quantity");
   for (let rowIndex = 1; rowIndex < sheetRows.length; rowIndex += 1) {
     const cell = worksheet[window.XLSX.utils.encode_cell({ r: rowIndex, c: quantityColumn })];
     if (cell?.t === "n") cell.z = "0";
@@ -1136,14 +1138,14 @@ function buildDetailWorkbook(rows) {
   workbook.Workbook = { CalcPr: { calcMode: "auto", fullCalcOnLoad: true, forceFullCalc: true } };
   worksheet["!cols"] = getAutoExportColumns(sheetRows);
   window.XLSX.utils.book_append_sheet(workbook, worksheet, "备货需求分配明细");
-  const sheetShapes = [{ rowCount: sheetRows.length, columnCount: DETAIL_COLUMNS.length }];
+  const sheetShapes = [{ rowCount: sheetRows.length, columnCount: EXPORT_COLUMNS.length }];
 
   return { workbook, sheetShapes };
 }
 
 function addDeliveryFormulas(sheet, rows) {
   const X = window.XLSX;
-  const col = key => DETAIL_COLUMNS.findIndex(c => c.key === key);
+  const col = key => EXPORT_COLUMNS.findIndex(c => c.key === key);
   const serial = value => {
     const [y,m,d] = value.split('-').map(Number);
     return (Date.UTC(y,m-1,d)-Date.UTC(1899,11,30))/86400000;
@@ -1231,13 +1233,13 @@ function styleDetailWorksheetXml(xml, shape) {
   const sheetData = documentXml.querySelector("sheetData");
   if (!sheetData) return xml;
 
-  const wrapColumnIndex = DETAIL_COLUMNS.findIndex((column) => column.key === "stockReason") + 1;
-  const quantityColumnIndex = DETAIL_COLUMNS.findIndex((column) => column.key === "quantity") + 1;
+  const wrapColumnIndex = EXPORT_COLUMNS.findIndex((column) => column.key === "stockReason") + 1;
+  const quantityColumnIndex = EXPORT_COLUMNS.findIndex((column) => column.key === "quantity") + 1;
   for (let rowIndex = 1; rowIndex <= shape.rowCount; rowIndex += 1) {
     const row = ensureWorksheetRow(documentXml, sheetData, rowIndex);
     for (let columnIndex = 1; columnIndex <= shape.columnCount; columnIndex += 1) {
       const cell = ensureWorksheetCell(documentXml, row, rowIndex, columnIndex);
-      const styleId = rowIndex === 1 ? "1" : columnIndex === quantityColumnIndex ? "4" : ["todayDate", "supplierDeliveryDate"].includes(DETAIL_COLUMNS[columnIndex-1]?.key) ? "5" : columnIndex === wrapColumnIndex ? "3" : "2";
+      const styleId = rowIndex === 1 ? "1" : columnIndex === quantityColumnIndex ? "4" : ["todayDate", "supplierDeliveryDate"].includes(EXPORT_COLUMNS[columnIndex-1]?.key) ? "5" : columnIndex === wrapColumnIndex ? "3" : "2";
       cell.setAttribute("s", styleId);
     }
   }
@@ -1356,7 +1358,7 @@ function getExportColumnMaxWidth(key) {
 }
 
 function getAutoExportColumns(sheetRows) {
-  return DETAIL_COLUMNS.map((column, columnIndex) => {
+  return EXPORT_COLUMNS.map((column, columnIndex) => {
     const contentWidth = sheetRows.reduce((width, row) => {
       const cellWidth = getTextDisplayWidth(row?.[columnIndex]);
       return Math.max(width, cellWidth);

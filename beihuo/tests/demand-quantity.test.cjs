@@ -20,7 +20,7 @@ function loadApp() {
   return { context, elements, run: (code) => vm.runInContext(code, context) };
 }
 
-test('all 19 table headers, rendered values and exported cells follow the requested order', async () => {
+test('preview and export table headers, rendered values and exported cells follow the requested order', async () => {
   const { context, run } = loadApp();
   const expected = [
     ['采购单订单下单人', 'buyer'], ['事业部', 'businessUnit'], ['申请人', 'applicant'],
@@ -41,8 +41,8 @@ test('all 19 table headers, rendered values and exported cells follow the reques
   run('state.filteredRows = [row]');
   await run('downloadDetailWorkbook()');
   const output = XLSX.utils.sheet_to_json(exported.Sheets[exported.SheetNames[0]], { header: 1 });
-  assert.deepEqual(output[0], expected.map(item => item[0]));
-  assert.deepEqual(output[1], expected.map(([,key],i) => key === 'quantity' ? '' : `value-${i+1}`));
+  assert.deepEqual(output[0], expected.filter(item => item[1] !== "materialCodeValid").map(item => item[0]));
+  assert.deepEqual(output[1], expected.map(([,key],i) => key === 'quantity' ? '' : `value-${i+1}`).filter((_,i) => i !== 10));
 });
 
 test('per-buyer workbooks preserve rows, reasons, formulas and WPS highlight',()=>{
@@ -50,7 +50,7 @@ test('per-buyer workbooks preserve rows, reasons, formulas and WPS highlight',()
  context.rows=[{buyer:'甲',quantity:0,stockReason:'需要保留',todayDate:'2026-10-21',deliveryDays:2,supplierDeliveryDate:'2026-10-23'},{buyer:'甲',quantity:3,stockReason:'另一个原因'}];
  const output=run('buildDetailWorkbook(rows)');
  const w=XLSX.read(XLSX.write(output.workbook,{type:'buffer',bookType:'xlsx'}),{type:'buffer'});
- assert.equal(w.Custprops.KSOReadingLayout,true);assert.equal(w.Sheets.备货需求分配明细.S2.v,'需要保留');assert.equal(w.Sheets.备货需求分配明细.H2.v,0);assert.equal(w.Sheets.备货需求分配明细.N2.f,'IF(M2="","",L2+M2)');assert.equal(w.Sheets.备货需求分配明细['!ref'],'A1:S3');
+ assert.equal(w.Custprops.KSOReadingLayout,true);assert.equal(w.Sheets.备货需求分配明细.R2.v,'需要保留');assert.equal(w.Sheets.备货需求分配明细.H2.v,0);assert.equal(w.Sheets.备货需求分配明细.M2.f,'IF(L2="","",K2+L2)');assert.equal(w.Sheets.备货需求分配明细['!ref'],'A1:R3');
 });
 
 test('quantity exports as numeric cells with zero-decimal formatting and preserves missing values', async () => {
@@ -261,7 +261,7 @@ test('交期按北京时间加自然日，覆盖零、空值、跨月跨年闰�
 
 test('下载日期保留TODAY及加天数公式，空值和0均保留，重开不丢失',()=>{
  const {context,run}=loadApp();context.sheet={};context.rows=[{todayDate:'2026-10-15',deliveryDays:20,supplierDeliveryDate:'2026-11-04'},{todayDate:'2026-10-15',deliveryDays:'',supplierDeliveryDate:''},{todayDate:'2026-10-15',deliveryDays:0,supplierDeliveryDate:'2026-10-15'}];
- run('addDeliveryFormulas(sheet,rows)');context.sheet['!ref']='A1:S4';
+ run('addDeliveryFormulas(sheet,rows)');context.sheet['!ref']='A1:R4';
  const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,context.sheet,'测试');const sheet=XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true}).Sheets.测试;
- assert.equal(sheet.L2.f,'TODAY()');assert.equal(sheet.N2.f,'IF(M2="","",L2+M2)');assert.equal(sheet.N3.f,'IF(M3="","",L3+M3)');assert.equal(sheet.N3.v,'');assert.equal(sheet.N4.v,sheet.L4.v);assert.equal(XLSX.SSF.format(sheet.N2.z,sheet.N2.v),'2026-11-04');
+ assert.equal(sheet.K2.f,'TODAY()');assert.equal(sheet.M2.f,'IF(L2="","",K2+L2)');assert.equal(sheet.M3.f,'IF(L3="","",K3+L3)');assert.equal(sheet.M3.v,'');assert.equal(sheet.M4.v,sheet.K4.v);assert.equal(XLSX.SSF.format(sheet.M2.z,sheet.M2.v),'2026-11-04');
 });
