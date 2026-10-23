@@ -404,7 +404,18 @@
     $('orderMeta').textContent = state.order ? `${state.order.rows.length} 行 · ${state.order.headers.length} 个字段` : '尚未读取订单';
     if (ready) { ensureBusinessMappings(); renderBusinessMappings(); }
     const summary = [];
-    if (state.orderFile) summary.push(`订单：${state.orderFile.name}（${state.order.rows.length}行）`);
+    if (state.orderFile && state.order) {
+      let amountLabel = '合同总金额：待核对';
+      try {
+        const selections = ready ? state.fieldSelections : Object.fromEntries(
+          ACTIVE_FIELDS.map(field => [field.key, field.automatic || bestOrderHeader(field)])
+        );
+        const total = contractTotals(selections);
+        const band = total.cents > 3000000n ? '＞3万' : total.cents < 3000000n ? '＜3万' : '＝3万';
+        amountLabel = `合同总金额：￥${total.lower.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}（${band}）`;
+      } catch (_) { /* Invalid quantity or price must not appear as a valid total. */ }
+      summary.push(`订单：${state.orderFile.name}（${state.order.rows.length}行）｜${amountLabel}`);
+    }
     if (state.templateFile) summary.push(`模板：${state.templateFile.name}`);
     $('fileSummary').textContent = summary.join('；') || '等待上传订单和合同模板';
     const selectedCount = ACTIVE_FIELDS.filter(field => field.automatic || state.fieldSelections[field.key]).length;
@@ -2116,12 +2127,13 @@
     }
   }
 
-  function calculatedAmount(record) {
-    try { return C.formatAmountCents(C.lineAmountCents(record[state.fieldSelections.quantity], record[state.fieldSelections.taxUnitPrice])); }
+  function calculatedAmount(record, selections = state.fieldSelections) {
+    try { return C.formatAmountCents(C.lineAmountCents(record[selections.quantity], record[selections.taxUnitPrice])); }
     catch (e) { throw new Error(`订单第 ${record._row} 行：${e.message}`); }
   }
-  function contractTotals() {
-    return C.sumAmountField(detailRecords().map(record => ({ _row: record._row, calculated: calculatedAmount(record) })), 'calculated');
+  function contractTotals(selections = state.fieldSelections) {
+    const rows = C.selectDetailRows(state.order?.rows || [], state.order?.headers || [], selections);
+    return C.sumAmountField(rows.map(record => ({ _row: record._row, calculated: calculatedAmount(record, selections) })), 'calculated');
   }
   function resolveMapping(mapping) {
     if (mapping.businessKey === 'contractNumber') return '';
