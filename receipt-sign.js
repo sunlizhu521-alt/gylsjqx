@@ -1,25 +1,8 @@
 (()=>{'use strict';
 const $=id=>document.getElementById(id),W=1190,H=1684,PAD=55;
-let book=null,fileName='',documentCount=0,signature=null,rawSignature=null,signatureFile=null,busy=false;
+let book=null,fileName='',documentCount=0,signature=null,busy=false;
 const layouts=new Map(),positions=new Map(),preview=$('preview'),ctx=preview.getContext('2d');
 const text=cell=>String(cell?.w??cell?.v??'');
-function signatureCache(action,record){
- return new Promise((resolve,reject)=>{
-  const request=indexedDB.open('gylsjqx-receipt-signature',1);
-  request.onupgradeneeded=()=>request.result.createObjectStore('signature');
-  request.onerror=()=>reject(request.error);
-  request.onblocked=()=>reject(Error('签名缓存被其他窗口占用'));
-  request.onsuccess=()=>{const db=request.result,tx=db.transaction('signature',action==='get'?'readonly':'readwrite'),store=tx.objectStore('signature');let value;
-   const op=action==='get'?store.get('default'):action==='delete'?store.delete('default'):store.put(record,'default');
-   op.onsuccess=()=>{value=op.result;};tx.oncomplete=()=>{db.close();resolve(value);};tx.onabort=tx.onerror=()=>{db.close();reject(tx.error||Error('无法保存签名'));};
-  };
- });
-}
-async function saveSignature(){
- if(!signatureFile||!signature)return;
- try{await signatureCache('put',{file:signatureFile,clean:$('cleanSignature').checked});$('signatureMemory').textContent='签名已保存在当前浏览器，下次自动使用。';}
- catch(e){$('signatureMemory').textContent='签名可用于本次导出，但本地保存失败：'+e.message;}
-}
 function wrap(c,value,width){
  const lines=[];for(const paragraph of value.replace(/\r/g,'').split('\n')){let line='';for(const char of paragraph){if(line&&c.measureText(line+char).width>width){lines.push(line);line=char;}else line+=char;}lines.push(line);}return lines;
 }
@@ -73,29 +56,39 @@ function draw(name,canvas=preview){
  if(signature){const size=signatureSize(),pos=positions.get(name)||defaultPosition(model,size);if(!validPosition(model,pos,size))throw Error('签名位置超出纸张或与单据文字重叠，请调整签名大小或点击下方空白处');c.drawImage(signature,pos.x,pos.y,size.w,size.h);}
 }
 function refresh(message=''){
- $('download').disabled=true;try{draw($('sheet').value);if(book){const model=layouts.get($('sheet').value);$('status').textContent=message||`${documentCount} 个文件、${book.SheetNames.length} 个工作表，每表一页；当前最小字号约 ${model.minFont.toFixed(1)} pt。${signature?'签名已添加，可点击空白处调整。':'请上传签名图片。'}`;if(model.minFont<6)$('status').textContent+=' 内容较多，打印字号较小，请检查预览。';} $('download').disabled=busy||!book||!signature;}catch(e){$('status').textContent=e.message;}
+ $('download').disabled=true;try{draw($('sheet').value);if(book){const model=layouts.get($('sheet').value);$('status').textContent=message||`${documentCount} 个文件、${book.SheetNames.length} 个工作表，每表一页；当前最小字号约 ${model.minFont.toFixed(1)} pt。${signature?'签名已添加，可点击空白处调整。':'默认签名正在加载。'}`;if(model.minFont<6)$('status').textContent+=' 内容较多，打印字号较小，请检查预览。';} $('download').disabled=busy||!book||!signature;}catch(e){$('status').textContent=e.message;}
 }
 async function loadImage(file){if(file.size>15*1024*1024)throw Error('签名图片不能超过15MB');const url=URL.createObjectURL(file);try{const image=new Image();image.src=url;await image.decode();if(image.width*image.height>20000000)throw Error('签名图片尺寸过大');return image;}finally{URL.revokeObjectURL(url);}}
 function extractSignature(image){
- const c=document.createElement('canvas');c.width=image.width;c.height=image.height;const g=c.getContext('2d');g.drawImage(image,0,0);if(!$('cleanSignature').checked)return c;
+ const c=document.createElement('canvas');c.width=image.width;c.height=image.height;const g=c.getContext('2d');g.drawImage(image,0,0);
  const data=g.getImageData(0,0,c.width,c.height),p=data.data;
  // Ignore the dark screenshot frame: use the bounding area of opaque white paper.
  let left=c.width,top=c.height,right=-1,bottom=-1;
  for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++){const i=(y*c.width+x)*4;if(p[i+3]>240&&Math.min(p[i],p[i+1],p[i+2])>240){left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);}}
- if(right<left)throw Error('未找到白底，请取消“提取白底图片中的签名”');
+ if(right<left)throw Error('默认签名图片缺少白底');
  // Keep ink only where white paper exists on all four sides, excluding rounded black corners.
  let minX=c.width,minY=c.height,maxX=-1,maxY=-1;
  const rowBounds=[],colBounds=[];
  for(let y=top;y<=bottom;y++){let a=c.width,b=-1;for(let x=left;x<=right;x++){const i=(y*c.width+x)*4;if(p[i+3]>240&&Math.min(p[i],p[i+1],p[i+2])>240){a=Math.min(a,x);b=x;}}rowBounds[y]=[a,b];}
  for(let x=left;x<=right;x++){let a=c.height,b=-1;for(let y=top;y<=bottom;y++){const i=(y*c.width+x)*4;if(p[i+3]>240&&Math.min(p[i],p[i+1],p[i+2])>240){a=Math.min(a,y);b=y;}}colBounds[x]=[a,b];}
  for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++){const i=(y*c.width+x)*4;const inside=x>left&&x<right&&y>top&&y<bottom&&x>rowBounds[y]?.[0]&&x<rowBounds[y]?.[1]&&y>colBounds[x]?.[0]&&y<colBounds[x]?.[1];const alpha=inside?255-Math.min(p[i],p[i+1],p[i+2]):0;p[i]=p[i+1]=p[i+2]=0;p[i+3]=alpha>25?alpha:0;if(p[i+3]){minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);}}
- if(maxX<minX)throw Error('没有提取到签名，请取消白底提取或换用清晰图片');g.putImageData(data,0,0);const out=document.createElement('canvas');out.width=maxX-minX+9;out.height=maxY-minY+9;out.getContext('2d').drawImage(c,minX,minY,maxX-minX+1,maxY-minY+1,4,4,maxX-minX+1,maxY-minY+1);return out;
+ if(maxX<minX)throw Error('默认签名图片未能提取到笔迹');g.putImageData(data,0,0);const out=document.createElement('canvas');out.width=maxX-minX+9;out.height=maxY-minY+9;out.getContext('2d').drawImage(c,minX,minY,maxX-minX+1,maxY-minY+1,4,4,maxX-minX+1,maxY-minY+1);return out;
 }
-function updateSignature(){signature=null;try{signature=extractSignature(rawSignature);positions.clear();$('signaturePreview').src=signature.toDataURL();$('signaturePreview').hidden=false;refresh();}catch(e){$('signaturePreview').hidden=true;refresh();$('status').textContent=e.message;}}
+// Always use the approved built-in signature, including in a fresh browser.
+const signatureReady=(async()=>{
+ try{
+  const response=await fetch('assets/receipt-default-signature.png');
+  if(!response.ok)throw Error('HTTP '+response.status);
+  signature=extractSignature(await loadImage(await response.blob()));
+  refresh();return true;
+ }catch(e){$('status').textContent='默认签名加载失败，请刷新页面重试：'+e.message;return false;}
+})();
 $('file').onchange=async()=>{
  const files=[...$('file').files];if(!files.length)return;
  book=null;layouts.clear();positions.clear();$('download').disabled=true;$('file').disabled=true;
  try{
+  $('status').textContent='正在读取单据并自动签字…';
+  if(!await signatureReady)throw Error('默认签名加载失败，请刷新页面重试');
   if(files.reduce((sum,f)=>sum+f.size,0)>100*1024*1024)throw Error('本批文件合计不能超过100MB');
   const next={SheetNames:[],Sheets:{}};
   for(const [index,file] of files.entries()){
@@ -112,17 +105,8 @@ $('file').onchange=async()=>{
  }catch(e){layouts.clear();$('sheet').replaceChildren();$('sheet').disabled=true;$('status').textContent='读取失败：'+e.message;ctx.clearRect(0,0,W,H);}
  finally{$('file').disabled=false;}
 };
-$('signature').onchange=async()=>{const file=$('signature').files[0];if(!file)return;signature=null;rawSignature=null;$('download').disabled=true;try{rawSignature=await loadImage(file);signatureFile=file;updateSignature();await saveSignature();}catch(e){$('status').textContent=e.message;}};
-$('cleanSignature').onchange=()=>{if(rawSignature){updateSignature();saveSignature();}};$('sheet').onchange=()=>refresh();$('signatureWidth').oninput=()=>{positions.clear();refresh();};
+$('sheet').onchange=()=>refresh();$('signatureWidth').oninput=()=>{positions.clear();refresh();};
 preview.onclick=event=>{if(!book||!signature||busy)return;try{const rect=preview.getBoundingClientRect(),size=signatureSize(),pos={x:(event.clientX-rect.left)*W/rect.width-size.w/2,y:(event.clientY-rect.top)*H/rect.height-size.h/2};if(!validPosition(layouts.get($('sheet').value),pos,size))throw Error('此处会遮挡文字或超出纸张，请点击空白处');positions.set($('sheet').value,pos);refresh();}catch(e){$('status').textContent=e.message;}};
 $('download').onclick=async()=>{if(!book||!signature||busy)return;busy=true;for(const el of document.querySelectorAll('input,select,button'))el.disabled=true;try{const pdf=await PDFLib.PDFDocument.create();for(const name of book.SheetNames){const canvas=document.createElement('canvas');draw(name,canvas);const png=await pdf.embedPng(canvas.toDataURL('image/png'));const page=pdf.addPage([595.28,841.89]);page.drawImage(png,{x:0,y:0,width:595.28,height:841.89});}const blob=new Blob([await pdf.save()],{type:'application/pdf'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName.replace(/\.[^.]+$/,'')+'-签字.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('status').textContent=`已生成 ${book.SheetNames.length} 页签字 PDF。`;}catch(e){$('status').textContent='生成失败：'+e.message;}finally{busy=false;for(const el of document.querySelectorAll('input,select,button'))el.disabled=false;$('download').disabled=!book||!signature;}};
 refresh();
-$('signature').disabled=true;$('clearSignature').disabled=true;
-signatureCache('get').then(async saved=>{
- if(saved?.file){signatureFile=saved.file;rawSignature=await loadImage(saved.file);$('cleanSignature').checked=saved.clean!==false;updateSignature();$('signatureMemory').textContent='已自动加载本机保存的默认签名。';}
-}).catch(e=>{$('signatureMemory').textContent='签名缓存读取失败，请重新上传：'+e.message;}).finally(()=>{$('signature').disabled=false;$('clearSignature').disabled=false;});
-$('clearSignature').onclick=async()=>{
- try{await signatureCache('delete');signature=null;rawSignature=null;signatureFile=null;$('signature').value='';$('signaturePreview').hidden=true;positions.clear();refresh();$('signatureMemory').textContent='已清除本机保存的签名。';}
- catch(e){$('signatureMemory').textContent='清除失败：'+e.message;}
-};
 })();
