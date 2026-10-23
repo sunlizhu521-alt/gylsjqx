@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>备货分配｜供应链数据清洗</title>
-    <link rel="stylesheet" href="./styles.css?v=20261021-existence-filter" />
+    <link rel="stylesheet" href="./styles.css?v=20261023-minimum-order" />
   </head>
   <body>
     <div class="app-shell">
@@ -178,7 +178,7 @@
                 <tr><td>供应商反馈交期</td><td>自动计算</td><td>今天日期＋天数</td><td>天数留空时交期留空。</td></tr>
                 <tr><td>采购单订单号</td><td>人工填写</td><td>—</td><td>默认留空，供导出后填写采购单订单号。</td></tr>
                 <tr><td>要求货好时间</td><td>备货需求表</td><td>要求货好时间 / 要求货好日期等</td><td>直接读取要求货好时间类字段。</td></tr>
-                <tr><td>起订量</td><td>Dim-采购部分工明细</td><td>“产品线明细”工作表 J列</td><td>仅从名称为“产品线明细”的工作表读取，按物料编码匹配。</td></tr>
+                <tr><td>起订量</td><td>Dim-采购部分工明细</td><td>“产品线明细”工作表的“起订量”列</td><td>仅从名称为“产品线明细”的工作表读取，按物料编码匹配。</td></tr>
                 <tr><td>起订量是否满足</td><td>系统计算</td><td>数量、起订量</td><td>同一物料合计数量大于或等于起订量时显示“满足”，否则显示“不满足”；缺少任一数值时留空。</td></tr>
                 <tr><td>备货原因</td><td>备货需求表</td><td>备货原因 / 申请原因 / 需求原因等</td><td>直接读取原因类字段。</td></tr>
               </tbody>
@@ -191,6 +191,6 @@
     <script src="./vendor/xlsx.full.min.js?v=20260601-1"></script>
     <script src="./vendor/jszip.min.js?v=20260609-1"></script>
 
-    <script src="./file-library.js?v=20261021-existence-filter"></script>
+    <script src="./file-library.js?v=20261023-minimum-order"></script>
   </body>
 </html>

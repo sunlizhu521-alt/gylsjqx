@@ -90,8 +90,8 @@ test('same material merges across sheets with unique OA numbers, summed quantity
   ]), '需求二');
   const division = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(division, XLSX.utils.aoa_to_sheet([
-    ['物料编码', '采购单订单下单人', '供应商简称', '', '', '', '', '', '', '起订量'],
-    ['TEST-001', '采购甲', '供应商甲', '', '', '', '', '', '', 8],
+    ['物料编码', '采购单订单下单人', '供应商简称', '起订量'],
+    ['TEST-001', '采购甲', '供应商甲', 8],
   ]), '产品线明细');
   const record = (wb) => {
     const bytes = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
@@ -124,6 +124,8 @@ test('same material merges across sheets with unique OA numbers, summed quantity
   const output = XLSX.utils.sheet_to_json(exported.Sheets['备货需求分配明细'], { header: 1 });
   assert.equal(output.length, 2);
   assert.equal(output[1][output[0].indexOf('数量')], 10);
+  assert.equal(output[1][output[0].indexOf('起订量')], '8');
+  assert.equal(output[1][output[0].indexOf('起订量是否满足')], '满足');
   assert.equal(output[1][output[0].indexOf('OA备货流程号')], 'OA001/OA002');
   assert.equal(output[1][output[0].indexOf('采购单订单号')], '');
 });
@@ -264,4 +266,25 @@ test('下载日期保留TODAY及加天数公式，空值和0均保留，重开�
  run('addDeliveryFormulas(sheet,rows)');context.sheet['!ref']='A1:R4';
  const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,context.sheet,'测试');const sheet=XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true}).Sheets.测试;
  assert.equal(sheet.K2.f,'TODAY()');assert.equal(sheet.M2.f,'IF(L2="","",K2+L2)');assert.equal(sheet.M3.f,'IF(L3="","",K3+L3)');assert.equal(sheet.M3.v,'');assert.equal(sheet.M4.v,sheet.K4.v);assert.equal(XLSX.SSF.format(sheet.M2.z,sheet.M2.v),'2026-11-04');
+});
+
+
+test('起订量按表头识别，列移动、零值、空白及异常不会误判', () => {
+ const {context,run}=loadApp();
+ context.tables=[
+  {source:{sheetName:'产品线明细'},rows:[
+   ['起订量','供应商简称','物料编码'],
+   [100,'甲','A'],[0,'甲','B'],['','甲','C'],['/','甲','D'],['无','甲','E'],['1,000','甲','F']
+  ]},
+  {source:{sheetName:'产品线明细备份'},rows:[['物料编码','起订量'],['A',1]]}
+ ];
+ const index=run('buildMinimumOrderIndex(tables).byMaterial');
+ assert.equal(index.get('a'),100);assert.equal(index.get('b'),0);assert.equal(index.get('f'),1000);
+ for(const code of ['c','d','e'])assert(!index.has(code));
+ for(const [quantity,minimum,expected] of [[99,100,'不满足'],[100,100,'满足'],[101,100,'满足'],[0,100,'不满足'],[0,0,'满足'],[NaN,100,''],[100,NaN,'']]){
+  context.quantity=quantity;context.minimum=minimum;
+  assert.equal(run('getMinimumOrderStatus(quantity,minimum)'),expected);
+ }
+ context.tables=[{source:{sheetName:'产品线明细'},rows:[['物料编码','','','','','','','','','价格'],['A','','','','','','','','',100]]}];
+ assert.equal(run('buildMinimumOrderIndex(tables).byMaterial.size'),0);
 });

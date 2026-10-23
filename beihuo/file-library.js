@@ -619,20 +619,19 @@ function buildPurchaseDivisionIndex(tables) {
 function buildMinimumOrderIndex(tables) {
   const byMaterial = new Map();
   tables
-    .filter((table) => String(table.source?.sheetName || "").trim().includes("产品线明细"))
+    .filter((table) => String(table.source?.sheetName || "").trim() === "产品线明细")
     .forEach(({ rows }) => {
       const headerIndex = findHeaderRowIndex(rows, TABLE_FIELD_ALIASES.divisionMaterialCode, 1);
-      const columnMap = headerIndex >= 0
-        ? buildColumnMapByAliases(rows[headerIndex], {
-          materialCode: TABLE_FIELD_ALIASES.divisionMaterialCode,
-        })
-        : {};
-      const startIndex = headerIndex >= 0 ? headerIndex + 1 : 0;
-      rows.slice(startIndex).forEach((row) => {
-        const materialCode = getCellValue(row, columnMap.materialCode ?? 0);
-        const materialKey = normalizeLookupKey(materialCode);
+      if (headerIndex < 0) return;
+      const columnMap = buildColumnMapByAliases(rows[headerIndex], {
+        materialCode: TABLE_FIELD_ALIASES.divisionMaterialCode,
+        minimumOrderQuantity: ["起订量", "起订数量", "最小起订量", "最低起订量", "起订单量", "MOQ"],
+      });
+      if (columnMap.materialCode === undefined || columnMap.minimumOrderQuantity === undefined) return;
+      rows.slice(headerIndex + 1).forEach((row) => {
+        const materialKey = normalizeLookupKey(getCellValue(row, columnMap.materialCode));
         if (!materialKey) return;
-        const minimumOrderQuantity = forceDemandNumber(row?.[9]);
+        const minimumOrderQuantity = forceDemandNumber(row?.[columnMap.minimumOrderQuantity]);
         if (Number.isFinite(minimumOrderQuantity)) byMaterial.set(materialKey, minimumOrderQuantity);
       });
     });
