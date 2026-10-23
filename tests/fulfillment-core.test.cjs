@@ -54,3 +54,14 @@ test('陆续交货取自然月末，文件名年份优先、显式年份优先�
  const cell=saved.Sheets.汇总表.Q2;
  assert.equal(cell.t,'n');assert.equal(X.SSF.format(cell.z,cell.v),'2028年2月29日');
 });
+
+test('相同汇总补存或更新原文件时不推进对比基准',()=>{
+ const result=C.merge(fixture()),previous={filename:'上次',result};
+ const current={filename:'本次',result},history={version:1,previous,current};
+ const next={...current,sourceBytes:new Uint8Array([1,2]).buffer};
+ const upgraded=C.advance(history,next);assert.equal(upgraded.previous,previous);assert.equal(upgraded.current,next);
+ assert.equal(C.advance(upgraded,{...next,sourceBytes:new Uint8Array([1,2]).buffer}),upgraded);
+ const changed={...next,sourceBytes:new Uint8Array([1,3]).buffer};
+ assert.equal(C.advance(upgraded,changed).current,changed);
+ assert.equal(C.advance(upgraded,changed).previous,previous);
+});

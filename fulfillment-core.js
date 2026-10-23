@@ -72,7 +72,11 @@ function difference(previous,current){
 }
 function advance(history,current){
  aggregate(current.result);
- if(history&&JSON.stringify(history.current.result.rows)===JSON.stringify(current.result.rows))return history;
+ if(history&&JSON.stringify(history.current.result.rows)===JSON.stringify(current.result.rows)){
+  const old=history.current.sourceBytes,next=current.sourceBytes,oldView=old?new Uint8Array(old):null;
+  if(next&&(!old||old.byteLength!==next.byteLength||new Uint8Array(next).some((v,i)=>v!==oldView[i])))return {...history,current};
+  return history;
+ }
  const previous=history?.current||null;
  difference(previous?.result,current.result);
  return {version:1,previous,current};
