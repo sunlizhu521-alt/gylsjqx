@@ -3,6 +3,25 @@ const $=id=>document.getElementById(id),W=1190,H=1684,PAD=55;
 let book=null,fileName='',documentCount=0,signature=null,busy=false;
 const layouts=new Map(),positions=new Map(),preview=$('preview'),ctx=preview.getContext('2d');
 const text=cell=>String(cell?.w??cell?.v??'');
+function supplierName(sheet){
+ const range=XLSX.utils.decode_range(sheet['!ref']);
+ for(let r=range.s.r;r<=range.e.r;r++)for(let c=range.s.c;c<=range.e.c;c++){
+  const value=text(sheet[XLSX.utils.encode_cell({r,c})]).trim();
+  const match=value.match(/^供\s*应\s*商\s*(?:[：:]\s*(.*))?$/s);
+  if(!match)continue;
+  if(match[1]?.trim())return match[1].trim();
+  const merged=(sheet['!merges']||[]).find(m=>m.s.r===r&&m.s.c===c);
+  for(let next=(merged?.e.c??c)+1;next<=range.e.c;next++){
+   const name=text(sheet[XLSX.utils.encode_cell({r,c:next})]).trim();
+   if(name)return /[：:]$/.test(name)?'':name;
+  }
+ }
+ return '';
+}
+function receiptFileName(sheets){
+ const names=[...new Set(Object.values(sheets).map(sheet=>supplierName(sheet)||'未识别供应商'))];
+ return '入库单-'+names.join('、').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/\s+/g,' ').trim()+'.pdf';
+}
 function wrap(c,value,width){
  const lines=[];for(const paragraph of value.replace(/\r/g,'').split('\n')){let line='';for(const char of paragraph){if(line&&c.measureText(line+char).width>width){lines.push(line);line=char;}else line+=char;}lines.push(line);}return lines;
 }
@@ -56,7 +75,7 @@ function draw(name,canvas=preview){
  if(signature){const size=signatureSize(),pos=positions.get(name)||defaultPosition(model,size);if(!validPosition(model,pos,size))throw Error('签名位置超出纸张或与单据文字重叠，请调整签名大小或点击下方空白处');c.drawImage(signature,pos.x,pos.y,size.w,size.h);}
 }
 function refresh(message=''){
- $('download').disabled=true;try{draw($('sheet').value);if(book){const model=layouts.get($('sheet').value);$('status').textContent=message||`${documentCount} 个文件、${book.SheetNames.length} 个工作表，每表一页；当前最小字号约 ${model.minFont.toFixed(1)} pt。${signature?'签名已添加，可点击空白处调整。':'默认签名正在加载。'}`;if(model.minFont<6)$('status').textContent+=' 内容较多，打印字号较小，请检查预览。';} $('download').disabled=busy||!book||!signature;}catch(e){$('status').textContent=e.message;}
+ $('download').disabled=true;try{draw($('sheet').value);if(book){const model=layouts.get($('sheet').value);$('status').textContent=message||`${documentCount} 个文件、${book.SheetNames.length} 个工作表，每表一页；当前最小字号约 ${model.minFont.toFixed(1)} pt。${signature?'签名已添加，可点击空白处调整。':'默认签名正在加载。'} 下载名称：${fileName}`;if(model.minFont<6)$('status').textContent+=' 内容较多，打印字号较小，请检查预览。';} $('download').disabled=busy||!book||!signature;}catch(e){$('status').textContent=e.message;}
 }
 async function loadImage(file){if(file.size>15*1024*1024)throw Error('签名图片不能超过15MB');const url=URL.createObjectURL(file);try{const image=new Image();image.src=url;await image.decode();if(image.width*image.height>20000000)throw Error('签名图片尺寸过大');return image;}finally{URL.revokeObjectURL(url);}}
 function extractSignature(image){
@@ -100,14 +119,14 @@ $('file').onchange=async()=>{
     layouts.set(name,layout(workbook.Sheets[sheetName]));next.SheetNames.push(name);next.Sheets[name]=workbook.Sheets[sheetName];
    }
   }
-  book=next;documentCount=files.length;fileName=files.length===1?files[0].name:'采购入库单-批量';
+  book=next;documentCount=files.length;fileName=receiptFileName(book.Sheets);
   $('sheet').replaceChildren(...book.SheetNames.map(name=>new Option(name,name)));$('sheet').disabled=false;refresh();
  }catch(e){layouts.clear();$('sheet').replaceChildren();$('sheet').disabled=true;$('status').textContent='读取失败：'+e.message;ctx.clearRect(0,0,W,H);}
  finally{$('file').disabled=false;}
 };
 $('sheet').onchange=()=>refresh();$('signatureWidth').oninput=()=>{positions.clear();refresh();};
 preview.onclick=event=>{if(!book||!signature||busy)return;try{const rect=preview.getBoundingClientRect(),size=signatureSize(),pos={x:(event.clientX-rect.left)*W/rect.width-size.w/2,y:(event.clientY-rect.top)*H/rect.height-size.h/2};if(!validPosition(layouts.get($('sheet').value),pos,size))throw Error('此处会遮挡文字或超出纸张，请点击空白处');positions.set($('sheet').value,pos);refresh();}catch(e){$('status').textContent=e.message;}};
-$('download').onclick=async()=>{if(!book||!signature||busy)return;busy=true;for(const el of document.querySelectorAll('input,select,button'))el.disabled=true;try{const pdf=await PDFLib.PDFDocument.create();for(const name of book.SheetNames){const canvas=document.createElement('canvas');draw(name,canvas);const png=await pdf.embedPng(canvas.toDataURL('image/png'));const page=pdf.addPage([595.28,841.89]);page.drawImage(png,{x:0,y:0,width:595.28,height:841.89});}const blob=new Blob([await pdf.save()],{type:'application/pdf'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName.replace(/\.[^.]+$/,'')+'-签字.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('status').textContent=`已生成 ${book.SheetNames.length} 页签字 PDF。`;}catch(e){$('status').textContent='生成失败：'+e.message;}finally{busy=false;for(const el of document.querySelectorAll('input,select,button'))el.disabled=false;$('download').disabled=!book||!signature;}};
+$('download').onclick=async()=>{if(!book||!signature||busy)return;busy=true;for(const el of document.querySelectorAll('input,select,button'))el.disabled=true;try{const pdf=await PDFLib.PDFDocument.create();for(const name of book.SheetNames){const canvas=document.createElement('canvas');draw(name,canvas);const png=await pdf.embedPng(canvas.toDataURL('image/png'));const page=pdf.addPage([595.28,841.89]);page.drawImage(png,{x:0,y:0,width:595.28,height:841.89});}const blob=new Blob([await pdf.save()],{type:'application/pdf'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('status').textContent=`已生成 ${book.SheetNames.length} 页签字 PDF。`;}catch(e){$('status').textContent='生成失败：'+e.message;}finally{busy=false;for(const el of document.querySelectorAll('input,select,button'))el.disabled=false;$('download').disabled=!book||!signature;}};
 refresh();
 signatureReady.then(ready=>{$('file').disabled=!ready;});
 })();

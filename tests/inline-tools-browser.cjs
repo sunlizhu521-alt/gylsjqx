@@ -30,7 +30,7 @@ const C = require('../fulfillment-core.js');
     assert.match(await receipt.locator('#status').innerText(),/签名已添加/);
     const signedDownload=page.waitForEvent('download');
     await receipt.locator('#download').click();
-    assert.equal((await signedDownload).suggestedFilename(),'自动签字-签字.pdf');
+    assert.equal((await signedDownload).suggestedFilename(),'入库单-未识别供应商.pdf');
     await select('beihuo');
     await page.frameLocator('iframe[data-tool="beihuo"]').locator('#applyAllButton').waitFor();
     await select('contract');
