@@ -1,6 +1,6 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FulfillmentCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
-const SHEETS=['徐英','李奇','操思敏','邢芳芳','孙立柱'];
+const SHEETS=['徐英','李奇','操思敏','邢芳芳'];
 const COLUMNS=['采购下单人','事业部','销售分渠道','运营','供应商简称','产品线','系列','物料编码','SKU','物料名称','未交付数量','已下单未备料未生产','已备料未生产','生产中产品','完工未发产品','已发货数量','合同约定交期','生产中交付时间','未生产预计交付时间','是否正常履约','下单月份','OA备货单号','采购订单号'];
 const DATE_FORMAT='yyyy"年"m"月"d"日"';
 const norm=v=>String(v??'').replace(/\s/g,'');
@@ -38,6 +38,12 @@ function merge(book,filename=''){
  return {rows,sources,counts,warnings};
 }
 
+function currentScope(result){
+ if(!result)return result;
+ const excluded=name=>/^孙立柱(?:[0-9]{4}|[0-9]{8})?$/.test(norm(name));
+ const keep=result.rows.map((_,i)=>!excluded(result.sources?.[i]?.sheet));
+ return {...result,rows:result.rows.filter((_,i)=>keep[i]),sources:(result.sources||[]).filter((_,i)=>keep[i]),counts:(result.counts||[]).filter(x=>!excluded(x.sheet)),warnings:(result.warnings||[]).filter(w=>!excluded(w.split('!')[0]))};
+}
 const DIFF_COLUMNS=['采购下单人','供应商','物料编码','SKU','物料名称','未交付数量'];
 function aggregate(result){
  const groups=new Map();
@@ -85,5 +91,5 @@ function advance(history,current){
 function columnWidth(key){return key==='物料名称'?42:['合同约定交期','生产中交付时间','未生产预计交付时间'].includes(key)?23:key==='SKU'?26:20;}
 function exportFilename(input){const base=String(input??'').trim().replace(/\.xlsx?$/i,'').trim()||'订单履约表';return (/更新版$/.test(base)?base.replace(/更新版$/,'汇总版'):/汇总版$/.test(base)?base:base+'汇总版')+'.xlsx';}
 function workbook(result){const s=X.utils.aoa_to_sheet([COLUMNS]);result.rows.forEach((row,r)=>row.forEach((cell,c)=>s[X.utils.encode_cell({r:r+1,c})]={...cell}));s['!ref']=`A1:${X.utils.encode_col(COLUMNS.length-1)}${result.rows.length+1}`;s['!autofilter']={ref:s['!ref']};s['!cols']=COLUMNS.map((key,col)=>({wch:[key,...result.rows.map(row=>row[col]?.z?X.SSF.format(row[col].z,row[col].v):String(row[col]?.v??''))].reduce((max,text)=>Math.max(max,[...text].reduce((width,ch)=>width+(ch.charCodeAt(0)>255?2:1),0)+4),columnWidth(key))}));const w=X.utils.book_new();X.utils.book_append_sheet(w,s,'汇总表');if(result.differences){const d=X.utils.aoa_to_sheet([DIFF_COLUMNS]);result.differences.forEach((row,r)=>row.forEach((cell,c)=>d[X.utils.encode_cell({r:r+1,c})]={...cell}));d['!ref']=`A1:F${result.differences.length+1}`;d['!autofilter']={ref:d['!ref']};d['!cols']=DIFF_COLUMNS.map((key,col)=>({wch:Math.max(20,...[key,...result.differences.map(r=>String(r[col].v))].map(v=>[...v].reduce((n,c)=>n+(c.charCodeAt(0)>255?2:1),4)))}));X.utils.book_append_sheet(w,d,'差异');}return w;}
-return {DIFF_COLUMNS,aggregate,difference,advance,SHEETS,COLUMNS,DATE_FORMAT,columnWidth,dateCell,merge,workbook,exportFilename};
+return {currentScope,DIFF_COLUMNS,aggregate,difference,advance,SHEETS,COLUMNS,DATE_FORMAT,columnWidth,dateCell,merge,workbook,exportFilename};
 });

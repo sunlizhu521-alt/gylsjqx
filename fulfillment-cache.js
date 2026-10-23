@@ -9,7 +9,7 @@ function run(current){return new Promise((resolve,reject)=>{
   const db=request.result,tx=db.transaction('snapshots',current?'readwrite':'readonly'),store=tx.objectStore('snapshots');
   let value,error;
   const read=store.get('history');
-  read.onsuccess=()=>{try{value=current?FulfillmentCore.advance(read.result,current):read.result;if(current)store.put(value,'history');}catch(e){error=e;tx.abort();}};
+  read.onsuccess=()=>{try{const history=read.result?{...read.result,current:{...read.result.current,result:FulfillmentCore.currentScope(read.result.current.result)},previous:read.result.previous?{...read.result.previous,result:FulfillmentCore.currentScope(read.result.previous.result)}:null}:null;value=current?FulfillmentCore.advance(history,current):history;if(current)store.put(value,'history');}catch(e){error=e;tx.abort();}};
   tx.oncomplete=()=>{db.close();resolve(value);};
   tx.onabort=tx.onerror=()=>{db.close();reject(error||tx.error||Error('历史保存失败，请检查浏览器存储空间'));};
  };
