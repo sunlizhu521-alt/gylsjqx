@@ -1,4 +1,5 @@
 const tools = [
+  { id: 'receipt-sign', icon: '签', title: '采购入库单签字', status: '可用', desc: '上传采购入库单与签名图片，在空白处签字并下载 PDF。', href: 'receipt-sign.html' },
   { id: 'beihuo', icon: '备', title: '备货分配', status: '可用', desc: '上传备货需求和维度表，匹配采购分工、汇总数量并导出分配明细。', href: 'beihuo/index.html' },
   { id: 'fulfillment', icon: '履', title: '订单履约表整理', status: '可用', desc: '合并五位采购人员的履约明细，保留指定列并统一日期格式。', href: 'fulfillment.html' },
   { id: 'contract', icon: '合', title: '合同生成', status: '可用', desc: '上传订单与合同模板，确认字段映射后在浏览器本地生成合同。', href: 'contract.html' },
