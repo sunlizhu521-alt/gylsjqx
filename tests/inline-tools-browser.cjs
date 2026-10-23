@@ -24,6 +24,7 @@ const C = require('../fulfillment-core.js');
     assert.equal(await receipt.locator('#signature,#clearSignature').count(),0);
     const receiptBook=X.utils.book_new();
     X.utils.book_append_sheet(receiptBook,X.utils.aoa_to_sheet([['采购入库单'],['物料编码','数量'],['TEST',2]]),'Sheet1');
+    await receipt.locator('#file:not([disabled])').waitFor();
     await receipt.locator('#file').setInputFiles({name:'自动签字.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(X.write(receiptBook,{type:'buffer',bookType:'xlsx'}))});
     await receipt.locator('#download:not([disabled])').waitFor();
     assert.match(await receipt.locator('#status').innerText(),/签名已添加/);
