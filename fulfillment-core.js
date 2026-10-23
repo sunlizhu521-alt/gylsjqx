@@ -4,17 +4,21 @@ const SHEETS=['徐英','李奇','操思敏','邢芳芳','孙立柱'];
 const COLUMNS=['采购下单人','事业部','销售分渠道','运营','供应商简称','产品线','系列','物料编码','SKU','物料名称','未交付数量','已下单未备料未生产','已备料未生产','生产中产品','完工未发产品','已发货数量','合同约定交期','生产中交付时间','未生产预计交付时间','是否正常履约','下单月份','OA备货单号','采购订单号'];
 const DATE_FORMAT='yyyy"年"m"月"d"日"';
 const norm=v=>String(v??'').replace(/\s/g,'');
-function dateCell(cell,date1904){
+function currentYear(){return Number(new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Shanghai',year:'numeric'}).format(new Date()));}
+function dateCell(cell,date1904,defaultYear=currentYear()){
  const v=cell?.v;if(v==null||v==='')return {t:'s',v:''};if(String(v).trim()==='/')return {t:'s',v:'/'};
  let y,m,d;
  if(typeof v==='number'){const p=X.SSF.parse_date_code(v,{date1904});if(p){y=p.y;m=p.m;d=p.d;}}
- else {const match=String(v).trim().match(/^(\d{4})[年/.-](\d{1,2})[月/.-](\d{1,2})日?(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$/);if(match)[,y,m,d]=match.map(Number);}
+ else {const match=String(v).trim().match(/^(\d{4})[年/.-](\d{1,2})[月/.-](\d{1,2})日?(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$/);if(match)[,y,m,d]=match.map(Number);
+ else {const monthly=norm(v).match(/^(?:(\d{4})年)?(\d{1,2})月陆续交货$/);if(monthly){y=monthly[1]?Number(monthly[1]):defaultYear;m=Number(monthly[2]);if(m>=1&&m<=12)d=new Date(Date.UTC(y,m,0)).getUTCDate();}}
+ }
  const utc=Date.UTC(y,m-1,d),check=new Date(utc);
  if(!y||y<1900||y>9999||check.getUTCFullYear()!==y||check.getUTCMonth()!==m-1||check.getUTCDate()!==d)return {t:'s',v:String(v),invalid:true};
  let serial=(utc-Date.UTC(1899,11,30))/86400000;if(serial<61)serial--;
  return {t:'n',v:serial,z:DATE_FORMAT};
 }
-function merge(book){
+function merge(book,filename=''){
+ const yearMatch=String(filename).match(/(?:^|[^0-9])((?:19|20)\d{2})(?=[年./-])/),defaultYear=yearMatch?Number(yearMatch[1]):currentYear();
  const selected=SHEETS.map(person=>{const matches=Object.keys(book.Sheets).filter(name=>new RegExp('^'+person+'(?:[0-9]{4}|[0-9]{8})?$').test(norm(name)));if(!matches.length)throw Error('缺少工作表：'+person);if(matches.length>1)throw Error(person+'：匹配到多个工作表（'+matches.join('、')+'），请仅保留本次需要合并的版本');return matches[0];});
  const rows=[],sources=[],counts=[],warnings=[];
  for(const name of selected){const sheet=book.Sheets[name],range=X.utils.decode_range(sheet['!ref']||'A1');let hr=-1,map;
@@ -24,9 +28,9 @@ function merge(book){
  let count=0;
  for(let r=hr+1;r<=range.e.r;r++){let nonempty=false;for(let c=range.s.c;c<=range.e.c;c++){const cell=sheet[X.utils.encode_cell({r,c})];if(cell?.v!=null&&String(cell.v).trim()!==''){nonempty=true;break;}}if(!nonempty)continue;
  const record=COLUMNS.map((key,i)=>{if(!map[key])return {t:'s',v:''};const address=X.utils.encode_cell({r,c:map[key][0]}),cell=sheet[address];let output;
- if(['合同约定交期','生产中交付时间','未生产预计交付时间'].includes(key)){output=dateCell(cell,!!book.Workbook?.WBProps?.date1904);if(output.invalid)warnings.push(`${name}!${address}：日期“${cell.v}”无法识别，保留原文`);}
+ if(['合同约定交期','生产中交付时间','未生产预计交付时间'].includes(key)){output=dateCell(cell,!!book.Workbook?.WBProps?.date1904,defaultYear);if(output.invalid)warnings.push(`${name}!${address}：日期“${cell.v}”无法识别，保留原文`);}
  else if(cell?.t==='e'||(cell?.f&&cell.v==null)){warnings.push(`${name}!${address}：公式结果不可用，请在 Excel 中重算后上传`);output={t:'s',v:cell.w||'#公式结果缺失'};}
- else if(key==='下单月份'&&typeof cell?.v==='number'){output=dateCell(cell,!!book.Workbook?.WBProps?.date1904);if(output.z)output.z='yyyy"年"m"月"';}
+ else if(key==='下单月份'&&typeof cell?.v==='number'){output=dateCell(cell,!!book.Workbook?.WBProps?.date1904,defaultYear);if(output.z)output.z='yyyy"年"m"月"';}
  else if(['物料编码','SKU','OA备货单号','采购订单号'].includes(key))output={t:'s',v:cell?String(cell.w??cell.v??''):''};
  else output={t:typeof cell?.v==='number'?'n':'s',v:cell?.v??''};
  delete output.invalid;return output;});rows.push(record);sources.push({sheet:name,row:r+1});count++;}

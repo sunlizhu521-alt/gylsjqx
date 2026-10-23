@@ -19,7 +19,7 @@ $('file').onchange=async()=>{
  if(file.size>60*1024*1024){$('status').textContent='文件超过60MB，请缩小后重试';return;}
  $('status').textContent='正在读取、对比并保存历史…';$('file').disabled=true;$('download').disabled=true;
  try{
-  const book=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:false,cellNF:true}),merged=C.merge(book);
+  const book=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:false,cellNF:true}),merged=C.merge(book,file.name);
   if(!merged.rows.length)throw Error('没有可合并的数据，未更新历史');
   const history=await FulfillmentCache.save({filename:file.name,savedAt:new Date().toISOString(),result:merged});
   show(history);

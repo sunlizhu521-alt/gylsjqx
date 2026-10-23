@@ -38,3 +38,19 @@ test('姓名日期后缀、三列映射、缺列留空及旧历史兼容',()=>{
  const old={...r,rows:r.rows.map(row=>row.slice(0,20))};assert.deepEqual(C.difference(old,r),[]);assert.doesNotThrow(()=>C.workbook(old));
  w.Sheets.邢芳芳=s;assert.throws(()=>C.merge(w),/多个工作表/);delete w.Sheets.邢芳芳;w.Sheets['邢芳芳备份']=s;delete w.Sheets['邢芳芳1017'];assert.throws(()=>C.merge(w),/缺少工作表/);
 });
+
+test('陆续交货取自然月末，文件名年份优先、显式年份优先并保留真实日期',()=>{
+ const formatted=(value,year)=>{const c=C.dateCell({v:value},false,year);return X.SSF.format(c.z,c.v);};
+ assert.equal(formatted('10月陆续交货',2026),'2026年10月31日');
+ assert.equal(formatted(' 4月 陆续交货 ',2026),'2026年4月30日');
+ assert.equal(formatted('2月陆续交货',2026),'2026年2月28日');
+ assert.equal(formatted('2028年2月陆续交货',2026),'2028年2月29日');
+ assert.equal(formatted('12月陆续交货',2026),'2026年12月31日');
+ for(const v of ['0月陆续交货','13月陆续交货','10月中旬','10月陆续交货待确认'])assert.ok(C.dateCell({v},false,2026).invalid);
+ const w=fixture();w.Sheets.徐英.G3={t:'s',v:'2月陆续交货'};
+ const r=C.merge(w,'订单履约明细跟进表截止2028.2.1更新版.xlsx');
+ assert.equal(r.warnings.length,0);assert.equal(w.Sheets.徐英.G3.v,'2月陆续交货');
+ const saved=X.read(X.write(C.workbook(r),{type:'buffer',bookType:'xlsx'}),{cellNF:true});
+ const cell=saved.Sheets.汇总表.Q2;
+ assert.equal(cell.t,'n');assert.equal(X.SSF.format(cell.z,cell.v),'2028年2月29日');
+});
