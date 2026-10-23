@@ -1,8 +1,25 @@
 (()=>{'use strict';
-const $=id=>document.getElementById(id),W=1684,H=1190,PAD=55;
-let book=null,fileName='',documentCount=0,signature=null,rawSignature=null,busy=false;
+const $=id=>document.getElementById(id),W=1190,H=1684,PAD=55;
+let book=null,fileName='',documentCount=0,signature=null,rawSignature=null,signatureFile=null,busy=false;
 const layouts=new Map(),positions=new Map(),preview=$('preview'),ctx=preview.getContext('2d');
 const text=cell=>String(cell?.w??cell?.v??'');
+function signatureCache(action,record){
+ return new Promise((resolve,reject)=>{
+  const request=indexedDB.open('gylsjqx-receipt-signature',1);
+  request.onupgradeneeded=()=>request.result.createObjectStore('signature');
+  request.onerror=()=>reject(request.error);
+  request.onblocked=()=>reject(Error('签名缓存被其他窗口占用'));
+  request.onsuccess=()=>{const db=request.result,tx=db.transaction('signature',action==='get'?'readonly':'readwrite'),store=tx.objectStore('signature');let value;
+   const op=action==='get'?store.get('default'):action==='delete'?store.delete('default'):store.put(record,'default');
+   op.onsuccess=()=>{value=op.result;};tx.oncomplete=()=>{db.close();resolve(value);};tx.onabort=tx.onerror=()=>{db.close();reject(tx.error||Error('无法保存签名'));};
+  };
+ });
+}
+async function saveSignature(){
+ if(!signatureFile||!signature)return;
+ try{await signatureCache('put',{file:signatureFile,clean:$('cleanSignature').checked});$('signatureMemory').textContent='签名已保存在当前浏览器，下次自动使用。';}
+ catch(e){$('signatureMemory').textContent='签名可用于本次导出，但本地保存失败：'+e.message;}
+}
 function wrap(c,value,width){
  const lines=[];for(const paragraph of value.replace(/\r/g,'').split('\n')){let line='';for(const char of paragraph){if(line&&c.measureText(line+char).width>width){lines.push(line);line=char;}else line+=char;}lines.push(line);}return lines;
 }
@@ -40,9 +57,9 @@ function layout(sheet){
  // Reserve a clear footer for signatures instead of placing them over the form.
  const factor=Math.min(1,(H-PAD*2-180)/ys.at(-1));
  const objects=cells.map(cell=>({...cell,x:PAD+xs[cell.c-range.s.c]*factor,y:PAD+ys[cell.r-range.s.r]*factor,width:(xs[cell.endC-range.s.c+1]-xs[cell.c-range.s.c])*factor,height:(ys[cell.endR-range.s.r+1]-ys[cell.r-range.s.r])*factor,font:cell.font*factor}));
- return {cells:objects,bottom:PAD+ys.at(-1)*factor,minFont:20*factor*72/(W/297*25.4),factor};
+ return {cells:objects,bottom:PAD+ys.at(-1)*factor,minFont:20*factor*72/(W/210*25.4),factor};
 }
-function signatureSize(){const width=Number($('signatureWidth').value);if(!Number.isFinite(width)||width<15||width>70)throw Error('签名宽度请填写15至70毫米');return {w:width*W/297,h:width*W/297*signature.height/signature.width};}
+function signatureSize(){const width=Number($('signatureWidth').value);if(!Number.isFinite(width)||width<15||width>70)throw Error('签名宽度请填写15至70毫米');return {w:width*W/210,h:width*W/210*signature.height/signature.width};}
 function defaultPosition(model,size){return {x:W-PAD-size.w,y:Math.min(H-PAD-size.h,model.bottom+35)};}
 function validPosition(model,pos,size){return pos.x>=PAD&&pos.y>=PAD&&pos.x+size.w<=W-PAD&&pos.y+size.h<=H-PAD&&!model.cells.some(c=>c.value.trim()&&pos.x<c.x+c.width&&pos.x+size.w>c.x&&pos.y<c.y+c.height&&pos.y+size.h>c.y);}
 function draw(name,canvas=preview){
@@ -95,9 +112,17 @@ $('file').onchange=async()=>{
  }catch(e){layouts.clear();$('sheet').replaceChildren();$('sheet').disabled=true;$('status').textContent='读取失败：'+e.message;ctx.clearRect(0,0,W,H);}
  finally{$('file').disabled=false;}
 };
-$('signature').onchange=async()=>{const file=$('signature').files[0];if(!file)return;signature=null;rawSignature=null;$('download').disabled=true;try{rawSignature=await loadImage(file);updateSignature();}catch(e){$('status').textContent=e.message;}};
-$('cleanSignature').onchange=()=>{if(rawSignature)updateSignature();};$('sheet').onchange=()=>refresh();$('signatureWidth').oninput=()=>{positions.clear();refresh();};
+$('signature').onchange=async()=>{const file=$('signature').files[0];if(!file)return;signature=null;rawSignature=null;$('download').disabled=true;try{rawSignature=await loadImage(file);signatureFile=file;updateSignature();await saveSignature();}catch(e){$('status').textContent=e.message;}};
+$('cleanSignature').onchange=()=>{if(rawSignature){updateSignature();saveSignature();}};$('sheet').onchange=()=>refresh();$('signatureWidth').oninput=()=>{positions.clear();refresh();};
 preview.onclick=event=>{if(!book||!signature||busy)return;try{const rect=preview.getBoundingClientRect(),size=signatureSize(),pos={x:(event.clientX-rect.left)*W/rect.width-size.w/2,y:(event.clientY-rect.top)*H/rect.height-size.h/2};if(!validPosition(layouts.get($('sheet').value),pos,size))throw Error('此处会遮挡文字或超出纸张，请点击空白处');positions.set($('sheet').value,pos);refresh();}catch(e){$('status').textContent=e.message;}};
-$('download').onclick=async()=>{if(!book||!signature||busy)return;busy=true;for(const el of document.querySelectorAll('input,select,button'))el.disabled=true;try{const pdf=await PDFLib.PDFDocument.create();for(const name of book.SheetNames){const canvas=document.createElement('canvas');draw(name,canvas);const png=await pdf.embedPng(canvas.toDataURL('image/png'));const page=pdf.addPage([841.89,595.28]);page.drawImage(png,{x:0,y:0,width:841.89,height:595.28});}const blob=new Blob([await pdf.save()],{type:'application/pdf'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName.replace(/\.[^.]+$/,'')+'-签字.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('status').textContent=`已生成 ${book.SheetNames.length} 页签字 PDF。`;}catch(e){$('status').textContent='生成失败：'+e.message;}finally{busy=false;for(const el of document.querySelectorAll('input,select,button'))el.disabled=false;$('download').disabled=!book||!signature;}};
+$('download').onclick=async()=>{if(!book||!signature||busy)return;busy=true;for(const el of document.querySelectorAll('input,select,button'))el.disabled=true;try{const pdf=await PDFLib.PDFDocument.create();for(const name of book.SheetNames){const canvas=document.createElement('canvas');draw(name,canvas);const png=await pdf.embedPng(canvas.toDataURL('image/png'));const page=pdf.addPage([595.28,841.89]);page.drawImage(png,{x:0,y:0,width:595.28,height:841.89});}const blob=new Blob([await pdf.save()],{type:'application/pdf'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName.replace(/\.[^.]+$/,'')+'-签字.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('status').textContent=`已生成 ${book.SheetNames.length} 页签字 PDF。`;}catch(e){$('status').textContent='生成失败：'+e.message;}finally{busy=false;for(const el of document.querySelectorAll('input,select,button'))el.disabled=false;$('download').disabled=!book||!signature;}};
 refresh();
+$('signature').disabled=true;$('clearSignature').disabled=true;
+signatureCache('get').then(async saved=>{
+ if(saved?.file){signatureFile=saved.file;rawSignature=await loadImage(saved.file);$('cleanSignature').checked=saved.clean!==false;updateSignature();$('signatureMemory').textContent='已自动加载本机保存的默认签名。';}
+}).catch(e=>{$('signatureMemory').textContent='签名缓存读取失败，请重新上传：'+e.message;}).finally(()=>{$('signature').disabled=false;$('clearSignature').disabled=false;});
+$('clearSignature').onclick=async()=>{
+ try{await signatureCache('delete');signature=null;rawSignature=null;signatureFile=null;$('signature').value='';$('signaturePreview').hidden=true;positions.clear();refresh();$('signatureMemory').textContent='已清除本机保存的签名。';}
+ catch(e){$('signatureMemory').textContent='清除失败：'+e.message;}
+};
 })();
