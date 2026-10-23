@@ -28,6 +28,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
     const page = await context.newPage();
+    await page.clock.setFixedTime(new Date('2026-10-22T16:30:00Z'));
     // OCR is unrelated to contracts; its external loader must not delay this regression.
     await page.route('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js', route => route.fulfill({ contentType: 'application/javascript', body: '/* OCR unused in contract tests */' }));
     const errors = [], consoleErrors = [], httpErrors = [], mutatingRequests = [];
@@ -105,7 +106,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.equal(await page.locator('[data-business-key="signDate"] strong').innerText(), '甲方签署日期');
     assert.equal(await page.locator('[data-business-key="signDate"] .business-template-field').innerText(), '签署时间： → 右侧填写位置');
     assert.equal(await page.locator('[data-business-key="signDate"] .template-detection').innerText(), '识别成功');
-    assert.equal(await page.locator('[data-manual-key="signDate"]').inputValue(), '');
+    assert.equal(await page.locator('[data-manual-key="signDate"]').inputValue(), '2026-10-23');
     assert.match(await page.locator('#templateDetectionSummary').innerText(), /序号按 2 条物料明细自动生成/);
     assert.equal(await page.locator('[data-business-key="materialCode"] .business-template-field').innerText(), '物料编码');
     assert.equal(await page.locator('[data-business-key="materialCode"] .template-detection').innerText(), '识别成功');
@@ -127,6 +128,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     await page.locator('#outputName').fill('虚构采购合同');
     assert.match(await page.locator('#confirmSummary').innerText(), /识别 2 条物料明细/);
     await page.locator('#confirmGenerate').check();
+    await page.locator('[data-manual-key="signDate"]').fill('');
     assert.match(await page.locator('#contractIssues').innerText(), /请选择甲方签署日期/);
     assert.equal(await page.locator('#generateContract').isDisabled(), true);
     await page.locator('#confirmStage').screenshot({ path: path.join(out, 'contract-sign-date-required.png') });

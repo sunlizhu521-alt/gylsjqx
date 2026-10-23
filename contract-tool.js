@@ -49,7 +49,7 @@
     { key: 'orderNumber', label: '订单编号', aliases: ['订单编号', '采购订单号', '采购单号', '订单号'], kind: 'single' },
     { key: 'buyer', label: '采购方（甲方）', aliases: ['采购方（甲方）', '采购方', '甲方', '买方'], kind: 'single' },
     { key: 'supplier', label: '供应商（乙方）', aliases: ['供应方（乙方）', '供应方', '供应商名称', '供应商（乙方）', '供应商', '乙方', '卖方'], kind: 'single' },
-    { key: 'signDate', label: '甲方签署日期', aliases: ['甲方签署日期', '甲方签署时间', '签署时间', '签署日期', '签订日期', '签订时间', '签字日期', '合同日期', '签约日期'], kind: 'single', automatic: '@sign-date', automaticLabel: '请选择日期', manualInput: 'date', writeMode: '选择后填充' },
+    { key: 'signDate', label: '甲方签署日期', aliases: ['甲方签署日期', '甲方签署时间', '签署时间', '签署日期', '签订日期', '签订时间', '签字日期', '合同日期', '签约日期'], kind: 'single', automatic: '@sign-date', automaticLabel: '默认今天，可手动修改', manualInput: 'date', writeMode: '按所选日期填充' },
     { key: 'deliveryPlace', label: '交货地点', aliases: ['交货地点', '送货地址', '交付地点'], kind: 'single' },
     { key: 'paymentTerms', label: '付款方式', aliases: ['付款方式', '付款条件', '结算方式', '结算条件'], kind: 'single' },
   ];
@@ -65,7 +65,7 @@
     orderFile: null, orderBytes: null, orderBook: null, orderSheet: '', order: null,
     templateFile: null, templateBytes: null, templateType: '', templateBook: null, templateSheet: '', templateModel: null, templateFeatures: [], fingerprint: '',
     previewDocument: null, previewPdfiumDocument: null, previewMode: '', previewPageCount: 0, previewPage: 0, previewRenderToken: 0,
-    mappings: {}, detailRow: '', fieldSelections: {}, fieldStrategies: {}, manualValues: {}, templateBindings: {}, mappingSignature: '', customOutputName: false, output: null, outputFileName: '', outputPdf: null, outputPdfFileName: '', busy: false,
+    mappings: {}, detailRow: '', fieldSelections: {}, fieldStrategies: {}, manualValues: { signDate: todaySignDate() }, templateBindings: {}, mappingSignature: '', customOutputName: false, output: null, outputFileName: '', outputPdf: null, outputPdfFileName: '', busy: false,
   };
   const $ = id => document.getElementById(id);
   const esc = value => C.text(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -73,6 +73,14 @@
   const all = (element, name, namespace = W) => [...(element?.getElementsByTagNameNS(namespace, name) || [])];
 
   document.addEventListener('DOMContentLoaded', init);
+
+  function todaySignDate() {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(new Date());
+    const value = type => parts.find(part => part.type === type).value;
+    return `${value('year')}-${value('month')}-${value('day')}`;
+  }
 
   function init() {
     initTheme();
@@ -151,7 +159,7 @@
       const bytes = await file.arrayBuffer();
       const book = XLSX.read(bytes, { type: 'array', cellDates: false, cellFormula: true });
       if (!book.SheetNames.length) throw new Error('订单文件中没有工作表');
-      state.orderFile = file; state.orderBytes = bytes; state.orderBook = book; state.orderSheet = book.SheetNames[0]; state.manualValues = {};
+      state.orderFile = file; state.orderBytes = bytes; state.orderBook = book; state.orderSheet = book.SheetNames[0];
       setOptions($('orderSheet'), book.SheetNames, state.orderSheet); $('orderSheet').disabled = false;
       analyzeOrder();
       if (state.templateModel) restoreMapping();
@@ -232,7 +240,7 @@
       const type = file.name.toLowerCase().endsWith('.docx') ? 'docx' : 'xlsx';
       const zip = await validateOoxml(bytes, type);
       state.templateFile = file; state.templateBytes = bytes; state.templateType = type; state.fingerprint = await sha256(bytes);
-      state.templateBook = null; state.templateSheet = ''; state.mappings = {}; state.detailRow = ''; state.fieldSelections = {}; state.fieldStrategies = {}; state.manualValues = {}; state.templateBindings = {}; state.mappingSignature = '';
+      state.templateBook = null; state.templateSheet = ''; state.mappings = {}; state.detailRow = ''; state.fieldSelections = {}; state.fieldStrategies = {}; state.templateBindings = {}; state.mappingSignature = '';
       if (type === 'docx') await parseDocx(zip);
       else parseXlsx();
       $('templateFileName').textContent = file.name; $('templateDrop').classList.add('loaded');
@@ -2219,7 +2227,7 @@
   function saveMapping() { try { const key = mappingKey(); if (key) localStorage.setItem(key, JSON.stringify(mappingPayload())); } catch (_) {} }
   function restoreMapping() {
     try { const key = mappingKey(), raw = key && localStorage.getItem(key); if (raw) applyMappingPayload(JSON.parse(raw)); }
-    catch (_) { state.mappings = {}; state.detailRow = ''; state.fieldSelections = {}; state.fieldStrategies = {}; state.manualValues = {}; state.mappingSignature = ''; }
+    catch (_) { state.mappings = {}; state.detailRow = ''; state.fieldSelections = {}; state.fieldStrategies = {}; state.mappingSignature = ''; }
   }
 
   function parseXml(xml) {
