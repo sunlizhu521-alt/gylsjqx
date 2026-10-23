@@ -1,8 +1,8 @@
 const test=require('node:test'),assert=require('node:assert/strict'),X=require('../vendor/xlsx.full.min.js'),C=require('../fulfillment-core.js');
-function fixture(){const w=X.utils.book_new();for(const name of C.SHEETS){const h=[...C.COLUMNS].reverse();const r=h.map(k=>k==='采购下单人'?'原表采购员':k==='物料编码'?'00123':k==='SKU'?'SKU-001':k==='合同约定交期'?'2026年8月14日':k==='生产中交付时间'?'/':k==='未生产预计交付时间'?'':k==='未交付数量'?0:'样例');X.utils.book_append_sheet(w,X.utils.aoa_to_sheet([['标题'],h,r,r]),name);}return w;}
-test('四表按姓名顺序匹配不同列位，保留重复、零和文本编码',()=>{const r=C.merge(fixture());assert.equal(r.rows.length,8);assert.deepEqual(r.counts.map(x=>x.sheet),C.SHEETS);assert.equal(r.rows[0][0].v,'原表采购员');assert.equal(C.COLUMNS[1],'事业部');assert.equal(r.rows[0][7].v,'00123');assert.equal(r.rows[0][10].v,0);assert.equal(r.rows[0][16].t,'n');assert.equal(r.rows[0][17].v,'/');assert.equal(r.rows[0][18].v,'');const w=X.read(X.write(C.workbook(r),{type:'buffer',bookType:'xlsx'}),{cellNF:true});assert.equal(w.Sheets.汇总表.Q2.z,C.DATE_FORMAT);assert.equal(w.Sheets.汇总表['!autofilter'].ref,'A1:W9');});
+function fixture(){const w=X.utils.book_new();for(const name of C.SHEETS){const h=[...C.COLUMNS.slice(0,23)].reverse().concat('下单日期');const r=h.map(k=>k==='下单日期'?'':k==='采购下单人'?'原表采购员':k==='物料编码'?'00123':k==='SKU'?'SKU-001':k==='合同约定交期'?'2026年8月14日':k==='生产中交付时间'?'/':k==='未生产预计交付时间'?'':k==='未交付数量'?0:'样例');X.utils.book_append_sheet(w,X.utils.aoa_to_sheet([['标题'],h,r,r]),name);}return w;}
+test('四表按姓名顺序匹配不同列位，保留重复、零和文本编码',()=>{const r=C.merge(fixture());assert.equal(r.rows.length,8);assert.deepEqual(r.counts.map(x=>x.sheet),C.SHEETS);assert.equal(r.rows[0][0].v,'原表采购员');assert.equal(C.COLUMNS[1],'事业部');assert.equal(r.rows[0][7].v,'00123');assert.equal(r.rows[0][10].v,0);assert.equal(r.rows[0][16].t,'n');assert.equal(r.rows[0][17].v,'/');assert.equal(r.rows[0][18].v,'');const w=X.read(X.write(C.workbook(r),{type:'buffer',bookType:'xlsx'}),{cellNF:true});assert.equal(w.Sheets.汇总表.R2.z,C.DATE_FORMAT);assert.equal(w.Sheets.汇总表['!autofilter'].ref,'A1:U9');});
 test('日期真实类型、1904体系、闰日、无效日期与空白',()=>{const c=C.dateCell({v:'2026-08-14 23:59:59'},false);assert.equal(X.SSF.format(c.z,c.v),'2026年8月14日');assert.equal(C.dateCell({v:c.v-1462},true).v,c.v);assert.ok(C.dateCell({v:'2026-02-29'}).invalid);assert.equal(C.dateCell({v:'2024-02-29'}).t,'n');assert.equal(C.dateCell({v:''}).v,'');assert.ok(C.dateCell({v:'10月中旬'}).invalid);});
-test('缺表、缺列、重复列明确阻止导出；日期异常保留且溯源',()=>{let w=fixture();delete w.Sheets.徐英;assert.throws(()=>C.merge(w),/缺少工作表/);w=fixture();w.Sheets.徐英.D2.v='缺失';assert.throws(()=>C.merge(w),/缺少列/);w=fixture();w.Sheets.徐英.X2={t:'s',v:'SKU'};w.Sheets.徐英['!ref']='A1:X4';assert.throws(()=>C.merge(w),/重复列/);w=fixture();w.Sheets.徐英.G3={t:'s',v:'待定'};let r=C.merge(w);assert.equal(r.warnings.length,1);assert.match(r.warnings[0],/徐英!G3/);});
+test('缺表、缺列、重复列明确阻止导出；日期异常保留且溯源',()=>{let w=fixture();delete w.Sheets.徐英;assert.throws(()=>C.merge(w),/缺少工作表/);w=fixture();w.Sheets.徐英.D2.v='缺失';assert.throws(()=>C.merge(w),/缺少列/);w=fixture();w.Sheets.徐英.Y2={t:'s',v:'SKU'};w.Sheets.徐英['!ref']='A1:Y4';assert.throws(()=>C.merge(w),/重复列/);w=fixture();w.Sheets.徐英.G3={t:'s',v:'待定'};let r=C.merge(w);assert.equal(r.warnings.length,1);assert.match(r.warnings[0],/徐英!G3/);});
 test('导出名称使用上传名称和日期，更新版替换为汇总版',()=>{
  assert.equal(C.exportFilename('订单履约明细跟进表截止2026.10.8-10.10更新版.xlsx'),'订单履约明细跟进表截止2026.10.8-10.10汇总版.xlsx');
  assert.equal(C.exportFilename('订单2026.11.1更新版.XLS'),'订单2026.11.1汇总版.xlsx');
@@ -34,7 +34,7 @@ test('姓名日期后缀、三列映射、缺列留空及旧历史兼容',()=>{
  const s=w.Sheets['邢芳芳1017'];s.B2.v='OA备货流程号';s.A3={t:'s',v:'CGDD001'};s.B3={t:'s',v:'OA001'};s.C3={t:'n',v:46275};
  const r=C.merge(w),row=r.rows[6];assert.equal(row[21].v,'OA001');assert.equal(row[22].v,'CGDD001');assert.equal(X.SSF.format(row[20].z,row[20].v),'2026年9月');
  assert.equal(r.sources[6].sheet,'邢芳芳1017');
- for(const col of ['A','B','C'])delete s[col+'2'];const missing=C.merge(w);assert.deepEqual(missing.rows[6].slice(20).map(c=>c.v),['','','']);assert.equal(missing.warnings.length,3);
+ for(const col of ['A','B','C'])delete s[col+'2'];const missing=C.merge(w);assert.deepEqual(missing.rows[6].slice(20).map(c=>c.v),['','','','']);assert.equal(missing.warnings.length,3);
  const old={...r,rows:r.rows.map(row=>row.slice(0,20))};assert.deepEqual(C.difference(old,r),[]);assert.doesNotThrow(()=>C.workbook(old));
  w.Sheets.邢芳芳=s;assert.throws(()=>C.merge(w),/多个工作表/);delete w.Sheets.邢芳芳;w.Sheets['邢芳芳备份']=s;delete w.Sheets['邢芳芳1017'];assert.throws(()=>C.merge(w),/缺少工作表/);
 });
@@ -51,7 +51,7 @@ test('陆续交货取自然月末，文件名年份优先、显式年份优先�
  const r=C.merge(w,'订单履约明细跟进表截止2028.2.1更新版.xlsx');
  assert.equal(r.warnings.length,0);assert.equal(w.Sheets.徐英.G3.v,'2月陆续交货');
  const saved=X.read(X.write(C.workbook(r),{type:'buffer',bookType:'xlsx'}),{cellNF:true});
- const cell=saved.Sheets.汇总表.Q2;
+ const cell=saved.Sheets.汇总表.R2;
  assert.equal(cell.t,'n');assert.equal(X.SSF.format(cell.z,cell.v),'2028年2月29日');
 });
 
@@ -76,4 +76,14 @@ test('孙立柱及日期后缀表不汇总，旧历史按同样口径排除以�
  assert.equal(filtered.rows.length,1);assert.equal(result.rows.length,3);
  assert.deepEqual(filtered.counts,[{sheet:'徐英',count:1}]);
  assert.deepEqual(C.difference(filtered,snapshot([['001',5]])),[]);
+});
+
+test('汇总21列按指定顺序，日期及OA字段对应，旧缓存缺日期不补造',()=>{
+ const expected=['事业部','销售分渠道','运营','下单日期','OA流程号','供应商简称','产品线','系列','物料编码','SKU','物料名称','未交付数量','已下单未备料未生产','已备料未生产','生产中产品','完工未发产品','已发货数量','合同约定交期','生产中交付时间','为生产预计交付时间','是否正常履约'];
+ const w=fixture();w.Sheets.徐英.X3={t:'s',v:'2026年10月23日'};w.Sheets.徐英.B2.v='OA流程号';w.Sheets.徐英.B3.v='OA123';
+ const result=C.merge(w),book=C.workbook(result),sheet=book.Sheets.汇总表;
+ assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1})[0],expected);
+ assert.equal(X.SSF.format(sheet.D2.z,sheet.D2.v),'2026年10月23日');
+ assert.equal(sheet.E2.v,'OA123');assert.equal(sheet.I2.v,'00123');assert.equal(sheet.L2.v,0);
+ assert.equal(C.summaryRows([result.rows[0].slice(0,23)])[0][3].v,'');
 });

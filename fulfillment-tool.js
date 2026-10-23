@@ -9,7 +9,7 @@ function show(history){
  $('warnings').textContent=result.warnings.join('\n');
  $('count').textContent=`共 ${result.rows.length} 条，预览前 ${Math.min(100,result.rows.length)} 条；下载将汇总表放在首位，并保留差异表和全部原始工作表。`;
  const table=(columns,rows)=>'<table><thead><tr>'+columns.map(v=>'<th>'+esc(v)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(0,100).map(row=>'<tr>'+row.map(c=>'<td>'+esc(c.z?XLSX.SSF.format(c.z,c.v):c.v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
- $('preview').innerHTML=table(C.COLUMNS,result.rows);$('diff-preview').innerHTML=table(C.DIFF_COLUMNS,result.differences);
+ $('preview').innerHTML=table(C.SUMMARY_COLUMNS,C.summaryRows(result.rows));$('diff-preview').innerHTML=table(C.DIFF_COLUMNS,result.differences);
  $('result').hidden=false;$('download').disabled=!sourceBytes;if(!sourceBytes)$('warnings').textContent+='\n请重新上传原文件，以便导出时保留原始工作表。';
 }
 $('file').disabled=true;$('status').textContent='正在读取历史数据…';
