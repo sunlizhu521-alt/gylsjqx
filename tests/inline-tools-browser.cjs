@@ -9,6 +9,8 @@ const C = require('../fulfillment-core.js');
     const errors=[]; page.on('pageerror',e=>errors.push(e.message));
     const base=process.env.QA_URL || 'http://127.0.0.1:8940/';
     await page.route('**/*',r=>new URL(r.request().url()).origin===new URL(base).origin?r.continue():r.abort());
+    // Simulate stale HTML at the previously unversioned child URL.
+    await page.route('**/receipt-sign.html',r=>r.fulfill({contentType:'text/html',body:'<input id="signature">旧版签字页面'}));
     await page.goto(base,{waitUntil:'networkidle'});
     const url=page.url();
     async function select(id) {
@@ -18,6 +20,16 @@ const C = require('../fulfillment-core.js');
     }
     let receipt=await select('receipt-sign');
     await receipt.locator('#signatureWidth').fill('42');
+    assert.match(await page.locator('iframe[data-tool="receipt-sign"]').getAttribute('src'), /[?&]v=/);
+    assert.equal(await receipt.locator('#signature,#clearSignature').count(),0);
+    const receiptBook=X.utils.book_new();
+    X.utils.book_append_sheet(receiptBook,X.utils.aoa_to_sheet([['采购入库单'],['物料编码','数量'],['TEST',2]]),'Sheet1');
+    await receipt.locator('#file').setInputFiles({name:'自动签字.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(X.write(receiptBook,{type:'buffer',bookType:'xlsx'}))});
+    await receipt.locator('#download:not([disabled])').waitFor();
+    assert.match(await receipt.locator('#status').innerText(),/签名已添加/);
+    const signedDownload=page.waitForEvent('download');
+    await receipt.locator('#download').click();
+    assert.equal((await signedDownload).suggestedFilename(),'自动签字-签字.pdf');
     await select('beihuo');
     await page.frameLocator('iframe[data-tool="beihuo"]').locator('#applyAllButton').waitFor();
     await select('contract');

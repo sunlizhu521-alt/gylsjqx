@@ -136,7 +136,11 @@ function mountEmbeddedTool(tool) {
     new ResizeObserver(resize).observe(doc.body);
     resize();
   });
-  frame.src = tool.href;
+  // Share the homepage script version so cached child HTML cannot outlive a release.
+  const script = [...document.scripts].find(item => item.src.includes('/app-merge19.js'));
+  const source = new URL(tool.href, location.href);
+  source.searchParams.set('v', new URL(script.src).searchParams.get('v') || '1');
+  frame.src = source.href;
   $('embeddedTools').append(frame);
 }
 
