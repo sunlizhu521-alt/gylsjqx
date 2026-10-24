@@ -65,6 +65,16 @@ window.FundsExport = async function(sourceBytes, result) {
   const formatId=code=>{if(!code||code==='General')return 0;if(formats.has(code))return formats.get(code);const id=nextFormat++;numFmts.append(create(styles,'numFmt',{numFmtId:id,formatCode:code}));numFmts.setAttribute('count',numFmts.children.length);formats.set(code,id);return id;};
   const styleIds=new Map();
   const styleFor=(code='',header=false)=>{const key=header?'header':code;if(styleIds.has(key))return styleIds.get(key);const xf=create(styles,'xf',{numFmtId:formatId(code),fontId:header?headerFontId:fontId,fillId:header?fillId:0,borderId,xfId:0,applyFont:1,applyFill:1,applyBorder:1,applyAlignment:1,applyNumberFormat:1});xf.append(create(styles,'alignment',{horizontal:'center',vertical:'center',wrapText:1}));const id=append('cellXfs',xf);styleIds.set(key,id);return id;};
+  const wrappedStyles=new Map();
+  const wrapStyle=id=>{
+    const original=xfs.children[Number(id)];if(!original)throw Error('谈判付款单元格样式缺失');
+    if(first(original,'alignment')?.getAttribute('wrapText')==='1'&&original.getAttribute('applyAlignment')!=='0')return id;
+    if(wrappedStyles.has(String(id)))return wrappedStyles.get(String(id));
+    const xf=original.cloneNode(true);let alignment=first(xf,'alignment');
+    if(!alignment){alignment=create(styles,'alignment');xf.insertBefore(alignment,first(xf,'protection')||null);}
+    alignment.setAttribute('wrapText','1');xf.setAttribute('applyAlignment','1');
+    const next=append('cellXfs',xf);wrappedStyles.set(String(id),next);return next;
+  };
   const date1904=['1','true'].includes(first(workbook,'workbookPr')?.getAttribute('date1904'));
   const writeCell=(doc,address,cell,styleId,convertDates=false)=>{
     const c=create(doc,'c',{r:address});if(styleId!==undefined)c.setAttribute('s',styleId);
@@ -86,6 +96,8 @@ window.FundsExport = async function(sourceBytes, result) {
   const rows=new Map(elements(sheetData,'row').map(r=>[Number(r.getAttribute('r')),r]));
   const cells=new Map(elements(sheetData,'c').map(c=>[c.getAttribute('r'),c]));
   const originalRange=XLSX.utils.decode_range(first(sheet,'dimension')?.getAttribute('ref')||'A1');
+  const submissionColumns=new Set((result.negotiated.headers||[]).flatMap((h,c)=>['提交时间汇总','提交付款申请单日期'].includes(String(h).normalize('NFKC').replace(/\s+/g,''))?[c]:[]));
+  const sourceColumns=elements(sheet,'col'),defaultWidth=Number(first(sheet,'sheetFormatPr')?.getAttribute('defaultColWidth')||8.43);
   let maxRow=originalRange.e.r,maxColumn=originalRange.e.c;
   const changed=new Set();
   for(const {address,cell} of result.negotiated.updates){
@@ -93,14 +105,23 @@ window.FundsExport = async function(sourceBytes, result) {
     const point=XLSX.utils.decode_cell(address),old=cells.get(address);let row=rows.get(point.r+1);
     if(!row){row=create(sheet,'row',{r:point.r+1});const after=[...rows].filter(([r])=>r>point.r+1).sort((a,b)=>a[0]-b[0])[0]?.[1];sheetData.insertBefore(row,after||null);rows.set(point.r+1,row);}
     const isHeader=point.r===result.negotiated.headerRow;
-    const styleId=old?.getAttribute('s')??styleFor(cell?.z||'',isHeader);
+    const submission=!isHeader&&submissionColumns.has(point.c),column=sourceColumns.find(c=>Number(c.getAttribute('min'))<=point.c+1&&Number(c.getAttribute('max'))>=point.c+1);
+    let styleId=old?.getAttribute('s')??(old&&submission?(row.getAttribute('s')??column?.getAttribute('style')??0):styleFor(cell?.z||'',isHeader));
+    if(submission)styleId=wrapStyle(styleId);
     const next=writeCell(sheet,address,cell,styleId);
     // Retain unrelated cell metadata while replacing only value/formula payloads.
     if(old){for(const attr of old.attributes)if(!['r','s','t'].includes(attr.name))next.setAttribute(attr.name,attr.value);old.replaceWith(next);}
     else {const after=[...row.children].find(c=>c.localName==='c'&&XLSX.utils.decode_cell(c.getAttribute('r')).c>point.c);row.insertBefore(next,after||null);}
     cells.set(address,next);changed.add(address);maxRow=Math.max(maxRow,point.r);maxColumn=Math.max(maxColumn,point.c);
-    // New multi-line fields must remain visible without reducing the source row height.
-    if(point.c>originalRange.e.c){const lines=String(cell?.v??'').split('\n').length;const needed=lines*17+6;if(needed>Number(row.getAttribute('ht')||15)){row.setAttribute('ht',needed);row.setAttribute('customHeight','1');}}
+    // Reused submission columns also grow when another batch is appended; never shrink source rows.
+    if(point.c>originalRange.e.c||submission){
+      const size=Number(first(fonts.children[Number(xfs.children[Number(styleId)].getAttribute('fontId')||0)],'sz')?.getAttribute('val')||12);
+      const width=Number(column?.getAttribute('width')||(point.c>originalRange.e.c?28:defaultWidth));
+      const capacity=Math.max(1,(width-2)*11/size);
+      const lines=String(cell?.v??'').split('\n').reduce((n,line)=>n+(submission?Math.max(1,Math.ceil([...line].reduce((sum,ch)=>sum+(/[\u0000-\u00ff]/.test(ch)?1:2),0)/capacity)):1),0);
+      const needed=lines*Math.max(17,size*1.4)+6;
+      if(needed>Number(row.getAttribute('ht')||first(sheet,'sheetFormatPr')?.getAttribute('defaultRowHeight')||15)){row.setAttribute('ht',needed);row.setAttribute('customHeight','1');}
+    }
   }
   let dimension=first(sheet,'dimension');if(!dimension){dimension=create(sheet,'dimension');sheet.documentElement.insertBefore(dimension,sheet.documentElement.firstChild);}dimension.setAttribute('ref',XLSX.utils.encode_range({s:originalRange.s,e:{r:maxRow,c:maxColumn}}));
   if(maxColumn>originalRange.e.c){let cols=first(sheet,'cols');if(!cols){cols=create(sheet,'cols');sheet.documentElement.insertBefore(cols,sheetData);}cols.append(create(sheet,'col',{min:originalRange.e.c+2,max:maxColumn+1,width:28,customWidth:1}));}
