@@ -203,34 +203,35 @@ function build(inputs,decisions={}){
  function applyFlow(target){
   const ids=oas(target.record),supplier=norm(value(target.record,'供应商名称')),amount=money(target.record.values['申请付款金额']);
   const valid=supplier&&target.record.values['供应商名称']?.t!=='e'&&amount.cents!==undefined&&amount.cents>=0n;
-  const exact=valid?flowRecords.filter(r=>payee(r)===supplier&&money(r.values['付款金额']).cents===amount.cents):[];
+  const problems=target.normal?flowProblems:r=>flowProblems(r).filter(f=>f==='流程编号'||FLOW_FIELDS.includes(f));
+  const exact=target.normal?(valid?flowRecords.filter(r=>payee(r)===supplier&&money(r.values['付款金额']).cents===amount.cents):[]):
+   [...new Map(ids.flatMap(id=>flows.get(id)||[]).map(r=>[JSON.stringify([flowId(r),...FLOW_FIELDS.map(f=>str(value(r,f))),problems(r)]),r])).values()];
   if(!exact.length)return;
-  const invalid=exact.filter(r=>flowProblems(r).length);
-  const conflictIds=[...new Set(exact.map(flowId))].filter(id=>flows.get(id).length>1);
+  const invalid=exact.filter(r=>problems(r).length);
+  const conflictIds=[...new Set(exact.map(flowId))].filter(id=>(target.normal?flows.get(id):exact.filter(r=>flowId(r)===id)).length>1);
   const consistent=rows=>ids.length>0&&ids.length===rows.length&&rows.every(r=>ids.includes(flowId(r)));
   let chosen=exact;
   if(conflictIds.length||invalid.length){
-   let message=invalid.length?'OA 字段含 Excel 错误或公式结果不可用，不能写入异常流程信息：'+[...new Set(invalid.flatMap(flowProblems))].join('、')+'。':'同一流程编号的收款单位、付款金额或进度信息存在冲突，请核对。';
-   message+=' 流程编号仅以供应商名称与金额完全一致的 OA 记录为准，原 OA 号保留，不作为匹配依据。';
-   const evidence=conflictIds.length?conflictIds.flatMap(id=>flows.get(id)):invalid;
+   let message=invalid.length?'OA 字段含 Excel 错误或公式结果不可用，不能写入异常流程信息：'+[...new Set(invalid.flatMap(problems))].join('、')+'。':target.normal?'同一流程编号的收款单位、付款金额或进度信息存在冲突，请核对。':'同一流程编号的进度信息存在冲突，请核对。';
+   message+=target.normal?' 流程编号仅以供应商名称与金额完全一致的 OA 记录为准，原 OA 号保留，不作为匹配依据。':' 谈判付款按原对公付款 OA 流程号与 OA 表流程编号匹配，原 OA 号保留。';
+   const evidence=conflictIds.length?(target.normal?conflictIds.flatMap(id=>flows.get(id)):exact.filter(r=>conflictIds.includes(flowId(r)))):invalid;
    if(evidence.length)message+='\nOA 来源记录：\n'+evidence.map(flowLabel).join('\n');
-   const answer=issue('oa:'+target.record.id,'oa',message,target.record,[{value:'keep',label:'保留原流程编号及流程信息'},...exact.filter(r=>!flowProblems(r).length).map(r=>({value:'match:'+r.id,label:'确认匹配：'+flowLabel(r)}))],true);
+   const answer=issue('oa:'+target.record.id,'oa',message,target.record,[{value:'keep',label:'保留原流程编号及流程信息'},...exact.filter(r=>!problems(r).length).map(r=>({value:'match:'+r.id,label:'确认匹配：'+flowLabel(r)}))],true);
    if(!answer.length||answer.includes('keep'))return;
-   chosen=exact.filter(r=>answer.includes('match:'+r.id)||(!conflictIds.includes(flowId(r))&&!flowProblems(r).length));
+   chosen=exact.filter(r=>answer.includes('match:'+r.id)||(!conflictIds.includes(flowId(r))&&!problems(r).length));
    const chosenIds=new Set(chosen.map(flowId));
    if(chosenIds.size!==chosen.length||exact.some(r=>!chosenIds.has(flowId(r)))){const current=issues[issues.length-1];current.resolved=false;current.message+=' 每个有冲突或异常的流程编号需要选择一个有效版本，其余无冲突流程自动保留。';return;}
   }
   oaMatched++;if(consistent(chosen))oaConsistent++;
-  target.matchedFlowIds=chosen.map(flowId);
   set(target,'流程编号',cell(chosen.map(r=>str(value(r,'流程编号'))).join('\n')));
   for(const f of FLOW_FIELDS){if(flow.map[f]===undefined)continue;set(target,f,cell(chosen.map(r=>(chosen.length>1?flowId(r)+'：':'')+str(value(r,f))).join('\n')));}
  }
  targets.forEach(applyFlow);
  normalObjects.forEach(applyApplications);
- // Application "合同号" is the payment OA number. Corrected flow IDs take precedence
- // over the original reference, while supplier + exact amount remains a direct match.
+ // Application "合同号" is the negotiated payment OA number; keep all source references,
+ // including those absent from the OA export. Supplier + exact amount remains a direct match.
  const submissions=new Map(negotiatedObjects.map(t=>[t,{rows:[],ambiguous:[],reasons:[]}]));
- const references=new Map(negotiatedObjects.map(t=>[t,t.matchedFlowIds||oas(t.record)]));
+ const references=new Map(negotiatedObjects.map(t=>[t,oas(t.record)]));
  for(const application of applications.records){
   const info=classification(application),contract=application.values['OA合同编号'];
   const ids=contract?.t==='e'?[]:codes(contract?.v);

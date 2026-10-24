@@ -95,8 +95,8 @@ function compareNegotiated(before,after){
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对']);compareNegotiated(original.Sheets[selectedName],saved.Sheets.谈判付款);
   const normal=X.utils.sheet_to_json(saved.Sheets.正常付款,{header:1,defval:''});assert.deepEqual(normal[0],NORMAL_HEADERS);
   const applicationReview=X.utils.sheet_to_json(saved.Sheets.付款申请核对,{header:1,defval:''});assert.deepEqual(applicationReview[0],REVIEW_HEADERS);
-  assert.equal(applicationReview.length-1,real?6:0,'仅申请异常列入核对表，未申请不列入');
-  assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),real?{'待核对':6}:{});
+  assert.equal(applicationReview.length-1,real?2:0,'仅申请异常列入核对表，未申请不列入');
+  assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),real?{'待核对':2}:{});
   assert.equal(saved.Sheets.付款申请核对['!autofilter'].ref,`A1:J${applicationReview.length}`);
   assert(applicationReview.slice(1).every(row=>row[5]&&row[7]&&row[8]&&Number.isInteger(row[9])),'付款申请核对须包含说明和来源文件、工作表、行号');
   assert.equal(normal.length-1,real?15:5);assert.equal(saved.Sheets.正常付款['!autofilter'].ref,`A1:W${normal.length}`);
@@ -132,7 +132,7 @@ function compareNegotiated(before,after){
    assert.equal(normal[4][16],'未申请','未匹配时按最新规则填写未申请，覆盖原是');assert.equal(normal[5][16],'未申请','部分金额未精确匹配时填写未申请');
   }else{
    const nh=fields(saved.Sheets.谈判付款),states=X.utils.sheet_to_json(saved.Sheets.谈判付款,{header:1,defval:''}).slice(1).map(row=>row[nh['是否提交付款申请单']]).filter(Boolean);
-   assert.deepEqual(states.reduce((counts,state)=>(counts[state]=(counts[state]||0)+1,counts),{}),{'已全部提交':43,'已部分提交':7,'未申请':60,'待核对':6});
+   assert.deepEqual(states.reduce((counts,state)=>(counts[state]=(counts[state]||0)+1,counts),{}),{'已全部提交':46,'已部分提交':7,'未申请':61,'待核对':2});
   }
   await download(2);
   await page.reload({waitUntil:'networkidle'});await page.locator('.tool-tab[data-tool="funds"]').click();frame=page.frameLocator('iframe[data-tool="funds"]');
@@ -154,7 +154,7 @@ function compareNegotiated(before,after){
     if(extra){const note=notes.find(row=>row['供应商名称']==='谈判甲公司');assert.equal(note['是否提交付款申请单'],'待核对');assert.match(note['核对说明'],/310\.00/);assert.match(note['核对说明'],/300\.00/);}
    }
    // A wrong nonempty OA may match a new flow; a blank original OA excludes the normal record entirely.
-   for(const [sourceOA,unmatched] of [['MDST-DGFK20990101999',false],['',false],['MDST-DGFK20261024001',true]]){
+   for(const [sourceOA,unmatched,negotiatedMissing] of [['MDST-DGFK20990101999',false],['',false],['MDST-DGFK20261024001',true,false],['MDST-DGFK20261024001',true,true]]){
    const book=X.read(data.ledger,{type:'buffer'});
    book.Sheets['对账明细-李奇'].D2={t:'s',v:sourceOA};
    const retained=['原审核节点','原未操作者','原流程状态','原申请人','原流程编号'];
@@ -162,7 +162,13 @@ function compareNegotiated(before,after){
    const changed={...data,ledger:Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}))};
    if(unmatched){
     const oa=X.read(data.oa,{type:'buffer'}),sheet=oa.Sheets[oa.SheetNames[0]];
-    for(const address of Object.keys(sheet).filter(key=>/^A\d+$/.test(key)))if(['MDST-DGFK20261024001','MDST-DGFK20261024010'].includes(sheet[address].v))sheet['G'+address.slice(1)]={t:'n',v:999};
+    for(const address of Object.keys(sheet).filter(key=>/^A\d+$/.test(key))){
+     if(sheet[address].v==='MDST-DGFK20261024001')sheet['G'+address.slice(1)]={t:'n',v:999};
+     if(sheet[address].v==='MDST-DGFK20261024010'){
+      if(negotiatedMissing)sheet[address]={t:'s',v:'MDST-DGFK20990101999'};
+      else{sheet['G'+address.slice(1)]={t:'n',v:999};sheet['F'+address.slice(1)]={t:'s',v:'不同收款单位'};}
+     }
+    }
     changed.oa=Buffer.from(X.write(oa,{type:'buffer',bookType:'xlsx'}));
     const negotiated=X.read(data.negotiated,{type:'buffer'}),n=negotiated.Sheets[selectedName],col=X.utils.decode_range(n['!ref']).e.c+1;
     X.utils.sheet_add_aoa(n,[['当前节点','未操作者','流程状态','申请人','流程编号'],retained],{origin:{r:0,c:col}});
@@ -191,7 +197,7 @@ function compareNegotiated(before,after){
     else assert.equal(await previewRows.filter({hasText:'正常供应商1'}).count(),0,'有匹配新流程也不能纳入原OA空白的记录');
     assert.equal(await previewRows.first().locator('td').last().innerText(),'已对账');
     const event=reviewPage.waitForEvent('download');await review.locator('#download').click();const downloaded=await event;
-    assert.equal(downloaded.suggestedFilename(),'资金整理-2026-10-24-V1.xlsx');const target=out+(unmatched?'/oa-unmatched-preserved.xlsx':sourceOA?'/oa-mismatch-auto.xlsx':'/oa-empty-excluded.xlsx');await downloaded.saveAs(target);
+    assert.equal(downloaded.suggestedFilename(),'资金整理-2026-10-24-V1.xlsx');const target=out+(negotiatedMissing?'/negotiated-oa-missing.xlsx':unmatched?'/oa-unmatched-preserved.xlsx':sourceOA?'/oa-mismatch-auto.xlsx':'/oa-empty-excluded.xlsx');await downloaded.saveAs(target);
     const downloadedBook=X.read(await fs.readFile(target),{type:'buffer',cellNF:true,cellStyles:true}),checked=downloadedBook.Sheets.正常付款;
     assert.equal(checked.W2.v,'已对账');
     if(sourceOA){
@@ -207,7 +213,13 @@ function compareNegotiated(before,after){
     if(unmatched){
      assert.equal(await review.locator('.issue[data-issue-id^="oa:"]').count(),0);
      assert.deepEqual(['R','S','T','U','V'].map(col=>checked[col+'2'].v),retained);
-     const n=downloadedBook.Sheets.谈判付款,h=fields(n);assert.deepEqual(['当前节点','未操作者','流程状态','申请人','流程编号'].map(key=>n[X.utils.encode_cell({r:1,c:h[key]})].v),retained);
+     const n=downloadedBook.Sheets.谈判付款,h=fields(n),expected=negotiatedMissing?retained:['财务审核','测试审核人','未归档','李奇','MDST-DGFK20261024010'];
+     const previewHeaders=await review.locator('#negotiatedPreview th').allTextContents();
+     for(const [index,key] of ['当前节点','未操作者','流程状态','申请人','流程编号'].entries()){
+      assert.equal(n[X.utils.encode_cell({r:1,c:h[key]})].v,expected[index]);
+      assert.equal(await review.locator('#negotiatedPreview tbody tr').first().locator('td').nth(previewHeaders.indexOf(key)).innerText(),expected[index]);
+     }
+     assert.equal(n.C2.v,'MDST-DGFK20261024010','原付款OA编号保持不变');
      assert.equal(n.E2.v,0);assert.equal(n.N2.v,300);assert.equal(n.K2.v,'否');
     }
     assert.deepEqual(errors,[]);
