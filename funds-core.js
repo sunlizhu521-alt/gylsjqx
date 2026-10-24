@@ -108,18 +108,31 @@ function build(inputs,decisions={}){
   issues.push({id,kind,message,source:rec.source,targetLabel:recordLabel(rec),choices,multiple,resolved:valid,selected:answer});return answer;
  }
  const headerRecord=t=>({source:{file:t.name,sheet:t.sheetName,row:t.headerRow+1},values:{}});
- for(const t of ledgerTables){const absent=NORMAL_HEADERS.slice(0,17).filter(k=>t.map[k]===undefined);if(absent.length)issue('headers:'+t.sheetName,'missing-header','缺少字段，输出保留空白：'+absent.join('、'),headerRecord(t));}
+ for(const t of ledgerTables){const absent=NORMAL_HEADERS.slice(0,17).filter(k=>k!=='是否谈判付款'&&t.map[k]===undefined);if(absent.length)issue('headers:'+t.sheetName,'missing-header','缺少字段，输出保留空白：'+absent.join('、'),headerRecord(t));}
  for(const [t,fields] of [[applications,['付款主体','OA合同编号','摘要']],[flow,['收款单位','付款金额',...FLOW_FIELDS]],[negotiated,['付款主体','对公付款0A流程号','已付金额','是否结清','剩余金额']]]){
   const absent=fields.filter(k=>t.map[k]===undefined);if(absent.length)issue('headers:'+t.sheetName,'missing-header','缺少字段，无法据此自动匹配或更新：'+absent.join('、'),headerRecord(t));
  }
  const targetCols={...negotiated.map},negHeaders=[...negotiated.headers];
  for(const h of ['已付金额','是否结清','剩余金额',...ADDED_HEADERS])if(targetCols[h]===undefined){const label=h==='剩余金额'?'剩余付款金额':h;targetCols[h]=negHeaders.length;negHeaders.push(label);updateMap.set(X.utils.encode_cell({r:negotiated.headerRow,c:targetCols[h]}),cell(label));}
- const normal=[];
+ const classification=r=>{
+  const supplier=r.values['供应商名称'],amount=money(r.values['申请付款金额']);
+  const name=supplier?.t==='e'||(supplier?.f&&(supplier.v==null||supplier.v===''))?'':norm(supplier?.v);
+  const cents=amount.cents!==undefined&&amount.cents>=0n?amount.cents:undefined;
+  return {name,cents,key:name&&cents!==undefined?JSON.stringify([name,cents.toString()]):''};
+ };
+ const negotiatedKeys=new Set(),uncertainNegotiated=[];
+ for(const r of negotiated.records){const info=classification(r);if(info.key)negotiatedKeys.add(info.key);else uncertainNegotiated.push({record:r,...info});}
+ const normal=[];let negotiatedLedgerRows=0;
  for(const r of ledger){
-  const flag=norm(value(r,'是否谈判付款'));
-  let include=flag==='否';
-  if(flag!=='是'&&flag!=='否')include=issue('classification:'+r.id,'classification','是否谈判付款为空或不是“是/否”，请确认是否纳入正常付款。',r,[{value:'normal',label:'纳入正常付款（否）'},{value:'keep',label:'保留原分类，本次不纳入正常付款'}])[0]==='normal';
-  if(include)normal.push(r);
+  const info=classification(r);
+  if(info.key&&negotiatedKeys.has(info.key)){negotiatedLedgerRows++;continue;}
+  const uncertain=uncertainNegotiated.filter(n=>(!n.name||!info.name||n.name===info.name)&&(n.cents===undefined||info.cents===undefined||n.cents===info.cents));
+  if(!info.key||uncertain.length){
+   const message=(!info.key?'供应商名称或申请付款金额为空、异常，无法判断是否在谈判表出现。':'谈判表存在可能对应的记录，但供应商名称或申请付款金额不完整，无法确认未命中。')+(uncertain.length?'\n谈判来源：\n'+uncertain.map(n=>recordLabel(n.record)).join('\n'):'');
+   const answer=issue('classification:'+r.id,'classification',message,r,[{value:'normal',label:'核实后确认正常付款，纳入正常付款表'},{value:'keep',label:'暂不分类，本次不纳入正常付款；保留源文件原值'}])[0];
+   if(answer!=='normal')continue;
+  }
+  normal.push(r);
  }
  const apConflict=(a,b)=>identifiersConflict(aps(a),aps(b));
  const oaConflict=(a,b)=>identifiersConflict(oas(a),oas(b));
@@ -231,7 +244,7 @@ function build(inputs,decisions={}){
  const normalRows=normalObjects.map(t=>NORMAL_HEADERS.map(h=>h==='是否谈判付款'?cell('否'):normalCell(t,h)));
  const rows=[];for(let r=negotiated.headerRow+1;r<=negotiated.range.e.r;r++)rows.push(negHeaders.map((_,c)=>clone(updateMap.get(X.utils.encode_cell({r,c}))||negotiated.sheet[X.utils.encode_cell({r,c})])));
  const updates=[...updateMap].map(([address,c])=>({address,cell:c}));
- return {normalHeaders:[...NORMAL_HEADERS],normalRows,negotiated:{sheetName:selected,headerRow:negotiated.headerRow,headers:negHeaders,rows,updates},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,applications:applications.records.length,oaFlows:flows.size,oaConsistent,pending:issues.filter(i=>!i.resolved).length}};
+ return {normalHeaders:[...NORMAL_HEADERS],normalRows,negotiated:{sheetName:selected,headerRow:negotiated.headerRow,headers:negHeaders,rows,updates},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length,applications:applications.records.length,oaFlows:flows.size,oaConsistent,pending:issues.filter(i=>!i.resolved).length}};
 }
 return {PEOPLE,NORMAL_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money};
 });
