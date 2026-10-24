@@ -180,10 +180,6 @@ function build(inputs,decisions={}){
  function applyApplications(target){
   const info=classification(target.record),matched=applicationsByKey.get(info.key)||[];
   set(target,'是否提交付款申请单',cell(matched.length?'已提交付款申请单':'未申请'));
-  if(!matched.length){
-   const possible=info.name?applications.records.filter(a=>classification(a).name===info.name):[];
-   reviewApplication(target,info.key?'付款申请汇总中未找到供应商名称与本次申请付款金额均一致的记录，标记为未申请。':'供应商名称或申请付款金额为空、异常，未匹配付款申请，标记为未申请。',possible);return;
-  }
  }
  function applySubmissionDetails(target,matched){
   const dates=[];let invalid=false;
@@ -265,7 +261,7 @@ function build(inputs,decisions={}){
   }).sort((a,b)=>a.sort.localeCompare(b.sort)||a.i-b.i).map(r=>r.text).join('\n')));
   if(!matched.length){
    set(target,'是否提交付款申请单',cell('未申请'));
-   reviewApplication(target,'未找到供应商名称＋单次申请金额一致，或同一供应商＋付款 OA 号对应的申请记录，标记为未申请。',info.name?applications.records.filter(a=>classification(a).name===info.name):[]);continue;
+   continue;
   }
   const amounts=matched.map(r=>money(r.values['申请付款金额']).cents);
   if(info.cents===undefined||amounts.some(n=>n===undefined||n<0n)){

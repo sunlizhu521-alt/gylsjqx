@@ -95,8 +95,8 @@ function compareNegotiated(before,after){
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对']);compareNegotiated(original.Sheets[selectedName],saved.Sheets.谈判付款);
   const normal=X.utils.sheet_to_json(saved.Sheets.正常付款,{header:1,defval:''});assert.deepEqual(normal[0],NORMAL_HEADERS);
   const applicationReview=X.utils.sheet_to_json(saved.Sheets.付款申请核对,{header:1,defval:''});assert.deepEqual(applicationReview[0],REVIEW_HEADERS);
-  assert.equal(applicationReview.length-1,real?75:2,'未匹配或异常申请应完整列入独立核对表');
-  assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),real?{'未申请':69,'待核对':6}:{'未申请':2});
+  assert.equal(applicationReview.length-1,real?6:0,'仅申请异常列入核对表，未申请不列入');
+  assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),real?{'待核对':6}:{});
   assert.equal(saved.Sheets.付款申请核对['!autofilter'].ref,`A1:J${applicationReview.length}`);
   assert(applicationReview.slice(1).every(row=>row[5]&&row[7]&&row[8]&&Number.isInteger(row[9])),'付款申请核对须包含说明和来源文件、工作表、行号');
   assert.equal(normal.length-1,real?15:5);assert.equal(saved.Sheets.正常付款['!autofilter'].ref,`A1:W${normal.length}`);
@@ -127,12 +127,8 @@ function compareNegotiated(before,after){
    assert.equal(row(2,'流程编号'),'MDST-DGFK20261024011','零元流程应正常匹配');
    assert.equal(normal[1][12],0);assert.equal(normal[1][14],100);assert.equal(normal[1][16],'已提交付款申请单');assert.equal(normal[1][17],'财务审核');
    assert.equal(normal[1][21],'MDST-DGFK20261024001');
-   assert.equal(applicationReview.length,3);
-   assert.deepEqual(applicationReview.slice(1).map(row=>[row[0],row[1],row[3],row[4],row[7],row[8],row[9]]),[
-    ['正常付款','正常供应商4',103,'未申请','ledger.xlsx','对账明细-操思敏',2],
-    ['正常付款','正常供应商5',104,'未申请','ledger.xlsx','对账明细-孙立柱',2]
-   ]);
-   assert.match(applicationReview[2][6],/applications.xlsx/);assert.match(applicationReview[2][6],/正常供应商5/);assert.match(applicationReview[2][6],/103/);
+   assert.equal(applicationReview.length,1,'没有申请异常时核对表仅有表头');
+   assert.equal(await frame.locator('#reviewPreview tbody tr').count(),0,'未申请不显示在核对预览');
    assert.equal(normal[4][16],'未申请','未匹配时按最新规则填写未申请，覆盖原是');assert.equal(normal[5][16],'未申请','部分金额未精确匹配时填写未申请');
   }else{
    const nh=fields(saved.Sheets.谈判付款),states=X.utils.sheet_to_json(saved.Sheets.谈判付款,{header:1,defval:''}).slice(1).map(row=>row[nh['是否提交付款申请单']]).filter(Boolean);
@@ -154,7 +150,7 @@ function compareNegotiated(before,after){
     await upload('applications',Buffer.from(X.write(changed,{type:'buffer',bookType:'xlsx'})));await frame.locator('#analyze:not([disabled])').click();await frame.locator('#download:not([disabled])').waitFor();assert.equal(await pending(),0,'申请超额记入核对表，不阻挡下载');
     const checked=X.read(await download(version),{type:'buffer',cellNF:true,cellStyles:true}),n=checked.Sheets.谈判付款,h=fields(n);
     assert.equal(n[X.utils.encode_cell({r:1,c:h['是否提交付款申请单']})].v,state);assert.equal(n[X.utils.encode_cell({r:1,c:h['提交时间汇总']})].v,summary);compareNegotiated(original.Sheets[selectedName],n);
-    const notes=X.utils.sheet_to_json(checked.Sheets.付款申请核对);assert.equal(notes.length,extra?3:2);
+    const notes=X.utils.sheet_to_json(checked.Sheets.付款申请核对);assert.equal(notes.length,extra?1:0);
     if(extra){const note=notes.find(row=>row['供应商名称']==='谈判甲公司');assert.equal(note['是否提交付款申请单'],'待核对');assert.match(note['核对说明'],/310\.00/);assert.match(note['核对说明'],/300\.00/);}
    }
    // A wrong nonempty OA may match a new flow; a blank original OA excludes the normal record entirely.
