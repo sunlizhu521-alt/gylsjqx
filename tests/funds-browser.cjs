@@ -60,7 +60,7 @@ function compareNegotiated(before,after){
   assert.equal(await frame.locator('.issue[data-issue-id^="date:"]').count(),0,'无法识别的登记月份或应付款时间保留原值，不要求人工确认');
   const pending=()=>frame.locator('#pendingCount').innerText().then(s=>Number(s.match(/\d+/)?.[0]||0));
   const initialPending=await pending();
-  if(!real)assert.equal(initialPending,0,'缺少或部分付款申请应自动记入核对表，不阻挡下载');
+  assert.equal(initialPending,0,'未匹配 OA 自动保留原信息，付款申请核对表也不阻挡下载');
   if(initialPending)assert(await frame.locator('#download').isDisabled(),'待核对时禁止下载');
   async function resolveKeep(){
    for(let count=0;count<800&&await pending();count++){
@@ -157,10 +157,20 @@ function compareNegotiated(before,after){
     if(extra){const note=notes.find(row=>row['供应商名称']==='谈判甲公司');assert.equal(note['是否提交付款申请单'],'待核对');assert.match(note['核对说明'],/310\.00/);assert.match(note['核对说明'],/300\.00/);}
    }
    // Supplier and amount matching is automatic even when the original OA is wrong or blank.
-   for(const sourceOA of ['MDST-DGFK20990101999','']){
+   for(const [sourceOA,unmatched] of [['MDST-DGFK20990101999',false],['',false],['MDST-DGFK20261024001',true]]){
    const book=X.read(data.ledger,{type:'buffer'});
    book.Sheets['对账明细-李奇'].D2={t:'s',v:sourceOA};
+   const retained=['原审核节点','原未操作者','原流程状态','原申请人','原流程编号'];
+   if(unmatched)X.utils.sheet_add_aoa(book.Sheets['对账明细-李奇'],[['当前节点','未操作者','流程状态','申请人','流程编号'],retained],{origin:'R1'});
    const changed={...data,ledger:Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}))};
+   if(unmatched){
+    const oa=X.read(data.oa,{type:'buffer'}),sheet=oa.Sheets[oa.SheetNames[0]];
+    for(const address of Object.keys(sheet).filter(key=>/^A\d+$/.test(key)))if(['MDST-DGFK20261024001','MDST-DGFK20261024010'].includes(sheet[address].v))sheet['G'+address.slice(1)]={t:'n',v:999};
+    changed.oa=Buffer.from(X.write(oa,{type:'buffer',bookType:'xlsx'}));
+    const negotiated=X.read(data.negotiated,{type:'buffer'}),n=negotiated.Sheets[selectedName],col=X.utils.decode_range(n['!ref']).e.c+1;
+    X.utils.sheet_add_aoa(n,[['当前节点','未操作者','流程状态','申请人','流程编号'],retained],{origin:{r:0,c:col}});
+    changed.negotiated=Buffer.from(X.write(negotiated,{type:'buffer',bookType:'xlsx'}));
+   }
    const reviewPage=await browser.newPage({viewport:{width:1440,height:1000}});
    try{
     reviewPage.on('pageerror',e=>errors.push(e.message));
@@ -177,14 +187,20 @@ function compareNegotiated(before,after){
     await review.locator('#download:not([disabled])').waitFor();
     assert.equal(await review.locator('.issue[data-issue-id="oa:对账明细-李奇!2"]').count(),0,'原OA错误或空白不应阻止供应商金额精确匹配');
     assert.equal(Number(await review.locator('#pendingCount').innerText()),0);
-    assert.equal(await review.locator('#normalPreview tbody tr').first().locator('td').nth(21).innerText(),'MDST-DGFK20261024001');
+    assert.equal(await review.locator('#normalPreview tbody tr').first().locator('td').nth(21).innerText(),unmatched?'原流程编号':'MDST-DGFK20261024001');
     assert.equal(await review.locator('#normalPreview tbody tr').first().locator('td').last().innerText(),sourceOA?'已对账':'未对账');
     const event=reviewPage.waitForEvent('download');await review.locator('#download').click();const downloaded=await event;
-    assert.equal(downloaded.suggestedFilename(),'资金整理-2026-10-24-V1.xlsx');const target=out+(sourceOA?'/oa-mismatch-auto.xlsx':'/oa-empty-auto.xlsx');await downloaded.saveAs(target);
-    const checked=X.read(await fs.readFile(target),{type:'buffer'}).Sheets.正常付款;
-    assert.equal(checked.D2?.v??'',sourceOA,'原付款OA号必须保留');assert.equal(checked.V2.v,'MDST-DGFK20261024001','流程编号按供应商和金额精确匹配');
+    assert.equal(downloaded.suggestedFilename(),'资金整理-2026-10-24-V1.xlsx');const target=out+(unmatched?'/oa-unmatched-preserved.xlsx':sourceOA?'/oa-mismatch-auto.xlsx':'/oa-empty-auto.xlsx');await downloaded.saveAs(target);
+    const downloadedBook=X.read(await fs.readFile(target),{type:'buffer'}),checked=downloadedBook.Sheets.正常付款;
+    assert.equal(checked.D2?.v??'',sourceOA,'原付款OA号必须保留');assert.equal(checked.V2.v,unmatched?'原流程编号':'MDST-DGFK20261024001','精确匹配才更新流程编号，未匹配保留原值');
     assert.equal(checked.W2.v,sourceOA?'已对账':'未对账','匹配流程编号不能替代原 OA 号判断是否对账');
-    assert.equal(checked.M2.v,0,'OA核对不得改变已付金额');assert.equal(checked.R2?.v??'','财务审核');
+    assert.equal(checked.M2.v,0,'OA核对不得改变已付金额');assert.equal(checked.R2?.v??'',unmatched?'原审核节点':'财务审核');
+    if(unmatched){
+     assert.equal(await review.locator('.issue[data-issue-id^="oa:"]').count(),0);
+     assert.deepEqual(['R','S','T','U','V'].map(col=>checked[col+'2'].v),retained);
+     const n=downloadedBook.Sheets.谈判付款,h=fields(n);assert.deepEqual(['当前节点','未操作者','流程状态','申请人','流程编号'].map(key=>n[X.utils.encode_cell({r:1,c:h[key]})].v),retained);
+     assert.equal(n.E2.v,0);assert.equal(n.N2.v,300);assert.equal(n.K2.v,'否');
+    }
     assert.deepEqual(errors,[]);
    }finally{await reviewPage.close();}
    }

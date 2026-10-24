@@ -206,12 +206,13 @@ function build(inputs,decisions={}){
   const ids=oas(target.record),supplier=norm(value(target.record,'供应商名称')),amount=money(target.record.values['申请付款金额']);
   const valid=supplier&&target.record.values['供应商名称']?.t!=='e'&&amount.cents!==undefined&&amount.cents>=0n;
   const exact=valid?flowRecords.filter(r=>payee(r)===supplier&&money(r.values['付款金额']).cents===amount.cents):[];
+  if(!exact.length)return;
   const invalid=exact.filter(r=>flowProblems(r).length);
   const conflictIds=[...new Set(exact.map(flowId))].filter(id=>flows.get(id).length>1);
   const consistent=rows=>ids.length>0&&ids.length===rows.length&&rows.every(r=>ids.includes(flowId(r)));
   let chosen=exact;
-  if(!exact.length||conflictIds.length||invalid.length){
-   let message=!valid?'供应商或申请付款金额为空、异常，无法按收款单位＋付款金额匹配。':!exact.length?'未找到收款单位与供应商名称、付款金额与申请付款金额均相同的 OA 流程。':invalid.length?'OA 字段含 Excel 错误或公式结果不可用，不能写入异常流程信息：'+[...new Set(invalid.flatMap(flowProblems))].join('、')+'。':'同一流程编号的收款单位、付款金额或进度信息存在冲突，请核对。';
+  if(conflictIds.length||invalid.length){
+   let message=invalid.length?'OA 字段含 Excel 错误或公式结果不可用，不能写入异常流程信息：'+[...new Set(invalid.flatMap(flowProblems))].join('、')+'。':'同一流程编号的收款单位、付款金额或进度信息存在冲突，请核对。';
    message+=' 流程编号仅以供应商名称与金额完全一致的 OA 记录为准，原 OA 号保留，不作为匹配依据。';
    const evidence=conflictIds.length?conflictIds.flatMap(id=>flows.get(id)):invalid;
    if(evidence.length)message+='\nOA 来源记录：\n'+evidence.map(flowLabel).join('\n');
