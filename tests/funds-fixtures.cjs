@@ -8,7 +8,7 @@ const NEGOTIATED_HEADERS=['供应商','付款主体','对公付款0A流程号','
 const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
 const sheetBook=(name,rows)=>{const book=X.utils.book_new();X.utils.book_append_sheet(book,X.utils.aoa_to_sheet(rows),name);return book;};
 async function fixtures(){
- const ledger=X.utils.book_new(),applications=[['申请日期','供应商全称','付款主体','合同号','合同金额','已付金额','付款事由','备注','对接人','本次申请付款金额']],oa=[['流程编号','当前节点','未操作者','流程状态','申请人','收款单位','付款金额']];
+ const ledger=X.utils.book_new(),applications=[['申请日期','供应商全称','付款主体','流程编码','合同金额','已付金额','付款事由','备注','对接人','本次申请付款金额']],oa=[['流程编号','当前节点','未操作者','流程状态','申请人','收款单位','付款金额']];
  // Old flags intentionally disagree: classification must use the selected negotiated table.
  const records=PEOPLE.map((person,i)=>({person,supplier:'正常供应商'+(i+1),amount:100+i,paid:0,id:'MDST-DGFK20261024'+String(i+1).padStart(3,'0'),ap:'AP00030'+String(i+1).padStart(3,'0'),contract:'HT-NORMAL-'+(i+1),reason:'10月货款',negotiated:i===0?'是':i===1?'':'否'}));
  records.push({person:'李奇',supplier:'谈判甲公司',amount:300,paid:100,id:'MDST-DGFK20261024010',ap:'AP00030010',contract:'HT-NEG-10',reason:'9月尾款',negotiated:'否'});

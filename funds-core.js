@@ -15,7 +15,7 @@ const cell=v=>({t:typeof v==='number'?'n':'s',v:v??''});
 const clone=c=>c?{...c}:empty();
 const aliases={月份:'登记月份',所属月份:'登记月份',供应商:'供应商名称',供应商全称:'供应商名称',对公付款OA流程号:'对公付款0A流程号',付款OA号:'对公付款0A流程号',应付时间:'应付款时间',已付款金额:'已付金额',剩余付款金额:'剩余金额',合同号:'OA合同编号',合同金额:'合同总金额',本次申请付款金额:'申请付款金额',付款事由:'摘要'};
 const canonical=v=>aliases[norm(v)]||norm(v);
-const relevant=new Set([...NORMAL_HEADERS,...ADDED_HEADERS,'申请日期','备注','对接人','创建人','流程编号']);
+const relevant=new Set([...NORMAL_HEADERS,...ADDED_HEADERS,'申请日期','备注','对接人','创建人','流程编号','流程编码']);
 const entity=v=>({'浙江迈德斯特医疗器械科技有限公司':'迈德斯特','杭州国源养老科技有限公司':'国源'}[norm(v)]||norm(v));
 function money(c){
  if(c?.t==='e'||(c?.f&&(c.v==null||c.v==='')))return {invalid:true};
@@ -79,7 +79,7 @@ function table(input,sheetName,required){
   const values={};for(const [k,c] of Object.entries(map))values[k]=clone(sheet[X.utils.encode_cell({r,c})]);
   const supplier=str(values['供应商名称']?.v),oa=str(values['对公付款0A流程号']?.v),amount=values['申请付款金额']?.v;
   if(required.includes('流程编号')){if(!str(values['流程编号']?.v))continue;}
-  else{if(/^(?:合计|总计|小计)$/.test(supplier))continue;if(!supplier&&!oa&&!str(values['OA合同编号']?.v)&&(amount==null||amount===''))continue;}
+  else{if(/^(?:合计|总计|小计)$/.test(supplier))continue;if(!supplier&&!oa&&!str(values['流程编码']?.v)&&!str(values['OA合同编号']?.v)&&(amount==null||amount===''))continue;}
   records.push({id:sheetName+'!'+(r+1),r,values,source:{file:input.name,sheet:sheetName,row:r+1},date1904:!!input.book.Workbook?.WBProps?.date1904,owner:sheetName.replace(/^对账明细[-－—]?/,'')});
  }
  return {sheetName,sheet,range,headerRow,map,headers,records,name:input.name,date1904:!!input.book.Workbook?.WBProps?.date1904};
@@ -92,7 +92,7 @@ function oneTable(input,required){
 const value=(r,k)=>r.values[k]?.v;
 const oas=r=>codes(value(r,'对公付款0A流程号'));
 const hasPaymentOA=r=>r.values['对公付款0A流程号']?.t!=='e'&&norm(value(r,'对公付款0A流程号'))!=='';
-const recordLabel=r=>`${r.source.file} / ${r.source.sheet} 第 ${r.source.row} 行；${str(value(r,'供应商名称'))}；${str(value(r,'付款主体'))}；申请 ${str(value(r,'申请付款金额'))}；${str(value(r,'对公付款0A流程号')||value(r,'OA合同编号'))}；${str(value(r,'摘要'))}；财务单 ${str(value(r,'单据号【财务应付单】')||value(r,'备注'))}；合同 ${str(value(r,'OA合同编号'))}`;
+const recordLabel=r=>`${r.source.file} / ${r.source.sheet} 第 ${r.source.row} 行；${str(value(r,'供应商名称'))}；${str(value(r,'付款主体'))}；申请 ${str(value(r,'申请付款金额'))}；${str(value(r,'对公付款0A流程号')||value(r,'OA合同编号'))}；${str(value(r,'摘要'))}；财务单 ${str(value(r,'单据号【财务应付单】')||value(r,'备注'))}；合同 ${str(value(r,'OA合同编号'))}`+(r.values['流程编码']?'；流程编码 '+str(value(r,'流程编码')):'');
 function negotiatedSheets(book){return (book?.SheetNames||[]).filter(n=>n.includes('谈判付款'));}
 function build(inputs,decisions={}){
  for(const role of ['ledger','applications','negotiated','oa'])if(!inputs[role]?.book)throw Error('请上传全部四份文件');
@@ -238,12 +238,13 @@ function build(inputs,decisions={}){
  }
  targets.forEach(applyFlow);
  normalObjects.forEach(applyApplications);
- // Negotiated applications link only by the payment OA number in their "合同号" field.
+ // Prefer the new column even when its value is blank; old files may still use "合同号".
+ const applicationOAField=applications.map['流程编码']===undefined?'OA合同编号':'流程编码';
  const submissions=new Map(negotiatedObjects.map(t=>[t,{rows:[],ambiguous:[],reasons:[]}]));
  const references=new Map(negotiatedObjects.map(t=>[t,oas(t.record)]));
  for(const application of applications.records){
-  const contract=application.values['OA合同编号'];
-  const ids=contract?.t==='e'?[]:codes(contract?.v);
+  const reference=application.values[applicationOAField];
+  const ids=reference?.t==='e'?[]:codes(reference?.v);
   const possible=negotiatedObjects.filter(t=>ids.some(id=>references.get(t).includes(id)));
   if(possible.length>1){for(const t of possible){const group=submissions.get(t);group.ambiguous.push(application);group.reasons.push('同一申请可对应多条谈判记录，未重复分配申请金额。');}continue;}
   if(possible.length===1){

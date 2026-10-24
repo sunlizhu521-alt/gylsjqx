@@ -99,8 +99,8 @@ function compareNegotiated(before,after){
   const normal=X.utils.sheet_to_json(saved.Sheets.正常付款,{header:1,defval:''});assert.deepEqual(normal[0],NORMAL_HEADERS);
   assert.deepEqual(normal.slice(1).map(row=>row[17]),previewSubmissions,'提交时间汇总的预览与导出一致');
   const applicationReview=X.utils.sheet_to_json(saved.Sheets.付款申请核对,{header:1,defval:''});assert.deepEqual(applicationReview[0],REVIEW_HEADERS);
-  assert.equal(applicationReview.length-1,real?1:0,'仅申请异常列入核对表，未申请不列入');
-  assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),real?{'待核对':1}:{});
+  assert.equal(applicationReview.length-1,real?5:0,'仅申请异常列入核对表，未申请不列入');
+  assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),real?{'待核对':5}:{});
   assert.equal(saved.Sheets.付款申请核对['!autofilter'].ref,`A1:J${applicationReview.length}`);
   assert(applicationReview.slice(1).every(row=>row[5]&&row[7]&&row[8]&&Number.isInteger(row[9])),'付款申请核对须包含说明和来源文件、工作表、行号');
   assert.equal(normal.length-1,real?15:5);assert.equal(saved.Sheets.正常付款['!autofilter'].ref,`A1:X${normal.length}`);
@@ -137,7 +137,10 @@ function compareNegotiated(before,after){
    assert.equal(normal[4][16],'未申请','未匹配时按最新规则填写未申请，覆盖原是');assert.equal(normal[5][16],'未申请','部分金额未精确匹配时填写未申请');
   }else{
    const nh=fields(saved.Sheets.谈判付款),states=X.utils.sheet_to_json(saved.Sheets.谈判付款,{header:1,defval:''}).slice(1).map(row=>row[nh['是否提交付款申请单']]).filter(Boolean);
-   assert.deepEqual(states.reduce((counts,state)=>(counts[state]=(counts[state]||0)+1,counts),{}),{'已全部提交':28,'已部分提交':8,'未申请':79,'待核对':1});
+   assert.deepEqual(states.reduce((counts,state)=>(counts[state]=(counts[state]||0)+1,counts),{}),{'已全部提交':42,'已部分提交':10,'未申请':59,'待核对':5});
+   assert.equal(applicationReview.slice(1).filter(row=>row[5].includes('未重复分配')).length,2,'同一流程对应两条谈判记录，保留并核对，不重复分摊');
+   assert.equal(applicationReview.slice(1).filter(row=>row[5].includes('累计申请金额')).length,3,'同流程重复及多次申请累计超过应申请金额，按原规则提示');
+   assert(applicationReview.slice(1).every(row=>row[6].includes('流程编码 MDST-DGFK')),'核对来源显示实际流程编码');
   }
   await download(2);
   await page.reload({waitUntil:'networkidle'});await page.locator('.tool-tab[data-tool="funds"]').click();frame=page.frameLocator('iframe[data-tool="funds"]');

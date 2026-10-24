@@ -356,6 +356,34 @@ const negotiatedValue=(r,key,row=0)=>r.negotiated.rows[row][r.negotiated.headers
 function installmentFixture(entries){
  const i=fixture(),existing=X.utils.sheet_to_json(i.applications.book.Sheets.付款申请汇总);i.applications.book=book('付款申请汇总',AH,[...entries.map(e=>({...existing[0],'合同号':'MDST-DGFK20261001001',...e})),existing[1]]);return i;
 }
+test('付款申请流程编码替代旧合同号，分批状态和时间汇总一致且原表不变',()=>{
+ for(const amounts of [[30,20],[40,60],[60,60],[0]]){
+  const i=installmentFixture(amounts.map((amount,n)=>({'申请日期':n?'2026-10-12':'2026-10-10','本次申请付款金额':amount}))),legacy=C.build(i);
+  i.applications.book.Sheets.付款申请汇总.D1={t:'s',v:' 流程编码 '};const before=JSON.stringify(i),r=C.build(i);
+  assert.deepEqual(r.normalRows,legacy.normalRows);assert.deepEqual(r.negotiated,legacy.negotiated);assert.deepEqual(r.stats,legacy.stats);
+  if(r.reviewRows.length)assert.match(r.reviewRows[0][6].v,/流程编码 MDST-DGFK20261001001/);
+  assert.equal(JSON.stringify(i),before);
+ }
+});
+test('新旧字段共存仅用流程编码，空白错误不同编号不回退旧合同号',()=>{
+ for(const code of ['MDST-DGFK20261001001','MDST-DGFK20990101999','',{t:'e',v:23,w:'#REF!'},{t:'s',f:'A99'}]){
+  const i=installmentFixture([{'本次申请付款金额':30}]),s=i.applications.book.Sheets.付款申请汇总;
+  X.utils.sheet_add_aoa(s,[['流程编码'],[''],['MDST-DGFK20261001002']],{origin:'J1'});set(i,'applications','流程编码',2,code);
+  const r=C.build(i),matched=code==='MDST-DGFK20261001001';
+  assert.equal(negotiatedValue(r,'是否提交付款申请单'),matched?'已部分提交':'未申请');
+  assert.equal(negotiatedValue(r,'提交时间汇总'),matched?'2026-10-10-30.00':'');
+  assert.equal(r.normalRows[0][16].v,'已提交付款申请单');assert.equal(r.normalRows[0][17].v,'2026-10-10-100.00');
+  assert.equal(r.stats.pending,0);assert.equal(r.reviewRows.length,0);
+ }
+ const i=fixture(),s=i.applications.book.Sheets.付款申请汇总;
+ set(i,'applications','合同号',2,'不匹配的旧合同');X.utils.sheet_add_aoa(s,[['流程编码'],['MDST-DGFK20261001001']],{origin:'J1'});
+ assert.equal(negotiatedValue(C.build(i),'是否提交付款申请单'),'已全部提交');
+});
+test('仅有流程编码的申请不能跳过，金额为空保留并列出核对来源',()=>{
+ const i=fixture(),s=i.applications.book.Sheets.付款申请汇总;s.D1={t:'s',v:'流程编码'};
+ for(const field of ['供应商全称','本次申请付款金额'])set(i,'applications',field,2,'');
+ const r=C.build(i);assert.equal(r.stats.applications,2);assert.equal(negotiatedValue(r,'是否提交付款申请单'),'待核对');assert.equal(r.reviewRows.length,1);assert.match(r.reviewRows[0][6].v,/流程编码 MDST-DGFK20261001001/);assert.equal(negotiatedValue(r,'已付金额'),0);
+});
 test('谈判分批按供应商及付款OA归集，累计小于等于超过分别为部分全部及待核对',()=>{
  for(const [amounts,status] of [[[30,20],'已部分提交'],[[40,60],'已全部提交'],[[60,60],'待核对'],[[0],'已部分提交']]){
   const i=installmentFixture(amounts.map((amount,n)=>({'申请日期':n?'2026-10-12':'2026-10-10','本次申请付款金额':amount}))),before=JSON.stringify(i),r=C.build(i);assert.equal(negotiatedValue(r,'是否提交付款申请单'),status);assert.equal(negotiatedValue(r,'提交时间汇总'),amounts.map((v,n)=>(n?'2026-10-12':'2026-10-10')+'-'+v.toFixed(2)).join('\n'));assert.equal(r.normalRows[0][16].v,'已提交付款申请单');assert.equal(r.stats.pending,0);assert.deepEqual(r.negotiated.rows[0].slice(4,5).map(c=>c.v),[0]);assert.equal(negotiatedValue(r,'剩余付款金额'),100);assert.equal(negotiatedValue(r,'是否结清'),'否');assert.equal(r.reviewRows.length,status==='待核对'?1:0);if(status==='待核对')assert.match(r.reviewRows[0][5].v,/累计申请金额 120.00.*超过/);assert.equal(JSON.stringify(i),before);
