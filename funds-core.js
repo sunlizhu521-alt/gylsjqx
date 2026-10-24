@@ -1,7 +1,7 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FundsCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const NORMAL_HEADERS=['登记月份','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号','是否对账'];
+const NORMAL_HEADERS=['登记月份','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账'];
 const ADDED_HEADERS=['提交付款申请单日期','提交时间汇总','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号'];
 const SUPPLEMENT_HEADERS=['对公付款0A流程号','付款主体','单据号【财务应付单】'];
 const REVIEW_HEADERS=['付款类别','供应商名称','付款主体','申请付款金额','是否提交付款申请单','核对说明','候选付款申请','来源文件','来源工作表','来源行号'];
@@ -30,6 +30,8 @@ function money(c){
  return cents>BigInt(Number.MAX_SAFE_INTEGER)||cents< -BigInt(Number.MAX_SAFE_INTEGER)?{invalid:true}:{cents};
 }
 const amountCell=n=>({t:'n',v:Number(n)/100,z:'#,##0.00'});
+const centsText=n=>{const a=n<0n?-n:n;return (n<0n?'-':'')+(a/100n)+'.'+String(a%100n).padStart(2,'0');};
+const amountText=c=>{const n=money(c).cents;return n===undefined?str(c?.w??c?.v)||'金额为空':centsText(n);};
 function codes(v,ap=false){const s=str(v).toUpperCase();return [...new Set(s.match(ap?/AP\d+/g:/[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*\d[A-Z0-9-]*/g)||[])];}
 const identifiersConflict=(a,b)=>a.length>0&&b.length>0&&(a.length!==b.length||a.some(v=>!b.includes(v)));
 function settled(v){const n=norm(v);return ['是','结清','已结清'].includes(n)?'是':['否','未结清'].includes(n)?'否':n;}
@@ -53,6 +55,13 @@ function submissionDates(c,date1904){
  const values=[];
  for(const part of parts){const d=date({v:part},date1904);if(d.invalid||d.v==='')return null;values.push(X.SSF.format('yyyy-mm-dd',d.v));}
  return values;
+}
+function submissionSummary(matched){
+ return cell(matched.map((r,i)=>{
+  const d=date(r.values['申请日期'],r.date1904),valid=!d.invalid&&d.v!=='';
+  const label=valid?X.SSF.format('yyyy-mm-dd',d.v):str(r.values['申请日期']?.w??r.values['申请日期']?.v)||'日期为空';
+  return {sort:valid?label:'\uffff',i,text:label+'-'+amountText(r.values['申请付款金额'])};
+ }).sort((a,b)=>a.sort.localeCompare(b.sort)||a.i-b.i).map(r=>r.text).join('\n'));
 }
 function table(input,sheetName,required){
  const sheet=input.book.Sheets[sheetName];if(!sheet)throw Error(input.name+'：缺少工作表 '+sheetName);
@@ -180,6 +189,7 @@ function build(inputs,decisions={}){
  function applyApplications(target){
   const info=classification(target.record),matched=applicationsByKey.get(info.key)||[];
   set(target,'是否提交付款申请单',cell(matched.length?'已提交付款申请单':'未申请'));
+  set(target,'提交时间汇总',submissionSummary(matched));
  }
  function applySubmissionDetails(target,matched){
   const dates=[];let invalid=false;
@@ -242,19 +252,13 @@ function build(inputs,decisions={}){
    else group.rows.push(application);
   }
  }
- const centsText=n=>{const a=n<0n?-n:n;return (n<0n?'-':'')+(a/100n)+'.'+String(a%100n).padStart(2,'0');};
- const amountText=c=>{const n=money(c).cents;return n===undefined?str(c?.w??c?.v)||'金额为空':centsText(n);};
  for(const target of negotiatedObjects){
   const group=submissions.get(target),matched=group.rows,info=classification(target.record);
   if(group.ambiguous.length){
    if(blank(target.values['是否提交付款申请单']))set(target,'是否提交付款申请单',cell('待核对'));
    reviewApplication(target,[...new Set(group.reasons)].join('\n'),[...matched,...group.ambiguous]);continue;
   }
-  set(target,'提交时间汇总',cell(matched.map((r,i)=>{
-   const d=date(r.values['申请日期'],r.date1904),valid=!d.invalid&&d.v!=='';
-   const label=valid?X.SSF.format('yyyy-mm-dd',d.v):str(r.values['申请日期']?.w??r.values['申请日期']?.v)||'日期为空';
-   return {sort:valid?label:'\uffff',i,text:label+'-'+amountText(r.values['申请付款金额'])};
-  }).sort((a,b)=>a.sort.localeCompare(b.sort)||a.i-b.i).map(r=>r.text).join('\n')));
+  set(target,'提交时间汇总',submissionSummary(matched));
   if(!matched.length){
    set(target,'是否提交付款申请单',cell('未申请'));
    continue;

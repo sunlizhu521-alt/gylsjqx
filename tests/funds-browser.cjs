@@ -82,6 +82,8 @@ function compareNegotiated(before,after){
   assert.match(classificationText,new RegExp(`${real?26:0} 条无对公付款 OA 号未纳入正常付款`));
   assert.match(classificationText,/0 条暂未分类/);
   const previewText=await frame.locator('#normalPreview').innerText();
+  assert.deepEqual((await frame.locator('#normalPreview th').allTextContents()).slice(16,19),['是否提交付款申请单','提交时间汇总','当前节点']);
+  const previewSubmissions=await frame.locator('#normalPreview tbody tr td:nth-child(18)').allTextContents();
   assert.equal(await frame.locator('#normalPreview th').last().innerText(),'是否对账');
   const previewReconciled=await frame.locator('#normalPreview tbody tr td:last-child').allTextContents();
   assert.equal(previewReconciled.filter(v=>v==='已对账').length,real?15:5);
@@ -95,15 +97,16 @@ function compareNegotiated(before,after){
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对']);compareNegotiated(original.Sheets[selectedName],saved.Sheets.谈判付款);
   const negotiatedHeaders=fields(saved.Sheets.谈判付款),previewColumnNames=await frame.locator('#negotiatedPreview th').allTextContents();assert.equal(Math.abs(negotiatedHeaders['提交付款申请单日期']-negotiatedHeaders['提交时间汇总']),1);for(const key of ['提交付款申请单日期','提交时间汇总','是否提交付款申请单','流程编号'])assert.equal(previewColumnNames.indexOf(key),negotiatedHeaders[key]);
   const normal=X.utils.sheet_to_json(saved.Sheets.正常付款,{header:1,defval:''});assert.deepEqual(normal[0],NORMAL_HEADERS);
+  assert.deepEqual(normal.slice(1).map(row=>row[17]),previewSubmissions,'提交时间汇总的预览与导出一致');
   const applicationReview=X.utils.sheet_to_json(saved.Sheets.付款申请核对,{header:1,defval:''});assert.deepEqual(applicationReview[0],REVIEW_HEADERS);
   assert.equal(applicationReview.length-1,real?1:0,'仅申请异常列入核对表，未申请不列入');
   assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),real?{'待核对':1}:{});
   assert.equal(saved.Sheets.付款申请核对['!autofilter'].ref,`A1:J${applicationReview.length}`);
   assert(applicationReview.slice(1).every(row=>row[5]&&row[7]&&row[8]&&Number.isInteger(row[9])),'付款申请核对须包含说明和来源文件、工作表、行号');
-  assert.equal(normal.length-1,real?15:5);assert.equal(saved.Sheets.正常付款['!autofilter'].ref,`A1:W${normal.length}`);
+  assert.equal(normal.length-1,real?15:5);assert.equal(saved.Sheets.正常付款['!autofilter'].ref,`A1:X${normal.length}`);
   assert(normal.slice(1).every(row=>row[15]==='否'),'正常付款分类应按谈判表重新计算');
-  assert.deepEqual(normal.slice(1).map(row=>row[22]),previewReconciled,'导出对账状态必须与预览一致');
-  assert(normal.slice(1).every(row=>String(row[3]??'').trim()&&row[22]==='已对账'),'正常付款仅保留原付款 OA 流程号有值的记录');
+  assert.deepEqual(normal.slice(1).map(row=>row[23]),previewReconciled,'导出对账状态必须与预览一致');
+  assert(normal.slice(1).every(row=>String(row[3]??'').trim()&&row[23]==='已对账'),'正常付款仅保留原付款 OA 流程号有值的记录');
   const metadata=await frame.locator('body').evaluate(async(_,{bytes,source})=>{
    const zip=await JSZip.loadAsync(new Uint8Array(bytes)),src=await JSZip.loadAsync(new Uint8Array(source)),parse=x=>new DOMParser().parseFromString(x,'application/xml'),all=(doc,n)=>[...doc.getElementsByTagNameNS('*',n)];
    const book=parse(await zip.file('xl/workbook.xml').async('string')),rels=parse(await zip.file('xl/_rels/workbook.xml.rels').async('string'));
@@ -126,8 +129,9 @@ function compareNegotiated(before,after){
    const previewHeaders=await frame.locator('#negotiatedPreview th').allTextContents();assert.equal(await frame.locator('#negotiatedPreview tbody tr').first().locator('td').nth(previewHeaders.indexOf('提交时间汇总')).innerText(),'2026-10-23-100.00\n2026-10-24-80.00');
    for(const [key,value] of [['当前节点','财务审核'],['未操作者','测试审核人'],['流程状态','未归档'],['申请人','李奇'],['流程编号','MDST-DGFK20261024010']])assert.equal(row(1,key),value);
    assert.equal(row(2,'流程编号'),'MDST-DGFK20261024011','零元流程应正常匹配');
-   assert.equal(normal[1][12],0);assert.equal(normal[1][14],100);assert.equal(normal[1][16],'已提交付款申请单');assert.equal(normal[1][17],'财务审核');
-   assert.equal(normal[1][21],'MDST-DGFK20261024001');
+   assert.equal(normal[1][12],0);assert.equal(normal[1][14],100);assert.equal(normal[1][16],'已提交付款申请单');assert.equal(normal[1][18],'财务审核');
+   assert.equal(normal[1][22],'MDST-DGFK20261024001');
+   assert.deepEqual(normal.slice(1).map(row=>row[17]),['2026-10-24-100.00','2026-10-24-101.00','2026-10-24-102.00','',''],'正常付款只显示名称与金额精确匹配的申请日期及金额');
    assert.equal(applicationReview.length,1,'没有申请异常时核对表仅有表头');
    assert.equal(await frame.locator('#reviewPreview tbody tr').count(),0,'未申请不显示在核对预览');
    assert.equal(normal[4][16],'未申请','未匹配时按最新规则填写未申请，覆盖原是');assert.equal(normal[5][16],'未申请','部分金额未精确匹配时填写未申请');
@@ -195,16 +199,16 @@ function compareNegotiated(before,after){
     const previewRows=review.locator('#normalPreview tbody tr');
     assert.equal(await previewRows.count(),sourceOA?5:4);
     assert.match(await review.locator('#classificationSummary').innerText(),new RegExp(`${sourceOA?0:1} 条无对公付款 OA 号未纳入正常付款`));
-    if(sourceOA)assert.equal(await previewRows.first().locator('td').nth(21).innerText(),unmatched?'原流程编号':'MDST-DGFK20261024001');
+    if(sourceOA)assert.equal(await previewRows.first().locator('td').nth(22).innerText(),unmatched?'原流程编号':'MDST-DGFK20261024001');
     else assert.equal(await previewRows.filter({hasText:'正常供应商1'}).count(),0,'有匹配新流程也不能纳入原OA空白的记录');
     assert.equal(await previewRows.first().locator('td').last().innerText(),'已对账');
     const event=reviewPage.waitForEvent('download');await review.locator('#download').click();const downloaded=await event;
     assert.equal(downloaded.suggestedFilename(),'资金整理-2026-10-24-V1.xlsx');const target=out+(negotiatedMissing?'/negotiated-oa-missing.xlsx':unmatched?'/oa-unmatched-preserved.xlsx':sourceOA?'/oa-mismatch-auto.xlsx':'/oa-empty-excluded.xlsx');await downloaded.saveAs(target);
     const downloadedBook=X.read(await fs.readFile(target),{type:'buffer',cellNF:true,cellStyles:true}),checked=downloadedBook.Sheets.正常付款;
-    assert.equal(checked.W2.v,'已对账');
+    assert.equal(checked.X2.v,'已对账');
     if(sourceOA){
-     assert.equal(checked.D2.v,sourceOA,'原付款OA号必须保留');assert.equal(checked.V2.v,unmatched?'原流程编号':'MDST-DGFK20261024001','精确匹配才更新流程编号，未匹配保留原值');
-     assert.equal(checked.M2.v,0,'OA核对不得改变已付金额');assert.equal(checked.R2?.v??'',unmatched?'原审核节点':'财务审核');
+     assert.equal(checked.D2.v,sourceOA,'原付款OA号必须保留');assert.equal(checked.W2.v,unmatched?'原流程编号':'MDST-DGFK20261024001','精确匹配才更新流程编号，未匹配保留原值');
+     assert.equal(checked.M2.v,0,'OA核对不得改变已付金额');assert.equal(checked.S2?.v??'',unmatched?'原审核节点':'财务审核');
     }else{
      const rows=X.utils.sheet_to_json(checked);assert.equal(rows.length,4);assert.equal(rows.some(row=>row['供应商名称']==='正常供应商1'),false);
      assert(rows.every(row=>row['对公付款0A流程号']&&row['是否对账']==='已对账'));
@@ -214,7 +218,7 @@ function compareNegotiated(before,after){
     }
     if(unmatched){
      assert.equal(await review.locator('.issue[data-issue-id^="oa:"]').count(),0);
-     assert.deepEqual(['R','S','T','U','V'].map(col=>checked[col+'2'].v),retained);
+     assert.deepEqual(['S','T','U','V','W'].map(col=>checked[col+'2'].v),retained);
      const n=downloadedBook.Sheets.谈判付款,h=fields(n),expected=negotiatedMissing?retained:['财务审核','测试审核人','未归档','李奇','MDST-DGFK20261024010'];
      const previewHeaders=await review.locator('#negotiatedPreview th').allTextContents();
      for(const [index,key] of ['当前节点','未操作者','流程状态','申请人','流程编号'].entries()){

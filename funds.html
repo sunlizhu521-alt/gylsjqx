@@ -44,7 +44,7 @@
     <div class="actions"><button id="analyze" disabled>整理并核对</button><span id="status" role="status" aria-live="polite">正在加载工具…</span></div>
     <small>按供应商名称＋申请付款金额在所选谈判表中是否出现分类：出现为谈判付款。正常付款仅纳入资金台账原“对公付款0A流程号”有值的记录，无编号记录不统计、不预览、不导出。</small>
     <small>供应商或付款主体为空时保留原值；已付金额为空时保留原付款情况，不按零处理。切换工具保留本次内容，刷新后需重新选择文件。</small>
-    <small>谈判付款的“提交时间汇总”逐次列出申请日期－金额，按本次上传记录累计；分批申请只按谈判表的对公付款 OA 流程号关联；“提交付款申请单日期”和“提交时间汇总”相邻显示。登记月份、应付款时间无法识别时直接保留原文。</small>
+    <small>两类付款均在“提交时间汇总”逐次列出申请日期－金额；正常付款该列紧邻“是否提交付款申请单”。谈判付款按本次上传记录累计；分批申请只按谈判表的对公付款 OA 流程号关联；“提交付款申请单日期”和“提交时间汇总”相邻显示。登记月份、应付款时间无法识别时直接保留原文。</small>
   </section>
   <section id="results" hidden>
     <p id="stats"></p>
@@ -63,7 +63,7 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=application-oa-only-20261025-4"></script>
+<script src="funds-core.js?v=normal-submission-summary-20261025-5"></script>
 <script src="funds-export.js?v=application-oa-only-20261025-4"></script>
 <script src="funds-tool.js?v=application-oa-only-20261025-4"></script>
 </body>
