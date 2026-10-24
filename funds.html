@@ -59,11 +59,11 @@
   </section>
   <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><small>预览最多显示 100 行；下载包含全部记录，并保留谈判原表格式。</small><div class="preview" id="negotiatedPreview"></div></section>
   <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><small>仅显示原“对公付款0A流程号”有值的正常付款，已结清明细也保留。原编号为空、只有空格或公式结果不可用的记录不纳入；匹配出的“流程编号”不替代此条件。</small><div class="preview" id="normalPreview"></div></section>
-  <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><small>仅列累计超额、归属不清及已匹配申请的异常日期或金额，未申请无需核对。每项保留来源和候选申请。分批提交进度不改变原已付金额、剩余金额及结清状态。</small><div class="preview" id="reviewPreview"></div></section>
+  <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><small>仅列累计超额、归属不清及已匹配申请的异常日期或金额，未申请无需核对。“是否提交付款申请单”先匹配申请表流程编码，无匹配时再核对供应商名称＋本次申请付款金额；任一匹配即为“已提交付款申请单”。金额及归属问题保留在核对说明中。每项保留来源和候选申请。分批提交进度不改变原已付金额、剩余金额及结清状态。</small><div class="preview" id="reviewPreview"></div></section>
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=application-process-code-20261025-6"></script>
+<script src="funds-core.js?v=review-submission-status-20261025-7"></script>
 <script src="funds-export.js?v=application-oa-only-20261025-4"></script>
 <script src="funds-tool.js?v=application-oa-only-20261025-4"></script>
 </body>

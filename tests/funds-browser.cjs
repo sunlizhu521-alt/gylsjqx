@@ -100,7 +100,7 @@ function compareNegotiated(before,after){
   assert.deepEqual(normal.slice(1).map(row=>row[17]),previewSubmissions,'提交时间汇总的预览与导出一致');
   const applicationReview=X.utils.sheet_to_json(saved.Sheets.付款申请核对,{header:1,defval:''});assert.deepEqual(applicationReview[0],REVIEW_HEADERS);
   assert.equal(applicationReview.length-1,real?5:0,'仅申请异常列入核对表，未申请不列入');
-  assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),real?{'待核对':5}:{});
+  assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),real?{'已提交付款申请单':5}:{});
   assert.equal(saved.Sheets.付款申请核对['!autofilter'].ref,`A1:J${applicationReview.length}`);
   assert(applicationReview.slice(1).every(row=>row[5]&&row[7]&&row[8]&&Number.isInteger(row[9])),'付款申请核对须包含说明和来源文件、工作表、行号');
   assert.equal(normal.length-1,real?15:5);assert.equal(saved.Sheets.正常付款['!autofilter'].ref,`A1:X${normal.length}`);
@@ -159,7 +159,7 @@ function compareNegotiated(before,after){
     const checked=X.read(await download(version),{type:'buffer',cellNF:true,cellStyles:true}),n=checked.Sheets.谈判付款,h=fields(n);
     assert.equal(n[X.utils.encode_cell({r:1,c:h['是否提交付款申请单']})].v,state);assert.equal(n[X.utils.encode_cell({r:1,c:h['提交时间汇总']})].v,summary);compareNegotiated(original.Sheets[selectedName],n);
     const notes=X.utils.sheet_to_json(checked.Sheets.付款申请核对);assert.equal(notes.length,extra?1:0);
-    if(extra){const note=notes.find(row=>row['供应商名称']==='谈判甲公司');assert.equal(note['是否提交付款申请单'],'待核对');assert.match(note['核对说明'],/310\.00/);assert.match(note['核对说明'],/300\.00/);}
+    if(extra){const note=notes.find(row=>row['供应商名称']==='谈判甲公司');assert.equal(note['是否提交付款申请单'],'已提交付款申请单');assert.match(note['核对说明'],/310\.00/);assert.match(note['核对说明'],/300\.00/);}
    }
    // A wrong nonempty OA may match a new flow; a blank original OA excludes the normal record entirely.
    for(const [sourceOA,unmatched,negotiatedMissing] of [['MDST-DGFK20990101999',false],['',false],['MDST-DGFK20261024001',true,false],['MDST-DGFK20261024001',true,true]]){

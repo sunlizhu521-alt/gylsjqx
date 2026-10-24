@@ -181,13 +181,24 @@ function build(inputs,decisions={}){
  normalObjects.forEach(applyFinancial);
  const applicationsByKey=new Map();
  for(const record of applications.records){const key=classification(record).key;if(key){if(!applicationsByKey.has(key))applicationsByKey.set(key,[]);applicationsByKey.get(key).push(record);}}
+ // Prefer the new column even when its value is blank; old files may still use "合同号".
+ const applicationOAField=applications.map['流程编码']===undefined?'OA合同编号':'流程编码';
+ const applicationIds=record=>{const reference=record.values[applicationOAField];return reference?.t==='e'?[]:codes(reference?.v);};
+ function matchingApplications(target,preferOA=false){
+  if(preferOA){
+   const ids=oas(target.record),matched=applications.records.filter(r=>applicationIds(r).some(id=>ids.includes(id)));
+   if(matched.length)return matched;
+  }
+  return applicationsByKey.get(classification(target.record).key)||[];
+ }
  function reviewApplication(target,message,candidates){
   const source=target.record.source,amount=money(target.values['申请付款金额']);
   const display=c=>c?.t==='e'?c.w||'Excel错误':c?.f&&(c.v==null||c.v==='')?'公式结果不可用':c?.v??'';
-  reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(display(target.values['供应商名称'])),cell(display(target.values['付款主体'])),amount.cents!==undefined?amountCell(amount.cents):cell(display(target.values['申请付款金额'])),cell(display(target.values['是否提交付款申请单'])),cell(message),cell(candidates.map(a=>recordLabel(a)+'；申请日期 '+str(value(a,'申请日期'))).join('\n')||'未找到候选付款申请'),cell(source.file),cell(source.sheet),cell(source.row)]);
+  const status=matchingApplications(target,true).length?'已提交付款申请单':'未申请';
+  reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(display(target.values['供应商名称'])),cell(display(target.values['付款主体'])),amount.cents!==undefined?amountCell(amount.cents):cell(display(target.values['申请付款金额'])),cell(status),cell(message),cell(candidates.map(a=>recordLabel(a)+'；申请日期 '+str(value(a,'申请日期'))).join('\n')||'未找到候选付款申请'),cell(source.file),cell(source.sheet),cell(source.row)]);
  }
  function applyApplications(target){
-  const info=classification(target.record),matched=applicationsByKey.get(info.key)||[];
+  const matched=matchingApplications(target);
   set(target,'是否提交付款申请单',cell(matched.length?'已提交付款申请单':'未申请'));
   set(target,'提交时间汇总',submissionSummary(matched));
  }
@@ -238,13 +249,10 @@ function build(inputs,decisions={}){
  }
  targets.forEach(applyFlow);
  normalObjects.forEach(applyApplications);
- // Prefer the new column even when its value is blank; old files may still use "合同号".
- const applicationOAField=applications.map['流程编码']===undefined?'OA合同编号':'流程编码';
  const submissions=new Map(negotiatedObjects.map(t=>[t,{rows:[],ambiguous:[],reasons:[]}]));
  const references=new Map(negotiatedObjects.map(t=>[t,oas(t.record)]));
  for(const application of applications.records){
-  const reference=application.values[applicationOAField];
-  const ids=reference?.t==='e'?[]:codes(reference?.v);
+  const ids=applicationIds(application);
   const possible=negotiatedObjects.filter(t=>ids.some(id=>references.get(t).includes(id)));
   if(possible.length>1){for(const t of possible){const group=submissions.get(t);group.ambiguous.push(application);group.reasons.push('同一申请可对应多条谈判记录，未重复分配申请金额。');}continue;}
   if(possible.length===1){
