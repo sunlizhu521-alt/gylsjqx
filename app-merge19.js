@@ -1,4 +1,5 @@
 const tools = [
+  { id: 'funds', icon: '账', title: '资金整理', status: '可用', desc: '核对付款台账、申请记录与 OA 审批进度，生成谈判付款和正常付款两张表。', href: 'funds.html' },
   { id: 'receipt-sign', icon: '签', title: '采购入库单签字', status: '可用', desc: '上传采购入库单后自动签字，合并下载 A4 竖向 PDF。', href: 'receipt-sign.html' },
   { id: 'beihuo', icon: '备', title: '备货分配', status: '可用', desc: '上传备货需求和维度表，匹配采购分工、汇总数量并导出分配明细。', href: 'beihuo/index.html' },
   { id: 'fulfillment', icon: '履', title: '订单履约表整理', status: '可用', desc: '合并徐英、李奇、操思敏、邢芳芳的履约明细，保留指定列并统一日期格式。', href: 'fulfillment.html' },
@@ -88,6 +89,7 @@ function switchTool(id) {
   $('embeddedTools').hidden = !tool.href;
   document.querySelectorAll('#embeddedTools iframe').forEach(frame => { frame.hidden = frame.dataset.tool !== id; });
   if (tool.href) {
+    $('toastArea').replaceChildren();
     mountEmbeddedTool(tool);
     $('activeFileCount').textContent = '本地处理';
     $('activeRowCount').textContent = '切换保留内容';

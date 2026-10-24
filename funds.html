@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>资金整理｜供应链数据清洗</title>
+  <link rel="stylesheet" href="styles-merge14.css">
+  <style>
+    main{max-width:1480px;margin:28px auto;padding:20px;min-width:0}
+    section{margin:18px 0;padding:22px;border:1px solid var(--line,#dbe2eb);border-radius:14px;background:var(--surface,#fff);min-width:0}
+    h1,h2,h3,p{overflow-wrap:anywhere}h2{font-size:1.16rem;margin:0 0 12px}h3{font-size:1rem;margin:0 0 8px}
+    p,small{line-height:1.7}small{display:block;color:var(--muted,#53657a)}
+    .uploads{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+    .upload{padding:16px;border:1px solid var(--line,#dbe2eb);border-radius:10px;min-width:0}
+    label{display:block;font-weight:600;margin-bottom:8px}input,select,button{font:inherit;max-width:100%}
+    input[type=file]{width:100%;margin:8px 0}input::file-selector-button{padding:8px 12px;border:1px solid #bfcbdc;border-radius:7px;cursor:pointer;background:#fff}
+    .file-info{white-space:pre-wrap;overflow-wrap:anywhere;min-height:42px}.file-error{color:#ac371b}
+    select{padding:9px;border:1px solid #bfcbdc;border-radius:7px;color:var(--text,#182333);background:var(--surface,#fff)}
+    #negotiatedSheet{width:100%;margin-top:8px}button{border:0;border-radius:8px;background:#315b9d;color:white;padding:11px 20px;cursor:pointer}
+    button:disabled{opacity:.45;cursor:not-allowed}.actions{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px}
+    #status{white-space:pre-wrap;line-height:1.8}#stats{font-weight:600}#filenameHint{overflow-wrap:anywhere}
+    .review-heading{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}
+    .review-heading label{font-weight:400}.issue-list{max-height:600px;overflow:auto;overscroll-behavior:contain}
+    .issue{padding:14px;margin:10px 0;border:1px solid #d7bf96;border-radius:8px;background:var(--surface,#fff);overflow-wrap:anywhere}
+    .issue.resolved{border-color:#97b7a9}.issue select{width:100%;margin-top:10px}.issue p{margin:6px 0}.issue-source{font-size:.86rem;color:var(--muted,#53657a)}
+    .preview{max-height:460px;overflow:auto}table{border-collapse:collapse;min-width:100%;font-size:13px}
+    th,td{border:1px solid #d6dee8;text-align:center;vertical-align:middle;padding:6px 10px;min-width:110px;max-width:300px;white-space:pre-wrap;overflow-wrap:anywhere}
+    th{position:sticky;top:0;background:#315b9d;color:#fff}td{background:#fff;color:#182333}
+    [hidden]{display:none!important}@media(max-width:700px){main{padding:12px}.uploads{grid-template-columns:1fr}section{padding:14px}.actions button{width:100%}}
+  </style>
+</head>
+<body><main>
+  <a href="index.html">← 返回工具箱</a>
+  <h1>资金整理</h1>
+  <p>核对资金台账、付款申请和 OA 审批进度，导出“谈判付款”“正常付款”两张表。文件仅在当前浏览器处理，原文件不修改。</p>
+  <section>
+    <h2>上传四份文件</h2>
+    <div class="uploads">
+      <div class="upload"><label for="ledgerFile">资金台账</label><small>读取李奇、徐英、邢芳芳、操思敏、孙立柱的对账明细。</small><input id="ledgerFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="ledgerInfo">尚未引用</small></div>
+      <div class="upload"><label for="applicationsFile">付款申请汇总</label><small>用于核对是否提交及申请日期，不作为实际付款依据。</small><input id="applicationsFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="applicationsInfo">尚未引用</small></div>
+      <div class="upload"><label for="negotiatedFile">谈判付款汇总</label><small>保留选中谈判表的原始内容、付款计划及格式。</small><input id="negotiatedFile" type="file" accept=".xlsx" disabled><small class="file-info" id="negotiatedInfo">尚未引用</small><label for="negotiatedSheet">谈判付款工作表</label><select id="negotiatedSheet" disabled><option value="">请先上传文件</option></select><small>名称包含“谈判付款”即可；存在多个版本时，请明确选择。</small></div>
+      <div class="upload"><label for="oaFile">OA 流程表</label><small>按流程编号补充当前节点、未操作者、流程状态和申请人。</small><input id="oaFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="oaInfo">尚未引用</small></div>
+    </div>
+    <div class="actions"><button id="analyze" disabled>整理并核对</button><span id="status" role="status" aria-live="polite">正在加载工具…</span></div>
+    <small>切换工具会保留本次内容；刷新或关闭页面后需要重新选择文件。已付金额为空不按零处理，流程归档不代表已付款。</small>
+  </section>
+  <section id="results" hidden>
+    <p id="stats"></p>
+    <div id="issues">
+      <div class="review-heading"><h2>需要核对：<span id="pendingCount">0</span> 项</h2><label><input id="onlyPending" type="checkbox" checked> 只显示待核对项</label></div>
+      <small>核对来源和候选后选择处理方式。多选框可按 Command / Ctrl 选择多笔申请；“保留原值”不能与其他选项同时选择。</small>
+      <div class="issue-list" id="issueList"></div>
+    </div>
+    <div class="actions"><button id="download" disabled>下载资金整理表</button><span id="filenameHint"></span></div>
+    <small>所有待核对项处理后可下载。当天在当前浏览器重复下载时，文件版本自动递增。</small>
+  </section>
+  <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><small>预览最多显示 100 行；下载包含全部记录，并保留谈判原表格式。</small><div class="preview" id="negotiatedPreview"></div></section>
+  <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><small>包含明确标记为正常付款的五人明细，已结清记录也保留。</small><div class="preview" id="normalPreview"></div></section>
+</main>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="funds-core.js?v=20261024-1"></script>
+<script src="funds-export.js?v=20261024-1"></script>
+<script src="funds-tool.js?v=20261024-1"></script>
+</body>
+</html>
