@@ -35,7 +35,7 @@
   function invalidate() {
     result = null; preparedBlob = null;
     for (const id of Object.keys(decisions)) delete decisions[id];
-    for (const id of ['results','negotiatedPreviewSection','normalPreviewSection']) $(id).hidden = true;
+    for (const id of ['results','negotiatedPreviewSection','normalPreviewSection','reviewPreviewSection']) $(id).hidden = true;
     controls();
   }
   function valueText(cell, date1904=false) {
@@ -90,19 +90,20 @@
       result = FundsCore.build(source,decisions);
       $('results').hidden = false;
       $('pendingCount').textContent = pending();
-      $('stats').textContent = `谈判付款 ${result.stats.negotiatedRows} 条；正常付款 ${result.normalRows.length} 条；OA 编号一致 ${result.stats.oaConsistent} 条；待核对 ${pending()} 项。`;
+      $('stats').textContent = `谈判付款 ${result.stats.negotiatedRows} 条；正常付款 ${result.normalRows.length} 条；OA 编号一致 ${result.stats.oaConsistent} 条；付款申请核对表 ${result.reviewRows.length} 条；待处理 ${pending()} 项。`;
       $('classificationSummary').textContent = `资金台账 ${result.stats.ledgerRows} 条：${result.stats.negotiatedLedgerRows} 条按供应商名称＋申请付款金额命中谈判表，${result.normalRows.length} 条正常付款，${result.stats.unclassifiedLedgerRows} 条暂未分类。`;
       showIssues();
       preview('normalPreview',result.normalHeaders,result.normalRows);
       preview('negotiatedPreview',result.negotiated.headers,result.negotiated.rows,Boolean(inputs.negotiated.book.Workbook?.WBProps?.date1904));
-      $('negotiatedPreviewSection').hidden = false; $('normalPreviewSection').hidden = false;
+      preview('reviewPreview',result.reviewHeaders,result.reviewRows);
+      $('negotiatedPreviewSection').hidden = false; $('normalPreviewSection').hidden = false; $('reviewPreviewSection').hidden = false;
       $('status').textContent = pending() ? `已完成整理，请处理下方 ${pending()} 项核对。` : '核对已完成，正在验证导出结果…';
       if (!pending()) {
         busy = true; controls();
         const blob = await FundsExport(inputs.negotiated.bytes,result);
         if (FundsExport.lastWarnings?.length) throw Error('以下公式无法完成结果校验，请调整源公式后重新上传：'+FundsExport.lastWarnings.join('；'));
         const saved = XLSX.read(await blob.arrayBuffer(),{type:'array',cellNF:true});
-        if (saved.SheetNames.join('|') !== '谈判付款|正常付款') throw Error('导出工作表检查未通过');
+        if (saved.SheetNames.join('|') !== '谈判付款|正常付款|付款申请核对') throw Error('导出工作表检查未通过');
         const sheet = saved.Sheets['谈判付款'];
         const rows = result.negotiated.rows.map((_,index)=>result.negotiated.headers.map((_,col)=>sheet[XLSX.utils.encode_cell({r:index+result.negotiated.headerRow+1,c:col})]));
         preview('negotiatedPreview',result.negotiated.headers,rows,Boolean(saved.Workbook?.WBProps?.date1904));
@@ -111,7 +112,7 @@
       }
     } catch (e) {
       result = null; $('results').hidden = true;
-      for (const id of ['normalPreviewSection','negotiatedPreviewSection']) $(id).hidden = true;
+      for (const id of ['normalPreviewSection','negotiatedPreviewSection','reviewPreviewSection']) $(id).hidden = true;
       $('status').textContent = (review?'核对失败：':'整理失败：') + e.message;
     }
     busy = false; controls();
@@ -152,7 +153,7 @@
   $('onlyPending').addEventListener('change',()=>{if(result)showIssues();});
   $('download').addEventListener('click',async()=>{
     if (busy || !result || !preparedBlob || pending()) return;
-    busy = true; controls(); $('status').textContent = '正在生成两张工作表，请稍候…';
+    busy = true; controls(); $('status').textContent = '正在生成三张工作表，请稍候…';
     let url;
     try {
       const blob = preparedBlob;

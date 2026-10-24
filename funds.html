@@ -32,37 +32,38 @@
 <body><main>
   <a href="index.html">← 返回工具箱</a>
   <h1>资金整理</h1>
-  <p>核对资金台账、付款申请和 OA 审批进度，导出“谈判付款”“正常付款”两张表。文件仅在当前浏览器处理，原文件不修改。</p>
+  <p>核对资金台账、付款申请和 OA 审批进度，导出“谈判付款”“正常付款”“付款申请核对”三张表。文件仅在当前浏览器处理，原文件不修改。</p>
   <section>
     <h2>上传四份文件</h2>
     <div class="uploads">
       <div class="upload"><label for="ledgerFile">资金台账</label><small>读取李奇、徐英、邢芳芳、操思敏、孙立柱的对账明细。</small><input id="ledgerFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="ledgerInfo">尚未引用</small></div>
-      <div class="upload"><label for="applicationsFile">付款申请汇总</label><small>用于核对是否提交及申请日期，不作为实际付款依据。</small><input id="applicationsFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="applicationsInfo">尚未引用</small></div>
-      <div class="upload"><label for="negotiatedFile">谈判付款汇总</label><small>完整保留选中谈判表所有原记录及顺序，不删除、不合并；保留备注、付款计划、合并、格式和无关公式，只更新授权字段。</small><input id="negotiatedFile" type="file" accept=".xlsx" disabled><small class="file-info" id="negotiatedInfo">尚未引用</small><label for="negotiatedSheet">谈判付款工作表</label><select id="negotiatedSheet" disabled><option value="">请先上传文件</option></select><small>名称包含“谈判付款”即可；存在多个版本时，请明确选择。</small></div>
+      <div class="upload"><label for="applicationsFile">付款申请汇总</label><small>按供应商名称＋本次申请付款金额匹配：匹配到为已提交付款申请单，未匹配为未申请。</small><input id="applicationsFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="applicationsInfo">尚未引用</small></div>
+      <div class="upload"><label for="negotiatedFile">谈判付款汇总</label><small>原记录、顺序及付款情况完整保留。资金台账仅补充能唯一对应的空缺付款 OA 号、付款主体、财务应付单号；备注、付款计划、合并、格式及原公式保留。</small><input id="negotiatedFile" type="file" accept=".xlsx" disabled><small class="file-info" id="negotiatedInfo">尚未引用</small><label for="negotiatedSheet">谈判付款工作表</label><select id="negotiatedSheet" disabled><option value="">请先上传文件</option></select><small>名称包含“谈判付款”即可；存在多个版本时，请明确选择。</small></div>
       <div class="upload"><label for="oaFile">OA 流程表（MDST-对公付款）</label><small>按收款单位＋付款金额匹配供应商名称＋申请付款金额，核对原 OA 号，新增流程编号并补充流程信息。</small><input id="oaFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="oaInfo">尚未引用</small></div>
     </div>
     <div class="actions"><button id="analyze" disabled>整理并核对</button><span id="status" role="status" aria-live="polite">正在加载工具…</span></div>
-    <small>按供应商名称＋申请付款金额在所选谈判表中是否出现分类：出现为谈判付款，未出现为正常付款。名称或金额异常时先核对。</small>
-    <small>切换工具会保留本次内容；刷新或关闭页面后需要重新选择文件。已付金额为空不按零处理，流程归档不代表已付款。</small>
+    <small>按供应商名称＋申请付款金额在所选谈判表中是否出现分类：出现为谈判付款，未出现为正常付款。资金台账名称或金额为空、异常时直接归入正常付款。</small>
+    <small>供应商或付款主体为空时保留原值；已付金额为空时保留原付款情况，不按零处理。切换工具保留本次内容，刷新后需重新选择文件。</small>
   </section>
   <section id="results" hidden>
     <p id="stats"></p>
     <small id="classificationSummary"></small>
     <div id="issues">
       <div class="review-heading"><h2>需要核对：<span id="pendingCount">0</span> 项</h2><label><input id="onlyPending" type="checkbox" checked> 只显示待核对项</label></div>
-      <small>核对来源和候选后选择处理方式。多选框可按 Command / Ctrl 选择多笔申请或流程；“保留原值”不能与其他选项同时选择。原对公付款 OA 号保留，匹配结果写入两张表末尾的“流程编号”。</small>
+      <small>核对来源和候选后选择处理方式。多选框可按 Command / Ctrl 选择多笔流程；“保留原值”不能与其他选项同时选择。原对公付款 OA 号保留，匹配结果写入两张付款表的“流程编号”列。</small>
       <div class="issue-list" id="issueList"></div>
     </div>
     <div class="actions"><button id="download" disabled>下载资金整理表</button><span id="filenameHint"></span></div>
-    <small>所有待核对项处理后可下载。当天在当前浏览器重复下载时，文件版本自动递增。</small>
+    <small>未匹配的付款申请及申请日期问题自动列入“付款申请核对”表，不阻止下载；其他待核对项处理后可下载。当天在当前浏览器重复下载时，文件版本自动递增。</small>
   </section>
   <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><small>预览最多显示 100 行；下载包含全部记录，并保留谈判原表格式。</small><div class="preview" id="negotiatedPreview"></div></section>
-  <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><small>保留五人台账中供应商名称＋申请付款金额未在所选谈判表出现的记录，以及已核实为正常付款的记录；已结清明细也保留。</small><div class="preview" id="normalPreview"></div></section>
+  <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><small>包含未命中谈判表、资金台账名称或金额为空及异常的记录，以及已核实为正常付款的记录；已结清明细也保留。“是否对账”按原对公付款 OA 流程号填写：有值为已对账，空白为未对账。</small><div class="preview" id="normalPreview"></div></section>
+  <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><small>未匹配供应商名称＋申请付款金额的记录标为“未申请”，在此备注来源、原因和同供应商申请记录。已匹配但日期异常时标为已提交，保留原日期并备注。</small><div class="preview" id="reviewPreview"></div></section>
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=classification-20261024-3"></script>
-<script src="funds-export.js?v=20261024-1"></script>
-<script src="funds-tool.js?v=classification-20261024-3"></script>
+<script src="funds-core.js?v=reconciliation-20261024-4"></script>
+<script src="funds-export.js?v=reconciliation-20261024-4"></script>
+<script src="funds-tool.js?v=reconciliation-20261024-4"></script>
 </body>
 </html>

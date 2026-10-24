@@ -40,7 +40,7 @@ window.FundsExport = async function(sourceBytes, result) {
     } else {if(local!==null)name.setAttribute('localSheetId','0');name.textContent=renameSelf(name.textContent);}
   }
   for(const formula of [...elements(sheet,'f'),...elements(sheet,'formula'),...elements(sheet,'formula1'),...elements(sheet,'formula2')]) {
-    if(removedNames.some(n=>refers(formula.textContent,n))||forbiddenNames.some(n=>new RegExp('\\b'+escapeRx(n)+'\\b').test(formula.textContent)))throw Error('谈判付款表公式引用了其他工作表，无法在只输出两张表时完整保留，请先将相关公式调整为本表引用');
+    if(removedNames.some(n=>refers(formula.textContent,n))||forbiddenNames.some(n=>new RegExp('\\b'+escapeRx(n)+'\\b').test(formula.textContent)))throw Error('谈判付款表公式引用了其他工作表，无法在仅保留所选谈判原表时完整保留，请先将相关公式调整为本表引用');
     formula.textContent=renameSelf(formula.textContent);
   }
   for(const link of elements(sheet,'hyperlink'))if(link.hasAttribute('location')) {
@@ -132,33 +132,38 @@ window.FundsExport = async function(sourceBytes, result) {
     for(const v of elements(c,'v'))v.remove();
     try{const value=evaluateCell(address);c.removeAttribute('t');const v=create(sheet,'v');v.textContent=String(Math.round((value+Number.EPSILON)*1e8)/1e8);c.append(v);}catch(_){window.FundsExport.lastWarnings.push('谈判付款!'+address+' 保留公式，需在 Excel/WPS 打开时重新计算。');}
   }
-  const normal=parseText(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="${S}"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews><cols/><sheetData/></worksheet>`);
-  const normalData=first(normal,'sheetData'),normalCols=first(normal,'cols');
-  const widths=result.normalHeaders.map((h,i)=>Math.min(52,Math.max(16,...[h,...result.normalRows.map(row=>row[i]?.v??'')].map(value=>Math.max(...String(value).split('\n').map(line=>[...line].reduce((n,c)=>n+(/[\u0000-\u00ff]/.test(c)?1:2),0)))+2))));
-  widths.forEach((width,i)=>normalCols.append(create(normal,'col',{min:i+1,max:i+1,width,customWidth:1})));
-  const allRows=[result.normalHeaders.map(v=>({t:'s',v})),...result.normalRows];
-  for(const [r,values] of allRows.entries()){
-    let lineCount=1;values.forEach((cell,c)=>{const lines=String(cell?.v??'').split('\n');lineCount=Math.max(lineCount,lines.reduce((n,line)=>n+Math.max(1,Math.ceil([...line].reduce((sum,ch)=>sum+(/[\u0000-\u00ff]/.test(ch)?1:2),0)/(widths[c]-2))),0));});
-    const row=create(normal,'row',{r:r+1,ht:Math.max(r===0?32:24,lineCount*17+6),customHeight:1});
-    for(let c=0;c<result.normalHeaders.length;c++){const cell=values[c]||{t:'s',v:''};row.append(writeCell(normal,XLSX.utils.encode_cell({r,c}),cell,styleFor(cell.z||'',r===0),true));}
-    normalData.append(row);
-  }
-  normal.documentElement.append(create(normal,'autoFilter',{ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:allRows.length-1,c:result.normalHeaders.length-1}})}));
-  normal.documentElement.insertBefore(create(normal,'dimension',{ref:`A1:${XLSX.utils.encode_cell({r:allRows.length-1,c:result.normalHeaders.length-1})}`}),normal.documentElement.firstChild);
   for(const entry of entries)if(entry!==selected){const id=entry.getAttributeNS(R,'id');elements(rels,'Relationship').find(e=>e.getAttribute('Id')===id)?.remove();entry.remove();}
   selected.setAttribute('name','谈判付款');selected.removeAttribute('state');
-  let newId='rIdFundsNormal',normalPath='xl/worksheets/funds-normal.xml';
-  while(elements(rels,'Relationship').some(e=>e.getAttribute('Id')===newId))newId+='x';
-  while(zip.file(normalPath))normalPath=normalPath.replace('.xml','x.xml');
-  const nextId=Math.max(...entries.map(e=>Number(e.getAttribute('sheetId'))),0)+1;
-  const entry=create(workbook,'sheet',{name:'正常付款',sheetId:nextId});entry.setAttributeNS(R,'r:id',newId);sheets.append(entry);
-  const relationship=rels.createElementNS(P,'Relationship');relationship.setAttribute('Id',newId);relationship.setAttribute('Type',R+'/worksheet');relationship.setAttribute('Target',normalPath.slice(3));rels.documentElement.append(relationship);
-  const type=types.createElementNS(types.documentElement.namespaceURI,'Override');type.setAttribute('PartName','/'+normalPath);type.setAttribute('ContentType','application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml');types.documentElement.append(type);
+  let nextSheetId=Math.max(...entries.map(e=>Number(e.getAttribute('sheetId'))),0)+1;
+  const generatedSheets=[['正常付款','Normal',result.normalHeaders,result.normalRows],['付款申请核对','Review',result.reviewHeaders,result.reviewRows]];
+  for(const [name,key,headers,data] of generatedSheets){
+    const generated=parseText(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="${S}"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews><cols/><sheetData/></worksheet>`);
+    const generatedData=first(generated,'sheetData'),generatedCols=first(generated,'cols');
+    const widths=headers.map((h,i)=>Math.min(52,Math.max(16,...[h,...data.map(row=>row[i]?.v??'')].map(value=>Math.max(...String(value).split('\n').map(line=>[...line].reduce((n,c)=>n+(/[\u0000-\u00ff]/.test(c)?1:2),0)))+2))));
+    widths.forEach((width,i)=>generatedCols.append(create(generated,'col',{min:i+1,max:i+1,width,customWidth:1})));
+    const allRows=[headers.map(v=>({t:'s',v})),...data];
+    for(const [r,values] of allRows.entries()){
+      let lineCount=1;values.forEach((cell,c)=>{const lines=String(cell?.v??'').split('\n');lineCount=Math.max(lineCount,lines.reduce((n,line)=>n+Math.max(1,Math.ceil([...line].reduce((sum,ch)=>sum+(/[\u0000-\u00ff]/.test(ch)?1:2),0)/(widths[c]-2))),0));});
+      const row=create(generated,'row',{r:r+1,ht:Math.max(r===0?32:24,lineCount*17+6),customHeight:1});
+      for(let c=0;c<headers.length;c++){const cell=values[c]||{t:'s',v:''};row.append(writeCell(generated,XLSX.utils.encode_cell({r,c}),cell,styleFor(cell.z||'',r===0),true));}
+      generatedData.append(row);
+    }
+    const range=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:allRows.length-1,c:headers.length-1}});
+    generated.documentElement.append(create(generated,'autoFilter',{ref:range}));
+    generated.documentElement.insertBefore(create(generated,'dimension',{ref:range}),generated.documentElement.firstChild);
+    let newId='rIdFunds'+key,generatedPath='xl/worksheets/funds-'+key.toLowerCase()+'.xml';
+    while(elements(rels,'Relationship').some(e=>e.getAttribute('Id')===newId))newId+='x';
+    while(zip.file(generatedPath))generatedPath=generatedPath.replace('.xml','x.xml');
+    const entry=create(workbook,'sheet',{name,sheetId:nextSheetId++});entry.setAttributeNS(R,'r:id',newId);sheets.append(entry);
+    const relationship=rels.createElementNS(P,'Relationship');relationship.setAttribute('Id',newId);relationship.setAttribute('Type',R+'/worksheet');relationship.setAttribute('Target',generatedPath.slice(3));rels.documentElement.append(relationship);
+    const type=types.createElementNS(types.documentElement.namespaceURI,'Override');type.setAttribute('PartName','/'+generatedPath);type.setAttribute('ContentType','application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml');types.documentElement.append(type);
+    save(generatedPath,generated);
+  }
   for(const relationship of elements(rels,'Relationship'))if(relationship.getAttribute('Type')===R+'/calcChain')relationship.remove();
   for(const view of elements(workbook,'workbookView')){view.setAttribute('activeTab','0');view.setAttribute('firstSheet','0');}
   let calc=first(workbook,'calcPr');if(!calc){calc=create(workbook,'calcPr');workbook.documentElement.append(calc);}calc.setAttribute('calcMode','auto');calc.setAttribute('fullCalcOnLoad','1');calc.setAttribute('forceFullCalc','1');
   for(const view of elements(sheet,'sheetView')){view.setAttribute('tabSelected','1');view.setAttribute('workbookViewId','0');}
-  save(sheetPath,sheet);save(normalPath,normal);save(stylePath,styles);save('xl/workbook.xml',workbook);save('xl/_rels/workbook.xml.rels',rels);
+  save(sheetPath,sheet);save(stylePath,styles);save('xl/workbook.xml',workbook);save('xl/_rels/workbook.xml.rels',rels);
   // Keep only reachable OOXML parts, including the selected sheet's drawings and comments.
   const reachable=new Set(['[Content_Types].xml','_rels/.rels']);
   const visit=async(path)=>{if(reachable.has(path))return;reachable.add(path);const relationPath=relPath(path);if(!zip.file(relationPath))return;reachable.add(relationPath);const doc=await parse(zip,relationPath);for(const relation of elements(doc,'Relationship'))if(relation.getAttribute('TargetMode')!=='External')await visit(resolve(path,relation.getAttribute('Target')));};
@@ -166,6 +171,6 @@ window.FundsExport = async function(sourceBytes, result) {
   for(const path of Object.keys(zip.files))if(!zip.files[path].dir&&!reachable.has(path))zip.remove(path);
   for(const override of elements(types,'Override'))if(!zip.file(override.getAttribute('PartName').replace(/^\//,'')))override.remove();
   save('[Content_Types].xml',types);
-  if(zip.file('docProps/app.xml')){const app=await parse(zip,'docProps/app.xml');for(const title of elements(app,'TitlesOfParts')){const vector=first(title,'vector');if(vector){vector.setAttribute('size','2');vector.replaceChildren();for(const value of ['谈判付款','正常付款']){const text=app.createElementNS(vector.namespaceURI,'vt:lpstr');text.textContent=value;vector.append(text);}}}const pairs=first(app,'HeadingPairs');if(pairs){const count=first(pairs,'i4');if(count)count.textContent='2';}save('docProps/app.xml',app);}
+  if(zip.file('docProps/app.xml')){const app=await parse(zip,'docProps/app.xml');for(const title of elements(app,'TitlesOfParts')){const vector=first(title,'vector');if(vector){vector.setAttribute('size','3');vector.replaceChildren();for(const value of ['谈判付款','正常付款','付款申请核对']){const text=app.createElementNS(vector.namespaceURI,'vt:lpstr');text.textContent=value;vector.append(text);}}}const pairs=first(app,'HeadingPairs');if(pairs){const count=first(pairs,'i4');if(count)count.textContent='3';}save('docProps/app.xml',app);}
   return zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 };
