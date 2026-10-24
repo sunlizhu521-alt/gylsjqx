@@ -39,7 +39,7 @@
       <div class="upload"><label for="ledgerFile">资金台账</label><small>读取李奇、徐英、邢芳芳、操思敏、孙立柱的对账明细。</small><input id="ledgerFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="ledgerInfo">尚未引用</small></div>
       <div class="upload"><label for="applicationsFile">付款申请汇总</label><small>用于核对是否提交及申请日期，不作为实际付款依据。</small><input id="applicationsFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="applicationsInfo">尚未引用</small></div>
       <div class="upload"><label for="negotiatedFile">谈判付款汇总</label><small>保留选中谈判表的原始内容、付款计划及格式。</small><input id="negotiatedFile" type="file" accept=".xlsx" disabled><small class="file-info" id="negotiatedInfo">尚未引用</small><label for="negotiatedSheet">谈判付款工作表</label><select id="negotiatedSheet" disabled><option value="">请先上传文件</option></select><small>名称包含“谈判付款”即可；存在多个版本时，请明确选择。</small></div>
-      <div class="upload"><label for="oaFile">OA 流程表</label><small>按流程编号补充当前节点、未操作者、流程状态和申请人。</small><input id="oaFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="oaInfo">尚未引用</small></div>
+      <div class="upload"><label for="oaFile">OA 流程表（MDST-对公付款）</label><small>按收款单位＋付款金额匹配供应商名称＋申请付款金额，核对原 OA 号，新增流程编号并补充流程信息。</small><input id="oaFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="oaInfo">尚未引用</small></div>
     </div>
     <div class="actions"><button id="analyze" disabled>整理并核对</button><span id="status" role="status" aria-live="polite">正在加载工具…</span></div>
     <small>切换工具会保留本次内容；刷新或关闭页面后需要重新选择文件。已付金额为空不按零处理，流程归档不代表已付款。</small>
@@ -48,7 +48,7 @@
     <p id="stats"></p>
     <div id="issues">
       <div class="review-heading"><h2>需要核对：<span id="pendingCount">0</span> 项</h2><label><input id="onlyPending" type="checkbox" checked> 只显示待核对项</label></div>
-      <small>核对来源和候选后选择处理方式。多选框可按 Command / Ctrl 选择多笔申请；“保留原值”不能与其他选项同时选择。</small>
+      <small>核对来源和候选后选择处理方式。多选框可按 Command / Ctrl 选择多笔申请或流程；“保留原值”不能与其他选项同时选择。原对公付款 OA 号保留，匹配结果写入两张表末尾的“流程编号”。</small>
       <div class="issue-list" id="issueList"></div>
     </div>
     <div class="actions"><button id="download" disabled>下载资金整理表</button><span id="filenameHint"></span></div>
@@ -59,8 +59,8 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=20261024-1"></script>
+<script src="funds-core.js?v=oa-payee-20261024-2"></script>
 <script src="funds-export.js?v=20261024-1"></script>
-<script src="funds-tool.js?v=20261024-1"></script>
+<script src="funds-tool.js?v=oa-payee-20261024-2"></script>
 </body>
 </html>

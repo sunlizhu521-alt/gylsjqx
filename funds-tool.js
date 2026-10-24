@@ -90,7 +90,7 @@
       result = FundsCore.build(source,decisions);
       $('results').hidden = false;
       $('pendingCount').textContent = pending();
-      $('stats').textContent = `谈判付款 ${result.stats.negotiatedRows} 条；正常付款 ${result.normalRows.length} 条；待核对 ${pending()} 项。`;
+      $('stats').textContent = `谈判付款 ${result.stats.negotiatedRows} 条；正常付款 ${result.normalRows.length} 条；OA 编号一致 ${result.stats.oaConsistent} 条；待核对 ${pending()} 项。`;
       showIssues();
       preview('normalPreview',result.normalHeaders,result.normalRows);
       preview('negotiatedPreview',result.negotiated.headers,result.negotiated.rows,Boolean(inputs.negotiated.book.Workbook?.WBProps?.date1904));

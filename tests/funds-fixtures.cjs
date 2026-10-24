@@ -2,12 +2,12 @@ const X=require('../vendor/xlsx.full.min.js');
 const Zip=require('../vendor/jszip.min.js');
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
 const HEADERS=['月份','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付款金额','是否结清','剩余付款金额','是否谈判付款','是否提交付款申请单'];
-const NORMAL_HEADERS=['登记月份','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','当前节点','未操作者','流程状态','申请人'];
+const NORMAL_HEADERS=['登记月份','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号'];
 const NEGOTIATED_HEADERS=['供应商','付款主体','对公付款0A流程号','合同总金额','已付金额','摘要','申请付款金额','单据号【财务应付单】','创建人','是否已确认付款','是否结清','应付款时间','账期','剩余付款金额','备注','10月付款计划','11月付款计划'];
 const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
 const sheetBook=(name,rows)=>{const book=X.utils.book_new();X.utils.book_append_sheet(book,X.utils.aoa_to_sheet(rows),name);return book;};
 async function fixtures(){
- const ledger=X.utils.book_new(),applications=[['申请日期','供应商全称','付款主体','合同号','合同金额','已付金额','付款事由','备注','对接人','本次申请付款金额']],oa=[['流程编号','当前节点','未操作者','流程状态','申请人']];
+ const ledger=X.utils.book_new(),applications=[['申请日期','供应商全称','付款主体','合同号','合同金额','已付金额','付款事由','备注','对接人','本次申请付款金额']],oa=[['流程编号','当前节点','未操作者','流程状态','申请人','收款单位','付款金额']];
  const records=PEOPLE.map((person,i)=>({person,supplier:'正常供应商'+(i+1),amount:100+i,paid:0,id:'MDST-DGFK20261024'+String(i+1).padStart(3,'0'),ap:'AP00030'+String(i+1).padStart(3,'0'),contract:'HT-NORMAL-'+(i+1),reason:'10月货款',negotiated:'否'}));
  records.push({person:'李奇',supplier:'谈判甲公司',amount:300,paid:100,id:'MDST-DGFK20261024010',ap:'AP00030010',contract:'HT-NEG-10',reason:'9月尾款',negotiated:'是'});
  records.push({person:'徐英',supplier:'谈判乙公司',amount:0,paid:0,id:'MDST-DGFK20261024011',ap:'AP00030011',contract:'HT-NEG-11',reason:'零余额对账',negotiated:'是'});
@@ -17,7 +17,7 @@ async function fixtures(){
   const sheet=X.utils.aoa_to_sheet(rows);for(let row=2;row<=rows.length;row++)for(const col of ['A','E','I'])sheet[col+row].z='yyyy年m月d日';
   X.utils.book_append_sheet(ledger,sheet,'对账明细-'+person);
  }
- for(const r of records){applications.push(['2026-10-24',r.supplier,'迈德斯特',r.contract,r.amount,r.paid,r.reason,r.ap,r.person,r.amount]);const flow=[r.id,'财务审核','测试审核人','未归档',r.person];oa.push(flow,flow.slice());}
+ for(const r of records){applications.push(['2026-10-24',r.supplier,'迈德斯特',r.contract,r.amount,r.paid,r.reason,r.ap,r.person,r.amount]);const flow=[r.id,'财务审核','测试审核人','未归档',r.person,r.supplier,r.amount];oa.push(flow,flow.slice());}
  const negotiated=X.utils.book_new(),sheet=X.utils.aoa_to_sheet([NEGOTIATED_HEADERS,
  ['谈判甲公司','迈德斯特','MDST-DGFK20261024010',300,0,'9月尾款',300,'AP00030010','李奇','是','否',46329,'票到30天',300,'必须保留的人工备注',80,220],
  ['谈判乙公司','迈德斯特','MDST-DGFK20261024011',0,0,'零余额对账',0,'AP00030011','徐英','是','是',46329,'约定账期',0,'',0,0],
