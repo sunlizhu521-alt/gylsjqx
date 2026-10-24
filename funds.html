@@ -42,7 +42,7 @@
       <div class="upload"><label for="oaFile">OA 流程表（MDST-对公付款）</label><small>以供应商名称与收款单位、申请付款金额与付款金额完全一致的 OA 记录为准，自动填写流程编号及流程信息。未匹配时自动保留原信息，无需确认。原 OA 号保留；多个不同流程分别列出。</small><input id="oaFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="oaInfo">尚未引用</small></div>
     </div>
     <div class="actions"><button id="analyze" disabled>整理并核对</button><span id="status" role="status" aria-live="polite">正在加载工具…</span></div>
-    <small>按供应商名称＋申请付款金额在所选谈判表中是否出现分类：出现为谈判付款，未出现为正常付款。资金台账名称或金额为空、异常时直接归入正常付款。</small>
+    <small>按供应商名称＋申请付款金额在所选谈判表中是否出现分类：出现为谈判付款。正常付款仅纳入资金台账原“对公付款0A流程号”有值的记录，无编号记录不统计、不预览、不导出。</small>
     <small>供应商或付款主体为空时保留原值；已付金额为空时保留原付款情况，不按零处理。切换工具保留本次内容，刷新后需重新选择文件。</small>
     <small>谈判付款的“提交时间汇总”逐次列出申请日期－金额，按本次上传记录累计；关联优先使用本次匹配的流程编号，没有新编号时引用原付款 OA 号。登记月份、应付款时间无法识别时直接保留原文。</small>
   </section>
@@ -58,13 +58,13 @@
     <small>未匹配、累计申请超额、无法区分归属及申请日期问题自动列入“付款申请核对”表，不阻止下载；其他待核对项处理后可下载。当天在当前浏览器重复下载时，文件版本自动递增。</small>
   </section>
   <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><small>预览最多显示 100 行；下载包含全部记录，并保留谈判原表格式。</small><div class="preview" id="negotiatedPreview"></div></section>
-  <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><small>包含未命中谈判表、资金台账名称或金额为空及异常的记录，以及已核实为正常付款的记录；已结清明细也保留。“是否对账”按原对公付款 OA 流程号填写：有值为已对账，空白为未对账。</small><div class="preview" id="normalPreview"></div></section>
+  <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><small>仅显示原“对公付款0A流程号”有值的正常付款，已结清明细也保留。原编号为空、只有空格或公式结果不可用的记录不纳入；匹配出的“流程编号”不替代此条件。</small><div class="preview" id="normalPreview"></div></section>
   <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><small>在此核对未申请、累计超额、归属不清及异常日期或金额；每项保留来源和候选申请。分批提交进度不改变原已付金额、剩余金额及结清状态。</small><div class="preview" id="reviewPreview"></div></section>
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=keep-unmatched-20261024-7"></script>
+<script src="funds-core.js?v=normal-with-oa-20261025-1"></script>
 <script src="funds-export.js?v=installments-20261024-6"></script>
-<script src="funds-tool.js?v=installments-20261024-6"></script>
+<script src="funds-tool.js?v=normal-with-oa-20261025-1"></script>
 </body>
 </html>

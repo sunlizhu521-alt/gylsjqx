@@ -91,7 +91,7 @@
       $('results').hidden = false;
       $('pendingCount').textContent = pending();
       $('stats').textContent = `谈判付款 ${result.stats.negotiatedRows} 条；正常付款 ${result.normalRows.length} 条；流程编号已填写 ${result.stats.oaMatched} 条；付款申请核对表 ${result.reviewRows.length} 条；待处理 ${pending()} 项。`;
-      $('classificationSummary').textContent = `资金台账 ${result.stats.ledgerRows} 条：${result.stats.negotiatedLedgerRows} 条按供应商名称＋申请付款金额命中谈判表，${result.normalRows.length} 条正常付款，${result.stats.unclassifiedLedgerRows} 条暂未分类。`;
+      $('classificationSummary').textContent = `资金台账 ${result.stats.ledgerRows} 条：${result.stats.negotiatedLedgerRows} 条按供应商名称＋申请付款金额命中谈判表，${result.normalRows.length} 条正常付款，${result.stats.excludedNormalRows} 条无对公付款 OA 号未纳入正常付款，${result.stats.unclassifiedLedgerRows} 条暂未分类。`;
       showIssues();
       preview('normalPreview',result.normalHeaders,result.normalRows);
       preview('negotiatedPreview',result.negotiated.headers,result.negotiated.rows,Boolean(inputs.negotiated.book.Workbook?.WBProps?.date1904));
