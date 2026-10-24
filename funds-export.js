@@ -153,6 +153,73 @@ window.FundsExport = async function(sourceBytes, result) {
     for(const v of elements(c,'v'))v.remove();
     try{const value=evaluateCell(address);c.removeAttribute('t');const v=create(sheet,'v');v.textContent=String(Math.round((value+Number.EPSILON)*1e8)/1e8);c.append(v);}catch(_){window.FundsExport.lastWarnings.push('谈判付款!'+address+' 保留公式，需在 Excel/WPS 打开时重新计算。');}
   }
+  // Move the existing column XML, including styles and references, instead of rebuilding the source sheet.
+  const order=result.negotiated.columnOrder;
+  if(order?.some((old,index)=>old!==index)){
+    if(new Set(order).size!==order.length||order.some(c=>!Number.isInteger(c)||c<0||c>=order.length))throw Error('谈判付款列顺序无效');
+    const positions=new Map(order.map((old,index)=>[old,index])),column=c=>positions.get(c)??c;
+    const reference=ref=>{const m=ref.match(/^(\$?)([A-Z]{1,3})(\$?\d+)?$/i);if(!m)throw Error('无法保留的列引用：'+ref);return {c:XLSX.utils.decode_col(m[2].toUpperCase()),absolute:m[1],row:m[3]||''};};
+    const groups=(start,end)=>{
+      const cols=[];for(let c=start;c<=end;c++)cols.push(column(c));cols.sort((a,b)=>a-b);
+      const out=[];for(const c of cols){const last=out.at(-1);if(last&&last[1]+1===c)last[1]=c;else out.push([c,c]);}return out;
+    };
+    const ranges=ref=>{
+      const [left,right]=ref.split(':'),a=reference(left),b=reference(right||left),format=(c,r)=>r.absolute+XLSX.utils.encode_col(c)+r.row;
+      if(!right)return [format(column(a.c),a)];
+      return groups(a.c,b.c).map(([start,end])=>format(start,a)+':'+format(end,b));
+    };
+    const singleRange=ref=>{const parts=ranges(ref);if(parts.length!==1)throw Error('日期列调整会拆分原合并或表格范围 '+ref+'，已停止导出以保留原结构');return parts[0];};
+    const formula=text=>text.split(/("(?:[^"]|"")*")/g).map((part,index)=>index%2?part:part.replace(/(^|[^A-Z0-9_.])((?:'(?:[^']|'')+'|[A-Z_\u4e00-\u9fff][A-Z0-9_.\u4e00-\u9fff]*)!)?(\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?|\$?[A-Z]{1,3}:\$?[A-Z]{1,3})(?![A-Z0-9_(])/gi,(match,prefix,token,ref)=>{
+      const name=token?.slice(0,-1).replace(/^'|'$/g,'').replace(/''/g,"'");if(name&&name!=='谈判付款'&&name!==oldName)return match;
+      const parts=ranges(ref).map(range=>(token||'')+range);return prefix+(parts.length>1?'('+parts.join(',')+')':parts[0]);
+    })).join('');
+    const relocateDocument=doc=>{
+      for(const el of doc.getElementsByTagName('*')){
+        for(const attr of ['ref','sqref','activeCell','topLeftCell'])if(el.hasAttribute(attr)){
+          const value=el.getAttribute(attr);if(!/^\$?[A-Z]+\$?\d+(?::\$?[A-Z]+\$?\d+)?(?:\s+\$?[A-Z]+\$?\d+(?::\$?[A-Z]+\$?\d+)?)*$/.test(value))continue;
+          el.setAttribute(attr,attr==='sqref'?value.split(/\s+/).flatMap(ranges).join(' '):singleRange(value));
+        }
+        if(['f','formula','formula1','formula2','calculatedColumnFormula','totalsRowFormula'].includes(el.localName))el.textContent=formula(el.textContent);
+        if(el.localName==='hyperlink'&&el.hasAttribute('location'))el.setAttribute('location',formula(el.getAttribute('location')));
+      }
+    };
+    for(const c of cells.values()){
+      const address=c.getAttribute('r'),f=first(c,'f');
+      if(f?.getAttribute('t')==='shared'){
+        const p=XLSX.utils.decode_cell(address),expanded=result.negotiated.rows[p.r-result.negotiated.headerRow-1]?.[p.c]?.f;
+        if(!expanded)throw Error('无法展开共享公式 '+address+'，已保留原文件');
+        f.textContent=expanded;for(const attr of ['t','si','ref'])f.removeAttribute(attr);
+      }
+      c.setAttribute('r',singleRange(address));
+    }
+    const remapFilters=doc=>{for(const filter of elements(doc,'autoFilter')){
+      const start=XLSX.utils.decode_range(filter.getAttribute('ref')).s.c,nextStart=XLSX.utils.decode_range(singleRange(filter.getAttribute('ref'))).s.c;
+      for(const f of elements(filter,'filterColumn'))f.setAttribute('colId',column(start+Number(f.getAttribute('colId')))-nextStart);
+    }};
+    remapFilters(sheet);relocateDocument(sheet);
+    for(const row of rows.values()){
+      const children=[...row.children].filter(c=>c.localName==='c').sort((a,b)=>XLSX.utils.decode_cell(a.getAttribute('r')).c-XLSX.utils.decode_cell(b.getAttribute('r')).c);
+      for(const c of children)row.insertBefore(c,first(row,'extLst')||null);row.removeAttribute('spans');
+    }
+    const cols=first(sheet,'cols');if(cols){const moved=[];for(const col of [...cols.children])for(const [start,end] of groups(Number(col.getAttribute('min'))-1,Number(col.getAttribute('max'))-1)){const next=col.cloneNode(true);next.setAttribute('min',start+1);next.setAttribute('max',end+1);moved.push(next);}cols.replaceChildren(...moved.sort((a,b)=>Number(a.getAttribute('min'))-Number(b.getAttribute('min'))));}
+    for(const name of elements(workbook,'definedName'))name.textContent=formula(name.textContent);
+    const visited=new Set();
+    const relocateRelated=async path=>{
+      const relationPath=relPath(path);if(!zip.file(relationPath))return;
+      for(const rel of elements(await parse(zip,relationPath),'Relationship')){
+        if(rel.getAttribute('TargetMode')==='External')continue;
+        const target=resolve(path,rel.getAttribute('Target'));if(visited.has(target)||!zip.file(target)||!(/\.(?:xml|vml)$/.test(target)))continue;visited.add(target);
+        const doc=await parse(zip,target),table=first(doc,'table');
+        if(table){const start=XLSX.utils.decode_range(table.getAttribute('ref')).s.c,list=first(table,'tableColumns');if(list)list.replaceChildren(...[...list.children].map((el,i)=>({el,c:column(start+i)})).sort((a,b)=>a.c-b.c).map(x=>x.el));}
+        remapFilters(doc);relocateDocument(doc);
+        for(const tag of ['from','to'])for(const anchor of elements(doc,tag)){const col=first(anchor,'col');if(col)col.textContent=column(Number(col.textContent));}
+        for(const el of elements(doc,'Column'))el.textContent=column(Number(el.textContent));
+        for(const el of elements(doc,'Anchor')){const values=el.textContent.split(',').map(v=>v.trim());if(values.length===8){values[0]=column(Number(values[0]));values[4]=column(Number(values[4]));el.textContent=values.join(', ');}}
+        save(target,doc);await relocateRelated(target);
+      }
+    };
+    await relocateRelated(sheetPath);
+  }
   for(const entry of entries)if(entry!==selected){const id=entry.getAttributeNS(R,'id');elements(rels,'Relationship').find(e=>e.getAttribute('Id')===id)?.remove();entry.remove();}
   selected.setAttribute('name','谈判付款');selected.removeAttribute('state');
   let nextSheetId=Math.max(...entries.map(e=>Number(e.getAttribute('sheetId'))),0)+1;

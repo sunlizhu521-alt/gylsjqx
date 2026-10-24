@@ -2,7 +2,7 @@
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
 const NORMAL_HEADERS=['登记月份','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号','是否对账'];
-const ADDED_HEADERS=['提交付款申请单日期','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号','提交时间汇总'];
+const ADDED_HEADERS=['提交付款申请单日期','提交时间汇总','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号'];
 const SUPPLEMENT_HEADERS=['对公付款0A流程号','付款主体','单据号【财务应付单】'];
 const REVIEW_HEADERS=['付款类别','供应商名称','付款主体','申请付款金额','是否提交付款申请单','核对说明','候选付款申请','来源文件','来源工作表','来源行号'];
 const FLOW_FIELDS=['当前节点','未操作者','流程状态','申请人'];
@@ -70,7 +70,7 @@ function table(input,sheetName,required){
   const values={};for(const [k,c] of Object.entries(map))values[k]=clone(sheet[X.utils.encode_cell({r,c})]);
   const supplier=str(values['供应商名称']?.v),oa=str(values['对公付款0A流程号']?.v),amount=values['申请付款金额']?.v;
   if(required.includes('流程编号')){if(!str(values['流程编号']?.v))continue;}
-  else{if(/^(?:合计|总计|小计)$/.test(supplier))continue;if(!supplier&&!oa&&(amount==null||amount===''))continue;}
+  else{if(/^(?:合计|总计|小计)$/.test(supplier))continue;if(!supplier&&!oa&&!str(values['OA合同编号']?.v)&&(amount==null||amount===''))continue;}
   records.push({id:sheetName+'!'+(r+1),r,values,source:{file:input.name,sheet:sheetName,row:r+1},date1904:!!input.book.Workbook?.WBProps?.date1904,owner:sheetName.replace(/^对账明细[-－—]?/,'')});
  }
  return {sheetName,sheet,range,headerRow,map,headers,records,name:input.name,date1904:!!input.book.Workbook?.WBProps?.date1904};
@@ -228,23 +228,18 @@ function build(inputs,decisions={}){
  }
  targets.forEach(applyFlow);
  normalObjects.forEach(applyApplications);
- // Application "合同号" is the negotiated payment OA number; keep all source references,
- // including those absent from the OA export. Supplier + exact amount remains a direct match.
+ // Negotiated applications link only by the payment OA number in their "合同号" field.
  const submissions=new Map(negotiatedObjects.map(t=>[t,{rows:[],ambiguous:[],reasons:[]}]));
  const references=new Map(negotiatedObjects.map(t=>[t,oas(t.record)]));
  for(const application of applications.records){
-  const info=classification(application),contract=application.values['OA合同编号'];
+  const contract=application.values['OA合同编号'];
   const ids=contract?.t==='e'?[]:codes(contract?.v);
-  const linked=negotiatedObjects.filter(t=>info.name&&info.name===classification(t.record).name&&ids.some(id=>references.get(t).includes(id)));
-  const direct=info.key?negotiatedObjects.filter(t=>classification(t.record).key===info.key):[];
-  const possible=linked.length?linked:direct;
+  const possible=negotiatedObjects.filter(t=>ids.some(id=>references.get(t).includes(id)));
   if(possible.length>1){for(const t of possible){const group=submissions.get(t);group.ambiguous.push(application);group.reasons.push('同一申请可对应多条谈判记录，未重复分配申请金额。');}continue;}
   if(possible.length===1){
    const target=possible[0],group=submissions.get(target);
    if(ids.length>1&&ids.some(id=>!references.get(target).includes(id))){group.ambiguous.push(application);group.reasons.push('一条申请包含多个付款 OA 号，金额无法明确分摊，保留原提交信息。');}
    else group.rows.push(application);
-  }else if(!info.name){
-   for(const target of negotiatedObjects.filter(t=>ids.some(id=>references.get(t).includes(id)))){const group=submissions.get(target);group.ambiguous.push(application);group.reasons.push('付款 OA 号有对应申请，但申请供应商名称为空或异常，保留原提交信息。');}
   }
  }
  const centsText=n=>{const a=n<0n?-n:n;return (n<0n?'-':'')+(a/100n)+'.'+String(a%100n).padStart(2,'0');};
@@ -293,7 +288,9 @@ function build(inputs,decisions={}){
  const normalRows=normalObjects.map(t=>NORMAL_HEADERS.map(h=>h==='是否谈判付款'?cell('否'):normalCell(t,h)));
  const rows=[];for(let r=negotiated.headerRow+1;r<=negotiated.range.e.r;r++)rows.push(negHeaders.map((_,c)=>clone(updateMap.get(X.utils.encode_cell({r,c}))||negotiated.sheet[X.utils.encode_cell({r,c})])));
  const updates=[...updateMap].map(([address,c])=>({address,cell:c}));
- return {normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,negotiated:{sheetName:selected,headerRow:negotiated.headerRow,headers:negHeaders,rows,updates},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
+ const columnOrder=negHeaders.map((_,i)=>i),dateColumn=targetCols['提交付款申请单日期'],summaryColumn=targetCols['提交时间汇总'];
+ if(Math.abs(dateColumn-summaryColumn)!==1){columnOrder.splice(summaryColumn,1);columnOrder.splice(columnOrder.indexOf(dateColumn)+1,0,summaryColumn);}
+ return {normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,negotiated:{sheetName:selected,headerRow:negotiated.headerRow,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
 }
 return {PEOPLE,NORMAL_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money};
 });

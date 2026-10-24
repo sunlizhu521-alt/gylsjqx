@@ -42,6 +42,21 @@ const {REVIEW_HEADERS}=require('./funds-fixtures.cjs');
   },{before:[...reusedInput],after:[...reused]});
   assert.equal(stylePreservation.sourceStyle,stylePreservation.unchangedSourceStyle);assert.equal(stylePreservation.unrelatedId,stylePreservation.sourceId);assert.equal(stylePreservation.columnsBefore,stylePreservation.columnsAfter);for(const written of stylePreservation.written){assert.notEqual(written.index,stylePreservation.sourceId);assert.equal(written.wrap,'1');assert.equal(written.details,stylePreservation.sourceDetails);}
   const b1904=X.utils.book_new();b1904.Workbook={WBProps:{date1904:true}};X.utils.book_append_sheet(b1904,source,'未来10月谈判付款');const out1904=await exportBytes(Buffer.from(X.write(b1904,{type:'buffer',bookType:'xlsx'})),result);assert.equal(X.read(out1904).Sheets.正常付款.A2.v,46319-1462);
+  // Reused source files may have unrelated columns between the two submission fields.
+  const moveHeaders=['供应商','提交付款申请单日期','付款计划','提交时间汇总','原公式备注'];
+  const moveBook=X.utils.book_new(),moveSheet=X.utils.aoa_to_sheet([moveHeaders,['测试甲','2026-10-01',20,'2026-10-01-20.00',40],['合并备注','2026-10-02',30,'2026-10-02-30.00',0],['','2026-10-03',40,'2026-10-03-40.00',70]]);
+  moveSheet.E2={t:'n',v:40,f:'C2*2'};moveSheet.E3={t:'n',v:0,f:'IF(B2="D2",$C$2,0)'};moveSheet.E4={t:'n',v:70,f:'SUM(C3:C4)'};
+  moveSheet.C2.c=[{a:'原作者',t:'跟随付款计划的批注'}];moveSheet.C2.l={Target:'#E2'};
+  moveSheet['!merges']=[{s:{r:2,c:0},e:{r:3,c:0}}];moveSheet['!cols']=[{wch:20},{wch:25},{wch:12},{wch:38},{wch:32}];moveSheet['!autofilter']={ref:'A1:E4'};
+  X.utils.book_append_sheet(moveBook,moveSheet,'复用谈判付款');moveBook.Workbook={Names:[{Name:'付款计划范围',Ref:"'复用谈判付款'!$C:$C"}]};
+  const moveInput=Buffer.from(X.write(moveBook,{type:'buffer',bookType:'xlsx'})),moveResult={...result,reviewRows:[],negotiated:{sheetName:'复用谈判付款',headerRow:0,headers:moveHeaders,rows:X.utils.sheet_to_json(moveSheet,{header:1}).slice(1).map((row,r)=>row.map((_,c)=>moveSheet[X.utils.encode_cell({r:r+1,c})])),updates:[],columnOrder:[0,1,3,2,4]}};
+  const moved=await exportBytes(moveInput,moveResult),movedBook=X.read(moved,{cellStyles:true,cellNF:true}),m=movedBook.Sheets.谈判付款;
+  assert.deepEqual(X.utils.sheet_to_json(m,{header:1})[0],['供应商','提交付款申请单日期','提交时间汇总','付款计划','原公式备注']);
+  assert.equal(m.C2.v,'2026-10-01-20.00');assert.equal(m.D2.v,20);assert.equal(m.E2.f,'D2*2');assert.equal(m.E3.f,'IF(B2="D2",$D$2,0)');assert.equal(m.E4.f,'SUM(D3:D4)');assert.equal(m.E4.v,70);
+  assert.equal(m.D2.c[0].t,'跟随付款计划的批注');assert.equal(m.D2.l.Target,'#E2');assert.equal(m['!cols'][2].wch,38);assert.equal(m['!cols'][3].wch,12);assert.deepEqual(m['!merges'],moveSheet['!merges']);assert.equal(m['!autofilter'].ref,'A1:E4');assert.equal(movedBook.Workbook.Names.find(n=>n.Name==='付款计划范围').Ref,"'谈判付款'!$D:$D");
+  const sourceAgain=X.read(moveInput,{cellStyles:true,cellNF:true}).Sheets.复用谈判付款;assert.equal(sourceAgain.E2.f,'C2*2');assert.equal(sourceAgain.C2.c[0].t,'跟随付款计划的批注');
+  const repeatResult={...moveResult,negotiated:{...moveResult.negotiated,sheetName:'谈判付款',headers:X.utils.sheet_to_json(m,{header:1})[0],columnOrder:[0,1,2,3,4]}};
+  const repeat=X.read(await exportBytes(moved,repeatResult),{cellStyles:true,cellNF:true});assert.equal(repeat.Sheets.谈判付款.E2.f,'D2*2');assert.equal(repeat.Sheets.谈判付款.D2.c[0].t,'跟随付款计划的批注');
   source.E4={f:"'其他'!A1",t:'n',v:0};const invalid=X.utils.book_new();X.utils.book_append_sheet(invalid,source,'未来10月谈判付款');X.utils.book_append_sheet(invalid,X.utils.aoa_to_sheet([[1]]),'其他');await assert.rejects(exportBytes(Buffer.from(X.write(invalid,{type:'buffer',bookType:'xlsx'})),result),/引用了其他工作表/);
   await fs.writeFile('/private/tmp/funds-export-synthetic.xlsx',output);
   console.log('PASS: native negotiated data/merges/formulas, three tabs, shared styles and frozen headers, review amounts and sources, empty review, repeated export, reused submission columns wrap without style loss and only grow rows, dependent caches, cross-sheet guard');

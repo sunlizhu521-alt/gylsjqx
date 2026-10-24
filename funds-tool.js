@@ -94,7 +94,8 @@
       $('classificationSummary').textContent = `资金台账 ${result.stats.ledgerRows} 条：${result.stats.negotiatedLedgerRows} 条按供应商名称＋申请付款金额命中谈判表，${result.normalRows.length} 条正常付款，${result.stats.excludedNormalRows} 条无对公付款 OA 号未纳入正常付款，${result.stats.unclassifiedLedgerRows} 条暂未分类。`;
       showIssues();
       preview('normalPreview',result.normalHeaders,result.normalRows);
-      preview('negotiatedPreview',result.negotiated.headers,result.negotiated.rows,Boolean(inputs.negotiated.book.Workbook?.WBProps?.date1904));
+      const order=result.negotiated.columnOrder,negotiatedHeaders=order.map(c=>result.negotiated.headers[c]);
+      preview('negotiatedPreview',negotiatedHeaders,result.negotiated.rows.map(row=>order.map(c=>row[c])),Boolean(inputs.negotiated.book.Workbook?.WBProps?.date1904));
       preview('reviewPreview',result.reviewHeaders,result.reviewRows);
       $('negotiatedPreviewSection').hidden = false; $('normalPreviewSection').hidden = false; $('reviewPreviewSection').hidden = false;
       $('status').textContent = pending() ? `已完成整理，请处理下方 ${pending()} 项核对。` : '核对已完成，正在验证导出结果…';
@@ -106,7 +107,7 @@
         if (saved.SheetNames.join('|') !== '谈判付款|正常付款|付款申请核对') throw Error('导出工作表检查未通过');
         const sheet = saved.Sheets['谈判付款'];
         const rows = result.negotiated.rows.map((_,index)=>result.negotiated.headers.map((_,col)=>sheet[XLSX.utils.encode_cell({r:index+result.negotiated.headerRow+1,c:col})]));
-        preview('negotiatedPreview',result.negotiated.headers,rows,Boolean(saved.Workbook?.WBProps?.date1904));
+        preview('negotiatedPreview',negotiatedHeaders,rows,Boolean(saved.Workbook?.WBProps?.date1904));
         preparedBlob = blob;
         $('status').textContent = '核对及导出检查已完成，预览与下载使用同一份结果。';
       }
