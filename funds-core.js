@@ -297,8 +297,8 @@ function build(inputs,decisions={}){
    }
    if(linked.length&&!linked.some(p=>p.verified.some(r=>oas(target.record).includes(flowId(r))))){
     const old=str(target.values['对公付款0A流程号']?.v)||'空白';
-    const details=linked.map(p=>'台账供应商“'+str(value(p.record,'供应商名称'))+'”；申请付款金额 '+centsText(info.cents)+'；台账来源 '+p.record.source.file+'/'+p.record.source.sheet+'!'+p.record.source.row+'\n'+[...new Set(p.verified.map(r=>'流程 '+flowId(r)+'；OA收款单位“'+flowText(r,'收款单位')+'”；OA付款金额 '+centsText(info.cents)))].join('\n')).join('\n');
-    oaReviews.push({target,message:'OA名称差异待核对：原对公付款0A流程号“'+old+'”；供应商名称＋申请付款金额与资金台账一致，台账OA号及金额与对公付款一致，但OA收款单位名称不同。仅核对，不自动更新OA号。\n'+details,evidence:[...new Set(linked.flatMap(p=>p.verified.map(r=>r.source.file+'/'+r.source.sheet+'!'+r.source.row)))].join('；')});
+    const details=linked.map(p=>'台账供应商“'+str(value(p.record,'供应商名称'))+'”；申请付款金额 '+centsText(info.cents)+'；台账来源 '+p.record.source.file+'/'+p.record.source.sheet+'!'+p.record.source.row+'\n'+[...new Set(p.verified.map(r=>'查到的流程编码：'+flowId(r)+'；OA收款单位“'+flowText(r,'收款单位')+'”；OA付款金额 '+centsText(info.cents)+'；流程来源：'+r.source.file+' / '+r.source.sheet+' / 第'+r.source.row+'行'))].join('\n')).join('\n');
+    oaReviews.push({target,message:'OA名称差异待核对\n当前对公付款OA号：'+old+'\n查到的流程编码：'+[...new Set(linked.flatMap(p=>p.verified.map(flowId)))].join('、')+'\n请核对是否需要更新当前OA号。供应商名称＋申请付款金额与资金台账一致，台账OA号及金额与对公付款一致，但OA收款单位名称不同。仅核对，不自动更新OA号。\n'+details,evidence:[...new Set(linked.flatMap(p=>p.verified.map(r=>r.source.file+'/'+r.source.sheet+'!'+r.source.row)))].join('；')});
    }
    // A scheduled instalment is evidence for review, never authority to replace the payment OA.
    if(!target.normal&&info.cents>0n){

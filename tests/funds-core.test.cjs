@@ -775,7 +775,7 @@ test('分批复核多日期及OA重复行只列一条，多个可验证流程都
 
 test('台账名称金额相同且OA号金额已验证，OA收款名称不同仍列复核，禁止自动替换',()=>{
  const i=classifiedFixture();set(i,'negotiated','对公付款0A流程号',2,'未提交OA');set(i,'oa','收款单位',2,'测试供应商甲器械公司');
- const before=JSON.stringify(i),r=C.build(i),review=r.reviewRows.find(row=>row[5].v.startsWith('OA名称差异待核对'));assert(review);assert.match(review[5].v,/MDST-DGFK20261001001/);assert.match(review[5].v,/台账供应商“测试供应商甲”/);assert.match(review[5].v,/OA收款单位“测试供应商甲器械公司”/);assert.match(review[5].v,/100.00/);assert.match(review[5].v,/资金.xlsx\/对账明细-李奇!2/);assert.match(review[5].v,/OA.xlsx\/Sheet0!2/);
+ const before=JSON.stringify(i),r=C.build(i),review=r.reviewRows.find(row=>row[5].v.startsWith('OA名称差异待核对'));assert(review);assert.match(review[5].v,/当前对公付款OA号：未提交OA\n查到的流程编码：MDST-DGFK20261001001/);assert.match(review[5].v,/流程来源：OA.xlsx \/ Sheet0 \/ 第2行/);assert.match(review[5].v,/台账供应商“测试供应商甲”/);assert.match(review[5].v,/OA收款单位“测试供应商甲器械公司”/);assert.match(review[5].v,/100.00/);assert.match(review[5].v,/资金.xlsx\/对账明细-李奇!2/);assert.match(review[5].v,/OA.xlsx\/Sheet0!2/);
  assert.equal(negotiatedValue(r,'对公付款0A流程号'),'未提交OA');assert.equal(negotiatedValue(r,'流程编号'),'');assert.equal(r.stats.pending,0);assert.equal(r.reviewHeaders.length,9);assert.equal(JSON.stringify(i),before);
 });
 test('名称差异复核不能只凭同金额或近似名称，需要资金台账OA号与对公付款金额一致',()=>{
