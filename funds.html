@@ -10,6 +10,9 @@
     section{margin:18px 0;padding:22px;border:1px solid var(--line,#dbe2eb);border-radius:14px;background:var(--surface,#fff);min-width:0}
     h1,h2,h3,p{overflow-wrap:anywhere}h2{font-size:1.16rem;margin:0 0 12px}h3{font-size:1rem;margin:0 0 8px}
     p,small{line-height:1.7}small{display:block;color:var(--muted,#53657a)}
+    .update-reminder{margin:16px 0;padding:20px 22px;border:1px solid #e8d498;border-left:4px solid #c28a21;border-radius:12px;background:#fff9e9;color:#493a1c}
+    .update-reminder h2{margin-bottom:14px}.update-reminder dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 24px;margin:0}
+    .update-reminder dt{font-weight:700;margin-bottom:4px}.update-reminder dd{margin:0;line-height:1.6}
     .uploads{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
     .upload{padding:16px;border:1px solid var(--line,#dbe2eb);border-radius:10px;min-width:0}
     label{display:block;font-weight:600;margin-bottom:8px}input,select,button{font:inherit;max-width:100%}
@@ -28,12 +31,21 @@
     th{white-space:nowrap;overflow-wrap:normal;max-width:none;position:sticky;top:0;background:#315b9d;color:#fff}td{background:#fff;color:#182333}
     .flow-code{white-space:nowrap;overflow-wrap:normal;max-width:none}
     .batch-detail{text-align:left;min-width:320px;max-width:600px}
-    [hidden]{display:none!important}@media(max-width:700px){main{padding:12px}.uploads{grid-template-columns:1fr}section{padding:14px}.actions button{width:100%}}
+    [hidden]{display:none!important}@media(max-width:700px){main{padding:12px}.uploads,.update-reminder dl{grid-template-columns:1fr}section{padding:14px}.actions button{width:100%}}
   </style>
 </head>
 <body><main>
   <a href="index.html">← 返回工具箱</a>
   <h1>资金整理</h1>
+  <aside class="update-reminder" aria-labelledby="updateReminderTitle">
+    <h2 id="updateReminderTitle">资料更新提醒</h2>
+    <dl>
+      <div><dt>资金台账</dt><dd>每周日从 WPS 在线导出</dd></div>
+      <div><dt>付款申请汇总</dt><dd>每周日从 WPS 在线导出</dd></div>
+      <div><dt>谈判付款</dt><dd>使用上周整理的最新版本</dd></div>
+      <div><dt>对公付款</dt><dd>每次整理都重新导出</dd></div>
+    </dl>
+  </aside>
   <p>核对资金台账、付款申请和 OA 审批进度，导出“谈判付款”“正常付款”“付款申请核对”三张表。文件仅在当前浏览器处理，原文件不修改。</p>
   <section>
     <h2>上传四份文件</h2>
