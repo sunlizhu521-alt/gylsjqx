@@ -772,3 +772,23 @@ test('分批复核多日期及OA重复行只列一条，多个可验证流程都
  const r=C.build(i),reviews=plannedReviews(r);assert.equal(reviews.length,1);assert.match(reviews[0][5].v,/2026-11-25.*2026-12-25/);assert.match(reviews[0][5].v,/MDST-DGFK20261001001/);assert.match(reviews[0][5].v,/MDST-DGFK20990101001/);assert.equal(negotiatedValue(r,'对公付款0A流程号'),'未申请OA');
  set(i,'negotiated','对公付款0A流程号',2,'MDST-DGFK20261001001');assert.equal(plannedReviews(C.build(i)).length,0);
 });
+
+test('台账名称金额相同且OA号金额已验证，OA收款名称不同仍列复核，禁止自动替换',()=>{
+ const i=classifiedFixture();set(i,'negotiated','对公付款0A流程号',2,'未提交OA');set(i,'oa','收款单位',2,'测试供应商甲器械公司');
+ const before=JSON.stringify(i),r=C.build(i),review=r.reviewRows.find(row=>row[5].v.startsWith('OA名称差异待核对'));assert(review);assert.match(review[5].v,/MDST-DGFK20261001001/);assert.match(review[5].v,/台账供应商“测试供应商甲”/);assert.match(review[5].v,/OA收款单位“测试供应商甲器械公司”/);assert.match(review[5].v,/100.00/);assert.match(review[5].v,/资金.xlsx\/对账明细-李奇!2/);assert.match(review[5].v,/OA.xlsx\/Sheet0!2/);
+ assert.equal(negotiatedValue(r,'对公付款0A流程号'),'未提交OA');assert.equal(negotiatedValue(r,'流程编号'),'');assert.equal(r.stats.pending,0);assert.equal(r.reviewHeaders.length,9);assert.equal(JSON.stringify(i),before);
+});
+test('名称差异复核不能只凭同金额或近似名称，需要资金台账OA号与对公付款金额一致',()=>{
+ for(const [role,field,val] of [['ledger','供应商名称','其他供应商'],['ledger','申请付款金额',99],['ledger','对公付款0A流程号',''],['ledger','对公付款0A流程号','未申请OA'],['oa','流程编号','MDST-DGFK20990101999'],['oa','付款金额',99],['oa','付款金额',''],['oa','付款金额',{t:'e',v:23}],['oa','收款单位',''],['oa','收款单位',{t:'e',v:23}]]){
+  const i=classifiedFixture();set(i,'negotiated','对公付款0A流程号',2,'未提交OA');set(i,'oa','收款单位',2,'不同收款名称');set(i,role,field,2,val);
+  assert(!C.build(i).reviewRows.some(row=>row[5].v.startsWith('OA名称差异待核对')));
+ }
+ const i=classifiedFixture();set(i,'oa','收款单位',2,'不同收款名称');assert(!C.build(i).reviewRows.some(row=>row[5].v.startsWith('OA名称差异待核对')),'已有对应OA号时不重复提示更新');
+});
+
+test('正常付款已有输出记录也可通过其他台账行发现名称差异，空OA正常记录仍不纳入',()=>{
+ const i=classifiedFixture(),s=i.ledger.book.Sheets['对账明细-李奇'],reference=X.utils.sheet_to_json(s,{header:1})[2].slice();
+ set(i,'ledger','对公付款0A流程号',3,'未提交OA');X.utils.sheet_add_aoa(s,[reference],{origin:-1});set(i,'oa','收款单位',3,'测试供应商乙器械公司');const r=C.build(i),reviews=r.reviewRows.filter(row=>row[5].v.startsWith('OA名称差异待核对'));
+ assert.equal(reviews.length,1);assert.equal(reviews[0][0].v,'正常付款');assert.equal(reviews[0][8].v,3);assert.match(reviews[0][5].v,/MDST-DGFK20261001002/);assert.equal(r.normalRows[0][3].v,'未提交OA');assert.equal(r.normalRows[1][3].v,'MDST-DGFK20261001002');
+ set(i,'ledger','对公付款0A流程号',3,'');const excluded=C.build(i);assert.equal(excluded.normalRows.length,1);assert(!excluded.reviewRows.some(row=>row[5].v.startsWith('OA名称差异待核对')));
+});
