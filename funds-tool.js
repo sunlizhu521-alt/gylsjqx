@@ -47,7 +47,8 @@
   }
   function preview(id, headers, rows, date1904=false) {
     const table = document.createElement('table'), head = table.createTHead().insertRow(), body = table.createTBody();
-    const flowColumn=headers.map(title=>String(title).normalize('NFKC').replace(/\s+/g,'')==='流程编号');
+    const singleLineHeaders=['流程编号',...(id==='normalPreview'?['对公付款0A流程号','开票时间','OA合同编号']:[])];
+    const flowColumn=headers.map(title=>singleLineHeaders.includes(String(title).normalize('NFKC').replace(/\s+/g,'')));
     for (const [i,title] of headers.entries()) { const th = document.createElement('th'); th.textContent = title;if(flowColumn[i])th.className='flow-code'; head.append(th); }
     for (const row of rows.slice(0,100)) {
       const tr = body.insertRow();

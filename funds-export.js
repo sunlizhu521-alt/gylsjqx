@@ -58,7 +58,7 @@ window.FundsExport = async function(sourceBytes, result) {
   const fontId=append('fonts',font),headerFont=font.cloneNode(true);first(headerFont,'color').setAttribute('rgb','FFFFFFFF');headerFont.append(create(styles,'b'));
   const headerFontId=append('fonts',headerFont);
   const fill=create(styles,'fill'),pattern=create(styles,'patternFill',{patternType:'solid'});pattern.append(create(styles,'fgColor',{rgb:'FF315B9D'}),create(styles,'bgColor',{indexed:64}));fill.append(pattern);const fillId=append('fills',fill);
-  const border=create(styles,'border');for(const edge of ['left','right','top','bottom']){const side=create(styles,edge,{style:'thin'});side.append(create(styles,'color',{rgb:'FFD9DEE7'}));border.append(side);}const borderId=append('borders',border);
+  const border=create(styles,'border');for(const edge of ['left','right','top','bottom']){const side=create(styles,edge,{style:'thin'});side.append(create(styles,'color',{rgb:'FF000000'}));border.append(side);}const borderId=append('borders',border);
   let numFmts=first(styles,'numFmts');if(!numFmts){numFmts=create(styles,'numFmts',{count:0});styles.documentElement.insertBefore(numFmts,styles.documentElement.firstChild);}
   const formats=new Map(elements(numFmts,'numFmt').map(e=>[e.getAttribute('formatCode'),Number(e.getAttribute('numFmtId'))]));
   let nextFormat=Math.max(163,...formats.values())+1;
@@ -104,6 +104,7 @@ window.FundsExport = async function(sourceBytes, result) {
       const originalBorder=borders.children[oldBorder],next=originalBorder.cloneNode(true);
       for(const edge of edges){let side=first(next,edge);if(!side||!side.getAttribute('style')||side.getAttribute('style')==='none'){
         const replacement=first(border,edge).cloneNode(true);if(side)side.replaceWith(replacement);else{const order=['start','end','left','right','top','bottom','diagonal','vertical','horizontal'];next.insertBefore(replacement,[...next.children].find(e=>order.indexOf(e.localName)>order.indexOf(edge))||null);}
+      }else{const color=first(side,'color');if(color?.getAttribute('rgb')!=='FF000000'){const black=create(styles,'color',{rgb:'FF000000'});if(color)color.replaceWith(black);else side.append(black);}
       }}
       borderStyles.set(borderKey,next.isEqualNode(originalBorder)?oldBorder:append('borders',next));
     }
@@ -116,6 +117,7 @@ window.FundsExport = async function(sourceBytes, result) {
     if(flow){let alignment=first(xf,'alignment');if(!alignment){alignment=create(styles,'alignment');xf.insertBefore(alignment,first(xf,'protection')||null);}alignment.setAttribute('wrapText','0');alignment.setAttribute('shrinkToFit','1');xf.setAttribute('applyAlignment','1');}
     const next=xf.isEqualNode(original)?Number(id):append('cellXfs',xf);layoutStyles.set(key,next);return next;
   };
+  const measure=document.createElement('canvas').getContext('2d');
   const fitSheet=(doc,end,headerRow=0)=>{
     const data=first(doc,'sheetData');let cols=first(doc,'cols');
     if(!cols){cols=create(doc,'cols');doc.documentElement.insertBefore(cols,data);}
@@ -124,18 +126,21 @@ window.FundsExport = async function(sourceBytes, result) {
     const ensureCell=(r,c)=>{const address=XLSX.utils.encode_cell({r,c});if(cells.has(address))return cells.get(address);let row=rows.get(r);if(!row){row=create(doc,'row',{r:r+1});data.insertBefore(row,[...data.children].find(e=>Number(e.getAttribute('r'))>r+1)||null);rows.set(r,row);}const cell=create(doc,'c',{r:address});row.insertBefore(cell,[...row.children].find(e=>XLSX.utils.decode_cell(e.getAttribute('r')).c>c)||null);cells.set(address,cell);return cell;};
     const styleId=c=>{const point=XLSX.utils.decode_cell(c.getAttribute('r')),column=oldCols.find(e=>Number(e.getAttribute('min'))<=point.c+1&&Number(e.getAttribute('max'))>=point.c+1);return Number(c.getAttribute('s')??c.parentElement.getAttribute('s')??column?.getAttribute('style')??0);};
     const flowColumns=new Set();for(let c=0;c<=end.c;c++)if(cellText(ensureCell(headerRow,c)).normalize('NFKC').replace(/\s+/g,'')==='流程编号')flowColumns.add(c);
+    const singleLineColumns=new Set(flowColumns),dateColumns=new Set();
+    if(doc!==sheet)for(let c=0;c<=end.c;c++){const title=cellText(ensureCell(headerRow,c));if(['对公付款0A流程号','对公付款OA流程号','开票时间','OA合同编号'].includes(title))singleLineColumns.add(c);if(title==='开票时间')dateColumns.add(c);}
     const populatedColumns=new Set([...cells.values()].filter(c=>cellText(c)!==''||first(c,'f')).map(c=>XLSX.utils.decode_cell(c.getAttribute('r')).c));
     // Keep the grid continuous through blank cells within every populated column.
     for(const c of populatedColumns)for(let r=headerRow;r<=end.r;r++)ensureCell(r,c);
     for(const c of elements(data,'c')){
-      const address=c.getAttribute('r'),point=XLSX.utils.decode_cell(address),header=point.r===headerRow,flow=flowColumns.has(point.c);
+      const address=c.getAttribute('r'),point=XLSX.utils.decode_cell(address),header=point.r===headerRow,flow=singleLineColumns.has(point.c);
       if(flow&&!header&&!first(c,'f')&&/[\r\n]/.test(cellText(c))){const text=cellText(c).replace(/\r\n|[\r\n]/g,'；');for(const child of [...c.children])if(['v','is'].includes(child.localName))child.remove();const is=create(doc,'is'),t=create(doc,'t');t.textContent=text;is.append(t);c.setAttribute('t','inlineStr');c.insertBefore(is,c.firstChild);}
       if(header||flow||populatedColumns.has(point.c))c.setAttribute('s',layoutStyle(styleId(c),header,flow));
       const xf=xfs.children[styleId(c)];
       const size=Number(first(fonts.children[Number(xf?.getAttribute('fontId')||0)],'sz')?.getAttribute('val')||11),type=c.getAttribute('t'),raw=first(c,'v')?.textContent??'';
       let text=type==='s'?sharedTexts[Number(raw)]||'':type==='inlineStr'?elements(c,'t').map(t=>t.textContent).join(''):raw;
       if((!type||type==='n')&&raw!=='')try{const id=Number(xf?.getAttribute('numFmtId')||0),format=[...formats].find(([,n])=>n===id)?.[0]??id;text=XLSX.SSF.format(format,Number(raw),{date1904});}catch(_){}
-      const width=Math.max(...String(text).split(/\r?\n/).map(line=>[...line].reduce((n,ch)=>n+(/[\u0000-\u00ff]/.test(ch)?1:2),0)))*size/11/(merged.get(address)||1)+3;
+      let width=Math.max(...String(text).split(/\r?\n/).map(line=>[...line].reduce((n,ch)=>n+(/[\u0000-\u00ff]/.test(ch)?1:2),0)))*size/11/(merged.get(address)||1)+3;
+      if(flow){const font=fonts.children[Number(xf?.getAttribute('fontId')||0)];if(measure){measure.font=(first(font,'b')?'bold ':'')+size+'pt '+JSON.stringify(first(font,'name')?.getAttribute('val')||'Arial')+', sans-serif';width=Math.max(width,(measure.measureText(String(text)).width*1.15+20)/7);}width=Math.max(width,dateColumns.has(point.c)?22:32);}
       widths[point.c]=Math.min(flow?255:80,Math.max(widths[point.c]||12,width));
     }
     // A populated merged cell also needs borders on its perimeter, without changing the merge.
