@@ -125,6 +125,8 @@ function compareNegotiated(before,after){
      if(header&&all(fill,'fgColor')[0]?.getAttribute('rgb')!=='FF315B9D')layoutErrors.push(entry.getAttribute('name')+'!'+ref+' 表头底色不同');
      if(flowColumns.has(ref.replace(/\d+/,''))&&(all(xf,'alignment')[0]?.getAttribute('wrapText')!=='0'||/[\r\n]/.test(text(c))))layoutErrors.push(entry.getAttribute('name')+'!'+ref+' 流程编号换行');
     }
+    const populatedColumns=new Set(cells.filter(c=>text(c)!==''||all(c,'f').length).map(c=>c.getAttribute('r').replace(/\d+/,''))),byRef=new Map(cells.map(c=>[c.getAttribute('r'),c])),lastRow=XLSX.utils.decode_range(all(doc,'dimension')[0].getAttribute('ref')).e.r+1;
+    for(const col of populatedColumns)for(let r=1;r<=lastRow;r++){const cell=byRef.get(col+r),xf=cell&&xfs.children[Number(cell.getAttribute('s')||0)],border=xf&&borders.children[Number(xf.getAttribute('borderId')||0)];if(!border||['left','right','top','bottom'].some(edge=>!all(border,edge)[0]?.getAttribute('style')||all(border,edge)[0]?.getAttribute('style')==='none'))layoutErrors.push(entry.getAttribute('name')+'!'+col+r+' 空白格边框不连续');}
    }
    return {frozen:all(sheet,'pane')[0]?.getAttribute('ySplit'),stylesPreserved:prefix,bodyColor:style.includes('FFFFFFFF'),layoutErrors};
   },{bytes:[...bytes],source:[...data.negotiated]});
