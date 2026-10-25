@@ -48,11 +48,12 @@
   function preview(id, headers, rows, date1904=false) {
     const table = document.createElement('table'), head = table.createTHead().insertRow(), body = table.createTBody();
     const singleLineHeaders=['流程编号','付款自然周',...(id==='normalPreview'?['对公付款0A流程号','开票时间','OA合同编号']:[])];
+    const hiddenColumns=headers.map(title=>id==='normalPreview'&&FundsCore.NORMAL_HIDDEN_HEADERS.includes(title));
     const flowColumn=headers.map(title=>singleLineHeaders.includes(String(title).normalize('NFKC').replace(/\s+/g,'')));
-    for (const [i,title] of headers.entries()) { const th = document.createElement('th'); th.textContent = title;if(flowColumn[i])th.className='flow-code'; head.append(th); }
+    for (const [i,title] of headers.entries()) { const th = document.createElement('th'); th.textContent = title;th.hidden=hiddenColumns[i];if(flowColumn[i])th.className='flow-code'; head.append(th); }
     for (const row of rows.slice(0,100)) {
       const tr = body.insertRow();
-      for (let i=0;i<headers.length;i++){const td=tr.insertCell(),text=valueText(row[i],date1904);td.textContent=flowColumn[i]?text.replace(/\r\n|[\r\n]/g,'；'):text;if(flowColumn[i])td.className='flow-code';if(headers[i]==='谈判明细')td.className='batch-detail';if(id==='reviewPreview'&&headers[i]==='核对说明')td.className='review-detail';}
+      for (let i=0;i<headers.length;i++){const td=tr.insertCell(),text=valueText(row[i],date1904);td.hidden=hiddenColumns[i];td.textContent=flowColumn[i]?text.replace(/\r\n|[\r\n]/g,'；'):text;if(flowColumn[i])td.className='flow-code';if(headers[i]==='谈判明细')td.className='batch-detail';if(id==='reviewPreview'&&headers[i]==='核对说明')td.className='review-detail';}
     }
     $(id).replaceChildren(table);
   }

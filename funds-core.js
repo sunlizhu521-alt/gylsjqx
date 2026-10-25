@@ -1,9 +1,10 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FundsCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const NORMAL_HEADERS=['登记月份','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','付款自然周','跟单员'];
+const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','付款自然周'];
 const ADDED_HEADERS=['提交付款申请单日期','提交时间汇总','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号','付款自然周'];
 const SUPPLEMENT_HEADERS=['对公付款0A流程号','付款主体','单据号【财务应付单】'];
+const NORMAL_HIDDEN_HEADERS=['单据号【财务应付单】','OA合同编号','合同总金额','是否对账'];
 const REVIEW_HEADERS=['付款类别','供应商名称','付款主体','申请付款金额','是否提交付款申请单','核对说明','来源文件','来源工作表','来源行号','跟单员'];
 const FLOW_FIELDS=['当前节点','未操作者','流程状态','申请人'];
 const OA_FIELDS=['流程编号','收款单位','付款金额',...FLOW_FIELDS];
@@ -141,7 +142,7 @@ function build(inputs,decisions={}){
   issues.push({id,kind,message,source:rec.source,targetLabel:recordLabel(rec),choices,multiple,resolved:valid,selected:answer});return answer;
  }
  const headerRecord=t=>({source:{file:t.name,sheet:t.sheetName,row:t.headerRow+1},values:{}});
- for(const t of ledgerTables){const absent=NORMAL_HEADERS.slice(0,17).filter(k=>k!=='是否谈判付款'&&t.map[k]===undefined);if(absent.length)issue('headers:'+t.sheetName,'missing-header','缺少字段，输出保留空白：'+absent.join('、'),headerRecord(t));}
+ for(const t of ledgerTables){const absent=NORMAL_HEADERS.filter(k=>k!=='跟单员').slice(0,17).filter(k=>k!=='是否谈判付款'&&t.map[k]===undefined);if(absent.length)issue('headers:'+t.sheetName,'missing-header','缺少字段，输出保留空白：'+absent.join('、'),headerRecord(t));}
  const absentFlow=['收款单位','付款金额',...FLOW_FIELDS].filter(k=>flow.map[k]===undefined);
  if(absentFlow.length)issue('headers:'+flow.sheetName,'missing-header','缺少字段，无法据此自动匹配或更新：'+absentFlow.join('、'),headerRecord(flow));
  const targetCols={...negotiated.map},negHeaders=[...negotiated.headers];
@@ -249,7 +250,7 @@ function build(inputs,decisions={}){
   if((declared&&declared!==expected)||(!declared&&retained&&retained!==expected)){const chosen=issue('settlement:'+target.record.id,'settlement','台账结清状态与申请金额减已付金额矛盾。',target.record,[{value:'keep',label:'保留原付款情况'},{value:'recalculate',label:'确认以明确金额重算并更新结清状态'}])[0];if(chosen!=='recalculate')return;}
   set(target,'已付金额',amountCell(p.cents));set(target,'是否结清',cell(expected));
   const r=target.index+2;
-  set(target,'剩余金额',{...amountCell(balance),f:'H'+r+'-M'+r});
+  set(target,'剩余金额',{...amountCell(balance),f:X.utils.encode_col(NORMAL_HEADERS.indexOf('申请付款金额'))+r+'-'+X.utils.encode_col(NORMAL_HEADERS.indexOf('已付金额'))+r});
  }
  normalObjects.forEach(applyFinancial);
  const applicationsByKey=new Map();
@@ -489,5 +490,5 @@ function build(inputs,decisions={}){
  if(dateColumn!==undefined&&summaryColumn!==undefined&&Math.abs(dateColumn-summaryColumn)!==1){columnOrder.splice(summaryColumn,1);columnOrder.splice(columnOrder.indexOf(dateColumn)+1,0,summaryColumn);}
  return {normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
 }
-return {PEOPLE,NORMAL_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText};
+return {PEOPLE,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText};
 });

@@ -330,6 +330,7 @@ window.FundsExport = async function(sourceBytes, result) {
     const range=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:allRows.length-1,c:headers.length-1}});
     generated.documentElement.insertBefore(create(generated,'dimension',{ref:range}),generated.documentElement.firstChild);
     fitSheet(generated,{r:allRows.length-1,c:headers.length-1},0,key==='Review');
+    if(key==='Normal')for(const col of elements(generated,'col'))if(FundsCore.NORMAL_HIDDEN_HEADERS.includes(headers[Number(col.getAttribute('min'))-1]))col.setAttribute('hidden','1');
     let newId='rIdFunds'+key,generatedPath='xl/worksheets/funds-'+key.toLowerCase()+'.xml';
     while(elements(rels,'Relationship').some(e=>e.getAttribute('Id')===newId))newId+='x';
     while(zip.file(generatedPath))generatedPath=generatedPath.replace('.xml','x.xml');
