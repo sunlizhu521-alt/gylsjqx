@@ -805,7 +805,7 @@ test('两类付款已有OA号未出现在上传流程表时列核对，保留状
  const i=classifiedFixture();set(i,'oa','流程编号',2,'MDST-DGFK20990101001');set(i,'oa','收款单位',2,'其他供应商甲');set(i,'oa','流程编号',3,'MDST-DGFK20990101002');set(i,'oa','收款单位',3,'其他供应商乙');
  const s=i.negotiated.book.Sheets['10月谈判付款主表'];s.K2={t:'n',v:100,f:'G2-E2'};const before=JSON.stringify(i),r=C.build(i),reviews=missingFlowReviews(r);
  assert.equal(reviews.length,2);assert.deepEqual(new Set(reviews.map(row=>row[0].v)),new Set(['谈判付款','正常付款']));
- for(const row of reviews){assert.match(row[5].v,/核对范围：OA.xlsx \/ Sheet0（流程编号列）/);assert.match(row[5].v,/不代表未提交付款申请或未付款/);assert(row[6].v);assert(row[7].v);assert(row[8].v);}
+ for(const row of reviews){assert.match(row[5].v,/核对范围：OA.xlsx \/ Sheet0（流程编号列）/);assert(row[5].v.endsWith('需要核对：'+row[0].v+'sheet的对公付款OA号是否正确'));assert(!/原对公付款OA号|当前对公付款OA号|OA 来源：/.test(row[5].v));assert.equal(C.formatReviewText(row[5].v).split('\n').length,3);assert(row[6].v);assert(row[7].v);assert(row[8].v);}
  assert.equal(negotiatedValue(r,'对公付款0A流程号'),'MDST-DGFK20261001001');assert.equal(negotiatedValue(r,'是否提交付款申请单'),'已经提交全部');assert.equal(r.normalRows[0][3].v,'MDST-DGFK20261001002');assert.equal(r.normalRows[0][16].v,'已提交');assert.equal(r.negotiated.rows[0][10].f,'G2-E2');assert.equal(r.stats.pending,0);assert.equal(JSON.stringify(i),before);
 });
 test('OA覆盖逐号核对，大小写空格标准化，已存在但金额不同不报编号缺失',()=>{
@@ -821,7 +821,7 @@ test('OA未找到核对不依赖供应商金额，空值异常值保留，零金
  }
 });
 test('原编号未找到但已唯一修正时合并到同一核对说明，不重复列付款',()=>{
- const i=classifiedFixture();set(i,'negotiated','对公付款0A流程号',2,'MDST-DGFK20990101999');const r=C.build(i);assert.equal(r.reviewRows.length,1);assert.equal(missingFlowReviews(r).length,1);assert.match(r.reviewRows[0][5].v,/已更新为“MDST-DGFK20261001001”/);assert.match(r.reviewRows[0][5].v,/当前对公付款OA号：MDST-DGFK20261001001/);
+ const i=classifiedFixture();set(i,'negotiated','对公付款0A流程号',2,'MDST-DGFK20990101999');const r=C.build(i);assert.equal(r.reviewRows.length,1);assert.equal(missingFlowReviews(r).length,1);assert.match(r.reviewRows[0][5].v,/已更新为“MDST-DGFK20261001001”/);assert.match(r.reviewRows[0][5].v,/需要核对：谈判付款sheet的对公付款OA号是否正确/);
 });
 
 test('核对说明逐条编号且保留原标点、金额、编号和来源，空值不生成条目',()=>{
