@@ -1,10 +1,10 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FundsCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const NORMAL_HEADERS=['登记月份','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','付款自然周'];
+const NORMAL_HEADERS=['登记月份','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','付款自然周','跟单员'];
 const ADDED_HEADERS=['提交付款申请单日期','提交时间汇总','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号','付款自然周'];
 const SUPPLEMENT_HEADERS=['对公付款0A流程号','付款主体','单据号【财务应付单】'];
-const REVIEW_HEADERS=['付款类别','供应商名称','付款主体','申请付款金额','是否提交付款申请单','核对说明','来源文件','来源工作表','来源行号'];
+const REVIEW_HEADERS=['付款类别','供应商名称','付款主体','申请付款金额','是否提交付款申请单','核对说明','来源文件','来源工作表','来源行号','跟单员'];
 const FLOW_FIELDS=['当前节点','未操作者','流程状态','申请人'];
 const OA_FIELDS=['流程编号','收款单位','付款金额',...FLOW_FIELDS];
 const DATE_FORMAT='yyyy"年"m"月"d"日"';
@@ -131,7 +131,7 @@ function build(inputs,decisions={}){
  const ledgerTables=PEOPLE.map(person=>{
   const names=inputs.ledger.book.SheetNames.filter(n=>new RegExp('^对账明细[-－—]?'+person+'(?:\\d{4}|\\d{8})?$').test(norm(n)));
   if(names.length!==1)throw Error('资金台账中'+person+'的对账明细'+(names.length?'存在多个版本':'缺失'));
-  return table(inputs.ledger,names[0],['供应商名称','申请付款金额']);
+  const parsed=table(inputs.ledger,names[0],['供应商名称','申请付款金额']);for(const record of parsed.records)record.owner=person;return parsed;
  });
  const ledger=ledgerTables.flatMap(t=>t.records),issues=[],updateMap=new Map(),reviewRows=[];
  function issue(id,kind,message,rec,choices=[{value:'keep',label:'保留原值'}],multiple=false){
@@ -196,6 +196,13 @@ function build(inputs,decisions={}){
   if((!blank(x)&&!left.length)||(!blank(y)&&!right.length))return false;
   return !identifiersConflict(left,right);
  };
+ // Derive responsibility from the ledger tab, never from the OA applicant or creator.
+ function ledgerOwner(record,ids=oas(record)){
+  const key=classification(record).key;if(!key)return '';
+  const matches=ledger.filter(r=>classification(r).key===key&&!identifiersConflict(ids,oas(r))&&compatible(record,r,'付款主体'));
+  const owners=[...new Set(matches.map(r=>r.owner))];return owners.length===1?owners[0]:'';
+ }
+ function reviewOwner(target){return target.normal?target.record.owner:usable(target.values['跟单员'])?str(target.values['跟单员'].v):ledgerOwner(target.record);}
  const normalObjects=normal.map((r,i)=>({record:r,normal:true,index:i,sourceOA:clone(r.values['对公付款0A流程号']),values:{...r.values}}));
  const negotiatedObjects=negotiated.records.map(r=>{
   const target={record:r,normal:false,sourceOA:clone(r.values['对公付款0A流程号']),values:{...r.values}},key=classification(r).key;
@@ -259,7 +266,7 @@ function build(inputs,decisions={}){
   const source=target.record.source,amount=money(target.values['申请付款金额']);
   const display=c=>c?.t==='e'?c.w||'Excel错误':c?.f&&(c.v==null||c.v==='')?'公式结果不可用':c?.v??'';
   const status=matchingApplications(target,true).length?'已提交':'未申请';
-  reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(display(target.values['供应商名称'])),cell(display(target.values['付款主体'])),amount.cents!==undefined?amountCell(amount.cents):cell(display(target.values['申请付款金额'])),cell(status),cell(message),cell(source.file),cell(source.sheet),cell(source.row)]);
+  reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(display(target.values['供应商名称'])),cell(display(target.values['付款主体'])),amount.cents!==undefined?amountCell(amount.cents):cell(display(target.values['申请付款金额'])),cell(status),cell(message),cell(source.file),cell(source.sheet),cell(source.row),cell(reviewOwner(target))]);
  }
  function applyApplications(target){
   const matched=matchingApplications(target);
@@ -450,14 +457,16 @@ function build(inputs,decisions={}){
   if(group.length<2)continue;
   const first=group[0],source=first.source,amount=classification(first).cents;
   const subjects=[...new Set(group.map(r=>{const c=r.values['付款主体'];return c?.t==='e'?c.w||'Excel错误':c?.f&&(c.v==null||c.v==='')?'公式结果不可用':str(c?.v);}).filter(Boolean))].join('、');
+  const owners=[...new Set(group.map(r=>ledgerOwner(r,applicationIds(r))))];
   const message='重复提交：共 '+group.length+' 次，重复 '+(group.length-1)+' 次；单笔金额 '+centsText(amount)+'；重复计入金额 '+centsText(amount*BigInt(group.length-1))+'。';
-  reviewRows.push([cell(applicationTypes.get(first)),cell(value(first,'供应商名称')),cell(subjects),amountCell(amount),cell('已提交'),cell(message),cell(source.file),cell(source.sheet),cell(source.row)]);
+  reviewRows.push([cell(applicationTypes.get(first)),cell(value(first,'供应商名称')),cell(subjects),amountCell(amount),cell('已提交'),cell(message),cell(source.file),cell(source.sheet),cell(source.row),cell(owners.length===1?owners[0]:'')]);
  }
  for(const {target,message,evidence} of oaReviews){
   const source=target.record.source;
-  reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(value(target.record,'供应商名称')),cell(target.values['付款主体']?.t==='e'?target.values['付款主体'].w||'Excel错误':target.values['付款主体']?.v),classification(target.record).cents===undefined?cell(target.values['申请付款金额']?.t==='e'?target.values['申请付款金额'].w||'Excel错误':target.values['申请付款金额']?.v):amountCell(classification(target.record).cents),cell(target.values['是否提交付款申请单']?.v),cell(message+(evidence?'\nOA 来源：'+evidence:'')),cell(source.file),cell(source.sheet),cell(source.row)]);
+  reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(value(target.record,'供应商名称')),cell(target.values['付款主体']?.t==='e'?target.values['付款主体'].w||'Excel错误':target.values['付款主体']?.v),classification(target.record).cents===undefined?cell(target.values['申请付款金额']?.t==='e'?target.values['申请付款金额'].w||'Excel错误':target.values['申请付款金额']?.v):amountCell(classification(target.record).cents),cell(target.values['是否提交付款申请单']?.v),cell(message+(evidence?'\nOA 来源：'+evidence:'')),cell(source.file),cell(source.sheet),cell(source.row),cell(reviewOwner(target))]);
  }
  function normalCell(target,key){
+  if(key==='跟单员')return cell(target.record.owner);
   if(key==='付款自然周')return paymentWeek(target.values['应付款时间'],target.record.date1904);
   if(key==='是否对账'){
    return cell(hasPaymentOA(target.record)?'已对账':'未对账');

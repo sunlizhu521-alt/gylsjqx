@@ -87,7 +87,7 @@ function compareNegotiated(before,after){
   const previewSubmissions=await frame.locator('#normalPreview tbody tr td:nth-child(18)').allTextContents();
   for(const id of ['normalPreview','negotiatedPreview'])assert(await frame.locator('#'+id+' .flow-code').evaluateAll(cells=>cells.length>0&&cells.every(c=>getComputedStyle(c).whiteSpace==='nowrap'&&getComputedStyle(c).maxWidth==='none'&&!/[\r\n]/.test(c.textContent))),'流程编号预览必须单行自适应');
   assert.equal(await frame.locator('#normalPreview th').nth(23).innerText(),'是否对账');
-  assert.equal(await frame.locator('#normalPreview th').last().innerText(),'付款自然周');
+  assert.equal(await frame.locator('#normalPreview th').nth(24).innerText(),'付款自然周');assert.equal(await frame.locator('#normalPreview th').last().innerText(),'跟单员');
   const previewWeeks=await frame.locator('#normalPreview tbody tr td:nth-child(25)').allTextContents();
   const previewReconciled=await frame.locator('#normalPreview tbody tr td:nth-child(24)').allTextContents();
   assert.equal(previewReconciled.filter(v=>v==='已对账').length,real?15:5);
@@ -102,7 +102,7 @@ function compareNegotiated(before,after){
   const negotiatedHeaders=fields(saved.Sheets.谈判付款),previewColumnNames=await frame.locator('#negotiatedPreview th').allTextContents();assert.equal(Math.abs(negotiatedHeaders['提交付款申请单日期']-negotiatedHeaders['提交时间汇总']),1);for(const key of ['提交付款申请单日期','提交时间汇总','是否提交付款申请单','流程编号'])assert.equal(previewColumnNames.indexOf(key),negotiatedHeaders[key]);
   for(const sheet of Object.values(saved.Sheets)){assert.equal(sheet['!autofilter'].ref,sheet['!ref'],'三个sheet首行筛选覆盖全部列');for(const row of sheet['!rows']||[])if(row){assert(sheet===saved.Sheets.付款申请核对?row.hpt>=30:row.hpt===30);assert(!row.hidden);}assert((sheet['!cols']||[]).slice(0,X.utils.decode_range(sheet['!ref']).e.c+1).every((c,i)=>c.width>=12&&c.width<=(sheet===saved.Sheets.付款申请核对?255:X.utils.sheet_to_json(sheet,{header:1})[0][i]&&['流程编号','付款自然周','对公付款0A流程号','开票时间','OA合同编号'].includes(X.utils.sheet_to_json(sheet,{header:1})[0][i])?255:80)),'列宽自适应且有合理范围');}
   for(const [col,min] of [[3,32],[4,22],[10,32]])assert(saved.Sheets.正常付款['!cols'][col].width>=min,'正常付款 D/E/K 必须充分加宽');
-  const normal=X.utils.sheet_to_json(saved.Sheets.正常付款,{header:1,defval:''});assert.deepEqual(normal[0],NORMAL_HEADERS);
+  const normal=X.utils.sheet_to_json(saved.Sheets.正常付款,{header:1,defval:''});assert.deepEqual(normal[0],NORMAL_HEADERS);assert.deepEqual(normal.slice(1).map(row=>row.at(-1)),coreResult.normalRows.map(row=>row.at(-1).v));
   assert.deepEqual(normal.slice(1).map(row=>row[17]),previewSubmissions,'提交时间汇总的预览与导出一致');
   assert.deepEqual(normal.slice(1).map(row=>row[24]),previewWeeks,'付款自然周预览与导出一致');
   const negotiatedRows=X.utils.sheet_to_json(saved.Sheets.谈判付款,{header:1,defval:''}),weekIndex=negotiatedHeaders['付款自然周'];
@@ -112,9 +112,9 @@ function compareNegotiated(before,after){
   const applicationReview=X.utils.sheet_to_json(saved.Sheets.付款申请核对,{header:1,defval:''});assert.deepEqual(applicationReview[0],REVIEW_HEADERS);
   assert.equal(applicationReview.length-1,coreResult.reviewRows.length,'核对导出与核心结果一致');
   assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),coreResult.reviewRows.reduce((counts,row)=>(counts[row[4].v]=(counts[row[4].v]||0)+1,counts),{}));
-  assert.equal(saved.Sheets.付款申请核对['!autofilter'].ref,`A1:I${applicationReview.length}`);
+  assert.equal(saved.Sheets.付款申请核对['!autofilter'].ref,`A1:J${applicationReview.length}`);
   assert(applicationReview.slice(1).every(row=>row[5]&&row[6]&&row[7]&&Number.isInteger(row[8])),'付款申请核对须包含说明和来源文件、工作表、行号');
-  assert.equal(normal.length-1,real?15:5);assert.equal(saved.Sheets.正常付款['!autofilter'].ref,`A1:Y${normal.length}`);
+  assert.equal(normal.length-1,real?15:5);assert.equal(saved.Sheets.正常付款['!autofilter'].ref,`A1:${X.utils.encode_col(NORMAL_HEADERS.length-1)}${normal.length}`);
   assert(normal.slice(1).every(row=>row[15]==='否'),'正常付款分类应按谈判表重新计算');
   assert.deepEqual(normal.slice(1).map(row=>row[23]),previewReconciled,'导出对账状态必须与预览一致');
   assert(normal.slice(1).every(row=>String(row[3]??'').trim()&&row[23]==='已对账'),'正常付款仅保留原付款 OA 流程号有值的记录');
