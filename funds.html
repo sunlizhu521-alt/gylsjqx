@@ -70,16 +70,16 @@
       <div class="issue-list" id="issueList"></div>
     </div>
     <div class="actions"><button id="download" disabled>下载资金整理表</button><span id="filenameHint"></span></div>
-    <small>重复提交扫描整份付款申请汇总，谈判付款、正常付款均检查，每个重复组只列一行，未进入付款表的申请也检查。除此之外，未申请及按流程号命中申请表“谈判付款”分类的记录不列入核对。其余记录累计申请超额、无法区分归属及申请日期问题自动列入“付款申请核对”表，不阻止下载；其他待核对项处理后可下载。当天在当前浏览器重复下载时，文件版本自动递增。</small>
+    <small>重复提交扫描整份付款申请汇总，谈判付款、正常付款均检查，每个重复组只列一行，未进入付款表的申请也检查。已匹配付款申请，但谈判表 OA 栏仍为“未提交OA／未交OA”的记录，也列入核对并展示申请来源，原 OA 栏保留。除此之外，未申请及按流程号命中申请表“谈判付款”分类的记录不列入核对。其余记录累计申请超额、无法区分归属及申请日期问题自动列入“付款申请核对”表，不阻止下载；其他待核对项处理后可下载。当天在当前浏览器重复下载时，文件版本自动递增。</small>
   </section>
   <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><small>预览最多显示 100 行；下载包含全部记录。V19 谈判明细左对齐、分行显示，行高按内容适配；其余表保留 30 磅行高。统一蓝底白字表头和筛选器，有内容的列从表头到最后一条数据都有边框，包含中间空白格。列宽按内容自适应，全部表头单行完整展示，流程编号不换行；长备注可在编辑栏查看。</small><div class="preview" id="negotiatedPreview"></div></section>
   <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><small>仅显示原“对公付款0A流程号”有值的正常付款，已结清明细也保留。原编号为空、只有空格或公式结果不可用的记录不纳入；匹配出的“流程编号”不替代此条件。</small><div class="preview" id="normalPreview"></div></section>
-  <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><small>按付款分类＋流程编码＋供应商名称＋金额识别重复提交，跨日期同样检查；列出重复次数、单笔金额、重复计入金额及全部申请来源。其他核对仍仅列累计超额、归属不清及已匹配申请的异常日期或金额，未申请无需核对。“是否提交付款申请单”先匹配申请表流程编码，缺少 OA 号时再按同类申请的供应商名称＋本次申请付款金额补判；已有编号不同的申请不匹配、不列核对。金额及归属问题保留在核对说明中。每项保留来源和候选申请。分批提交进度不改变原已付金额、剩余金额及结清状态。</small><div class="preview" id="reviewPreview"></div></section>
+  <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><small>按付款分类＋流程编码＋供应商名称＋金额识别重复提交，跨日期同样检查；列出重复次数、单笔金额、重复计入金额及全部申请来源。已匹配申请但谈判表 OA 栏仍为“未提交OA／未交OA”的记录也会列出，原 OA 栏不覆盖。其他核对仍仅列累计超额、归属不清及已匹配申请的异常日期或金额，未申请无需核对。“是否提交付款申请单”先匹配申请表流程编码，缺少 OA 号时再按同类申请的供应商名称＋本次申请付款金额补判；已有编号不同的申请不匹配、不列核对。金额及归属问题保留在核对说明中。每项保留来源和候选申请。分批提交进度不改变原已付金额、剩余金额及结清状态。</small><div class="preview" id="reviewPreview"></div></section>
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=duplicate-application-review-20261025-22"></script>
-<script src="funds-export.js?v=duplicate-application-review-20261025-22"></script>
-<script src="funds-tool.js?v=duplicate-application-review-20261025-22"></script>
+<script src="funds-core.js?v=submitted-without-oa-review-20261025-23"></script>
+<script src="funds-export.js?v=submitted-without-oa-review-20261025-23"></script>
+<script src="funds-tool.js?v=submitted-without-oa-review-20261025-23"></script>
 </body>
 </html>

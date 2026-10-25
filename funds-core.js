@@ -349,6 +349,8 @@ function build(inputs,decisions={}){
    set(target,'是否提交付款申请单',cell('未提交'));
    continue;
   }
+  const originalOA=str(value(target.record,'对公付款0A流程号'));
+  if(/^(?:未提交|未交)OA$/i.test(norm(originalOA)))reviewApplication(target,'已提交付款申请单，但谈判付款的对公付款0A流程号仍为“'+originalOA+'”，请核对并补充 OA 流程号。',matched);
   const seenSubmissions=new Set();
   const amounts=matched.filter(r=>{
    const ids=applicationIds(r),info=classification(r);
