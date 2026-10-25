@@ -792,3 +792,10 @@ test('正常付款已有输出记录也可通过其他台账行发现名称差�
  assert.equal(reviews.length,1);assert.equal(reviews[0][0].v,'正常付款');assert.equal(reviews[0][8].v,3);assert.match(reviews[0][5].v,/MDST-DGFK20261001002/);assert.equal(r.normalRows[0][3].v,'未提交OA');assert.equal(r.normalRows[1][3].v,'MDST-DGFK20261001002');
  set(i,'ledger','对公付款0A流程号',3,'');const excluded=C.build(i);assert.equal(excluded.normalRows.length,1);assert(!excluded.reviewRows.some(row=>row[5].v.startsWith('OA名称差异待核对')));
 });
+
+test('通用OA复核覆盖两类付款和各种未提交写法，不限定供应商或流程号',()=>{
+ for(const role of ['negotiated','ledger'])for(const old of ['未提交','未提交OA','未提交OAD','未申请OA','未交OA','MDST-DGFK20991231999']){
+  const i=classifiedFixture(),row=role==='ledger'?3:2,id=role==='ledger'?'MDST-DGFK20261001002':'MDST-DGFK20261001001';set(i,role,'对公付款0A流程号',row,old);
+  const before=JSON.stringify(i),r=C.build(i),review=r.reviewRows.find(line=>line[5].v.startsWith('OA号复核'));assert(review);assert(review[5].v.includes('“'+old+'”'));assert(review[5].v.includes(id));assert.equal(review[0].v,role==='ledger'?'正常付款':'谈判付款');assert.equal(role==='ledger'?r.normalRows[0][3].v:negotiatedValue(r,'对公付款0A流程号'),id);assert.equal(JSON.stringify(i),before);
+ }
+});
