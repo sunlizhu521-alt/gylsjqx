@@ -7,7 +7,7 @@ const FILE_IDS={ledger:'ledgerFile',applications:'applicationsFile',negotiated:'
 const fields=sheet=>Object.fromEntries((X.utils.sheet_to_json(sheet,{header:1,defval:''})[0]||[]).map((v,i)=>[v,i]));
 function compareNegotiated(before,after){
  assert.equal(X.utils.decode_range(after['!ref']).e.r,X.utils.decode_range(before['!ref']).e.r,'谈判表原行范围必须完整保留');
- const headers=fields(before),allowed=new Set(['提交付款申请单日期','提交时间汇总','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号'].map(h=>headers[h]).filter(Number.isInteger));
+ const headers=fields(before),allowed=new Set(['提交付款申请单日期','提交时间汇总','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号','付款自然周'].map(h=>headers[h]).filter(Number.isInteger));
  const supplementOnly=new Set(['对公付款0A流程号','对公付款OA流程号','付款OA号','付款主体','单据号【财务应付单】'].map(h=>headers[h]).filter(Number.isInteger));
  for(const address of Object.keys(before).filter(k=>/^[A-Z]+[0-9]+$/.test(k))){
   const col=X.utils.decode_cell(address).c;if(allowed.has(col))continue;
@@ -85,8 +85,10 @@ function compareNegotiated(before,after){
   assert.deepEqual((await frame.locator('#normalPreview th').allTextContents()).slice(16,19),['是否提交付款申请单','提交时间汇总','当前节点']);
   const previewSubmissions=await frame.locator('#normalPreview tbody tr td:nth-child(18)').allTextContents();
   for(const id of ['normalPreview','negotiatedPreview'])assert(await frame.locator('#'+id+' .flow-code').evaluateAll(cells=>cells.length>0&&cells.every(c=>getComputedStyle(c).whiteSpace==='nowrap'&&getComputedStyle(c).maxWidth==='none'&&!/[\r\n]/.test(c.textContent))),'流程编号预览必须单行自适应');
-  assert.equal(await frame.locator('#normalPreview th').last().innerText(),'是否对账');
-  const previewReconciled=await frame.locator('#normalPreview tbody tr td:last-child').allTextContents();
+  assert.equal(await frame.locator('#normalPreview th').nth(23).innerText(),'是否对账');
+  assert.equal(await frame.locator('#normalPreview th').last().innerText(),'付款自然周');
+  const previewWeeks=await frame.locator('#normalPreview tbody tr td:nth-child(25)').allTextContents();
+  const previewReconciled=await frame.locator('#normalPreview tbody tr td:nth-child(24)').allTextContents();
   assert.equal(previewReconciled.filter(v=>v==='已对账').length,real?15:5);
   assert.equal(previewReconciled.filter(v=>v==='未对账').length,0);
   await page.locator('.tool-tab[data-tool="payment"]').click();await page.locator('.tool-tab[data-tool="funds"]').click();
@@ -97,16 +99,21 @@ function compareNegotiated(before,after){
   const bytes=await download(1);const saved=X.read(bytes,{type:'buffer',cellNF:true,cellStyles:true}),original=X.read(data.negotiated,{type:'buffer',cellNF:true,cellStyles:true});
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对']);compareNegotiated(original.Sheets[selectedName],saved.Sheets.谈判付款);
   const negotiatedHeaders=fields(saved.Sheets.谈判付款),previewColumnNames=await frame.locator('#negotiatedPreview th').allTextContents();assert.equal(Math.abs(negotiatedHeaders['提交付款申请单日期']-negotiatedHeaders['提交时间汇总']),1);for(const key of ['提交付款申请单日期','提交时间汇总','是否提交付款申请单','流程编号'])assert.equal(previewColumnNames.indexOf(key),negotiatedHeaders[key]);
-  for(const sheet of Object.values(saved.Sheets)){assert.equal(sheet['!autofilter'].ref,sheet['!ref'],'三个sheet首行筛选覆盖全部列');for(const row of sheet['!rows']||[])if(row){assert.equal(row.hpt,30);assert(!row.hidden);}assert((sheet['!cols']||[]).slice(0,X.utils.decode_range(sheet['!ref']).e.c+1).every((c,i)=>c.width>=12&&c.width<=(X.utils.sheet_to_json(sheet,{header:1})[0][i]&&['流程编号','对公付款0A流程号','开票时间','OA合同编号'].includes(X.utils.sheet_to_json(sheet,{header:1})[0][i])?255:80)),'列宽自适应且有合理范围');}
+  for(const sheet of Object.values(saved.Sheets)){assert.equal(sheet['!autofilter'].ref,sheet['!ref'],'三个sheet首行筛选覆盖全部列');for(const row of sheet['!rows']||[])if(row){assert.equal(row.hpt,30);assert(!row.hidden);}assert((sheet['!cols']||[]).slice(0,X.utils.decode_range(sheet['!ref']).e.c+1).every((c,i)=>c.width>=12&&c.width<=(X.utils.sheet_to_json(sheet,{header:1})[0][i]&&['流程编号','付款自然周','对公付款0A流程号','开票时间','OA合同编号'].includes(X.utils.sheet_to_json(sheet,{header:1})[0][i])?255:80)),'列宽自适应且有合理范围');}
   for(const [col,min] of [[3,32],[4,22],[10,32]])assert(saved.Sheets.正常付款['!cols'][col].width>=min,'正常付款 D/E/K 必须充分加宽');
   const normal=X.utils.sheet_to_json(saved.Sheets.正常付款,{header:1,defval:''});assert.deepEqual(normal[0],NORMAL_HEADERS);
   assert.deepEqual(normal.slice(1).map(row=>row[17]),previewSubmissions,'提交时间汇总的预览与导出一致');
+  assert.deepEqual(normal.slice(1).map(row=>row[24]),previewWeeks,'付款自然周预览与导出一致');
+  const negotiatedRows=X.utils.sheet_to_json(saved.Sheets.谈判付款,{header:1,defval:''}),weekIndex=negotiatedHeaders['付款自然周'];
+  assert.equal(previewColumnNames[weekIndex],'付款自然周');
+  assert.deepEqual(negotiatedRows.slice(1,101).map(row=>row[weekIndex]),await frame.locator('#negotiatedPreview tbody tr td:nth-child('+(weekIndex+1)+')').allTextContents(),'谈判付款自然周预览与导出一致');
+  if(!real){for(const row of normal.slice(1))assert.equal(row[24],'2026-11-02～2026-11-08');for(const row of negotiatedRows.slice(1,3))assert.equal(row[weekIndex],'2026-11-02～2026-11-08');}
   const applicationReview=X.utils.sheet_to_json(saved.Sheets.付款申请核对,{header:1,defval:''});assert.deepEqual(applicationReview[0],REVIEW_HEADERS);
   assert.equal(applicationReview.length-1,real?5:0,'仅申请异常列入核对表，未申请不列入');
   assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),real?{'已提交':5}:{});
   assert.equal(saved.Sheets.付款申请核对['!autofilter'].ref,`A1:J${applicationReview.length}`);
   assert(applicationReview.slice(1).every(row=>row[5]&&row[7]&&row[8]&&Number.isInteger(row[9])),'付款申请核对须包含说明和来源文件、工作表、行号');
-  assert.equal(normal.length-1,real?15:5);assert.equal(saved.Sheets.正常付款['!autofilter'].ref,`A1:X${normal.length}`);
+  assert.equal(normal.length-1,real?15:5);assert.equal(saved.Sheets.正常付款['!autofilter'].ref,`A1:Y${normal.length}`);
   assert(normal.slice(1).every(row=>row[15]==='否'),'正常付款分类应按谈判表重新计算');
   assert.deepEqual(normal.slice(1).map(row=>row[23]),previewReconciled,'导出对账状态必须与预览一致');
   assert(normal.slice(1).every(row=>String(row[3]??'').trim()&&row[23]==='已对账'),'正常付款仅保留原付款 OA 流程号有值的记录');
@@ -120,7 +127,7 @@ function compareNegotiated(before,after){
    const xfs=all(styles,'cellXfs')[0],borders=all(styles,'borders')[0],fills=all(styles,'fills')[0],shared=zip.file('xl/sharedStrings.xml')?all(parse(await zip.file('xl/sharedStrings.xml').async('string')),'si').map(si=>all(si,'t').map(t=>t.textContent).join('')):[],layoutErrors=[];
    const text=c=>c.getAttribute('t')==='s'?shared[Number(all(c,'v')[0]?.textContent)]||'':c.getAttribute('t')==='inlineStr'?all(c,'t').map(t=>t.textContent).join(''):all(c,'v')[0]?.textContent??'';
    for(const entry of all(book,'sheet')){
-    const relation=all(rels,'Relationship').find(e=>e.getAttribute('Id')===entry.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id')),doc=parse(await zip.file(new URL(relation.getAttribute('Target'),'https://xlsx.invalid/xl/workbook.xml').pathname.slice(1)).async('string')),cells=all(doc,'c'),flowColumns=new Set(cells.filter(c=>/^[A-Z]+1$/.test(c.getAttribute('r'))&&['流程编号',...(entry.getAttribute('name')==='正常付款'?['对公付款0A流程号','开票时间','OA合同编号']:[])].includes(text(c))).map(c=>c.getAttribute('r').replace(/\d+/,'')));
+    const relation=all(rels,'Relationship').find(e=>e.getAttribute('Id')===entry.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id')),doc=parse(await zip.file(new URL(relation.getAttribute('Target'),'https://xlsx.invalid/xl/workbook.xml').pathname.slice(1)).async('string')),cells=all(doc,'c'),flowColumns=new Set(cells.filter(c=>/^[A-Z]+1$/.test(c.getAttribute('r'))&&['流程编号','付款自然周',...(entry.getAttribute('name')==='正常付款'?['对公付款0A流程号','开票时间','OA合同编号']:[])].includes(text(c))).map(c=>c.getAttribute('r').replace(/\d+/,'')));
     for(const c of cells){const ref=c.getAttribute('r'),xf=xfs.children[Number(c.getAttribute('s')||0)],border=borders.children[Number(xf.getAttribute('borderId')||0)],fill=fills.children[Number(xf.getAttribute('fillId')||0)],header=/^[A-Z]+1$/.test(ref);
      if((text(c)!==''||all(c,'f').length)&&['left','right','top','bottom'].some(edge=>!all(border,edge)[0]?.getAttribute('style')||all(border,edge)[0]?.getAttribute('style')==='none'))layoutErrors.push(entry.getAttribute('name')+'!'+ref+' 缺少边框');
      if((text(c)!==''||all(c,'f').length)&&['left','right','top','bottom'].some(edge=>all(all(border,edge)[0],'color')[0]?.getAttribute('rgb')!=='FF000000'))layoutErrors.push(entry.getAttribute('name')+'!'+ref+' 边框不是清晰黑色');
@@ -221,7 +228,7 @@ function compareNegotiated(before,after){
     assert.match(await review.locator('#classificationSummary').innerText(),new RegExp(`${sourceOA?0:1} 条无对公付款 OA 号未纳入正常付款`));
     if(sourceOA)assert.equal(await previewRows.first().locator('td').nth(22).innerText(),unmatched?'原流程编号':'MDST-DGFK20261024001');
     else assert.equal(await previewRows.filter({hasText:'正常供应商1'}).count(),0,'有匹配新流程也不能纳入原OA空白的记录');
-    assert.equal(await previewRows.first().locator('td').last().innerText(),'已对账');
+    assert.equal(await previewRows.first().locator('td').nth(23).innerText(),'已对账');
     const event=reviewPage.waitForEvent('download');await review.locator('#download').click();const downloaded=await event;
     assert.equal(downloaded.suggestedFilename(),'资金整理-2026-10-24-V1.xlsx');const target=out+(negotiatedMissing?'/negotiated-oa-missing.xlsx':unmatched?'/oa-unmatched-preserved.xlsx':sourceOA?'/oa-mismatch-auto.xlsx':'/oa-empty-excluded.xlsx');await downloaded.saveAs(target);
     const downloadedBook=X.read(await fs.readFile(target),{type:'buffer',cellNF:true,cellStyles:true}),checked=downloadedBook.Sheets.正常付款;

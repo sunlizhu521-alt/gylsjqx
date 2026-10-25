@@ -47,6 +47,7 @@
     <small>供应商或付款主体为空时保留原值；已付金额为空时保留原付款情况，不按零处理。切换工具保留本次内容，刷新后需重新选择文件。</small>
     <small>两类付款均在“提交时间汇总”逐次列出申请日期－金额；正常付款该列紧邻“是否提交付款申请单”。谈判付款按本次上传记录累计；分批申请只按谈判表的对公付款 OA 流程号关联；“提交付款申请单日期”和“提交时间汇总”相邻显示。登记月份、应付款时间无法识别时直接保留原文。</small>
   </section>
+  <p>谈判付款、正常付款表末尾新增“付款自然周”：按各表的“应付款时间”计算，周一至周日为一周，例如“2026-10-26～2026-11-01”。可用表头筛选器选择付款周；日期为空或无法识别时显示“日期待确认”。</p>
   <section id="results" hidden>
     <p id="stats"></p>
     <small id="classificationSummary"></small>
@@ -64,8 +65,8 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=compact-funds-layout-20261025-8"></script>
-<script src="funds-export.js?v=clear-grid-widths-20261025-11"></script>
-<script src="funds-tool.js?v=clear-grid-widths-20261025-11"></script>
+<script src="funds-core.js?v=payment-natural-week-20261025-12"></script>
+<script src="funds-export.js?v=payment-natural-week-20261025-12"></script>
+<script src="funds-tool.js?v=payment-natural-week-20261025-12"></script>
 </body>
 </html>

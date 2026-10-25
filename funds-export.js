@@ -125,7 +125,7 @@ window.FundsExport = async function(sourceBytes, result) {
     const rows=new Map(elements(data,'row').map(row=>[Number(row.getAttribute('r'))-1,row])),cells=new Map(elements(data,'c').map(c=>[c.getAttribute('r'),c]));
     const ensureCell=(r,c)=>{const address=XLSX.utils.encode_cell({r,c});if(cells.has(address))return cells.get(address);let row=rows.get(r);if(!row){row=create(doc,'row',{r:r+1});data.insertBefore(row,[...data.children].find(e=>Number(e.getAttribute('r'))>r+1)||null);rows.set(r,row);}const cell=create(doc,'c',{r:address});row.insertBefore(cell,[...row.children].find(e=>XLSX.utils.decode_cell(e.getAttribute('r')).c>c)||null);cells.set(address,cell);return cell;};
     const styleId=c=>{const point=XLSX.utils.decode_cell(c.getAttribute('r')),column=oldCols.find(e=>Number(e.getAttribute('min'))<=point.c+1&&Number(e.getAttribute('max'))>=point.c+1);return Number(c.getAttribute('s')??c.parentElement.getAttribute('s')??column?.getAttribute('style')??0);};
-    const flowColumns=new Set();for(let c=0;c<=end.c;c++)if(cellText(ensureCell(headerRow,c)).normalize('NFKC').replace(/\s+/g,'')==='流程编号')flowColumns.add(c);
+    const flowColumns=new Set();for(let c=0;c<=end.c;c++)if(['流程编号','付款自然周'].includes(cellText(ensureCell(headerRow,c)).normalize('NFKC').replace(/\s+/g,'')))flowColumns.add(c);
     const singleLineColumns=new Set(flowColumns),dateColumns=new Set();
     if(doc!==sheet)for(let c=0;c<=end.c;c++){const title=cellText(ensureCell(headerRow,c));if(['对公付款0A流程号','对公付款OA流程号','开票时间','OA合同编号'].includes(title))singleLineColumns.add(c);if(title==='开票时间')dateColumns.add(c);}
     const populatedColumns=new Set([...cells.values()].filter(c=>cellText(c)!==''||first(c,'f')).map(c=>XLSX.utils.decode_cell(c.getAttribute('r')).c));
