@@ -24,6 +24,10 @@ const {fixtures}=require('./funds-fixtures.cjs');
   zip.file('xl/worksheets/sheet1.xml',xml);data.negotiated=await zip.generateAsync({type:'nodebuffer'});
  }
  if(process.env.FUNDS_CLASSIFICATION_QA){
+  const ledgerBook=X.read(data.ledger),ledgerSheet=ledgerBook.Sheets['对账明细-李奇'];
+  const otherOA=X.utils.sheet_to_json(ledgerSheet,{header:1}).find(r=>r[1]==='谈判甲公司').slice();
+  otherOA[3]='MDST-DGFK20990101999';otherOA[8]=46387;
+  X.utils.sheet_add_aoa(ledgerSheet,[otherOA],{origin:-1});data.ledger=Buffer.from(X.write(ledgerBook,{type:'buffer',bookType:'xlsx'}));
   const appBook=X.read(data.applications),app=appBook.Sheets.付款申请汇总;
   app.K1={t:'s',v:'付款分类'};
   for(let r=2;r<=X.utils.decode_range(app['!ref']).e.r+1;r++){
