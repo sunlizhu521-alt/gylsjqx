@@ -33,6 +33,7 @@ function money(c){
 const amountCell=n=>({t:'n',v:Number(n)/100,z:'#,##0.00'});
 const centsText=n=>{const a=n<0n?-n:n;return (n<0n?'-':'')+(a/100n)+'.'+String(a%100n).padStart(2,'0');};
 const amountText=c=>{const n=money(c).cents;return n===undefined?str(c?.w??c?.v)||'金额为空':centsText(n);};
+function formatReviewText(value){return str(value).split(/[\r\n]+|(?<=[；。])/u).map(str).filter(Boolean).map((part,i)=>(i+1)+'、'+part).join('\n');}
 function codes(v,ap=false){const s=str(v).toUpperCase();return [...new Set(s.match(ap?/AP\d+/g:/[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*\d[A-Z0-9-]*/g)||[])];}
 const identifiersConflict=(a,b)=>a.length>0&&b.length>0&&(a.length!==b.length||a.some(v=>!b.includes(v)));
 function settled(v){const n=norm(v);return ['是','结清','已结清'].includes(n)?'是':['否','未结清'].includes(n)?'否':n;}
@@ -479,5 +480,5 @@ function build(inputs,decisions={}){
  if(dateColumn!==undefined&&summaryColumn!==undefined&&Math.abs(dateColumn-summaryColumn)!==1){columnOrder.splice(summaryColumn,1);columnOrder.splice(columnOrder.indexOf(dateColumn)+1,0,summaryColumn);}
  return {normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
 }
-return {PEOPLE,NORMAL_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money};
+return {PEOPLE,NORMAL_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText};
 });

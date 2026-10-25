@@ -52,7 +52,7 @@
     for (const [i,title] of headers.entries()) { const th = document.createElement('th'); th.textContent = title;if(flowColumn[i])th.className='flow-code'; head.append(th); }
     for (const row of rows.slice(0,100)) {
       const tr = body.insertRow();
-      for (let i=0;i<headers.length;i++){const td=tr.insertCell(),text=valueText(row[i],date1904);td.textContent=flowColumn[i]?text.replace(/\r\n|[\r\n]/g,'；'):text;if(flowColumn[i])td.className='flow-code';if(headers[i]==='谈判明细')td.className='batch-detail';}
+      for (let i=0;i<headers.length;i++){const td=tr.insertCell(),text=valueText(row[i],date1904);td.textContent=flowColumn[i]?text.replace(/\r\n|[\r\n]/g,'；'):text;if(flowColumn[i])td.className='flow-code';if(headers[i]==='谈判明细')td.className='batch-detail';if(id==='reviewPreview'&&headers[i]==='核对说明')td.className='review-detail';}
     }
     $(id).replaceChildren(table);
   }
@@ -98,7 +98,7 @@
       preview('normalPreview',result.normalHeaders,result.normalRows);
       const order=result.negotiated.columnOrder,negotiatedHeaders=order.map(c=>result.negotiated.headers[c]);
       preview('negotiatedPreview',negotiatedHeaders,result.negotiated.rows.map(row=>order.map(c=>row[c])),Boolean(inputs.negotiated.book.Workbook?.WBProps?.date1904));
-      preview('reviewPreview',result.reviewHeaders,result.reviewRows);
+      preview('reviewPreview',result.reviewHeaders,result.reviewRows.map(row=>row.map((cell,i)=>result.reviewHeaders[i]==='核对说明'?{...cell,v:FundsCore.formatReviewText(cell.v)}:cell)));
       $('negotiatedPreviewSection').hidden = false; $('normalPreviewSection').hidden = false; $('reviewPreviewSection').hidden = false;
       $('status').textContent = pending() ? `已完成整理，请处理下方 ${pending()} 项核对。` : '核对已完成，正在验证导出结果…';
       if (!pending()) {

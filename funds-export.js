@@ -124,7 +124,7 @@ window.FundsExport = async function(sourceBytes, result) {
     const xf=xfs.children[id].cloneNode(true);xf.setAttribute('numFmtId',formatId('yyyy"年"m"月"d"日"'));xf.setAttribute('applyNumberFormat','1');
     const next=append('cellXfs',xf);dateDisplayStyles.set(id,next);return next;
   };
-  const fitSheet=(doc,end,headerRow=0)=>{
+  const fitSheet=(doc,end,headerRow=0,review=false)=>{
     const batch=doc===sheet&&result.negotiated.batchLayout,detailColumn=batch?result.negotiated.headers.findIndex(h=>String(h).trim()==='谈判明细'):-1;
     const data=first(doc,'sheetData');let cols=first(doc,'cols');
     if(!cols){cols=create(doc,'cols');doc.documentElement.insertBefore(cols,data);}
@@ -152,12 +152,24 @@ window.FundsExport = async function(sourceBytes, result) {
       if(header||flow){const font=fonts.children[Number(xf?.getAttribute('fontId')||0)];if(measure){measure.font=(first(font,'b')?'bold ':'')+size+'pt '+JSON.stringify(first(font,'name')?.getAttribute('val')||'Arial')+', sans-serif';width=Math.max(width,(measure.measureText(String(text)).width*(header?1.2:1.15)+(header?36:20))/7/(merged.get(address)||1));}if(flow)width=Math.max(width,dateColumns.has(point.c)?22:32);}
       widths[point.c]=Math.max(widths[point.c]||12,Math.min(header||flow?255:80,width));
     }
-    if(batch){
+    if(batch||review){
       const detailStyles=new Map();
       for(const c of elements(data,'c')){
-        const point=XLSX.utils.decode_cell(c.getAttribute('r'));if(point.c!==detailColumn||point.r<=headerRow)continue;
-        const id=styleId(c);if(!detailStyles.has(id)){const xf=xfs.children[id].cloneNode(true);let alignment=first(xf,'alignment');if(!alignment){alignment=create(styles,'alignment');xf.insertBefore(alignment,first(xf,'protection')||null);}alignment.setAttribute('horizontal','left');alignment.setAttribute('vertical','center');alignment.setAttribute('wrapText','1');alignment.setAttribute('shrinkToFit','0');xf.setAttribute('applyAlignment','1');detailStyles.set(id,append('cellXfs',xf));}c.setAttribute('s',detailStyles.get(id));
+        const point=XLSX.utils.decode_cell(c.getAttribute('r'));if((!review&&point.c!==detailColumn)||point.r<=headerRow)continue;
+        const id=styleId(c);if(!detailStyles.has(id)){const xf=xfs.children[id].cloneNode(true);let alignment=first(xf,'alignment');if(!alignment){alignment=create(styles,'alignment');xf.insertBefore(alignment,first(xf,'protection')||null);}alignment.setAttribute('horizontal','left');alignment.setAttribute('vertical',review?'top':'center');alignment.setAttribute('wrapText','1');alignment.setAttribute('shrinkToFit','0');xf.setAttribute('applyAlignment','1');detailStyles.set(id,append('cellXfs',xf));}c.setAttribute('s',detailStyles.get(id));
       }
+    }
+    const reviewHeight=c=>{
+      const point=XLSX.utils.decode_cell(c.getAttribute('r')),xf=xfs.children[styleId(c)],font=fonts.children[Number(xf.getAttribute('fontId')||0)],size=Number(first(font,'sz')?.getAttribute('val')||12);
+      const available=Math.max(1,(widths[point.c]-3)*7);let lines=0;
+      if(measure)measure.font=size+'pt '+JSON.stringify(first(font,'name')?.getAttribute('val')||'Arial')+', sans-serif';
+      for(const line of cellText(c).split(/\r?\n/)){let used=0;lines++;for(const ch of line){const w=measure?measure.measureText(ch).width:((ch.charCodeAt(0)>255?2:1)*size);if(used&&used+w>available){lines++;used=0;}used+=w;}}
+      return lines*(size*1.5+2)+10;
+    };
+    if(review)for(const c of cells.values()){
+      const point=XLSX.utils.decode_cell(c.getAttribute('r'));if(point.r<=headerRow)continue;
+      while(reviewHeight(c)>409.5&&widths[point.c]<255)widths[point.c]=Math.min(255,widths[point.c]*1.25);
+      if(reviewHeight(c)>409.5)throw Error('付款申请核对第'+(point.r+1)+'行内容超过单行可完整显示的高度，请精简源说明后重新生成；未导出截断内容');
     }
     // A populated merged cell also needs borders on its perimeter, without changing the merge.
     for(const range of merges){const anchor=cells.get(XLSX.utils.encode_cell(range.s));if(cellText(anchor)===''&&!anchor?.getElementsByTagNameNS('*','f').length)continue;for(let r=range.s.r;r<=range.e.r;r++)for(let c=range.s.c;c<=range.e.c;c++){const edges=[c===range.s.c&&'left',c===range.e.c&&'right',r===range.s.r&&'top',r===range.e.r&&'bottom'].filter(Boolean);if(edges.length){const cell=ensureCell(r,c);cell.setAttribute('s',layoutStyle(styleId(cell),r===headerRow,flowColumns.has(c),edges));}}}
@@ -173,6 +185,7 @@ window.FundsExport = async function(sourceBytes, result) {
         const detail=cells.get(XLSX.utils.encode_cell({r:Number(row.getAttribute('r'))-1,c:detailColumn}));
         if(detail){const xf=xfs.children[styleId(detail)],size=Number(first(fonts.children[Number(xf.getAttribute('fontId')||0)],'sz')?.getAttribute('val')||11),width=Math.max(1,widths[detailColumn]-3);const lines=cellText(detail).split(/\r?\n/).reduce((n,line)=>n+Math.max(1,Math.ceil([...line].reduce((w,ch)=>w+(/[\u0000-\u00ff]/.test(ch)?1:2),0)*size/11/width)),0);height=Math.max(height,lines*(size+5)+8);}
       }
+      if(review&&Number(row.getAttribute('r'))>headerRow+1)for(const c of elements(row,'c'))height=Math.max(height,reviewHeight(c));
       row.setAttribute('ht',Math.min(409.5,height));row.setAttribute('customHeight','1');row.removeAttribute('hidden');
     }
     const range=XLSX.utils.encode_range({s:{r:headerRow,c:0},e:end});let filter=first(doc,'autoFilter');
@@ -311,12 +324,12 @@ window.FundsExport = async function(sourceBytes, result) {
     const allRows=[headers.map(v=>({t:'s',v})),...data];
     for(const [r,values] of allRows.entries()){
       const row=create(generated,'row',{r:r+1});
-      for(let c=0;c<headers.length;c++){const cell=values[c]||{t:'s',v:''};row.append(writeCell(generated,XLSX.utils.encode_cell({r,c}),cell,styleFor(cell.z||'',r===0),true));}
+      for(let c=0;c<headers.length;c++){const original=values[c]||{t:'s',v:''},cell=key==='Review'&&r>0&&headers[c]==='核对说明'?{...original,v:FundsCore.formatReviewText(original.v)}:original;row.append(writeCell(generated,XLSX.utils.encode_cell({r,c}),cell,styleFor(cell.z||'',r===0),true));}
       generatedData.append(row);
     }
     const range=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:allRows.length-1,c:headers.length-1}});
     generated.documentElement.insertBefore(create(generated,'dimension',{ref:range}),generated.documentElement.firstChild);
-    fitSheet(generated,{r:allRows.length-1,c:headers.length-1});
+    fitSheet(generated,{r:allRows.length-1,c:headers.length-1},0,key==='Review');
     let newId='rIdFunds'+key,generatedPath='xl/worksheets/funds-'+key.toLowerCase()+'.xml';
     while(elements(rels,'Relationship').some(e=>e.getAttribute('Id')===newId))newId+='x';
     while(zip.file(generatedPath))generatedPath=generatedPath.replace('.xml','x.xml');

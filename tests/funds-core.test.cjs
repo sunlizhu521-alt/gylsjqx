@@ -823,3 +823,9 @@ test('OA未找到核对不依赖供应商金额，空值异常值保留，零金
 test('原编号未找到但已唯一修正时合并到同一核对说明，不重复列付款',()=>{
  const i=classifiedFixture();set(i,'negotiated','对公付款0A流程号',2,'MDST-DGFK20990101999');const r=C.build(i);assert.equal(r.reviewRows.length,1);assert.equal(missingFlowReviews(r).length,1);assert.match(r.reviewRows[0][5].v,/已更新为“MDST-DGFK20261001001”/);assert.match(r.reviewRows[0][5].v,/当前对公付款OA号：MDST-DGFK20261001001/);
 });
+
+test('核对说明逐条编号且保留原标点、金额、编号和来源，空值不生成条目',()=>{
+ const text='当前OA号：未提交OA\n流程编码：MDST-DGFK20261021013；金额：79500.00。\n来源：文件.xlsx / Sheet0 / 第6行';
+ assert.equal(C.formatReviewText(text),'1、当前OA号：未提交OA\n2、流程编码：MDST-DGFK20261021013；\n3、金额：79500.00。\n4、来源：文件.xlsx / Sheet0 / 第6行');
+ assert.equal(C.formatReviewText(''), '');assert.equal(C.formatReviewText(null), '');assert.equal(C.formatReviewText('原因\r\n\r\n来源'), '1、原因\n2、来源');
+});
