@@ -117,7 +117,13 @@ window.FundsExport = async function(sourceBytes, result) {
     if(header||flow){let alignment=first(xf,'alignment');if(!alignment){alignment=create(styles,'alignment');xf.insertBefore(alignment,first(xf,'protection')||null);}alignment.setAttribute('wrapText','0');alignment.setAttribute('shrinkToFit',flow?'1':'0');xf.setAttribute('applyAlignment','1');}
     const next=xf.isEqualNode(original)?Number(id):append('cellXfs',xf);layoutStyles.set(key,next);return next;
   };
-  const measure=document.createElement('canvas').getContext('2d');
+  const measure=document.createElement('canvas').getContext('2d'),dateHeaderStyles=new Map();
+  // WPS format 31 displays a Chinese date, while SSF falls back to m/d/yy.
+  const dateHeaderStyle=id=>{
+    if(dateHeaderStyles.has(id))return dateHeaderStyles.get(id);
+    const xf=xfs.children[id].cloneNode(true);xf.setAttribute('numFmtId',formatId('yyyy"年"m"月"d"日"'));xf.setAttribute('applyNumberFormat','1');
+    const next=append('cellXfs',xf);dateHeaderStyles.set(id,next);return next;
+  };
   const fitSheet=(doc,end,headerRow=0)=>{
     const batch=doc===sheet&&result.negotiated.batchLayout,detailColumn=batch?result.negotiated.headers.findIndex(h=>String(h).trim()==='谈判明细'):-1;
     const data=first(doc,'sheetData');let cols=first(doc,'cols');
@@ -136,13 +142,14 @@ window.FundsExport = async function(sourceBytes, result) {
       const address=c.getAttribute('r'),point=XLSX.utils.decode_cell(address),header=point.r===headerRow,flow=singleLineColumns.has(point.c);
       if(point.c>end.c||point.r>end.r)continue;
       if(flow&&!header&&!first(c,'f')&&/[\r\n]/.test(cellText(c))){const text=cellText(c).replace(/\r\n|[\r\n]/g,'；');for(const child of [...c.children])if(['v','is'].includes(child.localName))child.remove();const is=create(doc,'is'),t=create(doc,'t');t.textContent=text;is.append(t);c.setAttribute('t','inlineStr');c.insertBefore(is,c.firstChild);}
+      if(header&&['',null,'n'].includes(c.getAttribute('t'))&&Number(xfs.children[styleId(c)].getAttribute('numFmtId'))===31)c.setAttribute('s',dateHeaderStyle(styleId(c)));
       if(header||flow||populatedColumns.has(point.c))c.setAttribute('s',layoutStyle(styleId(c),header,flow));
       const xf=xfs.children[styleId(c)];
       const size=Number(first(fonts.children[Number(xf?.getAttribute('fontId')||0)],'sz')?.getAttribute('val')||11),type=c.getAttribute('t'),raw=first(c,'v')?.textContent??'';
       let text=type==='s'?sharedTexts[Number(raw)]||'':type==='inlineStr'?elements(c,'t').map(t=>t.textContent).join(''):raw;
       if((!type||type==='n')&&raw!=='')try{const id=Number(xf?.getAttribute('numFmtId')||0),format=[...formats].find(([,n])=>n===id)?.[0]??id;text=XLSX.SSF.format(format,Number(raw),{date1904});}catch(_){}
       let width=Math.max(...String(text).split(/\r?\n/).map(line=>[...line].reduce((n,ch)=>n+(/[\u0000-\u00ff]/.test(ch)?1:2),0)))*size/11/(merged.get(address)||1)+3;
-      if(header||flow){const font=fonts.children[Number(xf?.getAttribute('fontId')||0)];if(measure){measure.font=(first(font,'b')?'bold ':'')+size+'pt '+JSON.stringify(first(font,'name')?.getAttribute('val')||'Arial')+', sans-serif';width=Math.max(width,(measure.measureText(String(text)).width*1.15+20)/7/(merged.get(address)||1));}if(flow)width=Math.max(width,dateColumns.has(point.c)?22:32);}
+      if(header||flow){const font=fonts.children[Number(xf?.getAttribute('fontId')||0)];if(measure){measure.font=(first(font,'b')?'bold ':'')+size+'pt '+JSON.stringify(first(font,'name')?.getAttribute('val')||'Arial')+', sans-serif';width=Math.max(width,(measure.measureText(String(text)).width*(header?1.2:1.15)+(header?36:20))/7/(merged.get(address)||1));}if(flow)width=Math.max(width,dateColumns.has(point.c)?22:32);}
       widths[point.c]=Math.max(widths[point.c]||12,Math.min(header||flow?255:80,width));
     }
     if(batch){

@@ -17,6 +17,10 @@ const {fixtures}=require('./funds-fixtures.cjs');
  if(!process.env.FUNDS_V19_FILE){
   const zip=await Zip.loadAsync(data.negotiated);let xml=await zip.file('xl/worksheets/sheet1.xml').async('string');
   for(const [address,attrs,master] of [['S2','t="shared" si="0" ref="S2:S4"',true],['S3','t="shared" si="0"',false],['S4','t="shared" si="0"',false],['T2','t="shared" si="1" ref="T2:T3"',true],['T3','t="shared" si="1"',false]])xml=xml.replace(new RegExp('(<c r="'+address+'"[^>]*>)([\\s\\S]*?)(</c>)'),(_,start,body,end)=>start+body.replace(/<f>[^<]*<\/f>/,f=>master?f.replace('<f>','<f '+attrs+'>'):'<f '+attrs+'/>')+end);
+  const dateStyleIds=new Set([...xml.matchAll(/<c r="(?:U|V|W|X|Y|Z|AA|AB|AC|AD|AE|AF|AG)1"[^>]*s="(\d+)"/g)].map(m=>Number(m[1])));
+  let styleXml=await zip.file('xl/styles.xml').async('string');
+  styleXml=styleXml.replace(/(<cellXfs[^>]*>)([\s\S]*?)(<\/cellXfs>)/,(_,a,body,b)=>{let id=0;return a+body.replace(/<xf\b[^>]*(?:\/>|>[\s\S]*?<\/xf>)/g,xf=>dateStyleIds.has(id++)?xf.replace(/numFmtId="\d+"/,'numFmtId="31"'):xf)+b;});
+  zip.file('xl/styles.xml',styleXml);
   zip.file('xl/worksheets/sheet1.xml',xml);data.negotiated=await zip.generateAsync({type:'nodebuffer'});
  }
  if(process.env.FUNDS_CLASSIFICATION_QA){
@@ -55,6 +59,11 @@ const {fixtures}=require('./funds-fixtures.cjs');
    assert.equal(s[address]?.v??'',c.v??'',address+' value');assert.equal(s[address]?.f,c.f,address+' formula');
   }
   assert.deepEqual(s['!merges'],src['!merges']);
+  for(let c=20;c<33;c++){
+   const address=X.utils.encode_cell({r:0,c}),d=X.SSF.parse_date_code(s[address].v),label=`${d.y}年${d.m}月${d.d}日`;
+   assert.equal(X.SSF.format(s[address].z,s[address].v),label,address+' full Chinese date');
+   assert(s['!cols'][c].width>=20,address+' date and filter must fit');
+  }
   const layout=await frame.locator('body').evaluate(async(_,{bytes})=>{
    const z=await JSZip.loadAsync(new Uint8Array(bytes)),p=new DOMParser(),parse=x=>p.parseFromString(x,'application/xml'),all=(d,n)=>[...d.getElementsByTagNameNS('*',n)];
    const doc=parse(await z.file('xl/worksheets/sheet1.xml').async('string')),styles=parse(await z.file('xl/styles.xml').async('string')),xfs=all(styles,'cellXfs')[0],cells=new Map(all(doc,'c').map(c=>[c.getAttribute('r'),c]));
