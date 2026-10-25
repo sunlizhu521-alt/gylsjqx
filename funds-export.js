@@ -93,11 +93,37 @@ window.FundsExport = async function(sourceBytes, result) {
     }
     return c;
   };
+  const sharedRel=elements(rels,'Relationship').find(e=>e.getAttribute('Type')===R+'/sharedStrings');
+  const sharedTexts=sharedRel?elements(await parse(zip,resolve('xl/workbook.xml',sharedRel.getAttribute('Target'))),'si').map(si=>elements(si,'t').map(t=>t.textContent).join('')):[];
+  const fitSheet=(doc,end,headerRow=0)=>{
+    const data=first(doc,'sheetData');let cols=first(doc,'cols');
+    if(!cols){cols=create(doc,'cols');doc.documentElement.insertBefore(cols,data);}
+    const oldCols=[...cols.children],widths=Array(end.c+1).fill(12),merged=new Map(elements(doc,'mergeCell').map(m=>{const range=XLSX.utils.decode_range(m.getAttribute('ref'));return [XLSX.utils.encode_cell(range.s),range.e.c-range.s.c+1];}));
+    for(const c of elements(data,'c')){
+      const address=c.getAttribute('r'),point=XLSX.utils.decode_cell(address),column=oldCols.find(e=>Number(e.getAttribute('min'))<=point.c+1&&Number(e.getAttribute('max'))>=point.c+1);
+      const xf=xfs.children[Number(c.getAttribute('s')??c.parentElement.getAttribute('s')??column?.getAttribute('style')??0)];
+      const size=Number(first(fonts.children[Number(xf?.getAttribute('fontId')||0)],'sz')?.getAttribute('val')||11),type=c.getAttribute('t'),raw=first(c,'v')?.textContent??'';
+      let text=type==='s'?sharedTexts[Number(raw)]||'':type==='inlineStr'?elements(c,'t').map(t=>t.textContent).join(''):raw;
+      if((!type||type==='n')&&raw!=='')try{const id=Number(xf?.getAttribute('numFmtId')||0),format=[...formats].find(([,n])=>n===id)?.[0]??id;text=XLSX.SSF.format(format,Number(raw),{date1904});}catch(_){}
+      const width=Math.max(...String(text).split(/\r?\n/).map(line=>[...line].reduce((n,ch)=>n+(/[\u0000-\u00ff]/.test(ch)?1:2),0)))*size/11/(merged.get(address)||1)+3;
+      widths[point.c]=Math.min(80,Math.max(widths[point.c]||12,width));
+    }
+    cols.replaceChildren(...widths.map((width,c)=>{
+      const old=oldCols.find(e=>Number(e.getAttribute('min'))<=c+1&&Number(e.getAttribute('max'))>=c+1),col=old?old.cloneNode(true):create(doc,'col');
+      for(const [key,value] of Object.entries({min:c+1,max:c+1,width:Math.ceil(width*100)/100,bestFit:1,customWidth:1}))col.setAttribute(key,value);return col;
+    }),...oldCols.filter(c=>Number(c.getAttribute('max'))>end.c+1).map(c=>{const col=c.cloneNode(true);col.setAttribute('min',Math.max(Number(col.getAttribute('min')),end.c+2));return col;}));
+    let format=first(doc,'sheetFormatPr');if(!format){format=create(doc,'sheetFormatPr');doc.documentElement.insertBefore(format,cols);}format.setAttribute('defaultRowHeight','30');format.setAttribute('customHeight','1');
+    for(const row of elements(data,'row')){row.setAttribute('ht','30');row.setAttribute('customHeight','1');row.removeAttribute('hidden');}
+    const range=XLSX.utils.encode_range({s:{r:headerRow,c:0},e:end});let filter=first(doc,'autoFilter');
+    if(!filter){filter=create(doc,'autoFilter');let after=data.nextElementSibling;while(after&&['sheetCalcPr','sheetProtection','protectedRanges','scenarios'].includes(after.localName))after=after.nextElementSibling;doc.documentElement.insertBefore(filter,after);}
+    filter.setAttribute('ref',range);filter.replaceChildren();
+    if(doc===sheet)for(const name of elements(workbook,'definedName'))if(name.getAttribute('name')==='_xlnm._FilterDatabase'&&name.getAttribute('localSheetId')==='0')name.textContent="'谈判付款'!$A$"+(headerRow+1)+':$'+XLSX.utils.encode_col(end.c)+'$'+(end.r+1);
+  };
   const rows=new Map(elements(sheetData,'row').map(r=>[Number(r.getAttribute('r')),r]));
   const cells=new Map(elements(sheetData,'c').map(c=>[c.getAttribute('r'),c]));
   const originalRange=XLSX.utils.decode_range(first(sheet,'dimension')?.getAttribute('ref')||'A1');
   const submissionColumns=new Set((result.negotiated.headers||[]).flatMap((h,c)=>['提交时间汇总','提交付款申请单日期'].includes(String(h).normalize('NFKC').replace(/\s+/g,''))?[c]:[]));
-  const sourceColumns=elements(sheet,'col'),defaultWidth=Number(first(sheet,'sheetFormatPr')?.getAttribute('defaultColWidth')||8.43);
+  const sourceColumns=elements(sheet,'col');
   let maxRow=originalRange.e.r,maxColumn=originalRange.e.c;
   const changed=new Set();
   for(const {address,cell} of result.negotiated.updates){
@@ -113,15 +139,6 @@ window.FundsExport = async function(sourceBytes, result) {
     if(old){for(const attr of old.attributes)if(!['r','s','t'].includes(attr.name))next.setAttribute(attr.name,attr.value);old.replaceWith(next);}
     else {const after=[...row.children].find(c=>c.localName==='c'&&XLSX.utils.decode_cell(c.getAttribute('r')).c>point.c);row.insertBefore(next,after||null);}
     cells.set(address,next);changed.add(address);maxRow=Math.max(maxRow,point.r);maxColumn=Math.max(maxColumn,point.c);
-    // Reused submission columns also grow when another batch is appended; never shrink source rows.
-    if(point.c>originalRange.e.c||submission){
-      const size=Number(first(fonts.children[Number(xfs.children[Number(styleId)].getAttribute('fontId')||0)],'sz')?.getAttribute('val')||12);
-      const width=Number(column?.getAttribute('width')||(point.c>originalRange.e.c?28:defaultWidth));
-      const capacity=Math.max(1,(width-2)*11/size);
-      const lines=String(cell?.v??'').split('\n').reduce((n,line)=>n+(submission?Math.max(1,Math.ceil([...line].reduce((sum,ch)=>sum+(/[\u0000-\u00ff]/.test(ch)?1:2),0)/capacity)):1),0);
-      const needed=lines*Math.max(17,size*1.4)+6;
-      if(needed>Number(row.getAttribute('ht')||first(sheet,'sheetFormatPr')?.getAttribute('defaultRowHeight')||15)){row.setAttribute('ht',needed);row.setAttribute('customHeight','1');}
-    }
   }
   let dimension=first(sheet,'dimension');if(!dimension){dimension=create(sheet,'dimension');sheet.documentElement.insertBefore(dimension,sheet.documentElement.firstChild);}dimension.setAttribute('ref',XLSX.utils.encode_range({s:originalRange.s,e:{r:maxRow,c:maxColumn}}));
   if(maxColumn>originalRange.e.c){let cols=first(sheet,'cols');if(!cols){cols=create(sheet,'cols');sheet.documentElement.insertBefore(cols,sheetData);}cols.append(create(sheet,'col',{min:originalRange.e.c+2,max:maxColumn+1,width:28,customWidth:1}));}
@@ -220,25 +237,23 @@ window.FundsExport = async function(sourceBytes, result) {
     };
     await relocateRelated(sheetPath);
   }
+  fitSheet(sheet,{r:maxRow,c:maxColumn},result.negotiated.headerRow||0);
   for(const entry of entries)if(entry!==selected){const id=entry.getAttributeNS(R,'id');elements(rels,'Relationship').find(e=>e.getAttribute('Id')===id)?.remove();entry.remove();}
   selected.setAttribute('name','谈判付款');selected.removeAttribute('state');
   let nextSheetId=Math.max(...entries.map(e=>Number(e.getAttribute('sheetId'))),0)+1;
   const generatedSheets=[['正常付款','Normal',result.normalHeaders,result.normalRows],['付款申请核对','Review',result.reviewHeaders,result.reviewRows]];
   for(const [name,key,headers,data] of generatedSheets){
     const generated=parseText(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="${S}"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews><cols/><sheetData/></worksheet>`);
-    const generatedData=first(generated,'sheetData'),generatedCols=first(generated,'cols');
-    const widths=headers.map((h,i)=>Math.min(52,Math.max(16,...[h,...data.map(row=>row[i]?.v??'')].map(value=>Math.max(...String(value).split('\n').map(line=>[...line].reduce((n,c)=>n+(/[\u0000-\u00ff]/.test(c)?1:2),0)))+2))));
-    widths.forEach((width,i)=>generatedCols.append(create(generated,'col',{min:i+1,max:i+1,width,customWidth:1})));
+    const generatedData=first(generated,'sheetData');
     const allRows=[headers.map(v=>({t:'s',v})),...data];
     for(const [r,values] of allRows.entries()){
-      let lineCount=1;values.forEach((cell,c)=>{const lines=String(cell?.v??'').split('\n');lineCount=Math.max(lineCount,lines.reduce((n,line)=>n+Math.max(1,Math.ceil([...line].reduce((sum,ch)=>sum+(/[\u0000-\u00ff]/.test(ch)?1:2),0)/(widths[c]-2))),0));});
-      const row=create(generated,'row',{r:r+1,ht:Math.max(r===0?32:24,lineCount*17+6),customHeight:1});
+      const row=create(generated,'row',{r:r+1});
       for(let c=0;c<headers.length;c++){const cell=values[c]||{t:'s',v:''};row.append(writeCell(generated,XLSX.utils.encode_cell({r,c}),cell,styleFor(cell.z||'',r===0),true));}
       generatedData.append(row);
     }
     const range=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:allRows.length-1,c:headers.length-1}});
-    generated.documentElement.append(create(generated,'autoFilter',{ref:range}));
     generated.documentElement.insertBefore(create(generated,'dimension',{ref:range}),generated.documentElement.firstChild);
+    fitSheet(generated,{r:allRows.length-1,c:headers.length-1});
     let newId='rIdFunds'+key,generatedPath='xl/worksheets/funds-'+key.toLowerCase()+'.xml';
     while(elements(rels,'Relationship').some(e=>e.getAttribute('Id')===newId))newId+='x';
     while(zip.file(generatedPath))generatedPath=generatedPath.replace('.xml','x.xml');
