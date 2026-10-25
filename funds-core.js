@@ -156,7 +156,18 @@ function build(inputs,decisions={}){
  // Prefer the new column even when its value is blank; old files may still use "合同号".
  const applicationOAField=applications.map['流程编码']===undefined?'OA合同编号':'流程编码';
  const applicationIds=record=>{const reference=record.values[applicationOAField];return reference?.t==='e'?[]:codes(reference?.v);};
- const applicationNegotiatedIds=new Set(applications.records.filter(r=>r.values['付款分类']?.t!=='e'&&norm(value(r,'付款分类'))==='谈判付款').flatMap(applicationIds));
+ const applicationTypes=new Map();
+ for(const r of applications.records){
+  if(applications.map['付款分类']===undefined)continue; // Legacy exports without this column retain their previous matching rules.
+  let type=r.values['付款分类']?.t==='e'?'':norm(value(r,'付款分类'));
+  if(!['谈判付款','正常付款'].includes(type)){
+   const answer=issue('application-type:'+r.id,'application-classification','付款申请的付款分类为空或异常，请确认分类；确认前不参与提交状态匹配。',r,[{value:'negotiated',label:'确认谈判付款'},{value:'normal',label:'确认正常付款'},{value:'keep',label:'保留原文件，本次不匹配此申请'}])[0];
+   type=answer==='negotiated'?'谈判付款':answer==='normal'?'正常付款':'';
+  }
+  applicationTypes.set(r,type);
+ }
+ const eligibleApplication=(r,normal)=>!applicationTypes.has(r)||applicationTypes.get(r)===(normal?'正常付款':'谈判付款');
+ const applicationNegotiatedIds=new Set(applications.records.filter(r=>applicationTypes.get(r)==='谈判付款').flatMap(applicationIds));
  const isApplicationNegotiated=r=>oas(r).some(id=>applicationNegotiatedIds.has(id));
  const negotiatedKeys=new Set(),uncertainNegotiated=[];
  for(const r of negotiated.records){const info=classification(r);if(info.key)negotiatedKeys.add(info.key);else uncertainNegotiated.push({record:r,...info});}
@@ -237,16 +248,16 @@ function build(inputs,decisions={}){
  for(const record of applications.records){const key=classification(record).key;if(key){if(!applicationsByKey.has(key))applicationsByKey.set(key,[]);applicationsByKey.get(key).push(record);}}
  function matchingApplications(target,preferOA=false){
   if(preferOA){
-   const ids=oas(target.record),matched=applications.records.filter(r=>applicationIds(r).some(id=>ids.includes(id)));
+   const ids=oas(target.record),matched=applications.records.filter(r=>eligibleApplication(r,target.normal)&&applicationIds(r).some(id=>ids.includes(id)));
    if(matched.length)return matched;
   }
-  return applicationsByKey.get(classification(target.record).key)||[];
+  return (applicationsByKey.get(classification(target.record).key)||[]).filter(r=>eligibleApplication(r,target.normal));
  }
- function reviewApplication(target,message,candidates){
+ function reviewApplication(target,message,candidates,statusOverride){
   if(isApplicationNegotiated(target.record))return;
   const source=target.record.source,amount=money(target.values['申请付款金额']);
   const display=c=>c?.t==='e'?c.w||'Excel错误':c?.f&&(c.v==null||c.v==='')?'公式结果不可用':c?.v??'';
-  const status=matchingApplications(target,true).length?'已提交':'未申请';
+  const status=statusOverride??(matchingApplications(target,true).length?'已提交':'未申请');
   reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(display(target.values['供应商名称'])),cell(display(target.values['付款主体'])),amount.cents!==undefined?amountCell(amount.cents):cell(display(target.values['申请付款金额'])),cell(status),cell(message),cell(candidates.map(a=>{const d=date(a.values['申请日期'],a.date1904),label=!d.invalid&&d.v!==''?X.SSF.format('yyyy-mm-dd',d.v):str(value(a,'申请日期'))||'日期为空';return label+'－'+amountText(a.values['申请付款金额'])+'；流程编码 '+(str(value(a,applicationOAField))||'空')+'；'+a.source.file+'/'+a.source.sheet+'!'+a.source.row;}).join('\n')||'无匹配申请'),cell(source.file),cell(source.sheet),cell(source.row)]);
  }
  function applyApplications(target){
@@ -303,13 +314,17 @@ function build(inputs,decisions={}){
  normalObjects.forEach(applyApplications);
  const submissions=new Map(negotiatedObjects.map(t=>[t,{rows:[],ambiguous:[],reasons:[]}]));
  const references=new Map(negotiatedObjects.map(t=>[t,oas(t.record)]));
- for(const application of applications.records){
+ for(const application of applications.records.filter(r=>eligibleApplication(r,false))){
   const ids=applicationIds(application);
-  const possible=negotiatedObjects.filter(t=>ids.some(id=>references.get(t).includes(id)));
-  if(possible.length>1){for(const t of possible){const group=submissions.get(t);group.ambiguous.push(application);group.reasons.push('同一流程对应多笔付款，请核对归属。');}continue;}
+  let possible=negotiatedObjects.filter(t=>ids.some(id=>references.get(t).includes(id)));
+  const applicationKey=classification(application).key;
+  const byOA=possible.length>0;
+  if(possible.length>1&&applicationKey){const exact=possible.filter(t=>classification(t.record).key===applicationKey);if(exact.length===1)possible=exact;}
+  if(!byOA&&applicationKey&&application.values[applicationOAField]?.t!=='e')possible=negotiatedObjects.filter(t=>(!ids.length||!references.get(t).length)&&t.record.values['对公付款0A流程号']?.t!=='e'&&classification(t.record).key===applicationKey);
+  if(possible.length>1){for(const t of possible){const group=submissions.get(t);group.ambiguous.push(application);group.reasons.push(byOA?'同一流程对应多笔付款，请核对归属。':'同一供应商和金额对应多笔付款，请核对归属。');}continue;}
   if(possible.length===1){
    const target=possible[0],group=submissions.get(target);
-   if(ids.length>1&&ids.some(id=>!references.get(target).includes(id))){group.ambiguous.push(application);group.reasons.push('申请含多个流程，请核对金额归属。');}
+   if(ids.length>1&&(!byOA||ids.some(id=>!references.get(target).includes(id)))){group.ambiguous.push(application);group.reasons.push('申请含多个流程，请核对金额归属。');}
    else group.rows.push(application);
   }
  }
@@ -321,6 +336,14 @@ function build(inputs,decisions={}){
    if(blank(target.values['是否提交付款申请单']))set(target,'是否提交付款申请单',cell('待核对'));
    reviewApplication(target,[...new Set(group.reasons)].join('\n'),[...matched,...group.ambiguous]);continue;
   }
+  if(!matched.length&&references.get(target).length&&info.key){
+   const conflicts=(applicationsByKey.get(info.key)||[]).filter(a=>eligibleApplication(a,false)&&applicationIds(a).length&&!applicationIds(a).some(id=>references.get(target).includes(id)));
+   if(conflicts.length){
+    const status=str(target.values['是否提交付款申请单']?.v)||'待核对';
+    if(blank(target.values['是否提交付款申请单']))set(target,'是否提交付款申请单',cell(status));
+    reviewApplication(target,'供应商名称和申请金额相同，但付款 OA 号冲突。原 OA 号：'+references.get(target).join('、')+'；保留原提交状态、日期及汇总，请核对。',conflicts,status);continue;
+   }
+  }
   set(target,'提交时间汇总',submissionSummary(matched));
   if(!matched.length){
    set(target,'是否提交付款申请单',cell('未申请'));
@@ -328,11 +351,11 @@ function build(inputs,decisions={}){
   }
   const amounts=matched.map(r=>money(r.values['申请付款金额']).cents);
   if(info.cents===undefined||amounts.some(n=>n===undefined||n<0n)){
-   set(target,'是否提交付款申请单',cell('待核对'));
+   set(target,'是否提交付款申请单',cell('已提交'));
    reviewApplication(target,'申请金额为空或异常，请核对。',matched);
   }else{
    const total=amounts.reduce((a,b)=>a+b,0n);
-   set(target,'是否提交付款申请单',cell(total>info.cents?'待核对':total===info.cents?'已全部提交':'已部分提交'));
+   set(target,'是否提交付款申请单',cell(total>info.cents?'已提交':total===info.cents?'已全部提交':'已部分提交'));
    if(total>info.cents)reviewApplication(target,'申请超额：累计 '+centsText(total)+'，应申请 '+amountText(target.values['申请付款金额'])+'。',matched);
   }
   applySubmissionDetails(target,matched);

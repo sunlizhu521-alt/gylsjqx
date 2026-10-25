@@ -31,6 +31,7 @@ const {fixtures}=require('./funds-fixtures.cjs');
   const appBook=X.read(data.applications),app=appBook.Sheets.付款申请汇总;
   app.K1={t:'s',v:'付款分类'};
   for(let r=2;r<=X.utils.decode_range(app['!ref']).e.r+1;r++){
+   app['K'+r]={t:'s',v:/谈判[甲乙]/.test(app['B'+r]?.v||'')?'谈判付款':'正常付款'};
    if(app['D'+r]?.v==='MDST-DGFK20261024001'){app['K'+r]={t:'s',v:'谈判付款'};app['B'+r]={t:'s',v:'不同申请供应商'};app['J'+r]={t:'n',v:1};}
    if(app['D'+r]?.v==='MDST-DGFK20261024010'){app['K'+r]={t:'s',v:'谈判付款'};app['J'+r]={t:'n',v:400};app['A'+r]={t:'s',v:'异常日期'};}
   }
@@ -54,7 +55,7 @@ const {fixtures}=require('./funds-fixtures.cjs');
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对']);assert.equal(s['!ref'],'A1:AM'+(expected.negotiated.sourceRange.e.r+1));
   if(process.env.FUNDS_CLASSIFICATION_QA){
    const normal=X.utils.sheet_to_json(saved.Sheets.正常付款);assert.equal(normal.length,4);assert(!normal.some(r=>r['对公付款0A流程号']==='MDST-DGFK20261024001'));
-   assert.equal(X.utils.sheet_to_json(saved.Sheets.付款申请核对).length,0);assert.equal(s['!ref'],'A1:AM4');
+   assert.equal(X.utils.sheet_to_json(saved.Sheets.付款申请核对).length,0);assert.equal(s['!ref'],'A1:AM4');assert.equal(s.AH2.v,'已提交');
   }
   const names=X.utils.sheet_to_json(s,{header:1})[0];for(const h of ['提交付款申请单日期','提交时间汇总','付款自然周'])assert(!names.includes(h));
   const updates=new Set(expected.negotiated.updates.map(u=>u.address));
