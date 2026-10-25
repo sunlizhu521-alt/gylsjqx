@@ -53,7 +53,7 @@
       <div class="upload"><label for="ledgerFile">资金台账</label><small>读取李奇、徐英、邢芳芳、操思敏、孙立柱的对账明细。</small><input id="ledgerFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="ledgerInfo">尚未引用</small></div>
       <div class="upload"><label for="applicationsFile">付款申请汇总</label><small>按付款分类分别匹配：谈判付款仅使用“谈判付款”申请，正常付款仅使用“正常付款”申请；分类为空或异常需先确认。旧文件无付款分类列时兼容原匹配规则。未匹配申请时，正常付款标记“未申请”，谈判付款标记“未提交”。谈判付款优先按“对公付款0A流程号”关联申请表“流程编码”（旧表无此列时兼容“合同号”）；同一流程有多笔款项时按供应商名称＋金额区分。缺少 OA 号时按供应商名称＋金额补判；两边都有 OA 号但不一致时不匹配、不列入付款申请核对。正常付款仍按供应商名称＋金额匹配。相同流程编码＋供应商名称＋金额的重复申请只计一次金额，原申请日期记录保留。谈判付款仅显示“已经提交全部”“已经提交部分”“未提交”：累计金额达到或超过申请金额为已经提交全部，低于为已经提交部分，无匹配申请为未提交；金额异常或归属不清时保留可识别的原进度，否则先确认三项中的一种。</small><input id="applicationsFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="applicationsInfo">尚未引用</small></div>
       <div class="upload"><label for="negotiatedFile">谈判付款汇总</label><small>原记录、顺序及付款情况完整保留。应付款时间按供应商名称＋申请付款金额＋原对公付款 OA 号从资金台账匹配更新，三项必须一致；编号缺失、匹配不到或日期为空时保留原值，日期冲突时核对。资金台账另外补充能唯一对应的空缺付款 OA 号、付款主体、财务应付单号；备注、付款计划、合并及原公式保留；行高和列宽按统一格式调整。</small><input id="negotiatedFile" type="file" accept=".xlsx" disabled><small class="file-info" id="negotiatedInfo">尚未引用</small><label for="negotiatedSheet">谈判付款工作表</label><select id="negotiatedSheet" disabled><option value="">请先上传文件</option></select><small>名称包含“谈判付款”即可；存在多个版本时，请明确选择。</small></div>
-      <div class="upload"><label for="oaFile">OA 流程表（MDST-对公付款）</label><small>两类已纳入付款表的记录，按供应商名称＋申请付款金额匹配 OA 表收款单位＋付款金额。原 OA 号已对应候选时保留；不一致、未提交或空白且能唯一对应时，补齐或纠正“对公付款0A流程号”，并在付款申请核对列出原值、新值及 OA 来源。多个候选、同名同额多笔付款或来源异常时保留当前值并提示核对。谈判付款按核验后的 OA 号读取流程信息；正常付款按名称＋金额读取。OA 归档不代表已付款或已提交付款申请。</small><input id="oaFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="oaInfo">尚未引用</small></div>
+      <div class="upload"><label for="oaFile">OA 流程表（MDST-对公付款）</label><small>两类已纳入付款表的记录，按供应商名称＋申请付款金额匹配 OA 表收款单位＋付款金额。原 OA 号已对应候选时保留；不一致、未提交或空白且能唯一对应时，补齐或纠正“对公付款0A流程号”，并在付款申请核对列出原值、新值及 OA 来源。多个候选、同名同额多笔付款或来源异常时保留当前值并提示核对。谈判金额仅匹配资金台账付款日期列时，再核验该台账的 OA 号、供应商与申请总金额；分批匹配只列入核对，绝不自动补齐 OA。谈判付款按核验后的 OA 号读取流程信息；正常付款按名称＋金额读取。OA 归档不代表已付款或已提交付款申请。</small><input id="oaFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="oaInfo">尚未引用</small></div>
     </div>
     <div class="actions"><button id="analyze" disabled>整理并核对</button><span id="status" role="status" aria-live="polite">正在加载工具…</span></div>
     <small>原对公付款 OA 号匹配付款申请汇总的“流程编码”，且“付款分类”为“谈判付款”时，直接归为谈判付款，不列入正常付款；谈判表没有的记录不新增。重复提交仍单独列入付款申请核对。其余记录按供应商名称＋申请付款金额在所选谈判表中是否出现分类。正常付款仅纳入资金台账原“对公付款0A流程号”有值的记录，无编号记录不统计、不预览、不导出。</small>
@@ -70,16 +70,16 @@
       <div class="issue-list" id="issueList"></div>
     </div>
     <div class="actions"><button id="download" disabled>下载资金整理表</button><span id="filenameHint"></span></div>
-    <small>重复提交扫描整份付款申请汇总，谈判付款、正常付款均检查，每个重复组只列一行，未进入付款表的申请也检查。OA 号补齐、更正及无法唯一确定的情况均列入核对，展示原值、处理结果及 OA 来源；已匹配付款申请但未能补齐 OA 的“未提交OA／未交OA”记录也保留申请来源提示。除此之外，未申请及按流程号命中申请表“谈判付款”分类的记录不列入核对。其余记录累计申请超额、无法区分归属及申请日期问题自动列入“付款申请核对”表，不阻止下载；其他待核对项处理后可下载。当天在当前浏览器重复下载时，文件版本自动递增。</small>
+    <small>重复提交扫描整份付款申请汇总，谈判付款、正常付款均检查，每个重复组只列一行，未进入付款表的申请也检查。OA 号补齐、更正及无法唯一确定的情况均列入核对，展示原值、处理结果及 OA 来源；已匹配付款申请但未能补齐 OA 的“未提交OA／未交OA／未申请OA”记录也保留申请来源提示。除此之外，未申请及按流程号命中申请表“谈判付款”分类的记录不列入核对。其余记录累计申请超额、无法区分归属及申请日期问题自动列入“付款申请核对”表，不阻止下载；其他待核对项处理后可下载。当天在当前浏览器重复下载时，文件版本自动递增。</small>
   </section>
   <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><small>预览最多显示 100 行；下载包含全部记录。V19 谈判明细左对齐、分行显示，行高按内容适配；其余表保留 30 磅行高。统一蓝底白字表头和筛选器，有内容的列从表头到最后一条数据都有边框，包含中间空白格。列宽按内容自适应，全部表头单行完整展示，流程编号不换行；长备注可在编辑栏查看。</small><div class="preview" id="negotiatedPreview"></div></section>
   <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><small>仅显示原“对公付款0A流程号”有值的正常付款，已结清明细也保留。原编号为空、只有空格或公式结果不可用的记录不纳入；匹配出的“流程编号”不替代此条件。</small><div class="preview" id="normalPreview"></div></section>
-  <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><small>按付款分类＋流程编码＋供应商名称＋金额识别重复提交，跨日期同样检查；列出重复次数、单笔金额、重复计入金额及全部申请来源。OA 号补齐、更正及多候选问题列出原值、处理结果和 OA 来源，不受付款分类过滤影响。已申请但未能补齐 OA 的“未提交OA／未交OA”记录仍会列出。其他核对仍仅列累计超额、归属不清及已匹配申请的异常日期或金额，未申请无需核对。“是否提交付款申请单”先用核验后的 OA 号匹配申请表流程编码，缺少 OA 号时再按同类申请的供应商名称＋本次申请付款金额补判；已有编号不同的申请不匹配、不列核对。金额及归属问题保留在核对说明中。每项保留来源和候选申请。分批提交进度不改变原已付金额、剩余金额及结清状态。</small><div class="preview" id="reviewPreview"></div></section>
+  <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><small>按付款分类＋流程编码＋供应商名称＋金额识别重复提交，跨日期同样检查；列出重复次数、单笔金额、重复计入金额及来源信息。OA 号补齐、更正及多候选问题列出原值、处理结果和 OA 来源，不受付款分类过滤影响。已申请但未能补齐 OA 的“未提交OA／未交OA／未申请OA”记录仍会列出。其他核对仍仅列累计超额、归属不清及已匹配申请的异常日期或金额，未申请无需核对。“是否提交付款申请单”先用核验后的 OA 号匹配申请表流程编码，缺少 OA 号时再按同类申请的供应商名称＋本次申请付款金额补判；已有编号不同的申请不匹配、不列核对。金额及归属问题保留在核对说明中。保留来源文件、工作表和行号，不再输出“候选付款申请”列。分批提交进度不改变原已付金额、剩余金额及结清状态。</small><div class="preview" id="reviewPreview"></div></section>
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=oa-number-reconciliation-20261025-24"></script>
-<script src="funds-export.js?v=oa-number-reconciliation-20261025-24"></script>
-<script src="funds-tool.js?v=oa-number-reconciliation-20261025-24"></script>
+<script src="funds-core.js?v=oa-plan-review-20261025-25"></script>
+<script src="funds-export.js?v=oa-plan-review-20261025-25"></script>
+<script src="funds-tool.js?v=oa-plan-review-20261025-25"></script>
 </body>
 </html>

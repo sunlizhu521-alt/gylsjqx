@@ -112,8 +112,8 @@ function compareNegotiated(before,after){
   const applicationReview=X.utils.sheet_to_json(saved.Sheets.付款申请核对,{header:1,defval:''});assert.deepEqual(applicationReview[0],REVIEW_HEADERS);
   assert.equal(applicationReview.length-1,coreResult.reviewRows.length,'核对导出与核心结果一致');
   assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),coreResult.reviewRows.reduce((counts,row)=>(counts[row[4].v]=(counts[row[4].v]||0)+1,counts),{}));
-  assert.equal(saved.Sheets.付款申请核对['!autofilter'].ref,`A1:J${applicationReview.length}`);
-  assert(applicationReview.slice(1).every(row=>row[5]&&row[7]&&row[8]&&Number.isInteger(row[9])),'付款申请核对须包含说明和来源文件、工作表、行号');
+  assert.equal(saved.Sheets.付款申请核对['!autofilter'].ref,`A1:I${applicationReview.length}`);
+  assert(applicationReview.slice(1).every(row=>row[5]&&row[6]&&row[7]&&Number.isInteger(row[8])),'付款申请核对须包含说明和来源文件、工作表、行号');
   assert.equal(normal.length-1,real?15:5);assert.equal(saved.Sheets.正常付款['!autofilter'].ref,`A1:Y${normal.length}`);
   assert(normal.slice(1).every(row=>row[15]==='否'),'正常付款分类应按谈判表重新计算');
   assert.deepEqual(normal.slice(1).map(row=>row[23]),previewReconciled,'导出对账状态必须与预览一致');
@@ -166,7 +166,7 @@ function compareNegotiated(before,after){
    assert.equal(applicationReview.slice(1).filter(row=>row[5].includes('同一流程对应多笔付款')).length,0,'同一流程下唯一名称金额可区分两笔申请，不重复分摊');
    assert.equal(applicationReview.slice(1).filter(row=>row[5].includes('申请超额')).length,0,'明确分类为谈判付款的申请不列入核对表');
    assert.equal(applicationReview.slice(1).filter(row=>row[5].includes('OA 号冲突')).length,0);assert.equal(applicationReview.slice(1).filter(row=>row[5].startsWith('重复提交：')).length,1);
-   assert(applicationReview.slice(1).every(row=>/流程(?:编码|编号) MDST-DGFK/.test(row[6])),'核对来源显示实际流程编码');
+   assert.equal(applicationReview[0].includes('候选付款申请'),false);
   }
   await download(2);
   await page.reload({waitUntil:'networkidle'});await page.locator('.tool-tab[data-tool="funds"]').click();frame=page.frameLocator('iframe[data-tool="funds"]');
