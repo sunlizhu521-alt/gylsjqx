@@ -119,6 +119,7 @@ window.FundsExport = async function(sourceBytes, result) {
   };
   const measure=document.createElement('canvas').getContext('2d');
   const fitSheet=(doc,end,headerRow=0)=>{
+    const batch=doc===sheet&&result.negotiated.batchLayout,detailColumn=batch?result.negotiated.headers.findIndex(h=>String(h).trim()==='谈判明细'):-1;
     const data=first(doc,'sheetData');let cols=first(doc,'cols');
     if(!cols){cols=create(doc,'cols');doc.documentElement.insertBefore(cols,data);}
     const oldCols=[...cols.children],widths=Array(end.c+1).fill(12),merges=elements(doc,'mergeCell').map(m=>XLSX.utils.decode_range(m.getAttribute('ref'))),merged=new Map(merges.map(range=>[XLSX.utils.encode_cell(range.s),range.e.c-range.s.c+1]));
@@ -133,6 +134,7 @@ window.FundsExport = async function(sourceBytes, result) {
     for(const c of populatedColumns)for(let r=headerRow;r<=end.r;r++)ensureCell(r,c);
     for(const c of elements(data,'c')){
       const address=c.getAttribute('r'),point=XLSX.utils.decode_cell(address),header=point.r===headerRow,flow=singleLineColumns.has(point.c);
+      if(point.c>end.c||point.r>end.r)continue;
       if(flow&&!header&&!first(c,'f')&&/[\r\n]/.test(cellText(c))){const text=cellText(c).replace(/\r\n|[\r\n]/g,'；');for(const child of [...c.children])if(['v','is'].includes(child.localName))child.remove();const is=create(doc,'is'),t=create(doc,'t');t.textContent=text;is.append(t);c.setAttribute('t','inlineStr');c.insertBefore(is,c.firstChild);}
       if(header||flow||populatedColumns.has(point.c))c.setAttribute('s',layoutStyle(styleId(c),header,flow));
       const xf=xfs.children[styleId(c)];
@@ -143,6 +145,13 @@ window.FundsExport = async function(sourceBytes, result) {
       if(flow){const font=fonts.children[Number(xf?.getAttribute('fontId')||0)];if(measure){measure.font=(first(font,'b')?'bold ':'')+size+'pt '+JSON.stringify(first(font,'name')?.getAttribute('val')||'Arial')+', sans-serif';width=Math.max(width,(measure.measureText(String(text)).width*1.15+20)/7);}width=Math.max(width,dateColumns.has(point.c)?22:32);}
       widths[point.c]=Math.min(flow?255:80,Math.max(widths[point.c]||12,width));
     }
+    if(batch){
+      const detailStyles=new Map();
+      for(const c of elements(data,'c')){
+        const point=XLSX.utils.decode_cell(c.getAttribute('r'));if(point.c!==detailColumn||point.r<=headerRow)continue;
+        const id=styleId(c);if(!detailStyles.has(id)){const xf=xfs.children[id].cloneNode(true);let alignment=first(xf,'alignment');if(!alignment){alignment=create(styles,'alignment');xf.insertBefore(alignment,first(xf,'protection')||null);}alignment.setAttribute('horizontal','left');alignment.setAttribute('vertical','center');alignment.setAttribute('wrapText','1');alignment.setAttribute('shrinkToFit','0');xf.setAttribute('applyAlignment','1');detailStyles.set(id,append('cellXfs',xf));}c.setAttribute('s',detailStyles.get(id));
+      }
+    }
     // A populated merged cell also needs borders on its perimeter, without changing the merge.
     for(const range of merges){const anchor=cells.get(XLSX.utils.encode_cell(range.s));if(cellText(anchor)===''&&!anchor?.getElementsByTagNameNS('*','f').length)continue;for(let r=range.s.r;r<=range.e.r;r++)for(let c=range.s.c;c<=range.e.c;c++){const edges=[c===range.s.c&&'left',c===range.e.c&&'right',r===range.s.r&&'top',r===range.e.r&&'bottom'].filter(Boolean);if(edges.length){const cell=ensureCell(r,c);cell.setAttribute('s',layoutStyle(styleId(cell),r===headerRow,flowColumns.has(c),edges));}}}
     cols.replaceChildren(...widths.map((width,c)=>{
@@ -150,7 +159,15 @@ window.FundsExport = async function(sourceBytes, result) {
       for(const [key,value] of Object.entries({min:c+1,max:c+1,width:Math.ceil(width*100)/100,bestFit:1,customWidth:1}))col.setAttribute(key,value);return col;
     }),...oldCols.filter(c=>Number(c.getAttribute('max'))>end.c+1).map(c=>{const col=c.cloneNode(true);col.setAttribute('min',Math.max(Number(col.getAttribute('min')),end.c+2));return col;}));
     let format=first(doc,'sheetFormatPr');if(!format){format=create(doc,'sheetFormatPr');doc.documentElement.insertBefore(format,cols);}format.setAttribute('defaultRowHeight','30');format.setAttribute('customHeight','1');
-    for(const row of elements(data,'row')){row.setAttribute('ht','30');row.setAttribute('customHeight','1');row.removeAttribute('hidden');}
+    for(const row of elements(data,'row')){
+      let height=30;
+      if(batch){
+        height=Math.max(height,Number(row.getAttribute('ht'))||0);
+        const detail=cells.get(XLSX.utils.encode_cell({r:Number(row.getAttribute('r'))-1,c:detailColumn}));
+        if(detail){const xf=xfs.children[styleId(detail)],size=Number(first(fonts.children[Number(xf.getAttribute('fontId')||0)],'sz')?.getAttribute('val')||11),width=Math.max(1,widths[detailColumn]-3);const lines=cellText(detail).split(/\r?\n/).reduce((n,line)=>n+Math.max(1,Math.ceil([...line].reduce((w,ch)=>w+(/[\u0000-\u00ff]/.test(ch)?1:2),0)*size/11/width)),0);height=Math.max(height,lines*(size+5)+8);}
+      }
+      row.setAttribute('ht',Math.min(409.5,height));row.setAttribute('customHeight','1');row.removeAttribute('hidden');
+    }
     const range=XLSX.utils.encode_range({s:{r:headerRow,c:0},e:end});let filter=first(doc,'autoFilter');
     if(!filter){filter=create(doc,'autoFilter');let after=data.nextElementSibling;while(after&&['sheetCalcPr','sheetProtection','protectedRanges','scenarios'].includes(after.localName))after=after.nextElementSibling;doc.documentElement.insertBefore(filter,after);}
     filter.setAttribute('ref',range);filter.replaceChildren();
@@ -158,7 +175,7 @@ window.FundsExport = async function(sourceBytes, result) {
   };
   const rows=new Map(elements(sheetData,'row').map(r=>[Number(r.getAttribute('r')),r]));
   const cells=new Map(elements(sheetData,'c').map(c=>[c.getAttribute('r'),c]));
-  const originalRange=XLSX.utils.decode_range(first(sheet,'dimension')?.getAttribute('ref')||'A1');
+  const originalRange=result.negotiated.sourceRange||XLSX.utils.decode_range(first(sheet,'dimension')?.getAttribute('ref')||'A1');
   const submissionColumns=new Set((result.negotiated.headers||[]).flatMap((h,c)=>['提交时间汇总','提交付款申请单日期'].includes(String(h).normalize('NFKC').replace(/\s+/g,''))?[c]:[]));
   const sourceColumns=elements(sheet,'col');
   let maxRow=originalRange.e.r,maxColumn=originalRange.e.c;
@@ -181,14 +198,15 @@ window.FundsExport = async function(sourceBytes, result) {
   if(maxColumn>originalRange.e.c){let cols=first(sheet,'cols');if(!cols){cols=create(sheet,'cols');sheet.documentElement.insertBefore(cols,sheetData);}cols.append(create(sheet,'col',{min:originalRange.e.c+2,max:maxColumn+1,width:28,customWidth:1}));}
   // Update simple dependent caches; unsupported affected formulas are recalculated by Excel/WPS.
   const formulaCells=[...cells].filter(([,c])=>first(c,'f'));
+  const formulaText=(address,c)=>{const point=XLSX.utils.decode_cell(address);return first(c,'f')?.textContent||result.negotiated.rows?.[point.r-result.negotiated.headerRow-1]?.[point.c]?.f||'';};
   const affected=new Set(changed);let grew=true;
-  while(grew){grew=false;for(const [address,c] of formulaCells){const f=first(c,'f'),formula=f.textContent.toUpperCase().replace(/\$/g,'');const refs=formula.match(/\b[A-Z]{1,3}[1-9]\d*\b/g)||[];
-    for(const match of formula.matchAll(/\b([A-Z]{1,3}[1-9]\d*):([A-Z]{1,3}[1-9]\d*)\b/g)){const a=XLSX.utils.decode_cell(match[1]),b=XLSX.utils.decode_cell(match[2]);if((b.r-a.r+1)*(b.c-a.c+1)<=20000)for(let r=a.r;r<=b.r;r++)for(let col=a.c;col<=b.c;col++)refs.push(XLSX.utils.encode_cell({r,c:col}));}if(!affected.has(address)&&(f.getAttribute('t')==='shared'||refs.some(r=>affected.has(r)))){affected.add(address);grew=true;}}}
+  while(grew){grew=false;for(const [address,c] of formulaCells){const f=first(c,'f'),formula=formulaText(address,c).toUpperCase().replace(/\$/g,'');const refs=formula.match(/\b[A-Z]{1,3}[1-9]\d*\b/g)||[];
+    for(const match of formula.matchAll(/\b([A-Z]{1,3}[1-9]\d*):([A-Z]{1,3}[1-9]\d*)\b/g)){const a=XLSX.utils.decode_cell(match[1]),b=XLSX.utils.decode_cell(match[2]);if((b.r-a.r+1)*(b.c-a.c+1)<=20000)for(let r=a.r;r<=b.r;r++)for(let col=a.c;col<=b.c;col++)refs.push(XLSX.utils.encode_cell({r,c:col}));}if(!affected.has(address)&&((f.getAttribute('t')==='shared'&&!formula)||refs.some(r=>affected.has(r)))){affected.add(address);grew=true;}}}
   const evaluating=new Set(),values=new Map();
   function evaluateCell(address){
     if(values.has(address))return values.get(address);if(evaluating.has(address))throw Error('循环公式');evaluating.add(address);
     try{const c=cells.get(address);if(!c)return 0;const f=first(c,'f');let value;
-      if(f&&affected.has(address)){value=evaluateFormula(f.textContent);}
+      if(f&&affected.has(address)){value=evaluateFormula(formulaText(address,c));}
       else {const raw=first(c,'v')?.textContent;if(c.getAttribute('t')&&c.getAttribute('t')!=='n')throw Error('非数字引用');value=raw===undefined||raw===''?0:Number(raw);}
       if(!Number.isFinite(value))throw Error('无效结果');values.set(address,value);return value;
     }finally{evaluating.delete(address);}

@@ -15,7 +15,8 @@ const cell=v=>({t:typeof v==='number'?'n':'s',v:v??''});
 const clone=c=>c?{...c}:empty();
 const aliases={月份:'登记月份',所属月份:'登记月份',供应商:'供应商名称',供应商全称:'供应商名称',对公付款OA流程号:'对公付款0A流程号',付款OA号:'对公付款0A流程号',应付时间:'应付款时间',已付款金额:'已付金额',剩余付款金额:'剩余金额',合同号:'OA合同编号',合同金额:'合同总金额',本次申请付款金额:'申请付款金额',付款事由:'摘要'};
 const canonical=v=>aliases[norm(v)]||norm(v);
-const relevant=new Set([...NORMAL_HEADERS,...ADDED_HEADERS,'申请日期','备注','对接人','创建人','流程编号','流程编码']);
+const BATCH_HEADERS=['谈判明细','分批总金额','核对'];
+const relevant=new Set([...NORMAL_HEADERS,...ADDED_HEADERS,...BATCH_HEADERS,'申请日期','备注','对接人','创建人','流程编号','流程编码']);
 const entity=v=>({'浙江迈德斯特医疗器械科技有限公司':'迈德斯特','杭州国源养老科技有限公司':'国源'}[norm(v)]||norm(v));
 function money(c){
  if(c?.t==='e'||(c?.f&&(c.v==null||c.v==='')))return {invalid:true};
@@ -87,7 +88,10 @@ function submissionSummary(matched){
 }
 function table(input,sheetName,required){
  const sheet=input.book.Sheets[sheetName];if(!sheet)throw Error(input.name+'：缺少工作表 '+sheetName);
- const range=X.utils.decode_range(sheet['!ref']||'A1');if((range.e.r-range.s.r+1)*(range.e.c-range.s.c+1)>2000000)throw Error(sheetName+'：数据范围过大');
+ // WPS can extend !ref to XFD solely because of formatting. Keep all real values/formulas.
+ const points=Object.keys(sheet).filter(a=>/^[A-Z]+[1-9]\d*$/.test(a)&&(sheet[a]?.f||sheet[a]?.v!==null&&sheet[a]?.v!==undefined&&sheet[a]?.v!=='')).map(a=>X.utils.decode_cell(a));
+ const range=points.reduce((range,p)=>({s:{r:Math.min(range.s.r,p.r),c:Math.min(range.s.c,p.c)},e:{r:Math.max(range.e.r,p.r),c:Math.max(range.e.c,p.c)}}),{s:points[0]||{r:0,c:0},e:points[0]||{r:0,c:0}});
+ if((range.e.r-range.s.r+1)*(range.e.c-range.s.c+1)>2000000)throw Error(sheetName+'：数据范围过大');
  let headerRow=-1,map,headers;
  for(let r=range.s.r;r<=Math.min(range.e.r,range.s.r+29);r++){
   const h={},hs=[];for(let c=0;c<=range.e.c;c++){const cc=sheet[X.utils.encode_cell({r,c})],key=canonical(cc?.v);hs.push(str(cc?.w??cc?.v));if((required.includes('流程编号')?OA_FIELDS.includes(key):relevant.has(key)))(h[key]??=[]).push(c);}
@@ -140,7 +144,9 @@ function build(inputs,decisions={}){
  const absentFlow=['收款单位','付款金额',...FLOW_FIELDS].filter(k=>flow.map[k]===undefined);
  if(absentFlow.length)issue('headers:'+flow.sheetName,'missing-header','缺少字段，无法据此自动匹配或更新：'+absentFlow.join('、'),headerRecord(flow));
  const targetCols={...negotiated.map},negHeaders=[...negotiated.headers];
- for(const h of [...SUPPLEMENT_HEADERS,...ADDED_HEADERS])if(targetCols[h]===undefined){targetCols[h]=negHeaders.length;negHeaders.push(h);updateMap.set(X.utils.encode_cell({r:negotiated.headerRow,c:targetCols[h]}),cell(h));}
+ const batchLayout=BATCH_HEADERS.every(h=>targetCols[h]!==undefined);
+ const addedHeaders=batchLayout?ADDED_HEADERS.filter(h=>!['提交付款申请单日期','提交时间汇总','付款自然周'].includes(h)):ADDED_HEADERS;
+ for(const h of [...SUPPLEMENT_HEADERS,...addedHeaders])if(targetCols[h]===undefined){targetCols[h]=negHeaders.length;negHeaders.push(h);updateMap.set(X.utils.encode_cell({r:negotiated.headerRow,c:targetCols[h]}),cell(h));}
  const classification=r=>{
   const supplier=r.values['供应商名称'],amount=money(r.values['申请付款金额']);
   const name=supplier?.t==='e'||(supplier?.f&&(supplier.v==null||supplier.v===''))?'':norm(supplier?.v);
@@ -185,7 +191,7 @@ function build(inputs,decisions={}){
   target.record={...r,values:{...target.values}};return target;
  });
  const targets=[...negotiatedObjects,...normalObjects];
- function set(target,key,c){target.values[key]=clone(c);if(!target.normal)updateMap.set(X.utils.encode_cell({r:target.record.r,c:targetCols[key]}),clone(c));}
+ function set(target,key,c){if(!target.normal&&targetCols[key]===undefined)return;target.values[key]=clone(c);if(!target.normal)updateMap.set(X.utils.encode_cell({r:target.record.r,c:targetCols[key]}),clone(c));}
  function applyFinancial(target){
   const src=target.record;
   const a=money(target.values['申请付款金额']),p=money(src.values['已付金额']);
@@ -285,7 +291,7 @@ function build(inputs,decisions={}){
  }
  for(const target of negotiatedObjects){
   const group=submissions.get(target),matched=group.rows,info=classification(target.record);
-  set(target,'付款自然周',plannedPaymentWeeks(negotiated,target.record.r));
+  if(!batchLayout)set(target,'付款自然周',plannedPaymentWeeks(negotiated,target.record.r));
   if(str(target.values['是否提交付款申请单']?.v)==='已提交付款申请单')set(target,'是否提交付款申请单',cell('已提交'));
   if(group.ambiguous.length){
    if(blank(target.values['是否提交付款申请单']))set(target,'是否提交付款申请单',cell('待核对'));
@@ -327,8 +333,8 @@ function build(inputs,decisions={}){
  const rows=[];for(let r=negotiated.headerRow+1;r<=negotiated.range.e.r;r++)rows.push(negHeaders.map((_,c)=>clone(updateMap.get(X.utils.encode_cell({r,c}))||negotiated.sheet[X.utils.encode_cell({r,c})])));
  const updates=[...updateMap].map(([address,c])=>({address,cell:c}));
  const columnOrder=negHeaders.map((_,i)=>i),dateColumn=targetCols['提交付款申请单日期'],summaryColumn=targetCols['提交时间汇总'];
- if(Math.abs(dateColumn-summaryColumn)!==1){columnOrder.splice(summaryColumn,1);columnOrder.splice(columnOrder.indexOf(dateColumn)+1,0,summaryColumn);}
- return {normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,negotiated:{sheetName:selected,headerRow:negotiated.headerRow,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
+ if(dateColumn!==undefined&&summaryColumn!==undefined&&Math.abs(dateColumn-summaryColumn)!==1){columnOrder.splice(summaryColumn,1);columnOrder.splice(columnOrder.indexOf(dateColumn)+1,0,summaryColumn);}
+ return {normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
 }
 return {PEOPLE,NORMAL_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money};
 });

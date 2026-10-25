@@ -52,7 +52,7 @@
     for (const [i,title] of headers.entries()) { const th = document.createElement('th'); th.textContent = title;if(flowColumn[i])th.className='flow-code'; head.append(th); }
     for (const row of rows.slice(0,100)) {
       const tr = body.insertRow();
-      for (let i=0;i<headers.length;i++){const td=tr.insertCell(),text=valueText(row[i],date1904);td.textContent=flowColumn[i]?text.replace(/\r\n|[\r\n]/g,'；'):text;if(flowColumn[i])td.className='flow-code';}
+      for (let i=0;i<headers.length;i++){const td=tr.insertCell(),text=valueText(row[i],date1904);td.textContent=flowColumn[i]?text.replace(/\r\n|[\r\n]/g,'；'):text;if(flowColumn[i])td.className='flow-code';if(headers[i]==='谈判明细')td.className='batch-detail';}
     }
     $(id).replaceChildren(table);
   }

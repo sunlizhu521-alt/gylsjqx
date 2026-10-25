@@ -27,6 +27,7 @@
     th,td{border:1px solid #d6dee8;text-align:center;vertical-align:middle;padding:6px 10px;min-width:110px;max-width:300px;white-space:pre-wrap;overflow-wrap:anywhere}
     th{position:sticky;top:0;background:#315b9d;color:#fff}td{background:#fff;color:#182333}
     .flow-code{white-space:nowrap;overflow-wrap:normal;max-width:none}
+    .batch-detail{text-align:left;min-width:320px;max-width:600px}
     [hidden]{display:none!important}@media(max-width:700px){main{padding:12px}.uploads{grid-template-columns:1fr}section{padding:14px}.actions button{width:100%}}
   </style>
 </head>
@@ -45,9 +46,9 @@
     <div class="actions"><button id="analyze" disabled>整理并核对</button><span id="status" role="status" aria-live="polite">正在加载工具…</span></div>
     <small>按供应商名称＋申请付款金额在所选谈判表中是否出现分类：出现为谈判付款。正常付款仅纳入资金台账原“对公付款0A流程号”有值的记录，无编号记录不统计、不预览、不导出。</small>
     <small>供应商或付款主体为空时保留原值；已付金额为空时保留原付款情况，不按零处理。切换工具保留本次内容，刷新后需重新选择文件。</small>
-    <small>两类付款均在“提交时间汇总”逐次列出申请日期－金额；正常付款该列紧邻“是否提交付款申请单”。谈判付款按本次上传记录累计；分批申请只按谈判表的对公付款 OA 流程号关联；“提交付款申请单日期”和“提交时间汇总”相邻显示。登记月份、应付款时间无法识别时直接保留原文。</small>
+    <small>支持 V19 分批格式：识别“谈判明细、分批总金额、核对”，保留原分批计划、求和及核对公式、剩余付款金额公式和结清信息，不重新添加已删除的提交日期、提交时间汇总、付款自然周列。付款申请仍按原规则匹配并更新提交状态；正常付款保留提交时间汇总。登记月份、应付款时间无法识别时保留原文。</small>
   </section>
-  <p>“付款自然周”按周一至周日计算，简写为“2026/10/26周”（日期为该周周一）。谈判付款按本行有正数付款金额的日期表头归周，多周去重、排序后放在一个单元格；正常付款仍按“应付款时间”计算。零金额、空白不计入；没有有效计划显示“日期待确认”，日期不完整或计划金额异常显示“付款计划待确认”。筛选某周时可使用“文本包含”。</p>
+  <p>V19 谈判付款保留原周一日期列和分配金额，不重复提前日期或合并计划。旧格式谈判表仍生成付款自然周；正常付款按应付款时间计算自然周。</p>
   <section id="results" hidden>
     <p id="stats"></p>
     <small id="classificationSummary"></small>
@@ -59,14 +60,14 @@
     <div class="actions"><button id="download" disabled>下载资金整理表</button><span id="filenameHint"></span></div>
     <small>未申请的记录不列入核对。累计申请超额、无法区分归属及申请日期问题自动列入“付款申请核对”表，不阻止下载；其他待核对项处理后可下载。当天在当前浏览器重复下载时，文件版本自动递增。</small>
   </section>
-  <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><small>预览最多显示 100 行；下载包含全部记录。三个 sheet 统一 30 磅行高、蓝底白字表头和筛选器，有内容的列从表头到最后一条数据都有边框，包含中间空白格。流程编号自适应列宽且不换行；长备注可在编辑栏查看。</small><div class="preview" id="negotiatedPreview"></div></section>
+  <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><small>预览最多显示 100 行；下载包含全部记录。V19 谈判明细左对齐、分行显示，行高按内容适配；其余表保留 30 磅行高。统一蓝底白字表头和筛选器，有内容的列从表头到最后一条数据都有边框，包含中间空白格。流程编号自适应列宽且不换行；长备注可在编辑栏查看。</small><div class="preview" id="negotiatedPreview"></div></section>
   <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><small>仅显示原“对公付款0A流程号”有值的正常付款，已结清明细也保留。原编号为空、只有空格或公式结果不可用的记录不纳入；匹配出的“流程编号”不替代此条件。</small><div class="preview" id="normalPreview"></div></section>
   <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><small>仅列累计超额、归属不清及已匹配申请的异常日期或金额，未申请无需核对。“是否提交付款申请单”先匹配申请表流程编码，无匹配时再核对供应商名称＋本次申请付款金额；任一匹配即为“已提交”。金额及归属问题保留在核对说明中。每项保留来源和候选申请。分批提交进度不改变原已付金额、剩余金额及结清状态。</small><div class="preview" id="reviewPreview"></div></section>
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=plan-header-weeks-20261025-13"></script>
-<script src="funds-export.js?v=plan-header-weeks-20261025-13"></script>
-<script src="funds-tool.js?v=plan-header-weeks-20261025-13"></script>
+<script src="funds-core.js?v=v19-batch-layout-20261025-14"></script>
+<script src="funds-export.js?v=v19-batch-layout-20261025-14"></script>
+<script src="funds-tool.js?v=v19-batch-layout-20261025-14"></script>
 </body>
 </html>

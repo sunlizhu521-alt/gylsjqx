@@ -3,6 +3,20 @@ const LH=['月份','供应商名称','付款主体','对公付款0A流程号','�
 const NH=['供应商','付款主体','对公付款0A流程号','合同总金额','已付金额','摘要','申请付款金额','单据号【财务应付单】','创建人','是否结清','剩余付款金额','原备注','付款计划'];
 const AH=['申请日期','供应商全称','付款主体','合同号','合同金额','已付金额','付款事由','备注','本次申请付款金额'];
 const OH=['流程编号','当前节点','未操作者','流程状态','申请人','收款单位','付款金额'];
+test('V19 batch columns ignore styled tails and preserve financial formulas, blank paid amounts and manual settlement',()=>{
+ const input=fixture(),sheet=input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]];
+ sheet.N1={t:'s',v:'谈判明细'};sheet.O1={t:'s',v:'分批总金额'};sheet.P1={t:'s',v:'核对'};
+ sheet.N2={t:'s',v:'1、10月30日－100.00\n2、11月30日－0.00'};sheet.O2={t:'n',v:100,f:'SUM(M2:M2)'};sheet.P2={t:'s',v:'一致',f:'IF(O2=G2,"一致","不一致")'};
+ sheet.K2={t:'n',v:100,f:'G2-E2'};sheet.J2={t:'s',v:'是'};delete sheet.E2;
+ sheet.XFD1={t:'z',v:undefined};sheet['!ref']='A1:XFD1048576';
+ const original=JSON.stringify(sheet),result=C.build(input),n=result.negotiated;
+ assert.equal(n.batchLayout,true);assert.equal(n.sourceRange.e.c,15);assert.equal(n.sourceRange.e.r,1);
+ for(const h of ['提交付款申请单日期','提交时间汇总','付款自然周'])assert(!n.headers.includes(h));
+ assert.equal(n.rows[0][10].f,'G2-E2');assert.equal(n.rows[0][9].v,'是');assert.equal(n.rows[0][4].v,'');
+ assert.equal(n.rows[0][14].f,'SUM(M2:M2)');assert.equal(n.rows[0][15].f,'IF(O2=G2,"一致","不一致")');
+ assert(!n.updates.some(u=>/^(E|G|J|K|M|N|O|P)2$/.test(u.address)));assert.equal(JSON.stringify(sheet),original);
+ sheet.XFD1000={t:'n',v:0};assert.throws(()=>C.build(input),/数据范围过大/,'a real far-right value must not be silently dropped');
+});
 function book(name,headers,rows){const b=X.utils.book_new();X.utils.book_append_sheet(b,X.utils.aoa_to_sheet([headers,...rows.map(r=>headers.map(h=>r[h]??''))]),name);return b;}
 function fixture(){
  const main={'月份':'2026-10-01','供应商名称':'测试供应商甲','付款主体':'迈德斯特','对公付款0A流程号':'MDST-DGFK20261001001','开票时间':'2026-10-01','开票金额':100,'摘要':'九月货款','申请付款金额':100,'应付款时间':'2026-10-31','单据号【财务应付单】':'AP000001','OA合同编号':'MDST-HT20260101','合同总金额':1000,'已付款金额':20,'是否结清':'否','剩余付款金额':80,'是否谈判付款':'是','是否提交付款申请单':''};
