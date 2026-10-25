@@ -47,10 +47,11 @@
   }
   function preview(id, headers, rows, date1904=false) {
     const table = document.createElement('table'), head = table.createTHead().insertRow(), body = table.createTBody();
-    for (const title of headers) { const th = document.createElement('th'); th.textContent = title; head.append(th); }
+    const flowColumn=headers.map(title=>String(title).normalize('NFKC').replace(/\s+/g,'')==='流程编号');
+    for (const [i,title] of headers.entries()) { const th = document.createElement('th'); th.textContent = title;if(flowColumn[i])th.className='flow-code'; head.append(th); }
     for (const row of rows.slice(0,100)) {
       const tr = body.insertRow();
-      for (let i=0;i<headers.length;i++) tr.insertCell().textContent = valueText(row[i],date1904);
+      for (let i=0;i<headers.length;i++){const td=tr.insertCell(),text=valueText(row[i],date1904);td.textContent=flowColumn[i]?text.replace(/\r\n|[\r\n]/g,'；'):text;if(flowColumn[i])td.className='flow-code';}
     }
     $(id).replaceChildren(table);
   }

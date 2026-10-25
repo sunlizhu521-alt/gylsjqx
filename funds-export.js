@@ -95,19 +95,48 @@ window.FundsExport = async function(sourceBytes, result) {
   };
   const sharedRel=elements(rels,'Relationship').find(e=>e.getAttribute('Type')===R+'/sharedStrings');
   const sharedTexts=sharedRel?elements(await parse(zip,resolve('xl/workbook.xml',sharedRel.getAttribute('Target'))),'si').map(si=>elements(si,'t').map(t=>t.textContent).join('')):[];
+  const cellText=c=>c?.getAttribute('t')==='s'?sharedTexts[Number(first(c,'v')?.textContent)]||'':c?.getAttribute('t')==='inlineStr'?elements(c,'t').map(t=>t.textContent).join(''):c?first(c,'v')?.textContent??'':'';
+  const layoutStyles=new Map(),headerFonts=new Map(),borderStyles=new Map();
+  const layoutStyle=(id,header,flow,edges=['left','right','top','bottom'])=>{
+    const key=[id,header,flow,edges.join(',')].join('|');if(layoutStyles.has(key))return layoutStyles.get(key);
+    const original=xfs.children[Number(id)],xf=original.cloneNode(true),oldBorder=Number(xf.getAttribute('borderId')||0),borderKey=oldBorder+':'+edges.join(',');
+    if(!borderStyles.has(borderKey)){
+      const originalBorder=borders.children[oldBorder],next=originalBorder.cloneNode(true);
+      for(const edge of edges){let side=first(next,edge);if(!side||!side.getAttribute('style')||side.getAttribute('style')==='none'){
+        const replacement=first(border,edge).cloneNode(true);if(side)side.replaceWith(replacement);else{const order=['start','end','left','right','top','bottom','diagonal','vertical','horizontal'];next.insertBefore(replacement,[...next.children].find(e=>order.indexOf(e.localName)>order.indexOf(edge))||null);}
+      }}
+      borderStyles.set(borderKey,next.isEqualNode(originalBorder)?oldBorder:append('borders',next));
+    }
+    xf.setAttribute('borderId',borderStyles.get(borderKey));xf.setAttribute('applyBorder','1');
+    if(header){
+      const oldFont=Number(xf.getAttribute('fontId')||0);
+      if(!headerFonts.has(oldFont)){const originalFont=fonts.children[oldFont],next=originalFont.cloneNode(true),color=create(styles,'color',{rgb:'FFFFFFFF'}),oldColor=first(next,'color');if(oldColor)oldColor.replaceWith(color);else next.append(color);headerFonts.set(oldFont,next.isEqualNode(originalFont)?oldFont:append('fonts',next));}
+      xf.setAttribute('fontId',headerFonts.get(oldFont));xf.setAttribute('applyFont','1');xf.setAttribute('fillId',fillId);xf.setAttribute('applyFill','1');
+    }
+    if(flow){let alignment=first(xf,'alignment');if(!alignment){alignment=create(styles,'alignment');xf.insertBefore(alignment,first(xf,'protection')||null);}alignment.setAttribute('wrapText','0');alignment.setAttribute('shrinkToFit','1');xf.setAttribute('applyAlignment','1');}
+    const next=xf.isEqualNode(original)?Number(id):append('cellXfs',xf);layoutStyles.set(key,next);return next;
+  };
   const fitSheet=(doc,end,headerRow=0)=>{
     const data=first(doc,'sheetData');let cols=first(doc,'cols');
     if(!cols){cols=create(doc,'cols');doc.documentElement.insertBefore(cols,data);}
-    const oldCols=[...cols.children],widths=Array(end.c+1).fill(12),merged=new Map(elements(doc,'mergeCell').map(m=>{const range=XLSX.utils.decode_range(m.getAttribute('ref'));return [XLSX.utils.encode_cell(range.s),range.e.c-range.s.c+1];}));
+    const oldCols=[...cols.children],widths=Array(end.c+1).fill(12),merges=elements(doc,'mergeCell').map(m=>XLSX.utils.decode_range(m.getAttribute('ref'))),merged=new Map(merges.map(range=>[XLSX.utils.encode_cell(range.s),range.e.c-range.s.c+1]));
+    const rows=new Map(elements(data,'row').map(row=>[Number(row.getAttribute('r'))-1,row])),cells=new Map(elements(data,'c').map(c=>[c.getAttribute('r'),c]));
+    const ensureCell=(r,c)=>{const address=XLSX.utils.encode_cell({r,c});if(cells.has(address))return cells.get(address);let row=rows.get(r);if(!row){row=create(doc,'row',{r:r+1});data.insertBefore(row,[...data.children].find(e=>Number(e.getAttribute('r'))>r+1)||null);rows.set(r,row);}const cell=create(doc,'c',{r:address});row.insertBefore(cell,[...row.children].find(e=>XLSX.utils.decode_cell(e.getAttribute('r')).c>c)||null);cells.set(address,cell);return cell;};
+    const styleId=c=>{const point=XLSX.utils.decode_cell(c.getAttribute('r')),column=oldCols.find(e=>Number(e.getAttribute('min'))<=point.c+1&&Number(e.getAttribute('max'))>=point.c+1);return Number(c.getAttribute('s')??c.parentElement.getAttribute('s')??column?.getAttribute('style')??0);};
+    const flowColumns=new Set();for(let c=0;c<=end.c;c++)if(cellText(ensureCell(headerRow,c)).normalize('NFKC').replace(/\s+/g,'')==='流程编号')flowColumns.add(c);
     for(const c of elements(data,'c')){
-      const address=c.getAttribute('r'),point=XLSX.utils.decode_cell(address),column=oldCols.find(e=>Number(e.getAttribute('min'))<=point.c+1&&Number(e.getAttribute('max'))>=point.c+1);
-      const xf=xfs.children[Number(c.getAttribute('s')??c.parentElement.getAttribute('s')??column?.getAttribute('style')??0)];
+      const address=c.getAttribute('r'),point=XLSX.utils.decode_cell(address),header=point.r===headerRow,flow=flowColumns.has(point.c);
+      if(flow&&!header&&!first(c,'f')&&/[\r\n]/.test(cellText(c))){const text=cellText(c).replace(/\r\n|[\r\n]/g,'；');for(const child of [...c.children])if(['v','is'].includes(child.localName))child.remove();const is=create(doc,'is'),t=create(doc,'t');t.textContent=text;is.append(t);c.setAttribute('t','inlineStr');c.insertBefore(is,c.firstChild);}
+      if(header||flow||cellText(c)!==''||first(c,'f'))c.setAttribute('s',layoutStyle(styleId(c),header,flow));
+      const xf=xfs.children[styleId(c)];
       const size=Number(first(fonts.children[Number(xf?.getAttribute('fontId')||0)],'sz')?.getAttribute('val')||11),type=c.getAttribute('t'),raw=first(c,'v')?.textContent??'';
       let text=type==='s'?sharedTexts[Number(raw)]||'':type==='inlineStr'?elements(c,'t').map(t=>t.textContent).join(''):raw;
       if((!type||type==='n')&&raw!=='')try{const id=Number(xf?.getAttribute('numFmtId')||0),format=[...formats].find(([,n])=>n===id)?.[0]??id;text=XLSX.SSF.format(format,Number(raw),{date1904});}catch(_){}
       const width=Math.max(...String(text).split(/\r?\n/).map(line=>[...line].reduce((n,ch)=>n+(/[\u0000-\u00ff]/.test(ch)?1:2),0)))*size/11/(merged.get(address)||1)+3;
-      widths[point.c]=Math.min(80,Math.max(widths[point.c]||12,width));
+      widths[point.c]=Math.min(flow?255:80,Math.max(widths[point.c]||12,width));
     }
+    // A populated merged cell also needs borders on its perimeter, without changing the merge.
+    for(const range of merges){const anchor=cells.get(XLSX.utils.encode_cell(range.s));if(cellText(anchor)===''&&!anchor?.getElementsByTagNameNS('*','f').length)continue;for(let r=range.s.r;r<=range.e.r;r++)for(let c=range.s.c;c<=range.e.c;c++){const edges=[c===range.s.c&&'left',c===range.e.c&&'right',r===range.s.r&&'top',r===range.e.r&&'bottom'].filter(Boolean);if(edges.length){const cell=ensureCell(r,c);cell.setAttribute('s',layoutStyle(styleId(cell),r===headerRow,flowColumns.has(c),edges));}}}
     cols.replaceChildren(...widths.map((width,c)=>{
       const old=oldCols.find(e=>Number(e.getAttribute('min'))<=c+1&&Number(e.getAttribute('max'))>=c+1),col=old?old.cloneNode(true):create(doc,'col');
       for(const [key,value] of Object.entries({min:c+1,max:c+1,width:Math.ceil(width*100)/100,bestFit:1,customWidth:1}))col.setAttribute(key,value);return col;

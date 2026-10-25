@@ -26,6 +26,7 @@
     .preview{max-height:460px;overflow:auto}table{border-collapse:collapse;min-width:100%;font-size:13px}
     th,td{border:1px solid #d6dee8;text-align:center;vertical-align:middle;padding:6px 10px;min-width:110px;max-width:300px;white-space:pre-wrap;overflow-wrap:anywhere}
     th{position:sticky;top:0;background:#315b9d;color:#fff}td{background:#fff;color:#182333}
+    .flow-code{white-space:nowrap;overflow-wrap:normal;max-width:none}
     [hidden]{display:none!important}@media(max-width:700px){main{padding:12px}.uploads{grid-template-columns:1fr}section{padding:14px}.actions button{width:100%}}
   </style>
 </head>
@@ -57,14 +58,14 @@
     <div class="actions"><button id="download" disabled>下载资金整理表</button><span id="filenameHint"></span></div>
     <small>未申请的记录不列入核对。累计申请超额、无法区分归属及申请日期问题自动列入“付款申请核对”表，不阻止下载；其他待核对项处理后可下载。当天在当前浏览器重复下载时，文件版本自动递增。</small>
   </section>
-  <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><small>预览最多显示 100 行；下载包含全部记录。三个 sheet 统一 30 磅行高、自适应列宽，表头都有筛选器；长备注可在编辑栏查看。</small><div class="preview" id="negotiatedPreview"></div></section>
+  <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><small>预览最多显示 100 行；下载包含全部记录。三个 sheet 统一 30 磅行高、蓝底白字表头和筛选器，有内容的单元格都有边框。流程编号自适应列宽且不换行；长备注可在编辑栏查看。</small><div class="preview" id="negotiatedPreview"></div></section>
   <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><small>仅显示原“对公付款0A流程号”有值的正常付款，已结清明细也保留。原编号为空、只有空格或公式结果不可用的记录不纳入；匹配出的“流程编号”不替代此条件。</small><div class="preview" id="normalPreview"></div></section>
   <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><small>仅列累计超额、归属不清及已匹配申请的异常日期或金额，未申请无需核对。“是否提交付款申请单”先匹配申请表流程编码，无匹配时再核对供应商名称＋本次申请付款金额；任一匹配即为“已提交”。金额及归属问题保留在核对说明中。每项保留来源和候选申请。分批提交进度不改变原已付金额、剩余金额及结清状态。</small><div class="preview" id="reviewPreview"></div></section>
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
 <script src="funds-core.js?v=compact-funds-layout-20261025-8"></script>
-<script src="funds-export.js?v=compact-funds-layout-20261025-8"></script>
-<script src="funds-tool.js?v=application-oa-only-20261025-4"></script>
+<script src="funds-export.js?v=flow-borders-header-20261025-9"></script>
+<script src="funds-tool.js?v=flow-borders-header-20261025-9"></script>
 </body>
 </html>

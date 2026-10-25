@@ -84,6 +84,7 @@ function compareNegotiated(before,after){
   const previewText=await frame.locator('#normalPreview').innerText();
   assert.deepEqual((await frame.locator('#normalPreview th').allTextContents()).slice(16,19),['是否提交付款申请单','提交时间汇总','当前节点']);
   const previewSubmissions=await frame.locator('#normalPreview tbody tr td:nth-child(18)').allTextContents();
+  for(const id of ['normalPreview','negotiatedPreview'])assert(await frame.locator('#'+id+' .flow-code').evaluateAll(cells=>cells.length>0&&cells.every(c=>getComputedStyle(c).whiteSpace==='nowrap'&&getComputedStyle(c).maxWidth==='none'&&!/[\r\n]/.test(c.textContent))),'流程编号预览必须单行自适应');
   assert.equal(await frame.locator('#normalPreview th').last().innerText(),'是否对账');
   const previewReconciled=await frame.locator('#normalPreview tbody tr td:last-child').allTextContents();
   assert.equal(previewReconciled.filter(v=>v==='已对账').length,real?15:5);
@@ -96,7 +97,7 @@ function compareNegotiated(before,after){
   const bytes=await download(1);const saved=X.read(bytes,{type:'buffer',cellNF:true,cellStyles:true}),original=X.read(data.negotiated,{type:'buffer',cellNF:true,cellStyles:true});
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对']);compareNegotiated(original.Sheets[selectedName],saved.Sheets.谈判付款);
   const negotiatedHeaders=fields(saved.Sheets.谈判付款),previewColumnNames=await frame.locator('#negotiatedPreview th').allTextContents();assert.equal(Math.abs(negotiatedHeaders['提交付款申请单日期']-negotiatedHeaders['提交时间汇总']),1);for(const key of ['提交付款申请单日期','提交时间汇总','是否提交付款申请单','流程编号'])assert.equal(previewColumnNames.indexOf(key),negotiatedHeaders[key]);
-  for(const sheet of Object.values(saved.Sheets)){assert.equal(sheet['!autofilter'].ref,sheet['!ref'],'三个sheet首行筛选覆盖全部列');for(const row of sheet['!rows']||[])if(row){assert.equal(row.hpt,30);assert(!row.hidden);}assert((sheet['!cols']||[]).slice(0,X.utils.decode_range(sheet['!ref']).e.c+1).every(c=>c.width>=12&&c.width<=80),'列宽自适应且有合理范围');}
+  for(const sheet of Object.values(saved.Sheets)){assert.equal(sheet['!autofilter'].ref,sheet['!ref'],'三个sheet首行筛选覆盖全部列');for(const row of sheet['!rows']||[])if(row){assert.equal(row.hpt,30);assert(!row.hidden);}assert((sheet['!cols']||[]).slice(0,X.utils.decode_range(sheet['!ref']).e.c+1).every((c,i)=>c.width>=12&&c.width<=(X.utils.sheet_to_json(sheet,{header:1})[0][i]==='流程编号'?255:80)),'列宽自适应且有合理范围');}
   const normal=X.utils.sheet_to_json(saved.Sheets.正常付款,{header:1,defval:''});assert.deepEqual(normal[0],NORMAL_HEADERS);
   assert.deepEqual(normal.slice(1).map(row=>row[17]),previewSubmissions,'提交时间汇总的预览与导出一致');
   const applicationReview=X.utils.sheet_to_json(saved.Sheets.付款申请核对,{header:1,defval:''});assert.deepEqual(applicationReview[0],REVIEW_HEADERS);
@@ -115,9 +116,20 @@ function compareNegotiated(before,after){
    const target=relation.getAttribute('Target');const file=target.startsWith('/')?target.slice(1):'xl/'+target;
    const sheet=parse(await zip.file(file).async('string'));const style=await zip.file('xl/styles.xml').async('string'),old=await src.file('xl/styles.xml').async('string');
    const styles=parse(style),oldStyles=parse(old);const prefix={};for(const tag of ['fonts','fills','borders','cellXfs']){const a=all(oldStyles,tag)[0],b=all(styles,tag)[0];prefix[tag]=a?[...a.children].every((el,i)=>el.isEqualNode(b.children[i])):true;}
-   return {frozen:all(sheet,'pane')[0]?.getAttribute('ySplit'),stylesPreserved:prefix,bodyColor:style.includes('FFFFFFFF')};
+   const xfs=all(styles,'cellXfs')[0],borders=all(styles,'borders')[0],fills=all(styles,'fills')[0],shared=zip.file('xl/sharedStrings.xml')?all(parse(await zip.file('xl/sharedStrings.xml').async('string')),'si').map(si=>all(si,'t').map(t=>t.textContent).join('')):[],layoutErrors=[];
+   const text=c=>c.getAttribute('t')==='s'?shared[Number(all(c,'v')[0]?.textContent)]||'':c.getAttribute('t')==='inlineStr'?all(c,'t').map(t=>t.textContent).join(''):all(c,'v')[0]?.textContent??'';
+   for(const entry of all(book,'sheet')){
+    const relation=all(rels,'Relationship').find(e=>e.getAttribute('Id')===entry.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id')),doc=parse(await zip.file(new URL(relation.getAttribute('Target'),'https://xlsx.invalid/xl/workbook.xml').pathname.slice(1)).async('string')),cells=all(doc,'c'),flowColumns=new Set(cells.filter(c=>/^[A-Z]+1$/.test(c.getAttribute('r'))&&text(c)==='流程编号').map(c=>c.getAttribute('r').replace(/\d+/,'')));
+    for(const c of cells){const ref=c.getAttribute('r'),xf=xfs.children[Number(c.getAttribute('s')||0)],border=borders.children[Number(xf.getAttribute('borderId')||0)],fill=fills.children[Number(xf.getAttribute('fillId')||0)],header=/^[A-Z]+1$/.test(ref);
+     if((text(c)!==''||all(c,'f').length)&&['left','right','top','bottom'].some(edge=>!all(border,edge)[0]?.getAttribute('style')||all(border,edge)[0]?.getAttribute('style')==='none'))layoutErrors.push(entry.getAttribute('name')+'!'+ref+' 缺少边框');
+     if(header&&all(fill,'fgColor')[0]?.getAttribute('rgb')!=='FF315B9D')layoutErrors.push(entry.getAttribute('name')+'!'+ref+' 表头底色不同');
+     if(flowColumns.has(ref.replace(/\d+/,''))&&(all(xf,'alignment')[0]?.getAttribute('wrapText')!=='0'||/[\r\n]/.test(text(c))))layoutErrors.push(entry.getAttribute('name')+'!'+ref+' 流程编号换行');
+    }
+   }
+   return {frozen:all(sheet,'pane')[0]?.getAttribute('ySplit'),stylesPreserved:prefix,bodyColor:style.includes('FFFFFFFF'),layoutErrors};
   },{bytes:[...bytes],source:[...data.negotiated]});
   assert.equal(metadata.frozen,'1');assert(Object.values(metadata.stylesPreserved).every(Boolean),'原样式定义改变');
+  assert.deepEqual(metadata.layoutErrors,[],'导出边框、表头颜色、流程编号单行格式');
   if(!real){
    assert.deepEqual(normal.slice(1).map(row=>row[1]),['正常供应商1','正常供应商2','正常供应商3','正常供应商4','正常供应商5'],'旧是/空标记不应排除正常记录，谈判甲乙不应混入正常表');
    const n=saved.Sheets.谈判付款,nh=fields(n),row=(r,key)=>n[X.utils.encode_cell({r,c:nh[key]})]?.v;
