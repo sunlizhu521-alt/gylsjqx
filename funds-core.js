@@ -53,8 +53,22 @@ function paymentWeek(c,date1904){
  if(parsed.invalid||parsed.v===''||c?.t==='e')return cell('日期待确认');
  const parts=X.SSF.parse_date_code(parsed.v),start=new Date(Date.UTC(parts.y,parts.m-1,parts.d));
  start.setUTCDate(start.getUTCDate()-(start.getUTCDay()+6)%7);
- const end=new Date(start.getTime()+6*86400000),label=d=>String(d.getUTCFullYear()).padStart(4,'0')+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
- return cell(label(start)+'～'+label(end));
+ return cell(String(start.getUTCFullYear()).padStart(4,'0')+'/'+String(start.getUTCMonth()+1).padStart(2,'0')+'/'+String(start.getUTCDate()).padStart(2,'0')+'周');
+}
+function plannedPaymentWeeks(t,row){
+ const weeks=new Set();let invalid=false;
+ for(let c=0;c<=t.range.e.c;c++){
+  const header=t.sheet[X.utils.encode_cell({r:t.headerRow,c})],parsed=date(header,t.date1904);
+  const valid=parsed.v!==''&&!parsed.invalid&&header?.t!=='e';
+  // Incomplete date headings must not inherit a year from today or a neighbouring plan.
+  if(!valid&&!/^(?:\d{4}[年./-]\d{1,2}(?:[月./-]\d{1,2}日?)?|\d{1,2}月\d{1,2}日?)$/.test(str(header?.v)))continue;
+  const amount=money(t.sheet[X.utils.encode_cell({r:row,c})]);
+  if(amount.blank||amount.cents===0n)continue;
+  if(amount.invalid||amount.cents<0n||!valid){invalid=true;continue;}
+  weeks.add(paymentWeek(header,t.date1904).v);
+ }
+ const labels=[...weeks].sort();if(invalid)labels.push('付款计划待确认');
+ return cell(labels.join('；')||'日期待确认');
 }
 function submissionDates(c,date1904){
  if(c?.t==='e'||(c?.f&&(c.v==null||c.v==='')))return null;
@@ -271,7 +285,7 @@ function build(inputs,decisions={}){
  }
  for(const target of negotiatedObjects){
   const group=submissions.get(target),matched=group.rows,info=classification(target.record);
-  set(target,'付款自然周',paymentWeek(target.values['应付款时间'],target.record.date1904));
+  set(target,'付款自然周',plannedPaymentWeeks(negotiated,target.record.r));
   if(str(target.values['是否提交付款申请单']?.v)==='已提交付款申请单')set(target,'是否提交付款申请单',cell('已提交'));
   if(group.ambiguous.length){
    if(blank(target.values['是否提交付款申请单']))set(target,'是否提交付款申请单',cell('待核对'));

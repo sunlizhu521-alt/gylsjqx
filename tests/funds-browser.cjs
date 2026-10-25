@@ -107,7 +107,7 @@ function compareNegotiated(before,after){
   const negotiatedRows=X.utils.sheet_to_json(saved.Sheets.谈判付款,{header:1,defval:''}),weekIndex=negotiatedHeaders['付款自然周'];
   assert.equal(previewColumnNames[weekIndex],'付款自然周');
   assert.deepEqual(negotiatedRows.slice(1,101).map(row=>row[weekIndex]),await frame.locator('#negotiatedPreview tbody tr td:nth-child('+(weekIndex+1)+')').allTextContents(),'谈判付款自然周预览与导出一致');
-  if(!real){for(const row of normal.slice(1))assert.equal(row[24],'2026-11-02～2026-11-08');for(const row of negotiatedRows.slice(1,3))assert.equal(row[weekIndex],'2026-11-02～2026-11-08');}
+  if(!real){for(const row of normal.slice(1))assert.equal(row[24],'2026/11/02周');assert.equal(negotiatedRows[1][weekIndex],'2026/10/26周；2026/11/02周');assert.equal(negotiatedRows[2][weekIndex],'日期待确认');}
   const applicationReview=X.utils.sheet_to_json(saved.Sheets.付款申请核对,{header:1,defval:''});assert.deepEqual(applicationReview[0],REVIEW_HEADERS);
   assert.equal(applicationReview.length-1,real?5:0,'仅申请异常列入核对表，未申请不列入');
   assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),real?{'已提交':5}:{});
