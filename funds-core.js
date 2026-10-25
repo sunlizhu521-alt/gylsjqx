@@ -146,7 +146,7 @@ function build(inputs,decisions={}){
  const targetCols={...negotiated.map},negHeaders=[...negotiated.headers];
  const batchLayout=BATCH_HEADERS.every(h=>targetCols[h]!==undefined);
  const addedHeaders=batchLayout?ADDED_HEADERS.filter(h=>!['提交付款申请单日期','提交时间汇总','付款自然周'].includes(h)):ADDED_HEADERS;
- for(const h of [...SUPPLEMENT_HEADERS,...addedHeaders])if(targetCols[h]===undefined){targetCols[h]=negHeaders.length;negHeaders.push(h);updateMap.set(X.utils.encode_cell({r:negotiated.headerRow,c:targetCols[h]}),cell(h));}
+ for(const h of [...SUPPLEMENT_HEADERS,'应付款时间',...addedHeaders])if(targetCols[h]===undefined){targetCols[h]=negHeaders.length;negHeaders.push(h);updateMap.set(X.utils.encode_cell({r:negotiated.headerRow,c:targetCols[h]}),cell(h));}
  const classification=r=>{
   const supplier=r.values['供应商名称'],amount=money(r.values['申请付款金额']);
   const name=supplier?.t==='e'||(supplier?.f&&(supplier.v==null||supplier.v===''))?'':norm(supplier?.v);
@@ -195,6 +195,25 @@ function build(inputs,decisions={}){
   }
   target.record={...r,values:{...target.values}};return target;
  });
+ function applyDueDate(target){
+  const key=classification(target.record).key;if(!key)return;
+  const matches=ledger.filter(r=>classification(r).key===key);if(!matches.length)return;
+  const candidates=matches.map(r=>({record:r,date:date(r.values['应付款时间'],r.date1904)}));
+  if(candidates.every(c=>c.date.v===''&&!c.date.invalid))return;
+  const dates=new Map();for(const c of candidates)if(!c.date.invalid&&c.date.v!=='')dates.set(c.date.v,c.date);
+  const column=targetCols['应付款时间'],row=target.record.r;
+  const merged=(negotiated.sheet['!merges']||[]).some(m=>row>=m.s.r&&row<=m.e.r&&column>=m.s.c&&column<=m.e.c&&(m.s.r!==m.e.r||m.s.c!==m.e.c));
+  if(merged){issue('due-date:'+target.record.id,'due-date','应付款时间位于合并单元格中，保留原值及合并结构，请核对。',target.record);return;}
+  let chosen=dates.size===1&&candidates.every(c=>!c.date.invalid&&c.date.v!=='')?[...dates.values()][0]:null;
+  if(!chosen){
+   const choices=[{value:'keep',label:'保留原应付款时间'},...[...dates].map(([serial,d])=>({value:'date:'+serial,label:'采用 '+X.SSF.format(DATE_FORMAT,d.v)}))];
+   const sources=candidates.map(c=>recordLabel(c.record)+'；应付款时间 '+(str(c.record.values['应付款时间']?.w??value(c.record,'应付款时间'))||'空白')).join('\n');
+   const answer=issue('due-date:'+target.record.id,'due-date','按供应商名称＋申请付款金额匹配到的应付款时间不一致、为空或无法识别，保留原值，请核对。\n'+sources,target.record,choices)[0];
+   if(answer?.startsWith('date:'))chosen=dates.get(Number(answer.slice(5)));
+  }
+  if(chosen)set(target,'应付款时间',{...chosen,v:chosen.v-(negotiated.date1904?1462:0)});
+ }
+ negotiatedObjects.forEach(applyDueDate);
  const targets=[...negotiatedObjects,...normalObjects];
  function set(target,key,c){if(!target.normal&&targetCols[key]===undefined)return;target.values[key]=clone(c);if(!target.normal)updateMap.set(X.utils.encode_cell({r:target.record.r,c:targetCols[key]}),clone(c));}
  function applyFinancial(target){

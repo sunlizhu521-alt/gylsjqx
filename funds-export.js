@@ -117,12 +117,12 @@ window.FundsExport = async function(sourceBytes, result) {
     if(header||flow){let alignment=first(xf,'alignment');if(!alignment){alignment=create(styles,'alignment');xf.insertBefore(alignment,first(xf,'protection')||null);}alignment.setAttribute('wrapText','0');alignment.setAttribute('shrinkToFit',flow?'1':'0');xf.setAttribute('applyAlignment','1');}
     const next=xf.isEqualNode(original)?Number(id):append('cellXfs',xf);layoutStyles.set(key,next);return next;
   };
-  const measure=document.createElement('canvas').getContext('2d'),dateHeaderStyles=new Map();
+  const measure=document.createElement('canvas').getContext('2d'),dateDisplayStyles=new Map();
   // WPS format 31 displays a Chinese date, while SSF falls back to m/d/yy.
-  const dateHeaderStyle=id=>{
-    if(dateHeaderStyles.has(id))return dateHeaderStyles.get(id);
+  const dateDisplayStyle=id=>{
+    if(dateDisplayStyles.has(id))return dateDisplayStyles.get(id);
     const xf=xfs.children[id].cloneNode(true);xf.setAttribute('numFmtId',formatId('yyyy"年"m"月"d"日"'));xf.setAttribute('applyNumberFormat','1');
-    const next=append('cellXfs',xf);dateHeaderStyles.set(id,next);return next;
+    const next=append('cellXfs',xf);dateDisplayStyles.set(id,next);return next;
   };
   const fitSheet=(doc,end,headerRow=0)=>{
     const batch=doc===sheet&&result.negotiated.batchLayout,detailColumn=batch?result.negotiated.headers.findIndex(h=>String(h).trim()==='谈判明细'):-1;
@@ -142,7 +142,7 @@ window.FundsExport = async function(sourceBytes, result) {
       const address=c.getAttribute('r'),point=XLSX.utils.decode_cell(address),header=point.r===headerRow,flow=singleLineColumns.has(point.c);
       if(point.c>end.c||point.r>end.r)continue;
       if(flow&&!header&&!first(c,'f')&&/[\r\n]/.test(cellText(c))){const text=cellText(c).replace(/\r\n|[\r\n]/g,'；');for(const child of [...c.children])if(['v','is'].includes(child.localName))child.remove();const is=create(doc,'is'),t=create(doc,'t');t.textContent=text;is.append(t);c.setAttribute('t','inlineStr');c.insertBefore(is,c.firstChild);}
-      if(header&&['',null,'n'].includes(c.getAttribute('t'))&&Number(xfs.children[styleId(c)].getAttribute('numFmtId'))===31)c.setAttribute('s',dateHeaderStyle(styleId(c)));
+      if(header&&['',null,'n'].includes(c.getAttribute('t'))&&Number(xfs.children[styleId(c)].getAttribute('numFmtId'))===31)c.setAttribute('s',dateDisplayStyle(styleId(c)));
       if(header||flow||populatedColumns.has(point.c))c.setAttribute('s',layoutStyle(styleId(c),header,flow));
       const xf=xfs.children[styleId(c)];
       const size=Number(first(fonts.children[Number(xf?.getAttribute('fontId')||0)],'sz')?.getAttribute('val')||11),type=c.getAttribute('t'),raw=first(c,'v')?.textContent??'';
@@ -194,6 +194,7 @@ window.FundsExport = async function(sourceBytes, result) {
     const isHeader=point.r===result.negotiated.headerRow;
     const submission=!isHeader&&submissionColumns.has(point.c),column=sourceColumns.find(c=>Number(c.getAttribute('min'))<=point.c+1&&Number(c.getAttribute('max'))>=point.c+1);
     let styleId=old?.getAttribute('s')??(old&&submission?(row.getAttribute('s')??column?.getAttribute('style')??0):styleFor(cell?.z||'',isHeader));
+    if(typeof cell?.v==='number'&&cell.z&&XLSX.SSF.is_date(cell.z))styleId=dateDisplayStyle(Number(styleId));
     if(submission)styleId=wrapStyle(styleId);
     const next=writeCell(sheet,address,cell,styleId);
     // Retain unrelated cell metadata while replacing only value/formula payloads.

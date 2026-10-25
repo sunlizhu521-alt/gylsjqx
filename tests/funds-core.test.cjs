@@ -124,7 +124,7 @@ test('正常付款公式仅使用有效缓存，缺缓存保留错误并阻止�
  const i=fixture();set(i,'ledger','已付款金额',3,{t:'n',f:'10+10',v:20});set(i,'ledger','是否结清',3,'');let r=C.build(i);assert.equal(r.normalRows[0][12].v,20);assert.equal(r.normalRows[0][12].f,undefined);set(i,'ledger','已付款金额',3,{t:'n',f:'10+10'});r=C.build(i);assert.equal(r.normalRows[0][12].v,'公式结果不可用');assert(r.stats.pending>0);set(i,'ledger','OA合同编号',3,{t:'e',v:23,w:'#REF!'});r=C.build(i);assert.equal(r.normalRows[0][10].v,'#REF!');assert(r.issues.some(x=>x.kind==='formula'));
 });
 test('已有追加字段不重复新增，源表空行和非授权字段保持完整',()=>{
- const i=fixture(),s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];X.utils.sheet_add_aoa(s,[['提交付款申请单日期','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号']],{origin:'N1'});s['!ref']='A1:T4';s.L4={t:'s',v:'尾注'};const r=C.build(i);assert.equal(r.negotiated.headers.length,22);assert.equal(r.negotiated.headers[20],'提交时间汇总');assert.equal(r.negotiated.headers.at(-1),'付款自然周');assert.equal(r.negotiated.rows.length,3);assert.equal(r.negotiated.headers.filter(h=>h==='流程编号').length,1);assert.equal(r.negotiated.rows[2][11].v,'尾注');assert(!r.negotiated.updates.some(u=>u.address==='L4'));
+ const i=fixture(),s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];X.utils.sheet_add_aoa(s,[['提交付款申请单日期','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号']],{origin:'N1'});s['!ref']='A1:T4';s.L4={t:'s',v:'尾注'};const r=C.build(i);assert.equal(r.negotiated.headers.length,23);assert.equal(r.negotiated.headers[20],'应付款时间');assert.equal(r.negotiated.headers[21],'提交时间汇总');assert.equal(r.negotiated.headers.at(-1),'付款自然周');assert.equal(r.negotiated.rows.length,3);assert.equal(r.negotiated.headers.filter(h=>h==='流程编号').length,1);assert.equal(r.negotiated.rows[2][11].v,'尾注');assert(!r.negotiated.updates.some(u=>u.address==='L4'));
 });
 test('1904来源日期转换为1900体系，原表不变',()=>{
  const i=fixture();i.ledger.book.Workbook={WBProps:{date1904:true}};set(i,'ledger','开票时间',3,{t:'n',v:44834,z:'yyyy-mm-dd'});const r=C.build(i);assert.equal(r.normalRows[0][4].v,44834+1462);assert.equal(i.ledger.book.Sheets['对账明细-李奇'].E3.v,44834);
@@ -510,4 +510,38 @@ test('已在谈判源表的分类命中记录不进入付款申请核对，其�
  assert.equal(r.negotiated.rows[0][4].v,0);assert.equal(r.negotiated.rows[0][10].v,100);
  const duplicate=X.utils.sheet_to_json(s,{header:1})[1].slice();duplicate[9]='正常付款';X.utils.sheet_add_aoa(s,[duplicate],{origin:-1});
  assert.equal(C.build(i).reviewRows.length,0,'存在任一谈判分类即生效');
+});
+
+test('谈判应付款时间按供应商和申请金额更新，不依赖主体及OA编号并保留财务字段',()=>{
+ const i=fixture(),n=i.negotiated.book.Sheets['10月谈判付款主表'];
+ X.utils.sheet_add_aoa(n,[['应付时间'],['旧日期']],{origin:'N1'});
+ set(i,'ledger','付款主体',2,'其他主体');set(i,'ledger','对公付款0A流程号',2,'OTHER-123');set(i,'ledger','应付款时间',2,'2026年11月12日');
+ const before=JSON.stringify(i),r=C.build(i),d=r.negotiated.rows[0][13];
+ assert.equal(X.SSF.format(C.DATE_FORMAT,d.v),'2026年11月12日');assert.equal(d.t,'n');assert.equal(d.z,C.DATE_FORMAT);
+ assert.equal(r.negotiated.rows[0][4].v,0);assert.equal(r.negotiated.rows[0][10].v,100);assert.equal(r.negotiated.rows[0][12].f,'G2');assert.equal(JSON.stringify(i),before);
+});
+test('谈判应付日期未匹配或源日期空白保留原值，不把空金额作为零匹配',()=>{
+ for(const [field,v] of [['供应商名称','其他供应商'],['申请付款金额',101],['申请付款金额',''],['申请付款金额','异常'],['应付款时间','']]){
+  const i=fixture(),n=i.negotiated.book.Sheets['10月谈判付款主表'];X.utils.sheet_add_aoa(n,[['应付款时间'],['原日期']],{origin:'N1'});set(i,'ledger',field,2,v);
+  const r=C.build(i);assert.equal(r.negotiated.rows[0][13].v,'原日期');assert(!r.negotiated.updates.some(u=>u.address==='N2'));
+ }
+ const i=fixture();set(i,'ledger','申请付款金额',2,0);set(i,'negotiated','申请付款金额',2,0);
+ const r=C.build(i);assert.equal(X.SSF.format(C.DATE_FORMAT,r.negotiated.rows[0][r.negotiated.headers.indexOf('应付款时间')].v),'2026年10月31日');
+});
+test('同键多笔日期一致可更新，日期冲突或错误保留并允许核对选择',()=>{
+ for(const [raw,conflict] of [['2026年10月31日',false],['2026-11-01',true],['',true],[{t:'e',v:23},true],[{t:'n',f:'A99'},true],['2026-02-30',true]]){
+  const i=fixture(),l=i.ledger.book.Sheets['对账明细-李奇'],n=i.negotiated.book.Sheets['10月谈判付款主表'];X.utils.sheet_add_aoa(n,[['应付款时间'],['原日期']],{origin:'N1'});
+  const row=X.utils.sheet_to_json(l,{header:1})[1].slice();row[8]=raw;X.utils.sheet_add_aoa(l,[row],{origin:-1});
+  const r=C.build(i),q=r.issues.find(q=>q.kind==='due-date');assert.equal(!!q,conflict);
+  if(conflict){assert.equal(r.negotiated.rows[0][13].v,'原日期');assert(q.message.includes('对账明细-李奇'));assert.equal(C.build(i,{[q.id]:['keep']}).negotiated.rows[0][13].v,'原日期');const choice=q.choices.find(c=>c.value.startsWith('date:'));assert.equal(C.build(i,{[q.id]:[choice.value]}).negotiated.rows[0][13].v,Number(choice.value.slice(5)));}
+  else assert.equal(X.SSF.format(C.DATE_FORMAT,r.negotiated.rows[0][13].v),'2026年10月31日');
+ }
+});
+test('谈判应付日期正确处理不同日期体系，保留合并单元格',()=>{
+ for(const from1904 of [false,true])for(const to1904 of [false,true]){
+  const i=fixture();i.ledger.book.Workbook={WBProps:{date1904:from1904}};i.negotiated.book.Workbook={WBProps:{date1904:to1904}};set(i,'ledger','应付款时间',2,{t:'n',v:46325-(from1904?1462:0)});
+  const r=C.build(i),d=r.negotiated.rows[0][r.negotiated.headers.indexOf('应付款时间')];assert.equal(d.v,46325-(to1904?1462:0));
+ }
+ const i=fixture(),n=i.negotiated.book.Sheets['10月谈判付款主表'];X.utils.sheet_add_aoa(n,[['应付款时间'],['合并日期']],{origin:'N1'});n['!merges']=[{s:{r:1,c:13},e:{r:2,c:13}}];
+ const r=C.build(i);assert.equal(r.negotiated.rows[0][13].v,'合并日期');assert(r.issues.some(q=>q.kind==='due-date'&&q.message.includes('合并')));
 });

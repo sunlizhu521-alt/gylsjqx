@@ -59,6 +59,10 @@ const {fixtures}=require('./funds-fixtures.cjs');
    assert.equal(s[address]?.v??'',c.v??'',address+' value');assert.equal(s[address]?.f,c.f,address+' formula');
   }
   assert.deepEqual(s['!merges'],src['!merges']);
+  if(!process.env.FUNDS_V19_FILE){
+   for(const address of ['L2','L3']){assert.equal(s[address].v,46329);assert.equal(s[address].t,'n');assert.equal(X.SSF.format(s[address].z,s[address].v),'2026年11月3日');}
+   assert.equal(await frame.locator('#negotiatedPreview tbody tr').first().locator('td').nth(11).innerText(),'2026年11月3日');
+  }
   for(let c=20;c<33;c++){
    const address=X.utils.encode_cell({r:0,c}),d=X.SSF.parse_date_code(s[address].v),label=`${d.y}年${d.m}月${d.d}日`;
    assert.equal(X.SSF.format(s[address].z,s[address].v),label,address+' full Chinese date');

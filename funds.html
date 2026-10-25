@@ -52,7 +52,7 @@
     <div class="uploads">
       <div class="upload"><label for="ledgerFile">资金台账</label><small>读取李奇、徐英、邢芳芳、操思敏、孙立柱的对账明细。</small><input id="ledgerFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="ledgerInfo">尚未引用</small></div>
       <div class="upload"><label for="applicationsFile">付款申请汇总</label><small>用于填写两类付款的申请状态，未匹配直接标记“未申请”，无需核对。谈判付款只按“对公付款0A流程号”关联申请表“流程编码”（旧表无此列时兼容“合同号”），不比较供应商名称或单次金额；正常付款仍按供应商名称＋金额匹配。谈判付款按累计金额显示已部分提交、已全部提交或未申请。</small><input id="applicationsFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="applicationsInfo">尚未引用</small></div>
-      <div class="upload"><label for="negotiatedFile">谈判付款汇总</label><small>原记录、顺序及付款情况完整保留。资金台账仅补充能唯一对应的空缺付款 OA 号、付款主体、财务应付单号；备注、付款计划、合并及原公式保留；行高和列宽按统一格式调整。</small><input id="negotiatedFile" type="file" accept=".xlsx" disabled><small class="file-info" id="negotiatedInfo">尚未引用</small><label for="negotiatedSheet">谈判付款工作表</label><select id="negotiatedSheet" disabled><option value="">请先上传文件</option></select><small>名称包含“谈判付款”即可；存在多个版本时，请明确选择。</small></div>
+      <div class="upload"><label for="negotiatedFile">谈判付款汇总</label><small>原记录、顺序及付款情况完整保留。应付款时间按供应商名称＋申请付款金额从资金台账更新，匹配不到或日期为空时保留原值，日期冲突时核对。资金台账另外补充能唯一对应的空缺付款 OA 号、付款主体、财务应付单号；备注、付款计划、合并及原公式保留；行高和列宽按统一格式调整。</small><input id="negotiatedFile" type="file" accept=".xlsx" disabled><small class="file-info" id="negotiatedInfo">尚未引用</small><label for="negotiatedSheet">谈判付款工作表</label><select id="negotiatedSheet" disabled><option value="">请先上传文件</option></select><small>名称包含“谈判付款”即可；存在多个版本时，请明确选择。</small></div>
       <div class="upload"><label for="oaFile">OA 流程表（MDST-对公付款）</label><small>谈判付款按“对公付款0A流程号”匹配 OA 表“流程编号”；正常付款按供应商名称＋申请付款金额匹配收款单位＋付款金额。填写流程编号、当前节点、未操作者、流程状态、申请人。未匹配保留原信息；多个流程分别列出。</small><input id="oaFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="oaInfo">尚未引用</small></div>
     </div>
     <div class="actions"><button id="analyze" disabled>整理并核对</button><span id="status" role="status" aria-live="polite">正在加载工具…</span></div>
@@ -78,8 +78,8 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=date-header-autofit-20261025-16"></script>
-<script src="funds-export.js?v=date-header-autofit-20261025-16"></script>
-<script src="funds-tool.js?v=date-header-autofit-20261025-16"></script>
+<script src="funds-core.js?v=negotiated-due-date-20261025-18"></script>
+<script src="funds-export.js?v=negotiated-due-date-20261025-18"></script>
+<script src="funds-tool.js?v=negotiated-due-date-20261025-18"></script>
 </body>
 </html>
