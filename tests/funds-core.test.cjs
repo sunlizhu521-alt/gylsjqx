@@ -799,3 +799,27 @@ test('通用OA复核覆盖两类付款和各种未提交写法，不限定供应
   const before=JSON.stringify(i),r=C.build(i),review=r.reviewRows.find(line=>line[5].v.startsWith('OA号复核'));assert(review);assert(review[5].v.includes('“'+old+'”'));assert(review[5].v.includes(id));assert.equal(review[0].v,role==='ledger'?'正常付款':'谈判付款');assert.equal(role==='ledger'?r.normalRows[0][3].v:negotiatedValue(r,'对公付款0A流程号'),id);assert.equal(JSON.stringify(i),before);
  }
 });
+
+const missingFlowReviews=r=>r.reviewRows.filter(row=>row[5].v.includes('OA流程表未找到：'));
+test('两类付款已有OA号未出现在上传流程表时列核对，保留状态金额公式且不阻止下载',()=>{
+ const i=classifiedFixture();set(i,'oa','流程编号',2,'MDST-DGFK20990101001');set(i,'oa','收款单位',2,'其他供应商甲');set(i,'oa','流程编号',3,'MDST-DGFK20990101002');set(i,'oa','收款单位',3,'其他供应商乙');
+ const s=i.negotiated.book.Sheets['10月谈判付款主表'];s.K2={t:'n',v:100,f:'G2-E2'};const before=JSON.stringify(i),r=C.build(i),reviews=missingFlowReviews(r);
+ assert.equal(reviews.length,2);assert.deepEqual(new Set(reviews.map(row=>row[0].v)),new Set(['谈判付款','正常付款']));
+ for(const row of reviews){assert.match(row[5].v,/核对范围：OA.xlsx \/ Sheet0（流程编号列）/);assert.match(row[5].v,/不代表未提交付款申请或未付款/);assert(row[6].v);assert(row[7].v);assert(row[8].v);}
+ assert.equal(negotiatedValue(r,'对公付款0A流程号'),'MDST-DGFK20261001001');assert.equal(negotiatedValue(r,'是否提交付款申请单'),'已经提交全部');assert.equal(r.normalRows[0][3].v,'MDST-DGFK20261001002');assert.equal(r.normalRows[0][16].v,'已提交');assert.equal(r.negotiated.rows[0][10].f,'G2-E2');assert.equal(r.stats.pending,0);assert.equal(JSON.stringify(i),before);
+});
+test('OA覆盖逐号核对，大小写空格标准化，已存在但金额不同不报编号缺失',()=>{
+ const i=classifiedFixture();set(i,'negotiated','对公付款0A流程号',2,' mdst-dgfk20261001001 、 MDST-DGFK20990101999、MDST-DGFK20990101999');set(i,'oa','付款金额',2,99);
+ const r=C.build(i),reviews=missingFlowReviews(r);assert.equal(reviews.length,1);assert.match(reviews[0][5].v,/OA流程表未找到：MDST-DGFK20990101999。/);assert(!reviews[0][5].v.includes('OA流程表未找到：MDST-DGFK20261001001'));
+ set(i,'negotiated','对公付款0A流程号',2,' mdst-dgfk20261001001 ');assert.equal(missingFlowReviews(C.build(i)).length,0);
+});
+test('OA未找到核对不依赖供应商金额，空值异常值保留，零金额仍检查',()=>{
+ for(const amount of ['',0,'异常',{t:'n',f:'A99'},{t:'e',v:23,w:'#REF!'}]){
+  const i=classifiedFixture();set(i,'negotiated','供应商',2,'');set(i,'negotiated','申请付款金额',2,amount);set(i,'negotiated','对公付款0A流程号',2,'MDST-DGFK20990101999');
+  const r=C.build(i),reviews=missingFlowReviews(r);assert.equal(reviews.length,1);assert.match(reviews[0][5].v,/MDST-DGFK20990101999/);assert.equal(negotiatedValue(r,'对公付款0A流程号'),'MDST-DGFK20990101999');
+  assert.deepEqual(reviews[0][3],typeof amount==='object'?{t:'s',v:amount.t==='e'?amount.w:''}:typeof amount==='number'?{t:'n',v:0,z:'#,##0.00'}:{t:'s',v:amount});
+ }
+});
+test('原编号未找到但已唯一修正时合并到同一核对说明，不重复列付款',()=>{
+ const i=classifiedFixture();set(i,'negotiated','对公付款0A流程号',2,'MDST-DGFK20990101999');const r=C.build(i);assert.equal(r.reviewRows.length,1);assert.equal(missingFlowReviews(r).length,1);assert.match(r.reviewRows[0][5].v,/已更新为“MDST-DGFK20261001001”/);assert.match(r.reviewRows[0][5].v,/当前对公付款OA号：MDST-DGFK20261001001/);
+});

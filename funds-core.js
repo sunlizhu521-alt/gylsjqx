@@ -341,6 +341,17 @@ function build(inputs,decisions={}){
   const evidence=conflicting?flow.records.filter(r=>ids.includes(flowId(r))):matches;
   oaReviews.push({target,message,evidence:evidence.map(r=>r.source.file+'/'+r.source.sheet+'!'+r.source.row).join('；')});
  }
+ // Check identifier coverage independently of supplier/amount matching and application status.
+ for(const target of targets){
+  const original=target.sourceOA,current=target.values['对公付款0A流程号'];
+  const ids=[...new Set([original,current].flatMap(c=>c?.t==='e'?[]:codes(norm(c?.v))))];
+  const missing=ids.filter(id=>!flow.records.some(r=>r.values['流程编号']?.t!=='e'&&flowId(r)===id));
+  if(!missing.length)continue;
+  const message='OA流程表未找到：'+missing.join('、')+'。\n原对公付款OA号：'+(str(original?.v)||'空白')+'；当前对公付款OA号：'+(str(current?.v)||'空白')+'。\n核对范围：'+flow.name+' / '+flow.sheetName+'（流程编号列）。请核实OA编号或重新导出完整的OA流程表；仅表示本次上传表中未找到，不代表未提交付款申请或未付款。';
+  const existing=oaReviews.find(r=>r.target===target);
+  if(existing)existing.message+='\n'+message;
+  else oaReviews.push({target,message,evidence:flow.name+' / '+flow.sheetName+'（未找到对应流程行）'});
+ }
  function applyFlow(target){
   const ids=oas(target.record),supplier=norm(value(target.record,'供应商名称')),amount=money(target.record.values['申请付款金额']);
   const valid=supplier&&target.record.values['供应商名称']?.t!=='e'&&amount.cents!==undefined&&amount.cents>=0n;
@@ -443,7 +454,7 @@ function build(inputs,decisions={}){
  }
  for(const {target,message,evidence} of oaReviews){
   const source=target.record.source;
-  reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(value(target.record,'供应商名称')),cell(target.values['付款主体']?.t==='e'?target.values['付款主体'].w||'Excel错误':target.values['付款主体']?.v),amountCell(classification(target.record).cents),cell(target.values['是否提交付款申请单']?.v),cell(message+'\nOA 来源：'+evidence),cell(source.file),cell(source.sheet),cell(source.row)]);
+  reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(value(target.record,'供应商名称')),cell(target.values['付款主体']?.t==='e'?target.values['付款主体'].w||'Excel错误':target.values['付款主体']?.v),classification(target.record).cents===undefined?cell(target.values['申请付款金额']?.t==='e'?target.values['申请付款金额'].w||'Excel错误':target.values['申请付款金额']?.v):amountCell(classification(target.record).cents),cell(target.values['是否提交付款申请单']?.v),cell(message+'\nOA 来源：'+evidence),cell(source.file),cell(source.sheet),cell(source.row)]);
  }
  function normalCell(target,key){
   if(key==='付款自然周')return paymentWeek(target.values['应付款时间'],target.record.date1904);
