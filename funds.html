@@ -61,7 +61,7 @@
     <small>供应商或付款主体为空时保留原值；已付金额为空时保留原付款情况，不按零处理。切换工具保留本次内容，刷新后需重新选择文件。</small>
     <small>支持分批格式：识别“谈判明细、分批总金额、核对”，保留原分批计划、求和及核对公式、剩余付款金额公式和结清信息，不重新添加已删除的提交日期、提交时间汇总、付款自然周列。付款申请仍按原规则匹配并更新提交状态；正常付款保留提交时间汇总。登记月份、应付款时间无法识别时保留原文。</small>
   </section>
-  <p>谈判付款保留原周一日期列和分配金额，不重复提前日期或合并计划。旧格式谈判表仍生成付款自然周；正常付款按应付款时间计算自然周。</p>
+  <p>谈判付款保留原周一日期列和分配金额，不重复提前日期或合并计划。旧格式谈判表仍生成付款自然周；正常付款的“提交付款申请单周”按应付款日期所在周的上一周周一计算。</p>
   <section id="results" hidden>
     <p id="stats"></p>
     <small id="classificationSummary"></small>
@@ -79,8 +79,8 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=normal-columns-20261026-33"></script>
-<script src="funds-export.js?v=normal-columns-20261026-33"></script>
-<script src="funds-tool.js?v=normal-columns-20261026-33"></script>
+<script src="funds-core.js?v=submission-week-20261026-34"></script>
+<script src="funds-export.js?v=submission-week-20261026-34"></script>
+<script src="funds-tool.js?v=submission-week-20261026-34"></script>
 </body>
 </html>
