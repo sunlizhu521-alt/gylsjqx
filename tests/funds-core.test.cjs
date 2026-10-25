@@ -482,3 +482,32 @@ test('单次同额申请含未知多OA也不能直接归集，全部属于目标
  }
  const i=installmentFixture([{'合同号':'MDST-DGFK20261001001、MDST-DGFK20261001003','本次申请付款金额':100}]);set(i,'negotiated','对公付款0A流程号',2,'MDST-DGFK20261001001、MDST-DGFK20261001003');X.utils.sheet_add_aoa(i.oa.book.Sheets.Sheet0,[['MDST-DGFK20261001003','出纳','人员乙','归档','李奇','测试供应商甲',100]],{origin:-1});const r=C.build(i);assert.equal(negotiatedValue(r,'是否提交付款申请单'),'已全部提交');assert.equal(negotiatedValue(r,'提交时间汇总'),'2026-10-10-100.00');assert.equal(r.reviewRows.length,0);assert.equal(r.stats.pending,0);
 });
+
+test('申请汇总流程编码标为谈判付款时优先分类，未在谈判源表中的记录仅排除不新增',()=>{
+ for(const amount of [100,0,'','异常',-1]){
+  const i=fixture(),s=i.applications.book.Sheets.付款申请汇总;
+  X.utils.sheet_add_aoa(s,[['流程编码','付款分类'],['MDST-DGFK20261001001','正常付款'],['MDST-DGFK20261001002','谈判付款']],{origin:'J1'});
+  set(i,'applications','供应商全称',3,'不同供应商');set(i,'applications','本次申请付款金额',3,amount);
+  const before=JSON.stringify(i),r=C.build(i);
+  assert.equal(r.normalRows.length,0);assert.equal(r.stats.negotiatedLedgerRows,2);assert.equal(r.negotiated.rows.length,1);assert.equal(r.reviewRows.length,0);
+  assert.equal(r.negotiated.rows[0][0].v,'测试供应商甲');assert.equal(r.negotiated.rows[0][12].f,'G2');assert.equal(JSON.stringify(i),before);
+ }
+});
+test('付款分类必须为谈判付款且流程号完整匹配，新流程编码空白不回退旧合同号',()=>{
+ for(const [id,type] of [['','谈判付款'],['MDST-DGFK202610010020','谈判付款'],['MDST-DGFK2026100100','谈判付款'],['MDST-DGFK20261001002','非谈判付款'],['MDST-DGFK20261001002',''],[{t:'e',v:23},'谈判付款'],['MDST-DGFK20261001002',{t:'e',v:23}]]){
+  const i=fixture();X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['流程编码','付款分类'],[],[id,type]],{origin:'J1'});
+  const r=C.build(i);assert.equal(r.normalRows.length,1);assert.equal(r.stats.negotiatedLedgerRows,1);
+ }
+ const i=fixture(),s=i.applications.book.Sheets.付款申请汇总;X.utils.sheet_add_aoa(s,[['付款分类'],[],['谈判付款']],{origin:'J1'});
+ assert.equal(C.build(i).normalRows.length,0,'旧表合同号仍兼容');
+});
+test('已在谈判源表的分类命中记录不进入付款申请核对，其他异常继续列出',()=>{
+ const i=fixture(),s=i.applications.book.Sheets.付款申请汇总;
+ set(i,'applications','申请日期',2,'异常日期');set(i,'applications','本次申请付款金额',2,200);
+ assert(C.build(i).reviewRows.length>0);
+ X.utils.sheet_add_aoa(s,[['付款分类'],['谈判付款']],{origin:'J1'});
+ const r=C.build(i);assert.equal(r.reviewRows.length,0);assert.equal(r.negotiated.rows.length,1);assert.equal(r.normalRows.length,1);
+ assert.equal(r.negotiated.rows[0][4].v,0);assert.equal(r.negotiated.rows[0][10].v,100);
+ const duplicate=X.utils.sheet_to_json(s,{header:1})[1].slice();duplicate[9]='正常付款';X.utils.sheet_add_aoa(s,[duplicate],{origin:-1});
+ assert.equal(C.build(i).reviewRows.length,0,'存在任一谈判分类即生效');
+});

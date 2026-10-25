@@ -19,9 +19,19 @@ const {fixtures}=require('./funds-fixtures.cjs');
   for(const [address,attrs,master] of [['S2','t="shared" si="0" ref="S2:S4"',true],['S3','t="shared" si="0"',false],['S4','t="shared" si="0"',false],['T2','t="shared" si="1" ref="T2:T3"',true],['T3','t="shared" si="1"',false]])xml=xml.replace(new RegExp('(<c r="'+address+'"[^>]*>)([\\s\\S]*?)(</c>)'),(_,start,body,end)=>start+body.replace(/<f>[^<]*<\/f>/,f=>master?f.replace('<f>','<f '+attrs+'>'):'<f '+attrs+'/>')+end);
   zip.file('xl/worksheets/sheet1.xml',xml);data.negotiated=await zip.generateAsync({type:'nodebuffer'});
  }
+ if(process.env.FUNDS_CLASSIFICATION_QA){
+  const appBook=X.read(data.applications),app=appBook.Sheets.付款申请汇总;
+  app.K1={t:'s',v:'付款分类'};
+  for(let r=2;r<=X.utils.decode_range(app['!ref']).e.r+1;r++){
+   if(app['D'+r]?.v==='MDST-DGFK20261024001'){app['K'+r]={t:'s',v:'谈判付款'};app['B'+r]={t:'s',v:'不同申请供应商'};app['J'+r]={t:'n',v:1};}
+   if(app['D'+r]?.v==='MDST-DGFK20261024010'){app['K'+r]={t:'s',v:'谈判付款'};app['J'+r]={t:'n',v:400};app['A'+r]={t:'s',v:'异常日期'};}
+  }
+  app['!ref']='A1:K'+(X.utils.decode_range(app['!ref']).e.r+1);data.applications=Buffer.from(X.write(appBook,{type:'buffer',bookType:'xlsx'}));
+ }
  const source=X.read(data.negotiated,{cellStyles:true,cellNF:true}),input={};
  for(const key of ['ledger','applications','oa','negotiated'])input[key]={name:key+'.xlsx',book:X.read(data[key],{cellNF:true})};input.negotiated.sheetName='谈判付款';
  const expected=Core.build(input);assert.equal(expected.negotiated.batchLayout,true);assert.equal(expected.negotiated.headers.length,39);assert.equal(expected.stats.pending,0);
+ if(process.env.FUNDS_CLASSIFICATION_QA){assert.equal(expected.normalRows.length,4);assert.equal(expected.reviewRows.length,0);assert.equal(expected.negotiated.rows.length,3);}
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
  try{
   const page=await browser.newPage({acceptDownloads:true});const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -30,9 +40,14 @@ const {fixtures}=require('./funds-fixtures.cjs');
   for(const key of ['ledger','applications','oa','negotiated'])await frame.locator('#'+key+'File:not([disabled])').setInputFiles({name:key+'.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:data[key]});
   await frame.locator('#analyze:not([disabled])').click();try{await frame.locator('#download:not([disabled])').waitFor({timeout:60000});}catch(e){throw Error(await frame.locator('#status').innerText());}
   assert.equal(await frame.locator('#negotiatedPreview th').count(),39);assert.equal(await frame.locator('#negotiatedPreview .batch-detail').first().evaluate(e=>getComputedStyle(e).textAlign),'left');
+  assert(await frame.locator('th').evaluateAll(cells=>cells.every(c=>getComputedStyle(c).whiteSpace==='nowrap'&&c.scrollWidth<=c.clientWidth+1)));
   const downloadPromise=page.waitForEvent('download');await frame.locator('#download').click();const download=await downloadPromise;
   const output=await fs.readFile(await download.path()),saved=X.read(output,{cellStyles:true,cellNF:true}),s=saved.Sheets.谈判付款,src=source.Sheets.谈判付款;
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对']);assert.equal(s['!ref'],'A1:AM'+(expected.negotiated.sourceRange.e.r+1));
+  if(process.env.FUNDS_CLASSIFICATION_QA){
+   const normal=X.utils.sheet_to_json(saved.Sheets.正常付款);assert.equal(normal.length,4);assert(!normal.some(r=>r['对公付款0A流程号']==='MDST-DGFK20261024001'));
+   assert.equal(X.utils.sheet_to_json(saved.Sheets.付款申请核对).length,0);assert.equal(s['!ref'],'A1:AM4');
+  }
   const names=X.utils.sheet_to_json(s,{header:1})[0];for(const h of ['提交付款申请单日期','提交时间汇总','付款自然周'])assert(!names.includes(h));
   const updates=new Set(expected.negotiated.updates.map(u=>u.address));
   for(const [address,c] of Object.entries(src)){

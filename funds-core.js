@@ -16,7 +16,7 @@ const clone=c=>c?{...c}:empty();
 const aliases={月份:'登记月份',所属月份:'登记月份',供应商:'供应商名称',供应商全称:'供应商名称',对公付款OA流程号:'对公付款0A流程号',付款OA号:'对公付款0A流程号',应付时间:'应付款时间',已付款金额:'已付金额',剩余付款金额:'剩余金额',合同号:'OA合同编号',合同金额:'合同总金额',本次申请付款金额:'申请付款金额',付款事由:'摘要'};
 const canonical=v=>aliases[norm(v)]||norm(v);
 const BATCH_HEADERS=['谈判明细','分批总金额','核对'];
-const relevant=new Set([...NORMAL_HEADERS,...ADDED_HEADERS,...BATCH_HEADERS,'申请日期','备注','对接人','创建人','流程编号','流程编码']);
+const relevant=new Set([...NORMAL_HEADERS,...ADDED_HEADERS,...BATCH_HEADERS,'付款分类','申请日期','备注','对接人','创建人','流程编号','流程编码']);
 const entity=v=>({'浙江迈德斯特医疗器械科技有限公司':'迈德斯特','杭州国源养老科技有限公司':'国源'}[norm(v)]||norm(v));
 function money(c){
  if(c?.t==='e'||(c?.f&&(c.v==null||c.v==='')))return {invalid:true};
@@ -153,12 +153,17 @@ function build(inputs,decisions={}){
   const cents=amount.cents!==undefined&&amount.cents>=0n?amount.cents:undefined;
   return {name,cents,key:name&&cents!==undefined?JSON.stringify([name,cents.toString()]):''};
  };
+ // Prefer the new column even when its value is blank; old files may still use "合同号".
+ const applicationOAField=applications.map['流程编码']===undefined?'OA合同编号':'流程编码';
+ const applicationIds=record=>{const reference=record.values[applicationOAField];return reference?.t==='e'?[]:codes(reference?.v);};
+ const applicationNegotiatedIds=new Set(applications.records.filter(r=>r.values['付款分类']?.t!=='e'&&norm(value(r,'付款分类'))==='谈判付款').flatMap(applicationIds));
+ const isApplicationNegotiated=r=>oas(r).some(id=>applicationNegotiatedIds.has(id));
  const negotiatedKeys=new Set(),uncertainNegotiated=[];
  for(const r of negotiated.records){const info=classification(r);if(info.key)negotiatedKeys.add(info.key);else uncertainNegotiated.push({record:r,...info});}
  const normal=[];let negotiatedLedgerRows=0,excludedNormalRows=0;
  for(const r of ledger){
   const info=classification(r);
-  if(info.key&&negotiatedKeys.has(info.key)){negotiatedLedgerRows++;continue;}
+  if(isApplicationNegotiated(r)||(info.key&&negotiatedKeys.has(info.key))){negotiatedLedgerRows++;continue;}
   if(!hasPaymentOA(r)){excludedNormalRows++;continue;}
   if(!info.key){normal.push(r);continue;}
   const uncertain=uncertainNegotiated.filter(n=>(!n.name||n.name===info.name)&&(n.cents===undefined||n.cents===info.cents));
@@ -209,9 +214,6 @@ function build(inputs,decisions={}){
  normalObjects.forEach(applyFinancial);
  const applicationsByKey=new Map();
  for(const record of applications.records){const key=classification(record).key;if(key){if(!applicationsByKey.has(key))applicationsByKey.set(key,[]);applicationsByKey.get(key).push(record);}}
- // Prefer the new column even when its value is blank; old files may still use "合同号".
- const applicationOAField=applications.map['流程编码']===undefined?'OA合同编号':'流程编码';
- const applicationIds=record=>{const reference=record.values[applicationOAField];return reference?.t==='e'?[]:codes(reference?.v);};
  function matchingApplications(target,preferOA=false){
   if(preferOA){
    const ids=oas(target.record),matched=applications.records.filter(r=>applicationIds(r).some(id=>ids.includes(id)));
@@ -220,6 +222,7 @@ function build(inputs,decisions={}){
   return applicationsByKey.get(classification(target.record).key)||[];
  }
  function reviewApplication(target,message,candidates){
+  if(isApplicationNegotiated(target.record))return;
   const source=target.record.source,amount=money(target.values['申请付款金额']);
   const display=c=>c?.t==='e'?c.w||'Excel错误':c?.f&&(c.v==null||c.v==='')?'公式结果不可用':c?.v??'';
   const status=matchingApplications(target,true).length?'已提交':'未申请';

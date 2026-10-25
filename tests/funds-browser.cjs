@@ -77,7 +77,7 @@ function compareNegotiated(before,after){
   }
   await resolveKeep();
   const classificationText=await frame.locator('#classificationSummary').innerText();
-  assert.match(classificationText,new RegExp(`${real?104:2} 条按供应商名称＋申请付款金额命中谈判表`));
+  assert.match(classificationText,new RegExp(`${real?104:2} 条按付款申请分类或谈判表识别为谈判付款`));
   assert.match(classificationText,new RegExp(`${real?15:5} 条正常付款`));
   assert.match(classificationText,new RegExp(`${real?26:0} 条无对公付款 OA 号未纳入正常付款`));
   assert.match(classificationText,/0 条暂未分类/);

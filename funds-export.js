@@ -114,7 +114,7 @@ window.FundsExport = async function(sourceBytes, result) {
       if(!headerFonts.has(oldFont)){const originalFont=fonts.children[oldFont],next=originalFont.cloneNode(true),color=create(styles,'color',{rgb:'FFFFFFFF'}),oldColor=first(next,'color');if(oldColor)oldColor.replaceWith(color);else next.append(color);headerFonts.set(oldFont,next.isEqualNode(originalFont)?oldFont:append('fonts',next));}
       xf.setAttribute('fontId',headerFonts.get(oldFont));xf.setAttribute('applyFont','1');xf.setAttribute('fillId',fillId);xf.setAttribute('applyFill','1');
     }
-    if(flow){let alignment=first(xf,'alignment');if(!alignment){alignment=create(styles,'alignment');xf.insertBefore(alignment,first(xf,'protection')||null);}alignment.setAttribute('wrapText','0');alignment.setAttribute('shrinkToFit','1');xf.setAttribute('applyAlignment','1');}
+    if(header||flow){let alignment=first(xf,'alignment');if(!alignment){alignment=create(styles,'alignment');xf.insertBefore(alignment,first(xf,'protection')||null);}alignment.setAttribute('wrapText','0');alignment.setAttribute('shrinkToFit',flow?'1':'0');xf.setAttribute('applyAlignment','1');}
     const next=xf.isEqualNode(original)?Number(id):append('cellXfs',xf);layoutStyles.set(key,next);return next;
   };
   const measure=document.createElement('canvas').getContext('2d');
@@ -142,8 +142,8 @@ window.FundsExport = async function(sourceBytes, result) {
       let text=type==='s'?sharedTexts[Number(raw)]||'':type==='inlineStr'?elements(c,'t').map(t=>t.textContent).join(''):raw;
       if((!type||type==='n')&&raw!=='')try{const id=Number(xf?.getAttribute('numFmtId')||0),format=[...formats].find(([,n])=>n===id)?.[0]??id;text=XLSX.SSF.format(format,Number(raw),{date1904});}catch(_){}
       let width=Math.max(...String(text).split(/\r?\n/).map(line=>[...line].reduce((n,ch)=>n+(/[\u0000-\u00ff]/.test(ch)?1:2),0)))*size/11/(merged.get(address)||1)+3;
-      if(flow){const font=fonts.children[Number(xf?.getAttribute('fontId')||0)];if(measure){measure.font=(first(font,'b')?'bold ':'')+size+'pt '+JSON.stringify(first(font,'name')?.getAttribute('val')||'Arial')+', sans-serif';width=Math.max(width,(measure.measureText(String(text)).width*1.15+20)/7);}width=Math.max(width,dateColumns.has(point.c)?22:32);}
-      widths[point.c]=Math.min(flow?255:80,Math.max(widths[point.c]||12,width));
+      if(header||flow){const font=fonts.children[Number(xf?.getAttribute('fontId')||0)];if(measure){measure.font=(first(font,'b')?'bold ':'')+size+'pt '+JSON.stringify(first(font,'name')?.getAttribute('val')||'Arial')+', sans-serif';width=Math.max(width,(measure.measureText(String(text)).width*1.15+20)/7/(merged.get(address)||1));}if(flow)width=Math.max(width,dateColumns.has(point.c)?22:32);}
+      widths[point.c]=Math.max(widths[point.c]||12,Math.min(header||flow?255:80,width));
     }
     if(batch){
       const detailStyles=new Map();
