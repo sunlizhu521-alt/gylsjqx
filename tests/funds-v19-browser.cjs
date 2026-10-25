@@ -40,7 +40,7 @@ const {fixtures}=require('./funds-fixtures.cjs');
  const source=X.read(data.negotiated,{cellStyles:true,cellNF:true}),input={};
  for(const key of ['ledger','applications','oa','negotiated'])input[key]={name:key+'.xlsx',book:X.read(data[key],{cellNF:true})};input.negotiated.sheetName='谈判付款';
  const expected=Core.build(input);assert.equal(expected.negotiated.batchLayout,true);assert.equal(expected.negotiated.headers.length,39);assert.equal(expected.stats.pending,0);
- if(process.env.FUNDS_CLASSIFICATION_QA){assert.equal(expected.normalRows.length,4);assert.equal(expected.reviewRows.length,0);assert.equal(expected.negotiated.rows.length,3);}
+ if(process.env.FUNDS_CLASSIFICATION_QA){assert.equal(expected.normalRows.length,4);assert.equal(expected.reviewRows.length,1);assert.equal(expected.negotiated.rows.length,3);}
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
  try{
   const page=await browser.newPage({acceptDownloads:true});const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -55,7 +55,7 @@ const {fixtures}=require('./funds-fixtures.cjs');
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对']);assert.equal(s['!ref'],'A1:AM'+(expected.negotiated.sourceRange.e.r+1));
   if(process.env.FUNDS_CLASSIFICATION_QA){
    const normal=X.utils.sheet_to_json(saved.Sheets.正常付款);assert.equal(normal.length,4);assert(!normal.some(r=>r['对公付款0A流程号']==='MDST-DGFK20261024001'));
-   assert.equal(X.utils.sheet_to_json(saved.Sheets.付款申请核对).length,0);assert.equal(s['!ref'],'A1:AM4');assert.equal(s.AH2.v,'已经提交全部');
+   assert.equal(X.utils.sheet_to_json(saved.Sheets.付款申请核对).length,1);assert.match(saved.Sheets.付款申请核对.F2.v,/重复提交.*单笔金额 400.00/);assert.equal(s['!ref'],'A1:AM4');assert.equal(s.AH2.v,'已经提交全部');
   }
   const names=X.utils.sheet_to_json(s,{header:1})[0];for(const h of ['提交付款申请单日期','提交时间汇总','付款自然周'])assert(!names.includes(h));
   const updates=new Set(expected.negotiated.updates.map(u=>u.address));

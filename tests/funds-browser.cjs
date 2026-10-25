@@ -109,8 +109,8 @@ function compareNegotiated(before,after){
   assert.deepEqual(negotiatedRows.slice(1,101).map(row=>row[weekIndex]),await frame.locator('#negotiatedPreview tbody tr td:nth-child('+(weekIndex+1)+')').allTextContents(),'谈判付款自然周预览与导出一致');
   if(!real){for(const row of normal.slice(1))assert.equal(row[24],'2026/11/02周');assert.equal(negotiatedRows[1][weekIndex],'2026/10/26周；2026/11/02周');assert.equal(negotiatedRows[2][weekIndex],'日期待确认');}
   const applicationReview=X.utils.sheet_to_json(saved.Sheets.付款申请核对,{header:1,defval:''});assert.deepEqual(applicationReview[0],REVIEW_HEADERS);
-  assert.equal(applicationReview.length-1,0,'仅申请异常列入核对表，未申请不列入');
-  assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),{});
+  assert.equal(applicationReview.length-1,real?1:0,'仅申请异常列入核对表，未申请不列入');
+  assert.deepEqual(applicationReview.slice(1).reduce((counts,row)=>(counts[row[4]]=(counts[row[4]]||0)+1,counts),{}),real?{'已提交':1}:{});
   assert.equal(saved.Sheets.付款申请核对['!autofilter'].ref,`A1:J${applicationReview.length}`);
   assert(applicationReview.slice(1).every(row=>row[5]&&row[7]&&row[8]&&Number.isInteger(row[9])),'付款申请核对须包含说明和来源文件、工作表、行号');
   assert.equal(normal.length-1,real?15:5);assert.equal(saved.Sheets.正常付款['!autofilter'].ref,`A1:Y${normal.length}`);
@@ -164,7 +164,7 @@ function compareNegotiated(before,after){
    assert.deepEqual(states.reduce((counts,state)=>(counts[state]=(counts[state]||0)+1,counts),{}),{'已经提交全部':48,'已经提交部分':10,'未提交':58});
    assert.equal(applicationReview.slice(1).filter(row=>row[5].includes('同一流程对应多笔付款')).length,0,'同一流程下唯一名称金额可区分两笔申请，不重复分摊');
    assert.equal(applicationReview.slice(1).filter(row=>row[5].includes('申请超额')).length,0,'明确分类为谈判付款的申请不列入核对表');
-   assert.equal(applicationReview.slice(1).filter(row=>row[5].includes('OA 号冲突')).length,0);
+   assert.equal(applicationReview.slice(1).filter(row=>row[5].includes('OA 号冲突')).length,0);assert.equal(applicationReview.slice(1).filter(row=>row[5].startsWith('重复提交：')).length,1);
    assert(applicationReview.slice(1).every(row=>row[6].includes('流程编码 MDST-DGFK')),'核对来源显示实际流程编码');
   }
   await download(2);

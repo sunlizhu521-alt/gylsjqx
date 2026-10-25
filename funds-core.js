@@ -253,12 +253,13 @@ function build(inputs,decisions={}){
   }
   return (applicationsByKey.get(classification(target.record).key)||[]).filter(r=>eligibleApplication(r,target.normal));
  }
+ const applicationEvidence=candidates=>candidates.map(a=>{const d=date(a.values['申请日期'],a.date1904),label=!d.invalid&&d.v!==''?X.SSF.format('yyyy-mm-dd',d.v):str(value(a,'申请日期'))||'日期为空';return label+'－'+amountText(a.values['申请付款金额'])+'；流程编码 '+(str(value(a,applicationOAField))||'空')+'；'+a.source.file+'/'+a.source.sheet+'!'+a.source.row;}).join('\n')||'无匹配申请';
  function reviewApplication(target,message,candidates){
   if(isApplicationNegotiated(target.record))return;
   const source=target.record.source,amount=money(target.values['申请付款金额']);
   const display=c=>c?.t==='e'?c.w||'Excel错误':c?.f&&(c.v==null||c.v==='')?'公式结果不可用':c?.v??'';
   const status=matchingApplications(target,true).length?'已提交':'未申请';
-  reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(display(target.values['供应商名称'])),cell(display(target.values['付款主体'])),amount.cents!==undefined?amountCell(amount.cents):cell(display(target.values['申请付款金额'])),cell(status),cell(message),cell(candidates.map(a=>{const d=date(a.values['申请日期'],a.date1904),label=!d.invalid&&d.v!==''?X.SSF.format('yyyy-mm-dd',d.v):str(value(a,'申请日期'))||'日期为空';return label+'－'+amountText(a.values['申请付款金额'])+'；流程编码 '+(str(value(a,applicationOAField))||'空')+'；'+a.source.file+'/'+a.source.sheet+'!'+a.source.row;}).join('\n')||'无匹配申请'),cell(source.file),cell(source.sheet),cell(source.row)]);
+  reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(display(target.values['供应商名称'])),cell(display(target.values['付款主体'])),amount.cents!==undefined?amountCell(amount.cents):cell(display(target.values['申请付款金额'])),cell(status),cell(message),cell(applicationEvidence(candidates)),cell(source.file),cell(source.sheet),cell(source.row)]);
  }
  function applyApplications(target){
   const matched=matchingApplications(target);
@@ -365,6 +366,22 @@ function build(inputs,decisions={}){
    if(total>info.cents)reviewApplication(target,'申请超额：累计 '+centsText(total)+'，应申请 '+amountText(target.values['申请付款金额'])+'。',matched);
   }
   applySubmissionDetails(target,matched);
+ }
+ // Scan the full application source once, independently of payment targets and their review exclusions.
+ const duplicateApplications=new Map();
+ for(const application of applications.records){
+  const type=applicationTypes.get(application),ids=applicationIds(application),info=classification(application);
+  if(!type||!ids.length||!info.key)continue;
+  const key=JSON.stringify([type,[...new Set(ids)].sort(),info.key]);
+  if(!duplicateApplications.has(key))duplicateApplications.set(key,[]);
+  duplicateApplications.get(key).push(application);
+ }
+ for(const group of duplicateApplications.values()){
+  if(group.length<2)continue;
+  const first=group[0],source=first.source,amount=classification(first).cents;
+  const subjects=[...new Set(group.map(r=>{const c=r.values['付款主体'];return c?.t==='e'?c.w||'Excel错误':c?.f&&(c.v==null||c.v==='')?'公式结果不可用':str(c?.v);}).filter(Boolean))].join('、');
+  const message='重复提交：共 '+group.length+' 次，重复 '+(group.length-1)+' 次；单笔金额 '+centsText(amount)+'；重复计入金额 '+centsText(amount*BigInt(group.length-1))+'。';
+  reviewRows.push([cell(applicationTypes.get(first)),cell(value(first,'供应商名称')),cell(subjects),amountCell(amount),cell('已提交'),cell(message),cell(applicationEvidence(group)),cell(source.file),cell(source.sheet),cell(source.row)]);
  }
  function normalCell(target,key){
   if(key==='付款自然周')return paymentWeek(target.values['应付款时间'],target.record.date1904);

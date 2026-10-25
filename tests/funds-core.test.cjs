@@ -644,3 +644,34 @@ test('相同流程编码供应商金额为重复提交，只计一次金额，�
  const suppliers=installmentFixture([{'供应商全称':'测试甲','本次申请付款金额':50},{'供应商全称':'测试乙','本次申请付款金额':50}]);assert.equal(negotiatedValue(C.build(suppliers),'是否提交付款申请单'),'已经提交全部','供应商不同不能视为重复');
  const missing=installmentFixture([{'合同号':'','本次申请付款金额':100},{'合同号':'','本次申请付款金额':100}]);assert.equal(C.build(missing).reviewRows.length,1,'流程编码缺失不能凭相同金额认定重复');
 });
+
+function classifiedFixture(){const i=fixture();X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['付款分类'],['谈判付款'],['正常付款']],{origin:'J1'});return i;}
+const duplicateReviews=r=>r.reviewRows.filter(row=>row[5].v.startsWith('重复提交：'));
+test('两类付款同日及跨日三次重复各只列一组，计额不变并列出全部来源',()=>{
+ const i=classifiedFixture(),s=i.applications.book.Sheets.付款申请汇总,rows=X.utils.sheet_to_json(s,{header:1});
+ for(const n of [1,2]){const same=rows[n].slice(),later=rows[n].slice();later[0]='2026-10-21';later[2]='其他主体';X.utils.sheet_add_aoa(s,[same,later],{origin:-1});}
+ const before=JSON.stringify(i),r=C.build(i),reviews=duplicateReviews(r);assert.equal(reviews.length,2);assert.equal(r.reviewRows.length,2);assert.equal(r.stats.pending,0);assert.deepEqual(reviews.map(row=>row[0].v),['谈判付款','正常付款']);
+ for(const row of reviews){assert.match(row[5].v,/共 3 次，重复 2 次.*单笔金额 100.00.*重复计入金额 200.00/);assert.equal(row[6].v.split('\n').length,3);assert.match(row[6].v,/2026-10-10.*100.00/);assert.match(row[6].v,/2026-10-21.*100.00/);assert.match(row[6].v,/流程编码 MDST-DGFK/);assert.match(row[6].v,/申请.xlsx\/付款申请汇总!/);assert.equal(row[7].v,'申请.xlsx');assert.equal(row[8].v,'付款申请汇总');assert.equal(row[3].t,'n');assert.equal(row[3].v,100);assert.equal(row[2].v,'迈德斯特、其他主体');}
+ assert.equal(negotiatedValue(r,'是否提交付款申请单'),'已经提交全部');assert.equal(negotiatedValue(r,'提交时间汇总').split('\n').length,3);assert.equal(r.normalRows[0][16].v,'已提交');assert.equal(negotiatedValue(r,'已付金额'),0);assert.equal(negotiatedValue(r,'剩余付款金额'),100);assert.equal(JSON.stringify(i),before);
+});
+test('扫描整份申请，未关联款项的重复也列核对但不新增付款明细',()=>{
+ const i=classifiedFixture(),s=i.applications.book.Sheets.付款申请汇总,row=X.utils.sheet_to_json(s,{header:1})[2].slice();row[1]='未关联供应商';row[3]='MDST-DGFK20991231099';row[8]=12.34;X.utils.sheet_add_aoa(s,[row,row],{origin:-1});
+ const r=C.build(i),reviews=duplicateReviews(r);assert.equal(reviews.length,1);assert.equal(reviews[0][1].v,'未关联供应商');assert.equal(reviews[0][9].v,4);assert.match(reviews[0][5].v,/单笔金额 12.34.*重复计入金额 12.34/);assert.equal(r.normalRows.length,1);assert.equal(r.negotiated.rows.length,1);assert.equal(r.stats.pending,0);
+});
+test('重复组复用标准化名称编码金额，按分精确计算且零金额有效',()=>{
+ for(const amount of [0,0.01,1234.56]){const i=classifiedFixture(),s=i.applications.book.Sheets.付款申请汇总;set(i,'applications','本次申请付款金额',3,amount);const row=X.utils.sheet_to_json(s,{header:1})[2].slice();row[1]='　测试供应商乙 ';row[3]=' mdst-dgfk20261001002 ';row[8]='￥'+amount.toFixed(2);row[9]=' 正常付款 ';X.utils.sheet_add_aoa(s,[row,row],{origin:-1});const reviews=duplicateReviews(C.build(i));assert.equal(reviews.length,1);assert.equal(reviews[0][3].v,amount);assert(reviews[0][5].v.includes('重复计入金额 '+(amount*2).toFixed(2)));}
+});
+test('不同类别流程供应商金额不混合，无可靠分类或完整键不猜测重复',()=>{
+ for(const [col,value] of [[9,'正常付款'],[3,'MDST-DGFK20990101099'],[1,'其他供应商'],[8,100.01]]){const i=classifiedFixture(),s=i.applications.book.Sheets.付款申请汇总,row=X.utils.sheet_to_json(s,{header:1})[1].slice();row[col]=value;X.utils.sheet_add_aoa(s,[row],{origin:-1});assert.equal(duplicateReviews(C.build(i)).length,0);}
+ for(const [col,bad] of [[3,''],[3,'未提交OA'],[3,{t:'e',v:23}],[3,{t:'s',f:'A99'}],[1,''],[1,{t:'e',v:23}],[8,''],[8,'异常'],[8,-1],[8,0.001],[8,{t:'n',f:'A99'}],[9,''],[9,'未知分类'],[9,{t:'e',v:23}]]){
+  const i=classifiedFixture(),s=i.applications.book.Sheets.付款申请汇总,row=X.utils.sheet_to_json(s,{header:1})[1].slice();row[col]=bad;X.utils.sheet_add_aoa(s,[row,row],{origin:-1});assert.equal(duplicateReviews(C.build(i)).length,0);
+ }
+ const legacy=fixture(),s=legacy.applications.book.Sheets.付款申请汇总,row=X.utils.sheet_to_json(s,{header:1})[1];X.utils.sheet_add_aoa(s,[row],{origin:-1});assert.equal(duplicateReviews(C.build(legacy)).length,0,'无付款分类列时不推断重复分类');
+});
+test('同组关联多条输出明细仍只列一次，日期异常仅保留来源不阻止重复识别',()=>{
+ const i=classifiedFixture(),s=i.applications.book.Sheets.付款申请汇总,row=X.utils.sheet_to_json(s,{header:1})[2].slice();row[0]='日期待定';X.utils.sheet_add_aoa(s,[row],{origin:-1});const ledger=i.ledger.book.Sheets['对账明细-李奇'],normal=X.utils.sheet_to_json(ledger,{header:1})[2];X.utils.sheet_add_aoa(ledger,[normal],{origin:-1});
+ const r=C.build(i);assert.equal(r.normalRows.length,2);assert.equal(duplicateReviews(r).length,1);assert.match(duplicateReviews(r)[0][6].v,/日期待定/);assert.equal(r.stats.pending,0);
+});
+test('多流程编码按完整集合识别重复，不把部分相同流程的申请合并',()=>{
+ const i=classifiedFixture(),s=i.applications.book.Sheets.付款申请汇总,row=X.utils.sheet_to_json(s,{header:1})[2].slice();row[3]='MDST-DGFK20990101001、MDST-DGFK20990101002';const reversed=row.slice();reversed[3]='MDST-DGFK20990101002、MDST-DGFK20990101001';const partial=row.slice();partial[3]='MDST-DGFK20990101001';X.utils.sheet_add_aoa(s,[row,reversed,partial],{origin:-1});const reviews=duplicateReviews(C.build(i));assert.equal(reviews.length,1);assert.match(reviews[0][5].v,/共 2 次/);assert.equal(reviews[0][6].v.split('\n').length,2);
+});

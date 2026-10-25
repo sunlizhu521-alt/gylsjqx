@@ -56,7 +56,7 @@
       <div class="upload"><label for="oaFile">OA 流程表（MDST-对公付款）</label><small>谈判付款按“对公付款0A流程号”匹配 OA 表“流程编号”；正常付款按供应商名称＋申请付款金额匹配收款单位＋付款金额。填写流程编号、当前节点、未操作者、流程状态、申请人。未匹配保留原信息；多个流程分别列出。</small><input id="oaFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="oaInfo">尚未引用</small></div>
     </div>
     <div class="actions"><button id="analyze" disabled>整理并核对</button><span id="status" role="status" aria-live="polite">正在加载工具…</span></div>
-    <small>原对公付款 OA 号匹配付款申请汇总的“流程编码”，且“付款分类”为“谈判付款”时，直接归为谈判付款，不列入正常付款及付款申请核对；谈判表没有的记录不新增。其余记录按供应商名称＋申请付款金额在所选谈判表中是否出现分类。正常付款仅纳入资金台账原“对公付款0A流程号”有值的记录，无编号记录不统计、不预览、不导出。</small>
+    <small>原对公付款 OA 号匹配付款申请汇总的“流程编码”，且“付款分类”为“谈判付款”时，直接归为谈判付款，不列入正常付款；谈判表没有的记录不新增。重复提交仍单独列入付款申请核对。其余记录按供应商名称＋申请付款金额在所选谈判表中是否出现分类。正常付款仅纳入资金台账原“对公付款0A流程号”有值的记录，无编号记录不统计、不预览、不导出。</small>
     <small>供应商或付款主体为空时保留原值；已付金额为空时保留原付款情况，不按零处理。切换工具保留本次内容，刷新后需重新选择文件。</small>
     <small>支持 V19 分批格式：识别“谈判明细、分批总金额、核对”，保留原分批计划、求和及核对公式、剩余付款金额公式和结清信息，不重新添加已删除的提交日期、提交时间汇总、付款自然周列。付款申请仍按原规则匹配并更新提交状态；正常付款保留提交时间汇总。登记月份、应付款时间无法识别时保留原文。</small>
   </section>
@@ -70,16 +70,16 @@
       <div class="issue-list" id="issueList"></div>
     </div>
     <div class="actions"><button id="download" disabled>下载资金整理表</button><span id="filenameHint"></span></div>
-    <small>未申请及按流程号命中申请表“谈判付款”分类的记录不列入核对。其余记录累计申请超额、无法区分归属及申请日期问题自动列入“付款申请核对”表，不阻止下载；其他待核对项处理后可下载。当天在当前浏览器重复下载时，文件版本自动递增。</small>
+    <small>重复提交扫描整份付款申请汇总，谈判付款、正常付款均检查，每个重复组只列一行，未进入付款表的申请也检查。除此之外，未申请及按流程号命中申请表“谈判付款”分类的记录不列入核对。其余记录累计申请超额、无法区分归属及申请日期问题自动列入“付款申请核对”表，不阻止下载；其他待核对项处理后可下载。当天在当前浏览器重复下载时，文件版本自动递增。</small>
   </section>
   <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><small>预览最多显示 100 行；下载包含全部记录。V19 谈判明细左对齐、分行显示，行高按内容适配；其余表保留 30 磅行高。统一蓝底白字表头和筛选器，有内容的列从表头到最后一条数据都有边框，包含中间空白格。列宽按内容自适应，全部表头单行完整展示，流程编号不换行；长备注可在编辑栏查看。</small><div class="preview" id="negotiatedPreview"></div></section>
   <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><small>仅显示原“对公付款0A流程号”有值的正常付款，已结清明细也保留。原编号为空、只有空格或公式结果不可用的记录不纳入；匹配出的“流程编号”不替代此条件。</small><div class="preview" id="normalPreview"></div></section>
-  <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><small>仅列累计超额、归属不清及已匹配申请的异常日期或金额，未申请无需核对。“是否提交付款申请单”先匹配申请表流程编码，缺少 OA 号时再按同类申请的供应商名称＋本次申请付款金额补判；已有编号不同的申请不匹配、不列核对。金额及归属问题保留在核对说明中。每项保留来源和候选申请。分批提交进度不改变原已付金额、剩余金额及结清状态。</small><div class="preview" id="reviewPreview"></div></section>
+  <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><small>按付款分类＋流程编码＋供应商名称＋金额识别重复提交，跨日期同样检查；列出重复次数、单笔金额、重复计入金额及全部申请来源。其他核对仍仅列累计超额、归属不清及已匹配申请的异常日期或金额，未申请无需核对。“是否提交付款申请单”先匹配申请表流程编码，缺少 OA 号时再按同类申请的供应商名称＋本次申请付款金额补判；已有编号不同的申请不匹配、不列核对。金额及归属问题保留在核对说明中。每项保留来源和候选申请。分批提交进度不改变原已付金额、剩余金额及结清状态。</small><div class="preview" id="reviewPreview"></div></section>
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=submission-three-statuses-20261025-21"></script>
-<script src="funds-export.js?v=submission-three-statuses-20261025-21"></script>
-<script src="funds-tool.js?v=submission-three-statuses-20261025-21"></script>
+<script src="funds-core.js?v=duplicate-application-review-20261025-22"></script>
+<script src="funds-export.js?v=duplicate-application-review-20261025-22"></script>
+<script src="funds-tool.js?v=duplicate-application-review-20261025-22"></script>
 </body>
 </html>
