@@ -248,14 +248,14 @@ function compareNegotiated(before,after){
     if(unmatched){
      assert.equal(await review.locator('.issue[data-issue-id^="oa:"]').count(),0);
      assert.deepEqual(['当前节点','未操作者','流程状态','申请人','流程编号'].map(key=>checked[X.utils.encode_cell({r:1,c:NORMAL_HEADERS.indexOf(key)})].v),retained);
-     const n=downloadedBook.Sheets.谈判付款,h=fields(n),expected=negotiatedMissing?retained:['财务审核','测试审核人','未归档','李奇','MDST-DGFK20261024010'];
+     const n=downloadedBook.Sheets.谈判付款,h=fields(n),expected=retained;
      const previewHeaders=await review.locator('#negotiatedPreview th').allTextContents();
      for(const [index,key] of ['当前节点','未操作者','流程状态','申请人','流程编号'].entries()){
       assert.equal(n[X.utils.encode_cell({r:1,c:h[key]})].v,expected[index]);
       assert.equal(await review.locator('#negotiatedPreview tbody tr').first().locator('td').nth(previewHeaders.indexOf(key)).innerText(),expected[index]);
      }
-     assert.equal(n.C2.v,'MDST-DGFK20261024010','原付款OA编号保持不变');
-     assert.equal(n[X.utils.encode_cell({r:1,c:h['是否提交付款申请单']})].v,'已经提交部分','供应商名称不同仍只按OA号归集');assert.equal(n[X.utils.encode_cell({r:1,c:h['提交时间汇总']})].v,'2026-10-23-100.00\n2026-10-24-80.00');
+     assert.equal(n.C2?.v??'',negotiatedMissing?'MDST-DGFK20261024010':'','跨供应商冲突不能沿用台账补入的OA');
+     assert.equal(n[X.utils.encode_cell({r:1,c:h['是否提交付款申请单']})]?.v??'',negotiatedMissing?'已经提交部分':'','跨供应商OA冲突保留原提交状态');assert.equal(n[X.utils.encode_cell({r:1,c:h['提交时间汇总']})].v,negotiatedMissing?'2026-10-23-100.00\n2026-10-24-80.00':'2026-09-01-999.00');if(!negotiatedMissing)assert.match(await review.locator('#reviewPreview').innerText(),/OA供应商冲突/);
      assert.equal(n.E2.v,0);assert.equal(n.N2.v,300);assert.equal(n.K2.v,'否');
     }
     assert.deepEqual(errors,[]);
