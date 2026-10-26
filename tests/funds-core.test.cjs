@@ -31,7 +31,7 @@ function fixture(){
 function set(input,role,header,row,value,sheet){const b=input[role].book,s=b.Sheets[sheet||b.SheetNames[0]],h=X.utils.sheet_to_json(s,{header:1})[0],c=h.indexOf(header);assert(c>=0);s[X.utils.encode_cell({r:row-1,c})]=typeof value==='object'&&value!==null?value:{t:typeof value==='number'?'n':'s',v:value};}
 const update=(r,address)=>r.negotiated.updates.find(u=>u.address===address)?.cell;
 function resolveKeep(input){let d={};for(let i=0;i<4;i++){const r=C.build(input,d);if(!r.stats.pending)return r;for(const issue of r.issues)if(!issue.resolved)d[issue.id]=['keep'];}return C.build(input,d);}
-test('正常付款提交付款申请单周按应付款时间提前一周计算，跨月跨年且不使用申请日期',()=>{
+test('正常付款申请付款的日期按应付款时间提前一周计算，跨月跨年且不使用申请日期',()=>{
  const serial=(Date.UTC(2026,9,28)-Date.UTC(1899,11,30))/86400000;
  for(const [raw,expected,date1904] of [
   ['2026-10-26','2026/10/19周'],['2026-10-27','2026/10/19周'],['2026年10月28日','2026/10/19周'],['2026/11/1 23:59:59','2026/10/19周'],['2026-11-02','2026/10/26周'],
@@ -40,15 +40,15 @@ test('正常付款提交付款申请单周按应付款时间提前一周计算�
  ]){
   const i=fixture(),n=i.negotiated.book.Sheets['10月谈判付款主表'];X.utils.sheet_add_aoa(n,[['应付时间','付款自然周'],[raw,'旧周标记']],{origin:'N1'});set(i,'ledger','应付款时间',3,raw);
   if(date1904){i.negotiated.book.Workbook={WBProps:{date1904:true}};i.ledger.book.Workbook={WBProps:{date1904:true}};}
-  const before=JSON.stringify(i),r=C.build(i),column=r.negotiated.headers.indexOf('付款自然周');assert.equal(r.negotiated.rows[0][column].v,'日期待确认');assert.equal(r.normalRows[0][r.normalHeaders.indexOf('提交付款申请单周')].v,expected);assert.equal(r.normalHeaders.at(-1),'提交付款申请单周');assert.equal(r.negotiated.headers.filter(h=>h==='付款自然周').length,1);assert.equal(r.negotiated.rows[0][4].v,0);assert.equal(JSON.stringify(i),before);
+  const before=JSON.stringify(i),r=C.build(i),column=r.negotiated.headers.indexOf('付款自然周');assert.equal(r.negotiated.rows[0][column].v,'日期待确认');assert.equal(r.normalRows[0][r.normalHeaders.indexOf('申请付款的日期')].v,expected);assert.equal(r.normalHeaders.at(-1),'申请付款的日期');assert.equal(r.negotiated.headers.filter(h=>h==='付款自然周').length,1);assert.equal(r.negotiated.rows[0][4].v,0);assert.equal(JSON.stringify(i),before);
  }
- const i=fixture(),r=C.build(i);assert.equal(r.negotiated.rows[0].at(-1).v,'日期待确认');assert.equal(r.normalRows[0][r.normalHeaders.indexOf('提交付款申请单周')].v,'2026/10/19周');assert.equal(r.reviewHeaders.includes('付款自然周'),false);
+ const i=fixture(),r=C.build(i);assert.equal(r.negotiated.rows[0].at(-1).v,'日期待确认');assert.equal(r.normalRows[0][r.normalHeaders.indexOf('申请付款的日期')].v,'2026/10/19周');assert.equal(r.reviewHeaders.includes('付款自然周'),false);
 });
 
 test('谈判付款只按有金额的表头日期归周，多周去重排序，原计划和公式完整保留',()=>{
  const i=fixture(),s=i.negotiated.book.Sheets['10月谈判付款主表'];
  X.utils.sheet_add_aoa(s,[['应付款时间',46325,'2026-11-01','2026-11-03','2026-12-31','2027-01-02','2026-10-05','2026-10-12'],['2030-01-01',10,{t:'n',v:20,f:'G2'},30,40,50,0,'']],{origin:'N1'});
- const before=JSON.stringify(i),r=C.build(i);assert.equal(r.negotiated.rows[0].at(-1).v,'2026/10/26周；2026/11/02周；2026/12/28周');assert.equal(JSON.stringify(i),before);assert.equal(r.normalRows[0][r.normalHeaders.indexOf('提交付款申请单周')].v,'2026/10/19周');
+ const before=JSON.stringify(i),r=C.build(i);assert.equal(r.negotiated.rows[0].at(-1).v,'2026/10/26周；2026/11/02周；2026/12/28周');assert.equal(JSON.stringify(i),before);assert.equal(r.normalRows[0][r.normalHeaders.indexOf('申请付款的日期')].v,'2026/10/19周');
  for(const [header,amount,expected] of [
   ['2026-10-28',0,'日期待确认'],['2026-10-28','', '日期待确认'],['2026-10-28','￥1,234.56','2026/10/26周'],['2026-10-28',{t:'n',v:12,f:'G2'},'2026/10/26周'],
   ['2026-10-28',{t:'n',f:'G2'},'付款计划待确认'],['2026-10-28',{t:'e',v:23},'付款计划待确认'],['2026-10-28',-10,'付款计划待确认'],['2026-10-28','待定','付款计划待确认'],

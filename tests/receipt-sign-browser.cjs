@@ -6,19 +6,29 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright'),fs=require
  await page.locator('#file:not([disabled])').waitFor();
  if(process.env.REAL_RECEIPT){assert.match(base,/^http:\/\/127\.0\.0\.1:/);await page.locator('#file').setInputFiles(process.env.REAL_RECEIPT);}
  else{const book=X.utils.book_new();for(const name of ['入库一','入库二']){const s=X.utils.aoa_to_sheet([['采购入库单'],['单据编号','TEST001'],['供 应 商 :','','测试甲公司'],['物料编码','物料名称','实收数量'],['001','模拟测试产品',0],['002','较长名称'.repeat(8),5000],['合计','',5000],['创建人','原始姓名']]);s['!merges']=[{s:{r:0,c:0},e:{r:0,c:2}}];s['!cols']=[{wch:18},{wch:40},{wch:15}];X.utils.book_append_sheet(book,s,name);}const second=X.utils.book_new();X.utils.book_append_sheet(second,X.utils.aoa_to_sheet([['采购入库单'],['供应商：测试乙公司'],['数量',7]]),'入库一');await page.locator('#file').setInputFiles([{name:'模拟入库单.XLS',mimeType:'application/vnd.ms-excel',buffer:Buffer.from(X.write(book,{type:'buffer',bookType:'biff8'}))},{name:'第二份.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(X.write(second,{type:'buffer',bookType:'xlsx'}))}]);}
- await page.waitForFunction(()=>!document.getElementById('download').disabled);const pages=await page.locator('#sheet option').count();
+ await page.waitForFunction(()=>!document.getElementById('download').disabled);const pages=Number((await page.locator('#pageInfo').innerText()).match(/\/ (\d+) 页/)[1]);assert.equal(await page.locator('#sheet').count(),0);assert(await page.locator('#previousPage').isDisabled());
  assert.equal(await page.locator('#signature,#clearSignature,#cleanSignature').count(),0);await page.locator('#preview').screenshot({path:out+'/preview.png'});
  const before=await page.locator('#status').innerText();assert.match(before,/签名已添加/);
  await page.locator('#signatureWidth').fill('0');assert(await page.locator('#download').isDisabled());await page.locator('#signatureWidth').fill('35');assert(!(await page.locator('#download').isDisabled()));
  if(!process.env.REAL_RECEIPT){const box=await page.locator('#preview').boundingBox();await page.locator('#preview').click({position:{x:box.width/2,y:85/1684*box.height}});assert.match(await page.locator('#status').innerText(),/遮挡/);await page.locator('#preview').click({position:{x:box.width/2,y:1450/1684*box.height}});assert.match(await page.locator('#status').innerText(),/签名已添加/);}
+ const firstPreview=await page.locator('#preview').evaluate(c=>c.toDataURL());
+ if(pages>1){
+  await page.locator('#nextPage').click();assert.equal(await page.locator('#pageInfo').innerText(),`第 2 / ${pages} 页`);
+  if(!process.env.REAL_RECEIPT){assert.match(await page.locator('#pageName').innerText(),/模拟入库单.XLS \/ 入库二/);assert.notEqual(await page.locator('#preview').evaluate(c=>c.toDataURL()),firstPreview);}
+  await page.locator('#previousPage').click();assert.equal(await page.locator('#preview').evaluate(c=>c.toDataURL()),firstPreview,'翻页保留每页签名位置');
+  for(let i=1;i<pages;i++)await page.locator('#nextPage').click();assert(await page.locator('#nextPage').isDisabled());
+  if(!process.env.REAL_RECEIPT)assert.match(await page.locator('#pageName').innerText(),/第二份.xlsx/);
+ }
+ let downloadCount=0;page.on('download',()=>downloadCount++);
  const event=page.waitForEvent('download');await page.locator('#download').click();const download=await event;await download.saveAs(out+'/签字.pdf');
- const bytes=await fs.readFile(out+'/签字.pdf');const info=await page.evaluate(async bytes=>{const pdf=await PDFLib.PDFDocument.load(new Uint8Array(bytes));return {count:pdf.getPageCount(),sizes:pdf.getPages().map(p=>p.getSize())};},[...bytes]);assert.equal(info.count,pages);if(!process.env.REAL_RECEIPT){assert.equal(pages,3);assert.equal(download.suggestedFilename(),'入库单-测试甲公司、测试乙公司.pdf');}assert(info.sizes.every(s=>Math.abs(s.width-595.28)<.1&&Math.abs(s.height-841.89)<.1));
+ const bytes=await fs.readFile(out+'/签字.pdf');const info=await page.evaluate(async bytes=>{const pdf=await PDFLib.PDFDocument.load(new Uint8Array(bytes));return {count:pdf.getPageCount(),sizes:pdf.getPages().map(p=>p.getSize())};},[...bytes]);assert.equal(info.count,pages);assert.equal(downloadCount,1,'只下载一个合并PDF');await page.waitForFunction(()=>!document.getElementById('file').disabled);assert(await page.locator('#nextPage').isDisabled());if(!process.env.REAL_RECEIPT){assert.equal(pages,3);assert.equal(download.suggestedFilename(),'入库单-测试甲公司、测试乙公司.pdf');}assert(info.sizes.every(s=>Math.abs(s.width-595.28)<.1&&Math.abs(s.height-841.89)<.1));
  await page.evaluate(async bytes=>{const pdfjs=await import('./vendor/pdf.min.mjs');pdfjs.GlobalWorkerOptions.workerSrc=new URL('./vendor/pdf.worker.min.mjs',location.href).href;const pdf=await pdfjs.getDocument({data:new Uint8Array(bytes)}).promise;for(let i=1;i<=pdf.numPages;i++){const p=await pdf.getPage(i),view=p.getViewport({scale:2});const canvas=document.createElement('canvas');canvas.id='pdf-check-'+i;canvas.width=view.width;canvas.height=view.height;document.body.append(canvas);await p.render({canvasContext:canvas.getContext('2d'),viewport:view}).promise;}},[...bytes]);for(let i=1;i<=pages;i++)await page.locator('#pdf-check-'+i).screenshot({path:out+'/pdf-page'+i+'.png'});
  await page.reload();assert(await page.locator('#download').isDisabled());
  const repeatBook=X.utils.book_new();X.utils.book_append_sheet(repeatBook,X.utils.aoa_to_sheet([['采购入库单'],['供应商：','测试甲公司']]),'Sheet1');
  await page.locator('#file:not([disabled])').waitFor();
  await page.locator('#file').setInputFiles({name:'复用签名.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(X.write(repeatBook,{type:'buffer',bookType:'xlsx'}))});
  await page.waitForFunction(()=>!document.getElementById('download').disabled);
+ assert.equal(await page.locator('#pageInfo').innerText(),'第 1 / 1 页');assert(await page.locator('#previousPage').isDisabled());assert(await page.locator('#nextPage').isDisabled());
  const restoredDownload=page.waitForEvent('download');await page.locator('#download').click();assert.equal((await restoredDownload).suggestedFilename(),'入库单-测试甲公司.pdf');
 
  assert.deepEqual(errors,[]);console.log(JSON.stringify({status:'PASS',pages,out,filename:download.suggestedFilename()}));
