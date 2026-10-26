@@ -187,8 +187,11 @@ button {
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 16px;
   padding: 16px;
-  max-width: 1500px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  min-height: calc(100vh - 56px);
+  align-items: start;
+  margin: 0;
 }
 
 .sidebar {

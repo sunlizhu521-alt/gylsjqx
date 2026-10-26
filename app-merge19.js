@@ -21,6 +21,7 @@ const tools = [
 ];
 
 const DEFAULT_SEAL_IMAGE = 'assets/quality-seal.png';
+const LAST_TOOL_KEY = 'gylsjqx-last-tool';
 
 const app = {
   activeTool: '',
@@ -42,19 +43,22 @@ const $ = (id) => document.getElementById(id);
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   renderToolList();
-  switchTool('merge');
+  let lastTool;
+  try { lastTool = localStorage.getItem(LAST_TOOL_KEY); } catch (_) {}
+  switchTool(tools.some(tool => tool.id === lastTool) ? lastTool : 'merge');
   $('downloadResult').addEventListener('click', downloadResult);
   $('downloadChart').addEventListener('click', downloadChart);
 });
 
 function initTheme() {
-  const saved = localStorage.getItem('dpc-theme');
+  let saved;
+  try { saved = localStorage.getItem('dpc-theme'); } catch (_) {}
   if (saved === 'dark') document.documentElement.dataset.theme = 'dark';
   $('themeToggle').addEventListener('click', () => {
     const next = document.documentElement.dataset.theme === 'dark' ? '' : 'dark';
     if (next) document.documentElement.dataset.theme = next;
     else delete document.documentElement.dataset.theme;
-    localStorage.setItem('dpc-theme', next || 'light');
+    try { localStorage.setItem('dpc-theme', next || 'light'); } catch (_) {}
   });
 }
 
@@ -74,11 +78,13 @@ function renderToolList() {
 }
 
 function switchTool(id) {
+  const tool = tools.find(item => item.id === id);
+  if (!tool) return;
   if (id === app.activeTool) return;
   saveToolState(app.activeTool);
   restoreToolState(id);
   app.activeTool = id;
-  const tool = tools.find(item => item.id === id);
+  try { localStorage.setItem(LAST_TOOL_KEY, id); } catch (_) {}
   $('toolTitle').textContent = tool.title;
   $('toolDesc').textContent = tool.desc;
   document.querySelectorAll('.tool-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.tool === id));
