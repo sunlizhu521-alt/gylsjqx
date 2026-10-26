@@ -18,13 +18,11 @@ const base = (extra = {}) => ({
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();
     const errors = []; page.on('pageerror', e => errors.push(e.message));
-    // Existing OCR CDN is unrelated to this tool. Payment flow must work without it.
-    await page.route('https://cdn.jsdelivr.net/**', route => route.fulfill({ status: 200, contentType: 'text/javascript', body: '' }));
     await page.goto(process.env.QA_URL || 'http://127.0.0.1:8899/');
     assert.equal(await page.title(), '供应链数据清洗');
-    assert.match(await page.locator('#toolTitle').innerText(), /报表合并/);
+    assert.match(await page.locator('#toolTitle').innerText(), /资金整理/);
     await page.locator('[data-tool="payment"]').click();
-    assert.equal(await page.locator('.result-layout').isVisible(), false);
+    assert.equal(await page.locator('#embeddedTools iframe[data-tool="funds"]').isVisible(), false);
     async function upload(rows, options = {}) {
       await page.waitForFunction(() => !document.querySelector('#paymentExcel').disabled);
       const array = await page.evaluate(({ rows, headers, options }) => {
@@ -74,8 +72,8 @@ const base = (extra = {}) => ({
     assert.ok(!docStats.text.includes('123456789012'));
     await page.locator('[data-field="计划付款日期"]').fill('2026-09-26');
     assert.equal(await page.locator('[data-payment-download="docx"]').isDisabled(), true);
-    await page.locator('[data-tool="merge"]').click();
-    assert.equal(await page.locator('.result-layout').isVisible(), true);
+    await page.locator('.tool-tab[data-tool="funds"]').click();
+    assert.equal(await page.locator('#embeddedTools iframe[data-tool="funds"]').isVisible(), true);
     await page.locator('[data-tool="payment"]').click();
     assert.equal(await page.locator('[data-field="计划付款日期"]').inputValue(), '2026-09-26');
     await upload([base({ 本次申请付款金额: '' })]); await generate();
@@ -151,7 +149,7 @@ const base = (extra = {}) => ({
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= window.innerWidth + 1),true);
     await page.screenshot({path:path.join(out,'directory-mobile.png'),fullPage:false});
     await page.setViewportSize({width:1440,height:1000});
-    await page.locator('[data-tool="merge"]').click(); await page.locator('[data-tool="payment"]').click();
+    await page.locator('.tool-tab[data-tool="funds"]').click(); await page.locator('[data-tool="payment"]').click();
     assert.equal(await page.locator('[data-reference="directory"]').innerText(), directoryTime);
     assert.equal(await page.locator('[data-reference="template"]').innerText(), templateTime);
     await upload([base()]); await generate();

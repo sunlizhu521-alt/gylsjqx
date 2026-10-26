@@ -58,6 +58,14 @@
     await uploadTemplate(null);
     state.restoring = false; render();
   }
+  function downloadBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
   function mount(element) {
     root = element; render();
     if (!state.templateInitialized) { state.templateInitialized = true; restoreFiles(); }

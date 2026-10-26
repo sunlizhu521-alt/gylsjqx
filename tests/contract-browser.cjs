@@ -29,8 +29,6 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
     const page = await context.newPage();
     await page.clock.setFixedTime(new Date('2026-10-22T16:30:00Z'));
-    // OCR is unrelated to contracts; its external loader must not delay this regression.
-    await page.route('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js', route => route.fulfill({ contentType: 'application/javascript', body: '/* OCR unused in contract tests */' }));
     const errors = [], consoleErrors = [], httpErrors = [], mutatingRequests = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
@@ -38,7 +36,10 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     page.on('request', request => { if (!['GET', 'HEAD'].includes(request.method())) mutatingRequests.push(`${request.method()} ${request.url()}`); });
     await page.goto(HOME_URL, { waitUntil: 'networkidle' });
     await page.locator('[data-tool="contract"]').click();
-    await page.waitForURL(/contract\.html$/);
+    await page.locator('iframe[data-tool="contract"]').waitFor();
+    assert.equal(page.url(), HOME_URL);
+    // The homepage keeps contracts embedded; exercise the full contract flow in its document.
+    await page.goto(new URL('contract.html', HOME_URL).href, { waitUntil: 'networkidle' });
     assert.equal(await page.title(), '合同生成｜供应链数据清洗');
     assert.match(await page.locator('h1').innerText(), /合同生成/);
     assert.doesNotMatch(await page.locator('body').innerText(), /登录/);

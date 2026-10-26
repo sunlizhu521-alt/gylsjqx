@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>供应链数据清洗</title>
-  <meta name="description" content="本地运行的数据处理工具箱，支持 Excel、CSV、JSON 清洗、匹配、合并、比对和图表生成。" />
-  <link rel="stylesheet" href="styles-merge14.css?v=responsive-home-20261027-37" />
-  <link rel="stylesheet" href="payment.css?v=cache-1" />
+  <meta name="description" content="本地运行的供应链工具台，支持资金整理、采购入库单签字、备货分配、订单履约整理、合同生成和付款申请单整理。" />
+  <link rel="stylesheet" href="styles-merge14.css?v=tools-cleanup-20261027-38" />
+  <link rel="stylesheet" href="payment.css?v=tools-cleanup-20261027-38" />
 </head>
 <body>
   <header class="app-header">
@@ -39,59 +39,29 @@
     <section class="workspace">
       <div class="workspace-header">
         <div>
-          <p class="eyebrow">Excel / CSV / JSON</p>
-          <h1 id="toolTitle">智能匹配</h1>
-          <p id="toolDesc">根据关键列把源表字段填入目标表。</p>
+          <p class="eyebrow">供应链工具</p>
+          <h1 id="toolTitle">资金整理</h1>
+          <p id="toolDesc">整理谈判付款、正常付款及申请核对记录，补充 OA 审批进度。</p>
         </div>
         <div class="status-strip">
-          <span id="activeFileCount">0 个文件</span>
-          <span id="activeRowCount">0 行数据</span>
+          <span id="activeFileCount">本地处理</span>
+          <span id="activeRowCount">切换保留内容</span>
         </div>
       </div>
 
       <div class="tool-panel" id="toolPanel"></div>
       <div id="embeddedTools" hidden></div>
 
-      <section class="result-layout">
-        <div class="result-card">
-          <div class="result-header">
-            <div>
-              <h2>数据预览</h2>
-              <span id="previewMeta">等待上传文件</span>
-            </div>
-            <button class="secondary-button" id="downloadResult" disabled>下载结果</button>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table" id="previewTable"></table>
-          </div>
-        </div>
-        <div class="result-card chart-card" id="chartCard">
-          <div class="result-header">
-            <div>
-              <h2>图表</h2>
-              <span>选择图表工具后生成</span>
-            </div>
-            <button class="secondary-button" id="downloadChart" disabled>保存图片</button>
-          </div>
-          <div class="chart-wrap">
-            <canvas id="chartCanvas"></canvas>
-          </div>
-        </div>
-      </section>
     </section>
   </main>
 
-  <div class="toast-area" id="toastArea"></div>
-
   <script src="vendor/xlsx.full.min.js"></script>
   <script src="vendor/jszip.min.js"></script>
-  <script src="vendor/chart.umd.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="vendor/pdf-lib.min.js"></script>
   <script src="payment-cache.js?v=cache-1"></script>
   <script src="payment-core.js?v=remarks-contact-20261018"></script>
   <script src="payment-document.js?v=detail-55-20261020"></script>
-  <script src="payment-tool.js?v=detail-55-20261020"></script>
-  <script src="app-merge19.js?v=responsive-home-20261027-37"></script>
+  <script src="payment-tool.js?v=tools-cleanup-20261027-38"></script>
+  <script src="app-merge19.js?v=tools-cleanup-20261027-38"></script>
 </body>
 </html>

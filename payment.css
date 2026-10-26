@@ -30,4 +30,3 @@
 .payment-actions button:disabled { opacity:.45; cursor:not-allowed; }
 #paymentStatus { margin:12px 0; line-height:1.6; }
 @media(max-width:760px) { .payment-upload-grid,.payment-info-grid { grid-template-columns:1fr; } .payment-group { padding:12px; } .payment-toolbar select { max-width:150px; } }
-.result-layout[hidden] { display:none; }
