@@ -17,6 +17,10 @@
     .upload{padding:16px;border:1px solid var(--line,#dbe2eb);border-radius:10px;min-width:0}
     label{display:block;font-weight:600;margin-bottom:8px}input,select,button{font:inherit;max-width:100%}
     input[type=file]{width:100%;margin:8px 0}input::file-selector-button{padding:8px 12px;border:1px solid #bfcbdc;border-radius:7px;cursor:pointer;background:#fff}
+    .help-details{margin:6px 0;color:var(--muted,#53657a);font-size:.86rem;line-height:1.7}
+    .help-details summary{width:fit-content;max-width:100%;cursor:pointer;color:var(--accent,#315b9d);font-weight:600}
+    .help-details summary:focus-visible{outline:2px solid var(--accent,#315b9d);outline-offset:3px;border-radius:3px}
+    .help-details ul{margin:8px 0;padding-left:20px}.help-details li+li{margin-top:4px}
     .file-info{white-space:pre-wrap;overflow-wrap:anywhere;min-height:42px}.file-error{color:#ac371b}
     select{padding:9px;border:1px solid #bfcbdc;border-radius:7px;color:var(--text,#182333);background:var(--surface,#fff)}
     #negotiatedSheet{width:100%;margin-top:8px}button{border:0;border-radius:8px;background:#315b9d;color:white;padding:11px 20px;cursor:pointer}
@@ -51,31 +55,28 @@
   <section>
     <h2>上传四份文件</h2>
     <div class="uploads">
-      <div class="upload"><label for="ledgerFile">资金台账</label><small>读取李奇、徐英、邢芳芳、操思敏、孙立柱的对账明细。</small><input id="ledgerFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="ledgerInfo">尚未引用</small></div>
-      <div class="upload"><label for="applicationsFile">付款申请汇总</label><small>按付款分类分别匹配：谈判付款仅使用“谈判付款”申请，正常付款仅使用“正常付款”申请；分类为空或异常需先确认。旧文件无付款分类列时兼容原匹配规则。未匹配申请时，正常付款标记“未申请”，谈判付款标记“未提交”。谈判付款优先按“对公付款0A流程号”关联申请表“流程编码”（旧表无此列时兼容“合同号”）；同一流程有多笔款项时按供应商名称＋金额区分。缺少 OA 号时按供应商名称＋金额补判；两边都有 OA 号但不一致时不匹配、不列入付款申请核对。正常付款仍按供应商名称＋金额匹配。相同流程编码＋供应商名称＋金额的重复申请只计一次金额，原申请日期记录保留。谈判付款仅显示“已经提交全部”“已经提交部分”“未提交”：累计金额达到或超过申请金额为已经提交全部，低于为已经提交部分，无匹配申请为未提交；金额异常或归属不清时保留可识别的原进度，否则先确认三项中的一种。</small><input id="applicationsFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="applicationsInfo">尚未引用</small></div>
-      <div class="upload"><label for="negotiatedFile">谈判付款汇总</label><small>原记录、顺序及付款情况完整保留。应付款时间按供应商名称＋申请付款金额＋原对公付款 OA 号从资金台账匹配更新，三项必须一致；编号缺失、匹配不到或日期为空时保留原值，日期冲突时核对。资金台账另外补充能唯一对应的空缺付款 OA 号、付款主体、财务应付单号；备注、付款计划、合并及原公式保留；行高和列宽按统一格式调整。</small><input id="negotiatedFile" type="file" accept=".xlsx" disabled><small class="file-info" id="negotiatedInfo">尚未引用</small><label for="negotiatedSheet">谈判付款工作表</label><select id="negotiatedSheet" disabled><option value="">请先上传文件</option></select><small>名称包含“谈判付款”即可；存在多个版本时，请明确选择。</small></div>
-      <div class="upload"><label for="oaFile">OA 流程表（MDST-对公付款）</label><small>两类已纳入付款表的记录，按供应商名称＋申请付款金额匹配 OA 表收款单位＋付款金额。原 OA 号已对应候选时保留；不一致、未提交或空白且能唯一对应时，补齐或纠正“对公付款0A流程号”，并在付款申请核对列出原值、新值及 OA 来源。多个候选、同名同额多笔付款或来源异常时保留当前值并提示核对。谈判金额仅匹配资金台账付款日期列时，再核验该台账的 OA 号、供应商与申请总金额；分批匹配只列入核对，绝不自动补齐 OA。谈判付款按核验后的 OA 号读取流程信息；正常付款按名称＋金额读取。谈判表或正常表的 OA 号未提交或不一致，且供应商＋金额能匹配资金台账、台账 OA 号和金额能匹配对公付款时，即使 OA 收款名称不同也列入核对，展示两边名称；名称差异只提示，不自动更新。OA 归档不代表已付款或已提交付款申请。</small><input id="oaFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="oaInfo">尚未引用</small></div>
+      <div class="upload"><label for="ledgerFile">资金台账</label><details class="help-details"><summary aria-label="查看资金台账说明">查看说明</summary><ul><li>读取李奇、徐英、邢芳芳、操思敏、孙立柱的对账明细。</li></ul></details><input id="ledgerFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="ledgerInfo">尚未引用</small></div>
+      <div class="upload"><label for="applicationsFile">付款申请汇总</label><details class="help-details"><summary aria-label="查看付款申请汇总说明">查看说明</summary><ul><li>两类付款分别匹配各自分类的申请；分类异常时先核对。</li><li>谈判付款优先匹配流程编码，缺少 OA 号时再按供应商＋金额；正常付款按供应商＋金额。</li><li>谈判付款的重复申请金额只计一次，申请日期保留；按累计金额显示“已经提交全部”“已经提交部分”或“未提交”。</li></ul></details><input id="applicationsFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="applicationsInfo">尚未引用</small></div>
+      <div class="upload"><label for="negotiatedFile">谈判付款汇总</label><details class="help-details"><summary aria-label="查看谈判付款汇总说明">查看说明</summary><ul><li>保留原记录、顺序、付款情况、备注、计划、合并单元格及公式。</li><li>应付款时间按供应商＋申请金额＋原 OA 号与资金台账匹配；无法确认时保留原值。</li><li>仅补充可唯一确认的空缺信息，冲突列入核对。</li></ul></details><input id="negotiatedFile" type="file" accept=".xlsx" disabled><small class="file-info" id="negotiatedInfo">尚未引用</small><label for="negotiatedSheet">谈判付款工作表</label><select id="negotiatedSheet" disabled><option value="">请先上传文件</option></select><small>名称包含“谈判付款”即可；存在多个版本时，请明确选择。</small></div>
+      <div class="upload"><label for="oaFile">OA 流程表（MDST-对公付款）</label><details class="help-details"><summary aria-label="查看OA 流程表说明">查看说明</summary><ul><li>按供应商＋申请金额匹配，唯一且核验一致时补齐或纠正 OA 号，并列出来源。</li><li>原编号属于其他供应商、多候选或仅匹配分批金额时，保留原值并提示核对。</li><li>OA 归档不代表已付款，也不代表已提交付款申请。</li></ul></details><input id="oaFile" type="file" accept=".xlsx,.xls" disabled><small class="file-info" id="oaInfo">尚未引用</small></div>
     </div>
     <div class="actions"><button id="analyze" disabled>整理并核对</button><span id="status" role="status" aria-live="polite">正在加载工具…</span></div>
-    <small>原对公付款 OA 号匹配付款申请汇总的“流程编码”，且“付款分类”为“谈判付款”时，直接归为谈判付款，不列入正常付款；谈判表没有的记录不新增。重复提交仍单独列入付款申请核对。其余记录按供应商名称＋申请付款金额在所选谈判表中是否出现分类。正常付款仅纳入资金台账原“对公付款0A流程号”有值的记录，无编号记录不统计、不预览、不导出。</small>
-    <small>供应商或付款主体为空时保留原值；已付金额为空时保留原付款情况，不按零处理。切换工具保留本次内容，刷新后需重新选择文件。</small>
-    <small>支持分批格式：识别“谈判明细、分批总金额、核对”，保留原分批计划、求和及核对公式、剩余付款金额公式和结清信息，不重新添加已删除的提交日期、提交时间汇总、付款自然周列。付款申请仍按原规则匹配并更新提交状态；正常付款保留提交时间汇总。登记月份、应付款时间无法识别时保留原文。</small>
+    <details class="help-details"><summary>查看整理规则</summary><ul><li>申请表中同 OA 号标为“谈判付款”的记录，排除正常付款；谈判表没有的记录不新增。其余按供应商＋申请金额分类。</li><li>正常付款仅纳入资金台账原 OA 号有值的记录；已结清记录保留。</li><li>空白供应商、付款主体、已付金额及无法识别的日期保留原值；已付金额空白不按零处理。</li><li>谈判付款保留原分批计划、周一日期、金额及公式，不重复提前或合并；旧格式仍生成付款自然周。正常付款的“申请付款的日期”取应付款日期所在周的上一周周一。</li><li>切换工具保留本次内容，刷新后需重新上传文件。</li></ul></details>
   </section>
-  <p>谈判付款保留原周一日期列和分配金额，不重复提前日期或合并计划。旧格式谈判表仍生成付款自然周；正常付款的“申请付款的日期”按应付款日期所在周的上一周周一计算。</p>
   <section id="results" hidden>
     <p id="stats"></p>
     <small id="classificationSummary"></small>
     <div id="issues">
       <div class="review-heading"><h2>需要核对：<span id="pendingCount">0</span> 项</h2><label><input id="onlyPending" type="checkbox" checked> 只显示待核对项</label></div>
-      <small>核对来源和候选后选择处理方式。多选框可按 Command / Ctrl 选择多笔流程；“保留原值”不能与其他选项同时选择。已唯一核验的 OA 号会补齐或纠正；其他候选保留当前 OA 号并列入核对。流程信息写入两张付款表。</small>
+      <details class="help-details"><summary>查看核对操作说明</summary><ul><li>核对来源后选择处理方式；多选时按住 Command / Ctrl。</li><li>“保留原值”不能与其他选项同时选择。确认后的流程信息写入两张付款表。</li></ul></details>
       <div class="issue-list" id="issueList"></div>
     </div>
     <div class="actions"><button id="download" disabled>下载资金整理表</button><span id="filenameHint"></span></div>
-    <small>重复提交扫描整份付款申请汇总，谈判付款、正常付款均检查，每个重复组只列一行，未进入付款表的申请也检查。OA 号补齐、更正及无法唯一确定的情况均列入核对，展示原值、处理结果及 OA 来源；已匹配付款申请但未能补齐 OA 的“未提交OA／未交OA／未申请OA”记录也保留申请来源提示。除此之外，未申请及按流程号命中申请表“谈判付款”分类的记录不列入核对。其余记录累计申请超额、无法区分归属及申请日期问题自动列入“付款申请核对”表，不阻止下载；其他待核对项处理后可下载。当天在当前浏览器重复下载时，文件版本自动递增。</small>
+    <details class="help-details"><summary>查看核对与下载说明</summary><ul><li>重复提交扫描整份申请汇总，每组只列一次；OA 编号补齐、更正、缺失及冲突均保留来源供核对。</li><li>未申请本身无需核对。重复、超额、归属不清及申请日期问题写入核对表，不阻止下载；其他待处理项需先确认。</li><li>当天在当前浏览器再次下载时，文件版本自动递增。</li></ul></details>
   </section>
-  <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><small>预览最多显示 100 行；下载包含全部记录。谈判明细左对齐、分行显示，行高按内容适配；正常付款保留 30 磅行高；付款申请核对按内容自适应行高。统一蓝底白字表头和筛选器，有内容的列从表头到最后一条数据都有边框，包含中间空白格。列宽按内容自适应，全部表头单行完整展示，流程编号不换行；长备注可在编辑栏查看。</small><div class="preview" id="negotiatedPreview"></div></section>
-  <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><small>跟单员位于登记月份后，按资金台账来源工作表填写。单据号【财务应付单】、OA合同编号、合同总金额、是否对账默认隐藏，导出文件可取消隐藏。仅显示原“对公付款0A流程号”有值的正常付款，已结清明细也保留。原编号为空、只有空格或公式结果不可用的记录不纳入；匹配出的“流程编号”不替代此条件。</small><div class="preview" id="normalPreview"></div></section>
-  <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><small>跟单员优先带入对应付款记录，无法唯一确定时留空。核对说明按 1、2、3 分条显示，左对齐、自动换行，导出行高随内容适配。按付款分类＋流程编码＋供应商名称＋金额识别重复提交，跨日期同样检查；列出重复次数、单笔金额、重复计入金额及来源信息。OA 号补齐、更正及多候选问题列出原值、处理结果和 OA 来源，不受付款分类过滤影响。已申请但未能补齐 OA 的“未提交OA／未交OA／未申请OA”记录仍会列出。其他核对仍仅列累计超额、归属不清及已匹配申请的异常日期或金额，未申请无需核对。“是否提交付款申请单”先用核验后的 OA 号匹配申请表流程编码，缺少 OA 号时再按同类申请的供应商名称＋本次申请付款金额补判；已有编号不同的申请不匹配、不列核对。金额及归属问题保留在核对说明中。保留来源文件、工作表和行号，不再输出“候选付款申请”列。分批提交进度不改变原已付金额、剩余金额及结清状态。</small><div class="preview" id="reviewPreview"></div></section>
+  <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>预览最多 100 行，下载包含全部记录。</li><li>谈判明细分行左对齐、行高自适应；统一表头、筛选器和边框，列宽随内容调整。</li></ul></details><div class="preview" id="negotiatedPreview"></div></section>
+  <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>跟单员取资金台账来源工作表，放在登记月份后。</li><li>单据号、OA 合同编号、合同总金额、是否对账默认隐藏，可在导出文件中取消隐藏；行高为 30 磅。</li></ul></details><div class="preview" id="normalPreview"></div></section>
+  <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>显示重复申请及 OA 编号等需复核事项，保留来源文件、工作表、行号和跟单员。</li><li>核对说明分条显示，自动换行并调整行高；分批提交进度不改变原已付金额、剩余金额或结清状态。</li></ul></details><div class="preview" id="reviewPreview"></div></section>
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
