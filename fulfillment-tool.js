@@ -29,10 +29,10 @@ async function show(history){
  if(!history){$('status').textContent='等待首次上传';$('history').textContent='尚无历史数据。首次上传保存为基准，差异表仅有表头。';return;}
  filename=history.current.filename;sourceBytes=history.current.sourceBytes||null;formulaInfo=history.current.formulaInfo||null;
  if(sourceBytes){
-  const prepared=await FulfillmentValues.prepare(sourceBytes),merged=prepared.formulaCount?C.merge(prepared.book,filename):history.current.result;
+  const prepared=await FulfillmentValues.prepare(sourceBytes),merged=prepared.formulaCount?C.merge(prepared.book,filename):C.refreshQuantities(history.current.result,prepared.book),quantityChanged=JSON.stringify(merged.rows)!==JSON.stringify(history.current.result.rows);
   validation=checkPrepared(prepared,merged);sourceBytes=prepared.bytes;
   if(prepared.formulaCount||prepared.converted)formulaInfo=conversionInfo(prepared);
-  if(prepared.formulaCount||prepared.converted){
+  if(prepared.formulaCount||prepared.converted||quantityChanged){
    history={...history,current:{...history.current,result:merged,sourceBytes,formulaInfo}};
    // Migrate only the current snapshot; the previous summary remains the recorded historical baseline.
    if(validation.passed)await FulfillmentCache.replace(history);

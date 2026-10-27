@@ -44,12 +44,15 @@ async function fixture({ unsupported = false, formulas = true } = {}) {
     if (name === '孙立柱') sheet.K2 = formulas ? { t: 'n', v: 0, f: "'辅助'!A2" } : { t: 'n', v: 11 };
     X.utils.book_append_sheet(book, sheet, name === '邢芳芳' ? '邢芳芳1017' : name);
   }
-  const helper = X.utils.aoa_to_sheet([['计算辅助', '', '', ''], [11, 1256, 0, 0.3], ['保留合并内容']]);
+  const helper = X.utils.aoa_to_sheet([['计算辅助', '', '', '', '判断', '空白结果', '数值判断'], [11, 1256, 0, 0.3, '一致', '', 11], ['保留合并内容']]);
   if (formulas) {
     helper.A2 = { t: 'n', v: 0, f: '5+6', z: '0.000' };
     helper.B2 = { t: 'n', v: 0, f: "'李奇'!K2+'孙立柱'!K2" };
     helper.C2 = { t: 'n', v: 100, f: '0' };
     helper.D2 = { t: 'n', v: 0, f: unsupported ? 'UNKNOWNFUNCTION(A2)' : '0.1+0.2' };
+    helper.E2 = { t: 's', v: '不一致', f: 'IF(C2=0,"一致","不一致")' };
+    helper.F2 = { t: 's', v: '旧值', f: 'IF(C2<>0,"有差异","")' };
+    helper.G2 = { t: 'n', v: 0, f: 'IF(C2=0,A2,1/0)' };
   }
   helper['!merges'] = [{ s: { r: 2, c: 0 }, e: { r: 2, c: 2 } }];
   helper['!cols'] = [{ wch: 26 }, { wch: 18 }, { wch: 14 }];
@@ -94,6 +97,16 @@ function assertNoFormulas(book) {
     if (address.startsWith('!')) continue;
     for (const key of ['f', 'F', 'D']) assert.equal(cell[key], undefined, name + '!' + address + '不应保留' + key);
   }
+}
+
+function mergedTextFixture() {
+  const book=X.utils.book_new();
+  for(const [person,name] of C.SHEETS.entries()){
+    const columns=C.COLUMNS.slice(person*4).concat(C.COLUMNS.slice(0,person*4));if(person%2)columns.reverse();
+    const rows=Array.from({length:3},(_,row)=>columns.map(field=>quantities.includes(field)?(row?'':field==='生产中产品'?'物料通用   474套左右':'约'+(100+quantities.indexOf(field))+'件'):({'物料编码':'MERGED-'+person+'-'+row,'事业部':divisions[person%divisions.length],'物料名称':'合并数量测试'})[field]??''));
+    const sheet=X.utils.aoa_to_sheet([columns,...rows]);sheet['!merges']=quantities.map(field=>({s:{r:1,c:columns.indexOf(field)},e:{r:3,c:columns.indexOf(field)}}));X.utils.book_append_sheet(book,sheet,name);
+  }
+  return Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
 }
 
 (async () => {
@@ -163,6 +176,9 @@ function assertNoFormulas(book) {
     assert.equal(prepared.Sheets.辅助.B2.v, 1256, '跨工作表公式读取重算后的依赖');
     assert.equal(prepared.Sheets.辅助.C2.v, 0, '公式得到的零必须保留');
     assert(Math.abs(prepared.Sheets.辅助.D2.v - 0.3) < 1e-12);
+    assert.deepEqual([prepared.Sheets.辅助.E2.t, prepared.Sheets.辅助.E2.v], ['s', '一致']);
+    assert.deepEqual([prepared.Sheets.辅助.F2.t, prepared.Sheets.辅助.F2.v], ['s', '']);
+    assert.equal(prepared.Sheets.辅助.G2.v, 11, 'IF只计算所选分支，不读取旧缓存或计算未选分支的除零');
     assert.equal(prepared.Sheets.辅助.A2.z, '0.000');
     assert.equal(prepared.Sheets.辅助['!merges'].length, 1);
     const [sourceZip, preparedZip] = await Promise.all([Zip.loadAsync(input), Zip.loadAsync(preparedBytes)]);
@@ -177,6 +193,7 @@ function assertNoFormulas(book) {
     assert.equal(download.name, '合成订单2026.10.23汇总版.xlsx');
     const exported = X.read(download.bytes, { type: 'buffer', cellNF: true });
     assertNoFormulas(exported);
+    assert.deepEqual([exported.Sheets.辅助.E2.v, exported.Sheets.辅助.F2.v, exported.Sheets.辅助.G2.v], ['一致', '', 11]);
     assert.deepEqual(exported.SheetNames, ['汇总表', '差异', '徐英', '操思敏', '邢芳芳1017', '李奇', '孙立柱', '辅助']);
     const rows = X.utils.sheet_to_json(exported.Sheets.汇总表, { header: 1, defval: '' });
     assert.deepEqual(rows[0], C.SUMMARY_COLUMNS);
@@ -236,7 +253,18 @@ function assertNoFormulas(book) {
       assert.equal(row[C.SUMMARY_COLUMNS.indexOf('物料编码')], expected.code);
       for (const field of quantities) assert.equal(row[C.SUMMARY_COLUMNS.indexOf(field)], expected.values[field], expected.sheet + '按表头读取“' + field + '”');
     }
+
+    const mergedInput=mergedTextFixture();await upload(mergedInput,'合并文本数量更新版.xlsx');
+    assert.equal(await page.locator('#download').isDisabled(),false,await page.locator('#quantityIssues').innerText());
+    const mergedOutput=X.read((await getDownload()).bytes,{type:'buffer'}),mergedRows=X.utils.sheet_to_json(mergedOutput.Sheets.汇总表,{header:1});
+    assert.equal(mergedRows.length,13);
+    for(let i=0;i<12;i++)for(const field of quantities)assert.equal(mergedRows[i+1][C.SUMMARY_COLUMNS.indexOf(field)],i%3?0:field==='生产中产品'?474:100+quantities.indexOf(field));
+    const mergedSourceZip=await Zip.loadAsync(mergedInput),mergedOutputZip=await Zip.loadAsync((await getDownload()).bytes);
+    for(const path of Object.keys(mergedSourceZip.files).filter(p=>/^xl\/worksheets\/sheet\d+\.xml$/.test(p)))assert.equal(await mergedSourceZip.file(path).async('string'),await mergedOutputZip.file(path).async('string'),'保留原文本及合并结构');
+    await page.evaluate(async()=>{const h=await FulfillmentCache.get(),C=FulfillmentCore;for(let i=0;i<h.current.result.rows.length;i++)for(const field of C.QUANTITY_FIELDS)h.current.result.rows[i][C.COLUMNS.indexOf(field)]={t:'s',v:i%3?'':field==='生产中产品'?'物料通用   474套左右':'约'+(100+C.QUANTITY_FIELDS.indexOf(field))+'件'};await FulfillmentCache.replace(h);});
+    const oldQuantityHistory=await history();await page.reload();await ready();assert.equal(await page.locator('#download').isDisabled(),false);const normalizedHistory=await history();assert.equal(normalizedHistory.current.savedAt,oldQuantityHistory.current.savedAt);assert.deepEqual(normalizedHistory.previous,oldQuantityHistory.previous);
+    assert.deepEqual(normalizedHistory.current.result.rows.slice(0,3).map(row=>row[C.COLUMNS.indexOf('生产中产品')].v),[474,0,0]);
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ url, detailRows: 8, codes: { '1007010122': 1295, '1007010123': 1240 }, allSheetsValuesOnly: 'passed', crossSheet: 'passed', preservedStructure: 'passed', legacyMigration: 'passed', blockedUnsupported: 'passed', independentHeaderPositions: 'passed' }));
+    console.log(JSON.stringify({ url, detailRows: 8, codes: { '1007010122': 1295, '1007010123': 1240 }, allSheetsValuesOnly: 'passed', crossSheet: 'passed', preservedStructure: 'passed', legacyMigration: 'passed', blockedUnsupported: 'passed', independentHeaderPositions: 'passed', ifResults:'passed', mergedTextQuantities:'passed' }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

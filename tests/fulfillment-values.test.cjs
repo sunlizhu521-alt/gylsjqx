@@ -42,7 +42,7 @@ test('跨表SUBTOTAL按引用表的筛选状态校验',()=>{
  source.Sheets.主表['!fulfillmentFilterActive']=true;source.Sheets.副表['!fulfillmentFilterActive']=false;const good=V.materialize(source);assert.deepEqual(good.issues,[]);assert.equal(good.book.Sheets.主表.A1.v,3);
 });
 test('未知函数、除零、错误引用、循环、外链和巨大范围都保留公式并阻止',()=>{
- for(const f of ['IF(1,2,3)','DISPIMG("ID",1)','1/0','A1+1','SUM(A1:XFD1048576)','SUM(B2:B1)','[远程.xlsx]Sheet1!A1','缺失!A1','globalThis.FULFILLMENT_TEST=1']){const source=book({明细:{A1:formula(f,888)}}),result=V.materialize(source);assert.equal(result.issues.length,1,f);assert.equal(result.updates.length,0,f);assert.equal(result.book.Sheets.明细.A1.f,f);assert.equal(result.correctedCount,0);}
+ for(const f of ['UNKNOWNFUNCTION(1,2,3)','DISPIMG("ID",1)','1/0','A1+1','SUM(A1:XFD1048576)','SUM(B2:B1)','[远程.xlsx]Sheet1!A1','缺失!A1','globalThis.FULFILLMENT_TEST=1']){const source=book({明细:{A1:formula(f,888)}}),result=V.materialize(source);assert.equal(result.issues.length,1,f);assert.equal(result.updates.length,0,f);assert.equal(result.book.Sheets.明细.A1.f,f);assert.equal(result.correctedCount,0);}
  assert.equal(globalThis.FULFILLMENT_TEST,undefined);
  const source=book({一:{A1:formula('二!A1')},二:{A1:formula('一!A1')}}),result=V.materialize(source);assert.equal(result.issues.length,2);assert.ok(result.issues.every(item=>/循环引用/.test(item.message)));
  const erroneous=V.materialize(book({明细:{A1:formula('B1+1'),B1:{t:'e',v:7}}}));assert.match(erroneous.issues[0].message,/明细!B1.*错误值/);

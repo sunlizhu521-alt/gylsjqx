@@ -14,12 +14,12 @@ function number(cell){
  return cell.v;
 }
 
-// Only this small arithmetic grammar is accepted; workbook formulas are never executed as JavaScript.
+// Only this small formula grammar is accepted; workbook formulas are never executed as JavaScript.
 function parse(formula,valuesOnly=false){
  const text=String(formula).replace(/^=/,'');let pos=0,depth=0;
  const tokens=[];
  while(pos<text.length){const part=text.slice(pos),space=part.match(/^\s+/);if(space){pos+=space[0].length;continue;}
-  const match=part.match(valuesOnly?/^(?:"(?:[^"]|"")*"|'(?:[^']|'')*'|[A-Za-z_0-9.\u0080-\uFFFF]+(?=\s*!)|\$?[A-Za-z]{1,3}\$?[1-9]\d*|(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?|[A-Za-z_\u0080-\uFFFF][A-Za-z_0-9.\u0080-\uFFFF]*|[+\-*/(),:!])/:/^(?:\$?[A-Za-z]{1,3}\$?[1-9]\d*|(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?|[A-Za-z_][A-Za-z_0-9.]*|[+\-*/(),:])/);
+  const match=part.match(valuesOnly?/^(?:#REF!|"(?:[^"]|"")*"|'(?:[^']|'')*'|[A-Za-z_0-9.\u0080-\uFFFF]+(?=\s*!)|\$?[A-Za-z]{1,3}\$?[1-9]\d*|(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?|[A-Za-z_\u0080-\uFFFF][A-Za-z_0-9.\u0080-\uFFFF]*|<=|>=|<>|[+\-*/(),:!=<>])/:/^(?:#REF!|"(?:[^"]|"")*"|\$?[A-Za-z]{1,3}\$?[1-9]\d*|(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?|[A-Za-z_][A-Za-z_0-9.]*|<=|>=|<>|[+\-*/(),:=<>])/);
   if(!match)throw Error('公式含暂不支持的表达式，请在 WPS/Excel 核对');tokens.push(match[0]);pos+=match[0].length;
   if(tokens.length>10000)throw Error('公式过长，无法可靠核验');
  }
@@ -37,18 +37,20 @@ function parse(formula,valuesOnly=false){
    node={op:'ref',first,sheet};
    if(peek()===':'){take();const last=take();if(!/^\$?[A-Za-z]{1,3}\$?[1-9]\d*$/.test(last||''))throw Error('公式引用范围无效');node={op:'range',first,last:last.replace(/\$/g,'').toUpperCase(),sheet};}
   }else if(/^(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$/.test(token||''))node={op:'number',value:Number(token)};
-  else if(valuesOnly&&token?.startsWith('"'))node={op:'literal',value:token.slice(1,-1).replace(/""/g,'"')};
-  else if(valuesOnly&&/^(TRUE|FALSE)$/i.test(token||'')){node={op:'literal',value:token.toUpperCase()==='TRUE'};if(peek()==='('){take();if(take()!==')')throw Error('布尔函数不能带参数');}}
+  else if(token==='#REF!')node={op:'error',value:token};
+  else if(token?.startsWith('"'))node={op:'literal',value:token.slice(1,-1).replace(/""/g,'"')};
+  else if(/^(TRUE|FALSE)$/i.test(token||'')){node={op:'literal',value:token.toUpperCase()==='TRUE'};if(peek()==='('){take();if(take()!==')')throw Error('布尔函数不能带参数');}}
   else if(/^[A-Za-z_]/.test(token||'')){
-   const name=token.toUpperCase();if(!['SUM','SUBTOTAL'].includes(name))throw Error('暂不支持公式 '+name+'，请在 WPS/Excel 核对');
+   const name=token.toUpperCase();if(!['SUM','SUBTOTAL','IF'].includes(name))throw Error('暂不支持公式 '+name+'，请在 WPS/Excel 核对');
    if(take()!=='(')throw Error('公式函数格式无效');const args=[];
    if(peek()!==')'){do{args.push(expression());if(peek()!==',')break;take();}while(true);}
-   if(take()!==')')throw Error('公式函数参数不完整');node={op:name,args};
+   if(take()!==')')throw Error('公式函数参数不完整');if(name==='IF'&&args.length!==3)throw Error('IF 需要条件、成立值和不成立值三个参数');node={op:name,args};
   }else throw Error('公式表达式无效');
   depth--;return node;
  }
  function product(){let node=primary();while(peek()==='*'||peek()==='/'){const op=take();node={op,left:node,right:primary()};}return node;}
- function expression(){let node=product();while(peek()==='+'||peek()==='-'){const op=take();node={op,left:node,right:product()};}return node;}
+ function addition(){let node=product();while(peek()==='+'||peek()==='-'){const op=take();node={op,left:node,right:product()};}return node;}
+ function expression(){let node=addition();while(['=','<>','<','<=','>','>='].includes(peek())){const op=take();node={op,left:node,right:addition()};}return node;}
  if(!tokens.length)throw Error('公式为空');const tree=expression();if(index!==tokens.length)throw Error('公式含暂不支持的表达式，请在 WPS/Excel 核对');return tree;
 }
 
@@ -96,10 +98,27 @@ function evaluator(sheet,onIssue,onFormula,options={}){
  function evaluate(node,field){
   if(node.op==='number')return node.value;
   if(node.op==='literal')return node.value;
+  if(node.op==='error')throw Error('公式引用已失效（'+node.value+'）');
   if(node.op==='ref')return node.sheet===undefined?cell(node.first,field):options.resolve(node.sheet)(node.first,field);
   if(node.op==='range')throw Error('范围引用只能用于 SUM/SUBTOTAL');
   if(node.op==='positive')return numeric(evaluate(node.value,field));
   if(node.op==='negative')return -numeric(evaluate(node.value,field));
+  if(node.op==='IF'){
+   const condition=evaluate(node.args[0],field);
+   if(typeof condition!=='boolean'&&!finite(condition))throw Error('IF 条件必须为逻辑值或数字');
+   return evaluate(node.args[condition?1:2],field);
+  }
+  if(['=','<>','<','<=','>','>='].includes(node.op)){
+   let left=evaluate(node.left,field),right=evaluate(node.right,field);
+   if(typeof left==='number')numeric(left);if(typeof right==='number')numeric(right);
+   const emptyReference=operand=>operand.op==='ref'&&blank(operand.sheet===undefined?sheet[operand.first]:options.resolve(operand.sheet).source(operand.first));
+   if(emptyReference(node.left))left=typeof right==='string'?'':typeof right==='boolean'?false:0;
+   if(emptyReference(node.right))right=typeof left==='string'?'':typeof left==='boolean'?false:0;
+   if(typeof left!==typeof right){if(node.op==='=')return false;if(node.op==='<>')return true;throw Error('比较运算两侧的类型不同，请在 WPS/Excel 核对');}
+   if(typeof left==='string'){left=left.toUpperCase();right=right.toUpperCase();}
+   if(node.op==='=')return left===right;if(node.op==='<>')return left!==right;
+   if(node.op==='<')return left<right;if(node.op==='<=')return left<=right;if(node.op==='>')return left>right;return left>=right;
+  }
   if(node.op==='SUM'||node.op==='SUBTOTAL'){
    let args=node.args,subtotal=0;
    if(node.op==='SUBTOTAL'){
@@ -115,7 +134,7 @@ function evaluator(sheet,onIssue,onFormula,options={}){
   if(node.op==='+')return left+right;if(node.op==='-')return left-right;if(node.op==='*')return left*right;
   if(right===0)throw Error('公式除数为零');return left/right;
  }
- cell.references=references;return cell;
+ cell.references=references;cell.source=address=>sheet[address];return cell;
 }
 
 function materialize(book){
@@ -131,7 +150,7 @@ function materialize(book){
    for(const key of ['f','F','D','w','r','h'])delete cell[key];
    if(source.t!==type||(type==='n'?!finite(source.v)||!equal(source.v,value):source.v!==value))correctedCount++;
    copy.Sheets[name][address]=cell;updates.push({sheet:name,cell:address,value,type});
-  }catch(error){const reference=error.cell&&(error.cell!==address||error.sheet&&error.sheet!==name)?'引用 '+(error.sheet||name)+'!'+error.cell+'：':'';issues.push({sheet:name,cell:address,field:'',message:reference+error.message,kind:'formula'});}
+  }catch(error){const reference=error.cell&&(error.cell!==address||error.sheet&&error.sheet!==name)?'引用 '+(error.sheet||name)+'!'+error.cell+'：':'',formula=String(source.f??'').replace(/^=/,''),shown=formula.slice(0,300)+(formula.length>300?'…':'');issues.push({sheet:name,cell:address,field:'',message:reference+error.message+(shown?'；公式：='+shown:''),kind:'formula'});}
  }}
  return {book:copy,updates,issues,formulaCount,correctedCount};
 }
@@ -177,11 +196,11 @@ function validate(book,result,core){
     const key=name+'\0'+(r+1);expected.add(key);const indexes=output.get(key)||[];
     if(indexes.length!==1)issue(name,String(r+1),'',indexes.length?'源表该行被重复汇总 '+indexes.length+' 次':'源表该行未进入汇总','mapping');
     FIELDS.forEach((field,index)=>{
-     if(map[field]?.length!==1)return;const address=X.utils.encode_cell({r,c:map[field][0]});let value=null;
-     try{value=read(address,field);sourceValues[index].push(value);}catch(error){invalid[index]=true;issue(name,error.cell||address,actualField(error.cell||address,field),error.message,'source');}
+     if(map[field]?.length!==1)return;const address=X.utils.encode_cell({r,c:map[field][0]}),sourceCell=core.quantityCell(sheet,r,map[field][0]);let value=null;
+     try{if(sourceCell.invalid)throw Error(sourceCell.invalid);value=sheet[address]?.f?read(address,field):number(sourceCell);sourceValues[index].push(value);}catch(error){invalid[index]=true;issue(name,error.cell||address,actualField(error.cell||address,field),error.message,'source');}
      for(const i of indexes){
       const outputCell=summaries[i]?.[core.SUMMARY_COLUMNS.indexOf(field)];
-      try{if(!outputCell)throw Error('汇总数量单元格缺失');const actual=number(outputCell);summaryValues[index].push(actual);if(blank(sheet[address])!==blank(outputCell))issue(name,address,field,'源表的空白与数字状态在汇总第 '+(i+2)+' 行发生变化','value');if(value!==null&&!equal(value,actual))issue(name,address,field,'源表计算值为 '+value+'，汇总第 '+(i+2)+' 行为 '+actual,'value');}
+      try{if(!outputCell)throw Error('汇总数量单元格缺失');const actual=number(outputCell);summaryValues[index].push(actual);if(blank(sourceCell)!==blank(outputCell))issue(name,address,field,'源表的空白与数字状态在汇总第 '+(i+2)+' 行发生变化','value');if(value!==null&&!equal(value,actual))issue(name,address,field,'源表计算值为 '+value+'，汇总第 '+(i+2)+' 行为 '+actual,'value');}
       catch(error){invalid[index]=true;issue(name,address,field,'汇总第 '+(i+2)+' 行：'+error.message,'summary');}
      }
     });
