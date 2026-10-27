@@ -21,7 +21,7 @@ function render(){
  $('quantityIssues').innerHTML=[...groupedIssues.values()].map(i=>'<li><strong>'+esc(i.sheet+(i.cell?'!'+i.cell:'')+' · '+i.field)+'</strong><br>'+i.messages.map(esc).join('<br>')+'</li>').join('');
  $('warnings').textContent=result.warnings.join('\n');
  $('count').textContent=`共 ${result.rows.length} 条，预览前 ${Math.min(100,result.rows.length)} 条；下载将汇总表放在首位，并保留差异表和全部原工作表，所有单元格公式均转为值。`;
- const table=(columns,rows)=>'<table><thead><tr>'+columns.map(v=>'<th>'+esc(v)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(0,100).map(row=>'<tr>'+row.map(c=>'<td>'+esc(c.z?XLSX.SSF.format(c.z,c.v):c.v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+ const table=(columns,rows)=>'<table><thead><tr>'+columns.map(v=>'<th>'+esc(v)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(0,100).map(row=>'<tr>'+row.map(c=>'<td>'+esc(C.formatCell(c))+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
  $('preview').innerHTML=table(C.SUMMARY_COLUMNS,C.summaryRows(result.rows));$('diff-preview').innerHTML=validation?.passed?table(C.DIFF_COLUMNS,result.differences):'<p>本次数量未通过校验，未更新历史和差异。</p>';
  $('result').hidden=false;updateDownloads();
 }
