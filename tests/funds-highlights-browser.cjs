@@ -79,15 +79,16 @@ function fixture({ removeFirstApplication = false } = {}) {
       assert.equal(n.rows[0][firstDate].applied, highlighted);
       if (highlighted) assert.equal(n.rows[0][firstDate].color, 'rgb(255, 0, 0)');
       assert.equal(n.rows[0][secondDate].applied, false, '未申请60不标红');
-      assert(n.rows[1].every(cell => !cell.applied), '两批相同40无法唯一定位，均不标红');
+      assert.equal(n.rows[1][firstDate].applied, true, '两批相同40按日期先后标记最早批次');
+      assert.equal(n.rows[1][firstDate].color, 'rgb(255, 0, 0)');
+      assert.equal(n.rows[1][secondDate].applied, false, '只有一笔申请，后续同额批次不能重复标红');
+      assert.equal(n.rows[1].filter(cell => cell.applied).length, 1);
       assert.equal(n.rows[0].filter(cell => cell.applied).length, highlighted ? 1 : 0);
       assert(normal.rows[0].every(cell => cell.applied && cell.color === 'rgb(255, 0, 0)'), '正常付款已申请整行红色背景');
       assert(normal.rows[0].some(cell => cell.hidden && cell.applied), '隐藏列也属于整行标红范围');
       assert(normal.rows[1].every(cell => !cell.applied), '正常未申请不标红');
       assert(actual.reviewPreview.rows.every(row => row.every(cell => !cell.applied)), '核对表不套用申请标红');
-      const review = actual.reviewPreview.rows.map(row => row.map(cell => cell.text).join(' ')).join('\n');
-      assert.match(review, /同额分批合成供应商/);
-      assert.match(review, /无法唯一|多批|多个|重复金额|相同金额|同额/, '无法定位批次需要清晰核对提示');
+      assert.equal(actual.reviewPreview.rows.length, 0, '同额批次已按日期确定，不生成同额核对');
     }
     async function analyze(highlighted) {
       // Pause export once: inspect the initial preview before the production export/re-read refresh.
@@ -105,8 +106,8 @@ function fixture({ removeFirstApplication = false } = {}) {
         let attempts = 0;
         const check = () => window.__releaseHighlightExport ? resolve() : attempts++ > 1500 ? reject(Error(document.getElementById('status').textContent)) : setTimeout(check, 10); check();
       }));
-      assert.equal(await frame.locator('#pendingCount').innerText(), '0', '批次无法定位只提示，不阻止下载');
-      assert.deepEqual(await frame.locator('body').evaluate(() => window.__highlightResult), { negotiatedCells: highlighted ? ['U2'] : [], normalRows: [2] });
+      assert.equal(await frame.locator('#pendingCount').innerText(), '0', '同额批次按日期分配，不产生待核对事项');
+      assert.deepEqual(await frame.locator('body').evaluate(() => window.__highlightResult), { negotiatedCells: highlighted ? ['U2', 'U3'] : ['U3'], normalRows: [2] });
       const initial = await snapshot(); checkPreview(initial, highlighted);
       await frame.locator('body').evaluate(() => { const release = window.__releaseHighlightExport; delete window.__releaseHighlightExport; release(); });
       await frame.locator('#download:not([disabled])').waitFor();
@@ -151,11 +152,11 @@ function fixture({ removeFirstApplication = false } = {}) {
         }
         return result;
       }, { bytes: [...bytes], marker: MARKER });
-      assert.deepEqual(metadata.谈判付款.cells, highlighted ? ['U2'] : []);
+      assert.deepEqual(metadata.谈判付款.cells, highlighted ? ['U2', 'U3'] : ['U3']);
       assert.deepEqual(metadata.正常付款.cells, C.NORMAL_HEADERS.map((_, c) => X.utils.encode_cell({ r: 1, c })).sort());
       assert.deepEqual(metadata.付款申请核对.cells, []);
       for (const sheet of Object.values(metadata)) for (const rule of sheet.rules) { assert.equal(rule.type, 'expression'); assert.match(rule.color, /^(?:FF)?FF0000$/i); }
-      assert.equal(X.utils.sheet_to_json(book.Sheets.付款申请核对).length, 1, '同额批次仅一条非阻断核对');
+      assert.equal(X.utils.sheet_to_json(book.Sheets.付款申请核对).length, 0, '同额批次按日期确定后不再产生核对记录');
     }
 
     const initial = await analyze(true);
@@ -164,7 +165,7 @@ function fixture({ removeFirstApplication = false } = {}) {
     const first = await download(1); await checkExport(first, true);
     if (process.env.QA_OUT) {
       await fs.mkdir(process.env.QA_OUT, { recursive: true });
-      await frame.locator('#negotiatedPreview td.funds-applied').scrollIntoViewIfNeeded();
+      await frame.locator('#negotiatedPreview td.funds-applied').first().scrollIntoViewIfNeeded();
       await frame.locator('#negotiatedPreview').screenshot({ path: process.env.QA_OUT + '/negotiated.png' });
       await frame.locator('#normalPreview td.funds-applied').first().scrollIntoViewIfNeeded();
       await frame.locator('#normalPreview').screenshot({ path: process.env.QA_OUT + '/normal.png' });
@@ -172,12 +173,12 @@ function fixture({ removeFirstApplication = false } = {}) {
     }
 
     // Feed the previous export back as the latest negotiated table, then remove one application.
-    // Tool-owned conditional formatting must be replaced, so yesterday's red cell cannot survive.
+    // Remove the withdrawn U2 highlight while retaining the earliest equal-amount batch at U3.
     await upload('negotiated', first);
     await upload('applications', fixture({ removeFirstApplication: true }).applications);
     await analyze(false);
     const second = await download(2); await checkExport(second, false);
     assert.deepEqual(errors, []);
-    console.log('PASS: homepage upload, first/re-read preview, unique installment and full normal-row red fill, ambiguous review, original formulas, hidden columns, fresh-input CF replacement');
+    console.log('PASS: homepage upload, first/re-read preview, earliest equal-amount installment and full normal-row red fill, no unnecessary review, original formulas, hidden columns, fresh-input CF replacement');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

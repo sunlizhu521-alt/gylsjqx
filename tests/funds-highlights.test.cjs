@@ -24,8 +24,19 @@ test('按分比较文本金额与公式缓存，逐笔不累计凑批次，跨�
  const i=fixture(['￥60.00',40],[60,40,60]),r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,['L2','M2']);assert.equal(state(r),'已经提交全部');assert.equal(r.reviewRows.filter(row=>row[5].v.startsWith('重复提交')).length,1);assert.equal(reviews(r).length,0);
  const j=fixture([100],[60,40]),result=C.build(j);assert.deepEqual(result.highlights.negotiatedCells,[]);assert.equal(state(result),'已经提交全部');assert.equal(reviews(result).length,2);assert.match(reviews(result)[0][5].v,/60.00.*未找到金额相等/s);assert.match(reviews(result)[1][5].v,/40.00.*未找到金额相等/s);assert.equal(result.stats.pending,0);
 });
-test('同额多批和没有批次只提醒不阻止，包含日期、金额及付款申请来源行',()=>{
- for(const plans of [[50,50],[]]){const i=fixture(plans,[50]),r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,[]);assert.equal(reviews(r).length,1);assert.equal(r.stats.pending,0);const message=reviews(r)[0][5].v;assert.match(message,/50.00/);assert.match(message,/申请.xlsx \/ 申请汇总 第 2 行/);assert.match(message,plans.length?/2026年11月2日.*2026年11月3日/s:/无金额相等的批次/);}
+test('同额多批按实际日期先后标红，重复申请不消耗后续批次',()=>{
+ const i=fixture([90000,90000],[90000,90000]),s=sheet(i,'negotiated');s.L1={t:'s',v:'2026-11-23'};s.M1={t:'s',v:'2026-10-26'};
+ const before=JSON.stringify(i),r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,['M2']);assert.equal(reviews(r).length,0);assert.equal(r.stats.pending,0);assert.equal(r.reviewRows.filter(row=>row[5].v.startsWith('重复提交')).length,1);assert.equal(JSON.stringify(i),before);
+});
+test('没有同额批次只提醒不阻止，包含金额及付款申请来源行',()=>{
+ const r=C.build(fixture([],[50]));assert.deepEqual(r.highlights.negotiatedCells,[]);assert.equal(reviews(r).length,1);assert.equal(r.stats.pending,0);const message=reviews(r)[0][5].v;assert.match(message,/50.00/);assert.match(message,/申请.xlsx \/ 申请汇总 第 2 行/);assert.match(message,/无金额相等的批次/);
+});
+test('独立申请依次使用未标红批次，批次用完后仅提醒不重复使用',()=>{
+ const i=fixture([100,100],[100,100,100]),s=sheet(i,'applications');for(const row of [2,3,4])s['D'+row]={t:'s',v:''};
+ const r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,['L2','M2']);assert.equal(reviews(r).length,1);assert.match(reviews(r)[0][5].v,/同额分批已全部对应其他申请/);assert.match(reviews(r)[0][5].v,/第 4 行/);assert.equal(r.stats.pending,0);
+});
+test('最早日期相同仍需核对，不凭列顺序选择批次',()=>{
+ const i=fixture([50,50],[50]),s=sheet(i,'negotiated');s.M1={t:'s',v:'2026-11-02'};const r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,[]);assert.match(reviews(r)[0][5].v,/最早日期存在多个同额批次/);assert.equal(r.stats.pending,0);
 });
 test('同流程对应多笔款项归属不明不标红，独立核对绕过谈判付款过滤且不增加pending',()=>{
  const i=fixture([60,40],[60]),s=sheet(i,'negotiated');X.utils.sheet_add_aoa(s,[X.utils.sheet_to_json(s,{header:1})[1]],{origin:-1});const before=JSON.stringify(i),r=C.build(i);
@@ -38,7 +49,7 @@ test('分类隔离且原已提交状态不能触发红色，未申请不新增�
 });
 test('零、空、负、异常分批和无缓存公式不标红，不按申请日期选择批次',()=>{
  for(const value of [0,'',-1,'待定',{t:'e',v:23},{t:'n',f:'D2'},{t:'n',v:100.001}]){const i=fixture([value],[100]),r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,[]);assert.equal(reviews(r).length,1);assert.equal(r.stats.pending,0);}
- const same=fixture([50,50],[50]);sheet(same,'applications').A2={t:'s',v:'2026-11-02'};assert.deepEqual(C.build(same).highlights.negotiatedCells,[]);
+ const same=fixture([50,50],[50]);sheet(same,'applications').A2={t:'s',v:'2026-11-03'};assert.deepEqual(C.build(same).highlights.negotiatedCells,['L2']);
  for(const value of [0,-1,'',{t:'e',v:23}]){const i=fixture([100],[value]);sheet(i,'negotiated').H2={t:'s',v:'未提交'};assert.deepEqual(C.build(i).highlights.negotiatedCells,[]);}
 });
 test('日期表头支持文本和1904数值，金额或表头合并不猜归属',()=>{
@@ -59,10 +70,11 @@ test('保留的历史已提交状态不能冒充本次匹配，源数据前置�
  const i=fixture();sheet(i,'oa').B3={t:'s',v:'另一个供应商'};const r=C.build(i);assert.equal(r.normalRows[0][r.normalHeaders.indexOf('是否提交付款申请单')].v,'已提交');assert.deepEqual(r.highlights.normalRows,[]);
  const j=fixture(),s=sheet(j,'negotiated'),moved={};for(const [address,value]of Object.entries(s))if(/^[A-Z]+\d+$/.test(address)){const p=X.utils.decode_cell(address);p.r+=2;moved[X.utils.encode_cell(p)]=value;}moved.A1={t:'s',v:'原表标题'};moved['!ref']='A1:L4';j.negotiated.book.Sheets[j.negotiated.book.SheetNames[0]]=moved;assert.deepEqual(C.build(j).highlights.negotiatedCells,['L4']);
 });
-test('100个同额日期候选分条完整列出，保留来源与序号范围，不产生超高单行',()=>{
+test('付款归属不明的100个同额日期候选分条完整列出，不产生超高单行',()=>{
  const i=fixture(Array(100).fill(100),[100]),s=sheet(i,'negotiated'),expected=[];
  for(let c=0;c<100;c++){const d=new Date(Date.UTC(2026,0,1+c*7));s[X.utils.encode_cell({r:0,c:c+11})]={t:'s',v:d.toISOString().slice(0,10)};expected.push({date:d.getUTCFullYear()+'年'+(d.getUTCMonth()+1)+'月'+d.getUTCDate()+'日',address:X.utils.encode_cell({r:1,c:c+11})});}
- const before=JSON.stringify(i),r=C.build(i),lines=reviews(r);assert.equal(lines.length,10);assert.equal(r.stats.pending,0);assert.deepEqual(r.highlights.negotiatedCells,[]);assert.equal(JSON.stringify(i),before);
+ X.utils.sheet_add_aoa(s,[X.utils.sheet_to_json(s,{header:1})[1]],{origin:-1});
+ const before=JSON.stringify(i),r=C.build(i),lines=reviews(r).filter(row=>row[8].v===2);assert.equal(lines.length,10);assert.equal(reviews(r).length,20);assert.equal(r.stats.pending,0);assert.deepEqual(r.highlights.negotiatedCells,[]);assert.equal(JSON.stringify(i),before);
  const found=[];for(const [index,line]of lines.entries()){
   const message=line[5].v;assert(message.length<500);assert.match(message,/申请金额 100.00/);assert.match(message,/申请.xlsx \/ 申请汇总 第 2 行/);assert(message.includes('候选日期（'+(index*10+1)+'-'+(index*10+10)+'/100）'));
   for(const m of message.matchAll(/(\d{4}年\d{1,2}月\d{1,2}日)（([A-Z]+2)，100.00）/g))found.push({date:m[1],address:m[2]});

@@ -298,7 +298,7 @@ function build(inputs,decisions={}){
    const address=X.utils.encode_cell({r:target.record.r,c}),merge=mergedAt(target.record.r,c),amount=money(merge?negotiated.sheet[X.utils.encode_cell(merge.s)]:negotiated.sheet[address]);
    if(amount.blank||amount.cents===0n)continue;
    const merged=!!merge||!!mergedAt(negotiated.headerRow,c),label=valid?X.SSF.format(DATE_FORMAT,parsed.v):str(header?.w??header?.v);
-   batches.push({address,amount:amount.cents,valid,merged,label:label+'（'+address+'，'+(amount.cents===undefined?'金额异常':centsText(amount.cents))+(merged?'，合并单元格':'')+'）'});
+   batches.push({address,amount:amount.cents,valid,date:parsed.v,merged,label:label+'（'+address+'，'+(amount.cents===undefined?'金额异常':centsText(amount.cents))+(merged?'，合并单元格':'')+'）'});
   }
   const sourceLabel=r=>r.source.file+' / '+r.source.sheet+' 第 '+r.source.row+' 行';
   function reviewCandidates(application,reason,exact){
@@ -311,8 +311,9 @@ function build(inputs,decisions={}){
   }
   for(const application of matched){
    const amount=money(application.values['申请付款金额']).cents,exact=amount!==undefined&&amount>0n?batches.filter(b=>b.amount===amount):[];
-   if(exact.length===1&&exact[0].valid&&!exact[0].merged){highlightedNegotiated.add(exact[0].address);continue;}
-   const reason=amount===undefined||amount<=0n?'申请金额为空、异常或非正数':exact.length>1?'同额对应多批':exact.length&&exact[0].merged?'分批金额或日期表头位于合并单元格，归属不清':exact.length?'分批日期无法识别':'未找到金额相等的分批';
+   const remaining=exact.filter(b=>!highlightedNegotiated.has(b.address)).sort((a,b)=>a.date-b.date),first=remaining[0];
+   if(first&&remaining.every(b=>b.valid)&&!first.merged&&(remaining.length===1||first.date<remaining[1].date)){highlightedNegotiated.add(first.address);continue;}
+   const reason=amount===undefined||amount<=0n?'申请金额为空、异常或非正数':!exact.length?'未找到金额相等的分批':!remaining.length?'同额分批已全部对应其他申请':remaining.some(b=>!b.valid)?'分批日期无法识别，不能按日期排序':first.merged?'分批金额或日期表头位于合并单元格，归属不清':'最早日期存在多个同额批次，归属不清';
    reviewCandidates(application,reason,exact);
   }
   for(const application of uniqueSubmissions(ambiguous)){
