@@ -1,6 +1,6 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FulfillmentCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
-const SHEETS=['徐英','李奇','操思敏','邢芳芳'];
+const SHEETS=['徐英','操思敏','邢芳芳','李奇'];
 const COLUMNS=['采购下单人','事业部','销售分渠道','运营','供应商简称','产品线','系列','物料编码','SKU','物料名称','未交付数量','已下单未备料未生产','已备料未生产','生产中产品','完工未发产品','已发货数量','合同约定交期','生产中交付时间','未生产预计交付时间','是否正常履约','下单月份','OA备货单号','采购订单号','下单日期'];
 const SUMMARY_COLUMNS=['事业部','销售分渠道','运营','下单日期','OA流程号','供应商简称','产品线','系列','物料编码','SKU','物料名称','未交付数量','已下单未备料未生产','已备料未生产','生产中产品','完工未发产品','已发货数量','合同约定交期','生产中交付时间','为生产预计交付时间','是否正常履约'];
 function summaryRows(rows){return rows.map(row=>SUMMARY_COLUMNS.map(key=>row[COLUMNS.indexOf(key==='OA流程号'?'OA备货单号':key==='为生产预计交付时间'?'未生产预计交付时间':key)]||{t:'s',v:''}));}

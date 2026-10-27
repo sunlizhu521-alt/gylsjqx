@@ -32,9 +32,9 @@ test('首次基准、重复上传、历史推进及异常不修改旧快照',()=
 test('姓名日期后缀、三列映射、缺列留空及旧历史兼容',()=>{
  const w=fixture();w.Sheets['邢芳芳1017']=w.Sheets.邢芳芳;delete w.Sheets.邢芳芳;
  const s=w.Sheets['邢芳芳1017'];s.B2.v='OA备货流程号';s.A3={t:'s',v:'CGDD001'};s.B3={t:'s',v:'OA001'};s.C3={t:'n',v:46275};
- const r=C.merge(w),row=r.rows[6];assert.equal(row[21].v,'OA001');assert.equal(row[22].v,'CGDD001');assert.equal(X.SSF.format(row[20].z,row[20].v),'2026年9月');
- assert.equal(r.sources[6].sheet,'邢芳芳1017');
- for(const col of ['A','B','C'])delete s[col+'2'];const missing=C.merge(w);assert.deepEqual(missing.rows[6].slice(20).map(c=>c.v),['','','','']);assert.equal(missing.warnings.length,3);
+ const r=C.merge(w),row=r.rows[4];assert.equal(row[21].v,'OA001');assert.equal(row[22].v,'CGDD001');assert.equal(X.SSF.format(row[20].z,row[20].v),'2026年9月');
+ assert.equal(r.sources[4].sheet,'邢芳芳1017');
+ for(const col of ['A','B','C'])delete s[col+'2'];const missing=C.merge(w);assert.deepEqual(missing.rows[4].slice(20).map(c=>c.v),['','','','']);assert.equal(missing.warnings.length,3);
  const old={...r,rows:r.rows.map(row=>row.slice(0,20))};assert.deepEqual(C.difference(old,r),[]);assert.doesNotThrow(()=>C.workbook(old));
  w.Sheets.邢芳芳=s;assert.throws(()=>C.merge(w),/多个工作表/);delete w.Sheets.邢芳芳;w.Sheets['邢芳芳备份']=s;delete w.Sheets['邢芳芳1017'];assert.throws(()=>C.merge(w),/缺少工作表/);
 });

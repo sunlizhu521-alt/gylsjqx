@@ -12,7 +12,8 @@ function file(items){const w=X.utils.book_new();for(const [i,name] of C.SHEETS.e
  await upload(second,'本次更新版.xlsx');let h=await history();assert.equal(h.previous.filename,'上一版.xlsx');assert.match(await page.locator('#history').innerText(),/3 个物料/);
  await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);assert.match(await page.locator('#history').innerText(),/上一版.xlsx/);
  await upload(second,'重复副本.xlsx');assert.deepEqual(await history(),h);
- await upload(file([['001','错误数量']]),'异常.xlsx');assert.match(await page.locator('#status').innerText(),/处理失败/);assert.deepEqual(await history(),h);
+ await upload(file([['001','错误数量']]),'异常.xlsx');assert.match(await page.locator('#status').innerText(),/数量校验未通过/);assert.deepEqual(await history(),h);assert(await page.locator('#download').isDisabled());
+ await upload(second,'本次更新版.xlsx');assert.deepEqual(await history(),h);assert(!(await page.locator('#download').isDisabled()));
  const saved=page.waitForEvent('download');await page.locator('#download').click();const download=await saved;assert.equal(download.suggestedFilename(),'本次汇总版.xlsx');
  const output=process.env.QA_OUTPUT||'/private/tmp/fulfillment-history-qa';await fs.mkdir(output,{recursive:true});const out=path.join(output,download.suggestedFilename());await download.saveAs(out);
  const book=X.read(await fs.readFile(out),{type:'buffer',cellStyles:true});assert.deepEqual(book.SheetNames,['汇总表','差异',...C.SHEETS]);const rows=X.utils.sheet_to_json(book.Sheets.差异,{header:1});assert.deepEqual(rows[0],C.DIFF_COLUMNS);assert.deepEqual(rows.slice(1).map(r=>[r[2],r[5]]),[['004',-5],['005',4],['002',-5]]);assert.equal(rows[1][0],'甲 / 乙');assert.equal(book.Sheets.差异.A1.s.fgColor.rgb,'315B9D');
