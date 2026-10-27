@@ -75,14 +75,14 @@
     <div class="actions"><button id="download" disabled>下载资金整理表</button><span id="filenameHint"></span></div>
     <details class="help-details"><summary>查看核对与下载说明</summary><ul><li>重复提交扫描整份申请汇总，每组只列一次；OA 编号补齐、更正、缺失及冲突均保留来源供核对。</li><li>未申请本身无需核对。重复、超额、归属不清及申请日期问题写入核对表，不阻止下载；其他待处理项需先确认。</li><li>当天在当前浏览器再次下载时，文件版本自动递增。</li></ul></details>
   </section>
-  <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>预览最多 100 行，下载包含全部记录。</li><li>本次付款申请金额与分批金额相同时，按日期从早到晚依次标红；重复申请只计一次，无法确定归属时列入付款申请核对。导出保留原有人工颜色。</li><li>谈判明细分行左对齐、行高自适应；统一表头、筛选器和边框，列宽随内容调整。</li></ul></details><div class="preview" id="negotiatedPreview"></div></section>
-  <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>本次已匹配付款申请的记录整行标红。</li><li>跟单员取资金台账来源工作表，放在登记月份后。</li><li>单据号、OA 合同编号、合同总金额、是否对账默认隐藏，可在导出文件中取消隐藏；行高为 30 磅。</li></ul></details><div class="preview" id="normalPreview"></div></section>
+  <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>预览最多 100 行，下载包含全部记录。</li><li>本次付款申请金额与分批金额相同时，按日期从早到晚依次标红；重复申请只计一次，无法确定归属时列入付款申请核对。导出保留原有人工颜色，下载后可手动修改底色。</li><li>谈判明细分行左对齐、行高自适应；统一表头、筛选器和边框，列宽随内容调整。</li></ul></details><div class="preview" id="negotiatedPreview"></div></section>
+  <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>本次已匹配付款申请的记录整行标红，排序时底色跟随记录，下载后可手动改色。</li><li>跟单员取资金台账来源工作表，放在登记月份后。</li><li>单据号、OA 合同编号、合同总金额、是否对账默认隐藏，可在导出文件中取消隐藏；行高为 30 磅。</li></ul></details><div class="preview" id="normalPreview"></div></section>
   <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>显示重复申请、OA 编号和实付同步等需复核事项，保留来源文件、工作表、行号和跟单员。</li><li>核对说明分条显示，自动换行并调整行高；申请提交进度不等于实际付款，实付金额以资金台账的唯一匹配结果更新。</li></ul></details><div class="preview" id="reviewPreview"></div></section>
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=negotiated-paid-20261028-51"></script>
-<script src="funds-export.js?v=negotiated-paid-20261028-51"></script>
-<script src="funds-tool.js?v=negotiated-paid-20261028-51"></script>
+<script src="funds-core.js?v=editable-payment-colors-20261028-52"></script>
+<script src="funds-export.js?v=editable-payment-colors-20261028-52"></script>
+<script src="funds-tool.js?v=editable-payment-colors-20261028-52"></script>
 </body>
 </html>

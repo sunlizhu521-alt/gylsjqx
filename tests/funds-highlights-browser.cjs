@@ -142,6 +142,11 @@ function fixture({ removeFirstApplication = false } = {}) {
         for (const entry of all(workbook, 'sheet')) {
           const id = entry.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id'), rel = all(rels, 'Relationship').find(e => e.getAttribute('Id') === id), path = new URL(rel.getAttribute('Target'), 'https://xlsx.invalid/xl/workbook.xml').pathname.slice(1), doc = parse(await zip.file(path).async('string'));
           const cells = new Set(), rules = [];
+          const xfs = all(styles, 'cellXfs')[0], fills = all(styles, 'fills')[0];
+          for (const c of all(doc, 'c')) {
+            const xf = xfs.children[Number(c.getAttribute('s') || 0)], fill = fills.children[Number(xf.getAttribute('fillId') || 0)];
+            if (all(fill, 'fgColor')[0]?.getAttribute('rgb') === 'FFFF0000') cells.add(c.getAttribute('r'));
+          }
           for (const cf of all(doc, 'conditionalFormatting')) for (const rule of all(cf, 'cfRule')) {
             if (!all(rule, 'formula').some(f => f.textContent === marker)) continue;
             const dxf = dxfs?.children[Number(rule.getAttribute('dxfId'))];
@@ -154,6 +159,8 @@ function fixture({ removeFirstApplication = false } = {}) {
       }, { bytes: [...bytes], marker: MARKER });
       assert.deepEqual(metadata.谈判付款.cells, highlighted ? ['U2', 'U3'] : ['U3']);
       assert.deepEqual(metadata.正常付款.cells, C.NORMAL_HEADERS.map((_, c) => X.utils.encode_cell({ r: 1, c })).sort());
+      assert.deepEqual(metadata.正常付款.rules, [], '正常付款不能用固定行号条件格式，以免排序后颜色错位');
+      assert.deepEqual(metadata.谈判付款.rules, [], '谈判付款底色也可手动修改，不添加覆盖底色的条件格式');
       assert.deepEqual(metadata.付款申请核对.cells, []);
       for (const sheet of Object.values(metadata)) for (const rule of sheet.rules) { assert.equal(rule.type, 'expression'); assert.match(rule.color, /^(?:FF)?FF0000$/i); assert.equal(rule.background, 'FFFF0000', 'WPS conditional-format background must be explicitly red'); assert.equal(rule.backgroundIndex, null); }
       assert.equal(X.utils.sheet_to_json(book.Sheets.付款申请核对).length, 0, '同额批次按日期确定后不再产生核对记录');
