@@ -65,6 +65,30 @@ async function fixture({ unsupported = false, formulas = true } = {}) {
   return zip.generateAsync({ type: 'nodebuffer' });
 }
 
+function shiftedHeadersFixture() {
+  const book = X.utils.book_new(), expected = [];
+  for (const [person, name] of C.SHEETS.entries()) {
+    // Four independent permutations: each quantity field occupies a different column in every sheet.
+    const order = C.COLUMNS.map((_, column) => C.COLUMNS[(column * (person % 2 ? 7 : 5) + person * 3 + 1) % C.COLUMNS.length]);
+    const headers = order.map((field, column) => column % 2 ? ' ' + field + ' ' : field.slice(0, 2) + '\n' + field.slice(2));
+    const values = Object.fromEntries(quantities.map((field, q) => [field, (person + 1) * 100 + (q + 1) * 7]));
+    Object.assign(values, { '采购下单人': name, '事业部': divisions[person % divisions.length], '物料编码': 'SHIFT-' + person, 'SKU': 'SHIFT-SKU-' + person, '供应商简称': '移位合成供应商', '物料名称': '按表头取值物料' });
+    const dataRow = person + 3;
+    const sheet = X.utils.aoa_to_sheet([
+      ...Array.from({ length: person + 1 }, (_, row) => row ? [] : ['各人员独立列顺序']),
+      headers,
+      order.map(field => values[field] ?? '')
+    ]);
+    const address = field => X.utils.encode_cell({ r: dataRow - 1, c: order.indexOf(field) });
+    if (person === 0) sheet[address('未交付数量')] = { t: 'n', v: 0, f: address('已发货数量') + '-35' };
+    if (person === 3) sheet[address('生产中产品')] = { t: 'n', v: 0, f: address('已备料未生产') + '+7' };
+    X.utils.book_append_sheet(book, sheet, name);
+    expected.push({ sheet: name, code: values.物料编码, values, columns: quantities.map(field => order.indexOf(field)) });
+  }
+  for (let q = 0; q < quantities.length; q++) assert.equal(new Set(expected.map(row => row.columns[q])).size, C.SHEETS.length);
+  return { bytes: Buffer.from(X.write(book, { type: 'buffer', bookType: 'xlsx' })), expected };
+}
+
 function assertNoFormulas(book) {
   for (const name of book.SheetNames) for (const [address, cell] of Object.entries(book.Sheets[name])) {
     if (address.startsWith('!')) continue;
@@ -196,7 +220,23 @@ function assertNoFormulas(book) {
     assert.deepEqual(await history(), corruptBefore, '无公式缓存结果不一致仍阻止，不能静默重建');
     await upload(input, '恢复更新版.xlsx');
     assert.equal(await page.locator('#download').isDisabled(), false);
+
+    const shifted = shiftedHeadersFixture();
+    await upload(shifted.bytes, '四人独立列位置更新版.xlsx');
+    assert.equal(await page.locator('#download').isDisabled(), false, await page.locator('#status').innerText());
+    assert.match(await page.locator('#quantityStatus').innerText(), /通过/);
+    assert.equal(await page.locator('#quantityChecks tbody tr').count(), 30);
+    const shiftedExport = X.read((await getDownload()).bytes, { type: 'buffer' });
+    assertNoFormulas(shiftedExport);
+    const shiftedRows = X.utils.sheet_to_json(shiftedExport.Sheets.汇总表, { header: 1, defval: '' });
+    assert.deepEqual(shiftedRows[0], C.SUMMARY_COLUMNS);
+    assert.equal(shiftedRows.length - 1, C.SHEETS.length);
+    for (const [index, expected] of shifted.expected.entries()) {
+      const row = shiftedRows[index + 1];
+      assert.equal(row[C.SUMMARY_COLUMNS.indexOf('物料编码')], expected.code);
+      for (const field of quantities) assert.equal(row[C.SUMMARY_COLUMNS.indexOf(field)], expected.values[field], expected.sheet + '按表头读取“' + field + '”');
+    }
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ url, detailRows: 8, codes: { '1007010122': 1295, '1007010123': 1240 }, allSheetsValuesOnly: 'passed', crossSheet: 'passed', preservedStructure: 'passed', legacyMigration: 'passed', blockedUnsupported: 'passed' }));
+    console.log(JSON.stringify({ url, detailRows: 8, codes: { '1007010122': 1295, '1007010123': 1240 }, allSheetsValuesOnly: 'passed', crossSheet: 'passed', preservedStructure: 'passed', legacyMigration: 'passed', blockedUnsupported: 'passed', independentHeaderPositions: 'passed' }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

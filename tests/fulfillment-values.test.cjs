@@ -54,3 +54,15 @@ test('导出重读后全部成功公式为真实typed values，且不改源工�
  const source=book({明细:{A1:formula('1245+50'),A2:formula('"供应商"'),A3:formula('TRUE()'),A4:{t:'s',v:''},'!ref':'A1:A4'}}),result=V.materialize(source),bytes=X.write(result.book,{type:'buffer',bookType:'xlsx'}),reopened=X.read(bytes,{type:'buffer'});
  assert.deepEqual(result.issues,[]);assert.equal(reopened.Sheets.明细.A1.v,1295);assert.equal(reopened.Sheets.明细.A2.v,'供应商');assert.equal(reopened.Sheets.明细.A3.v,true);for(const cell of Object.values(reopened.Sheets.明细))if(cell&&typeof cell==='object')assert.equal(cell.f,undefined);assert.equal(source.Sheets.明细.A1.f,'1245+50');
 });
+test('四人六项数量列各自移位并含换行表头，按名称核算、汇总及校验',()=>{
+ const C=require('../fulfillment-core.js'),source=X.utils.book_new(),expected=new Map();
+ C.SHEETS.forEach((name,person)=>{
+  const offset=(person+1)*5,columns=C.COLUMNS.slice(offset).concat(C.COLUMNS.slice(0,offset));if(person%2)columns.reverse();
+  const values=Object.fromEntries(V.FIELDS.map((field,i)=>[field,person*100+i]));values['完工未发产品']=person*100+33;expected.set(name,values);
+  const labels=columns.map(field=>V.FIELDS.includes(field)?' '+field.slice(0,2)+'\n'+field.slice(2)+' ':field);
+  const row=columns.map(field=>Object.hasOwn(values,field)?values[field]:({'物料编码':'MAT-'+person,'事业部':'国内事业部','供应商简称':'供应商'+person})[field]||'');
+  const sheet=X.utils.aoa_to_sheet([labels,row]);sheet[X.utils.encode_cell({r:1,c:columns.indexOf('完工未发产品')})]=formula(person*100+'+33',0);X.utils.book_append_sheet(source,sheet,name);
+ });
+ const converted=V.materialize(source);assert.deepEqual(converted.issues,[]);const result=C.merge(converted.book),check=V.validate(converted.book,result,C);assert.equal(check.passed,true,JSON.stringify(check.issues));
+ const summary=C.summaryRows(result.rows);for(let r=0;r<result.rows.length;r++){const name=result.sources[r].sheet;for(const field of V.FIELDS){assert.equal(summary[r][C.SUMMARY_COLUMNS.indexOf(field)].v,expected.get(name)[field],name+' '+field);assert.equal(check.checks.find(c=>c.sheet===name&&c.field===field).sourceTotal,expected.get(name)[field]);}}
+});
