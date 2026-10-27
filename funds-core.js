@@ -176,7 +176,8 @@ function build(inputs,decisions={}){
  const normal=[];let negotiatedLedgerRows=0,excludedNormalRows=0;
  for(const r of ledger){
   const info=classification(r);
-  if(isApplicationNegotiated(r)||(info.key&&negotiatedKeys.has(info.key))){negotiatedLedgerRows++;continue;}
+  const ledgerNegotiated=r.values['是否谈判付款']?.t!=='e'&&norm(value(r,'是否谈判付款'))==='是';
+  if(ledgerNegotiated||isApplicationNegotiated(r)||(info.key&&negotiatedKeys.has(info.key))){negotiatedLedgerRows++;continue;}
   if(!hasPaymentOA(r)){excludedNormalRows++;continue;}
   if(!info.key){normal.push(r);continue;}
   const uncertain=uncertainNegotiated.filter(n=>(!n.name||n.name===info.name)&&(n.cents===undefined||n.cents===info.cents));
