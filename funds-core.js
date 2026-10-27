@@ -301,12 +301,22 @@ function build(inputs,decisions={}){
    batches.push({address,amount:amount.cents,valid,date:parsed.v,merged,label:label+'（'+address+'，'+(amount.cents===undefined?'金额异常':centsText(amount.cents))+(merged?'，合并单元格':'')+'）'});
   }
   const sourceLabel=r=>r.source.file+' / '+r.source.sheet+' 第 '+r.source.row+' 行';
+  const actions={
+   '申请金额为空、异常或非正数':'核实申请表“本次申请付款金额”，修正空值、异常金额或公式结果后重新上传',
+   '未找到金额相等的分批':'核实申请表“本次申请付款金额”；若填错，修改申请表；若金额正确，核实谈判表该行是否漏列或错列分批日期和金额，有误再修正并重新上传',
+   '同额分批已全部对应其他申请':'核实申请表是否重复申请；若为新增的一次申请，核实谈判表是否漏列该批付款计划，修正后重新上传',
+   '分批日期无法识别，不能按日期排序':'将谈判表候选日期表头核实为完整年月日，再重新上传',
+   '分批金额或日期表头位于合并单元格，归属不清':'人工确认该合并金额或日期对应的付款批次；本工具保留合并结构，请确认后在导出表标记对应金额',
+   '最早日期存在多个同额批次，归属不清':'核实同日同额批次是否重复；若为独立批次，请确认本次对应哪一批，并在导出表标记该金额',
+   '付款申请归属不明':'核对申请表与谈判表的流程编码、供应商及金额，确认本次申请对应哪笔付款，修正归属信息后重新上传'
+  };
   function reviewCandidates(application,reason,exact){
    // Keep every candidate while staying below Excel's maximum row height.
    for(let start=0;start<Math.max(1,exact.length);start+=10){
     const end=Math.min(start+10,exact.length),label=exact.length>10?'候选日期（'+(start+1)+'-'+end+'/'+exact.length+'）':'候选日期';
     const candidates=exact.slice(start,end).map(b=>b.label).join('、')||'无金额相等的批次';
-    reviewApplication(target,'申请标红核对：申请金额 '+amountText(application.values['申请付款金额'])+'；'+reason+'，未标红。'+label+'：'+candidates+'。申请来源：'+sourceLabel(application)+'。',true);
+    const location=exact.length?'':'谈判位置：'+sourceLabel(target.record)+'，本行申请付款金额 '+amountText(target.values['申请付款金额'])+'。';
+    reviewApplication(target,'申请标红核对：申请金额 '+amountText(application.values['申请付款金额'])+'；'+reason+'，本笔未标红。'+label+'：'+candidates+'。申请来源：'+sourceLabel(application)+'。'+location+'需要处理：'+actions[reason]+'。',true);
    }
   }
   for(const application of matched){

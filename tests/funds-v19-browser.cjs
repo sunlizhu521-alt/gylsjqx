@@ -53,6 +53,9 @@ const {fixtures}=require('./funds-fixtures.cjs');
   const downloadPromise=page.waitForEvent('download');await frame.locator('#download').click();const download=await downloadPromise;
   const output=await fs.readFile(await download.path()),saved=X.read(output,{cellStyles:true,cellNF:true}),s=saved.Sheets.谈判付款,src=source.Sheets.谈判付款;
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对']);assert.equal(s['!ref'],'A1:AM'+(expected.negotiated.sourceRange.e.r+1));
+  const reviewNotes=X.utils.sheet_to_json(saved.Sheets.付款申请核对).map(row=>row['核对说明']);
+  assert.deepEqual(await frame.locator('#reviewPreview tbody tr td:nth-child(6)').allTextContents(),reviewNotes,'预览和下载核对说明一致');
+  for(const note of reviewNotes.filter(text=>text.includes('申请标红核对：'))){assert.match(note,/需要处理：/);assert.match(note,/申请来源：/);assert.match(note,/本笔未标红/);}
   if(process.env.FUNDS_CLASSIFICATION_QA){
    const normal=X.utils.sheet_to_json(saved.Sheets.正常付款);assert.equal(normal.length,4);assert(!normal.some(r=>r['对公付款0A流程号']==='MDST-DGFK20261024001'));
    const reviews=X.utils.sheet_to_json(saved.Sheets.付款申请核对);assert.equal(reviews.length,expected.reviewRows.length);assert.equal(reviews.filter(row=>!row['核对说明'].includes('申请标红核对：')).length,1);assert.match(saved.Sheets.付款申请核对.F2.v,/重复提交.*单笔金额 400.00/s);assert.equal(s['!ref'],'A1:AM4');assert.equal(s.AH2.v,'已经提交全部');
