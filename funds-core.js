@@ -343,7 +343,7 @@ function build(inputs,decisions={}){
   return [JSON.stringify([payee(r),amount.cents?.toString()??['invalid',r.values['付款金额']],...FLOW_FIELDS.map(f=>str(value(r,f))),flowProblems(r)]),r];
  })).values()]);
  const flowRecords=[...flows.values()].flat();let oaConsistent=0,oaMatched=0;
- const oaReviews=[],supplierConflicts=new Set();
+ const oaReviews=[],paidReviews=[],supplierConflicts=new Set(),paidOAConflicts=new Set();
  function identityEvidence(records){
   const groups=new Map();
   for(const r of records){
@@ -422,7 +422,7 @@ function build(inputs,decisions={}){
    set(target,'对公付款0A流程号',cell(ids[0]));
    target.record={...target.record,values:{...target.values}};
    message+='按收款单位＋付款金额唯一匹配，已更新为“'+ids[0]+'”。';
-  }else message+=(merged?'OA号位于合并单元格':repeatedTarget?'同一供应商和金额对应多笔付款':conflicting?'OA来源编号或匹配信息异常、不一致':'匹配到多个流程编号')+'，保留当前 OA 值“'+(str(target.values['对公付款0A流程号']?.v)||'空白')+'”，请核对。';
+  }else{paidOAConflicts.add(target);message+=(merged?'OA号位于合并单元格':repeatedTarget?'同一供应商和金额对应多笔付款':conflicting?'OA来源编号或匹配信息异常、不一致':'匹配到多个流程编号')+'，保留当前 OA 值“'+(str(target.values['对公付款0A流程号']?.v)||'空白')+'”，请核对。';}
   const evidence=conflicting?flow.records.filter(r=>ids.includes(flowId(r))):matches;
   oaReviews.push({target,message,evidence:evidence.map(r=>r.source.file+'/'+r.source.sheet+'!'+r.source.row).join('；')});
  }
@@ -465,6 +465,60 @@ function build(inputs,decisions={}){
   for(const f of FLOW_FIELDS){if(flow.map[f]===undefined)continue;set(target,f,cell(chosen.map(r=>(chosen.length>1?flowId(r)+'：':'')+str(value(r,f))).join('\n')));}
  }
  targets.forEach(applyFlow);
+ // Financial updates use the final verified OA, independently of application submission amounts.
+ const financialFields=['已付金额','剩余金额','是否结清'];
+ const scheduleColumns=new Set(negotiated.headers.map((h,c)=>{
+  const d=date(negotiated.sheet[X.utils.encode_cell({r:negotiated.headerRow,c})],negotiated.date1904);
+  return h==='付款计划'||(!d.invalid&&d.v!=='')?c:-1;
+ }).filter(c=>c>=0));
+ const scheduleFormulas=Object.keys(negotiated.sheet).filter(a=>/^[A-Z]+[1-9]\d*$/.test(a)&&negotiated.sheet[a].f&&scheduleColumns.has(X.utils.decode_cell(a).c));
+ function referencesFinancial(address,financial,seen=new Set()){
+  if(financial.has(address))return true;if(seen.has(address))return false;seen.add(address);
+  const f=negotiated.sheet[address]?.f;if(!f)return false;
+  const text=f.replace(/"(?:[^"]|"")*"/g,'').replace(/\$/g,'').toUpperCase(),refs=text.match(/\b[A-Z]{1,3}[1-9]\d*\b/g)||[];
+  for(const match of text.matchAll(/\b([A-Z]{1,3}[1-9]\d*):([A-Z]{1,3}[1-9]\d*)\b/g)){
+   const a=X.utils.decode_cell(match[1]),b=X.utils.decode_cell(match[2]);if((b.r-a.r+1)*(b.c-a.c+1)>20000)return true;
+   for(let r=a.r;r<=b.r;r++)for(let c=a.c;c<=b.c;c++)refs.push(X.utils.encode_cell({r,c}));
+  }
+  return refs.some(a=>referencesFinancial(a,financial,seen));
+ }
+ for(const target of negotiatedObjects){
+  const record=target.record,info=classification(record),ids=oas(record);
+  const sameOA=r=>hasPaymentOA(r)&&oas(r).length>0&&!identifiersConflict(ids,oas(r));
+  if(!hasPaymentOA(record)||!ids.length)continue;
+  const related=ledger.filter(r=>sameOA(r)||(info.key&&classification(r).key===info.key));
+  const matches=related.filter(r=>info.key&&classification(r).key===info.key&&sameOA(r));
+  const describe=r=>'OA号 '+(str(value(r,'对公付款0A流程号'))||'空白')+'｜供应商 '+(str(value(r,'供应商名称'))||'空白')+'｜付款主体 '+(str(value(r,'付款主体'))||'空白')+'｜申请付款金额 '+amountText(r.values['申请付款金额'])+'｜已付金额 '+amountText(r.values['已付金额'])+'｜来源 '+r.source.file+' / '+r.source.sheet+' 第 '+r.source.row+' 行';
+  const review=(reason,action,rows=matches.length?matches:related)=>paidReviews.push({target,message:'已付金额同步核对：'+reason+'；保留原已付金额、剩余金额和结清状态。\n谈判记录：'+describe(record)+rows.map(r=>'\n台账记录：'+describe(r)).join('')+'\n需要处理：'+action});
+  if(supplierConflicts.has(target)||paidOAConflicts.has(target)||issues.some(q=>q.id==='oa:'+record.id&&!q.resolved)){
+   review('OA号尚有冲突','先核实并修正来源表的 OA 号、供应商及申请金额，再重新上传。');continue;
+  }
+  const flowRows=ids.flatMap(id=>flow.records.filter(r=>flowId(r)===id));
+  if(flowRows.some(r=>flowProblems(r).some(f=>['流程编号','收款单位','付款金额'].includes(f)))||ids.some(id=>new Set(flowRows.filter(r=>flowId(r)===id).map(r=>JSON.stringify([payee(r),money(r.values['付款金额']).cents?.toString()]))).size>1)){
+   review('OA来源身份或金额存在冲突','核实 OA 流程表中同一编号的收款单位和付款金额后重新上传。');continue;
+  }
+  if(matches.length!==1){
+   if(matches.length>1)review('同一匹配键对应多条台账记录，不能相加或任选一条','核实重复台账记录，明确唯一付款记录后重新上传。');
+   else if(related.length)review('未找到 OA号、供应商和申请付款金额三项完全一致的台账记录','核对双方编号、供应商及金额；分批金额与整笔总金额不同的，请核实该批实际已付金额，勿直接套用整笔已付。');
+   continue;
+  }
+  const source=matches[0],paid=money(source.values['已付金额']);
+  if(paid.blank)continue;
+  if(!compatible(record,source,'付款主体')){review('付款主体不一致或异常','核实双方付款主体并修正来源表后重新上传。');continue;}
+  if(negotiatedObjects.filter(t=>classification(t.record).key===info.key&&sameOA(t.record)).length>1){review('同一台账记录可能重复分配到多条谈判记录','核实这些谈判记录的实际付款归属，明确后修正来源表；不得重复填入整笔已付。');continue;}
+  if(paid.cents===undefined||paid.cents<0n||paid.cents>info.cents){review('台账已付金额异常、为负或超过申请金额','核实台账“已付款金额”，修正异常金额或重算缺失的公式结果后重新上传。');continue;}
+  if(financialFields.some(h=>targetCols[h]===undefined)){review('谈判表缺少已付金额、剩余金额或是否结清列','补齐这三列表头后重新上传。');continue;}
+  const address=h=>X.utils.encode_cell({r:record.r,c:targetCols[h]});
+  if(financialFields.some(h=>(negotiated.sheet['!merges']||[]).some(m=>record.r>=m.s.r&&record.r<=m.e.r&&targetCols[h]>=m.s.c&&targetCols[h]<=m.e.c&&(m.s.r!==m.e.r||m.s.c!==m.e.c)))){review('付款情况位于合并单元格，无法确定单行金额','核实合并区域对应的付款记录；本次保留合并结构和原付款情况。');continue;}
+  const remaining=target.values['剩余金额'],a=address('申请付款金额'),p=address('已付金额');
+  const formula=remaining?.f?.replace(new RegExp("(?:'"+negotiated.sheetName.replace(/'/g,"''").replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+"'|"+negotiated.sheetName.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+")!",'g'),'').replace(/[\s$()]/g,'').replace(/^=/,'').toUpperCase();
+  if((remaining?.f&&formula!==a+'-'+p)||target.values['是否结清']?.f){review('原剩余金额或结清公式无法验证为本行申请金额减已付金额','核实本行剩余金额公式及结清规则，确认后修正来源公式并重新上传。');continue;}
+  const balance=info.cents-paid.cents;
+  const changes=[['已付金额',amountCell(paid.cents)],['剩余金额',{...amountCell(balance),f:remaining?.f||a+'-'+p}],['是否结清',cell(balance===0n?'是':'否')]].filter(([h,c])=>target.values[h]?.t!==c.t||target.values[h]?.v!==c.v);
+  const financial=new Set(changes.map(([h])=>address(h))),affectedPlan=scheduleFormulas.filter(a=>referencesFinancial(a,financial));
+  if(affectedPlan.length){review('付款计划公式依赖本行付款情况，自动同步会改变原分批金额','核实付款计划公式 '+affectedPlan.join('、')+'，将分批计划与实付余额区分后重新上传。');continue;}
+  for(const [h,c] of changes)set(target,h,c);
+ }
  normalObjects.filter(t=>!supplierConflicts.has(t)).forEach(applyApplications);
  function confirmSubmissionStatus(target,message){
   const original=str(target.values['是否提交付款申请单']?.v);
@@ -534,7 +588,7 @@ function build(inputs,decisions={}){
   const message='重复提交：共 '+group.length+' 次，重复 '+(group.length-1)+' 次；单笔金额 '+centsText(amount)+'；重复计入金额 '+centsText(amount*BigInt(group.length-1))+'。';
   reviewRows.push([cell(applicationTypes.get(first)),cell(value(first,'供应商名称')),cell(subjects),amountCell(amount),cell('已提交'),cell(message),cell(source.file),cell(source.sheet),cell(source.row),cell(owners.length===1?owners[0]:'')]);
  }
- for(const {target,message,evidence} of oaReviews){
+ for(const {target,message,evidence} of [...oaReviews,...paidReviews]){
   const source=target.record.source;
   reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(value(target.record,'供应商名称')),cell(target.values['付款主体']?.t==='e'?target.values['付款主体'].w||'Excel错误':target.values['付款主体']?.v),classification(target.record).cents===undefined?cell(target.values['申请付款金额']?.t==='e'?target.values['申请付款金额'].w||'Excel错误':target.values['申请付款金额']?.v):amountCell(classification(target.record).cents),cell(target.values['是否提交付款申请单']?.v),cell(message+(evidence?'\nOA 来源：'+evidence:'')),cell(source.file),cell(source.sheet),cell(source.row),cell(reviewOwner(target))]);
  }

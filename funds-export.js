@@ -227,6 +227,15 @@ window.FundsExport = async function(sourceBytes, result) {
   const sourceColumns=elements(sheet,'col');
   let maxRow=originalRange.e.r,maxColumn=originalRange.e.c;
   const changed=new Set();
+  // A changed shared-formula master must not leave untouched followers without their formula.
+  const touchedShared=new Set(result.negotiated.updates.map(u=>cells.has(u.address)?first(cells.get(u.address),'f'):null).filter(f=>f?.getAttribute('t')==='shared').map(f=>f.getAttribute('si')));
+  for(const [address,c] of cells){
+    const f=first(c,'f');if(!f||f.getAttribute('t')!=='shared'||!touchedShared.has(f.getAttribute('si')))continue;
+    const point=XLSX.utils.decode_cell(address),expanded=result.negotiated.rows?.[point.r-result.negotiated.headerRow-1]?.[point.c]?.f||f.textContent;
+    if(!expanded)throw Error('谈判付款!'+address+' 的共享公式无法展开，请在 Excel/WPS 重算后上传');
+    f.textContent=renameSelf(expanded);for(const key of ['t','si','ref'])f.removeAttribute(key);
+  }
+  const amountStyles=new Map();
   for(const {address,cell} of result.negotiated.updates){
     if(!/^[A-Z]+[1-9]\d*$/.test(address))throw Error('谈判付款更新地址无效');
     const point=XLSX.utils.decode_cell(address),old=cells.get(address);let row=rows.get(point.r+1);
@@ -235,8 +244,11 @@ window.FundsExport = async function(sourceBytes, result) {
     const submission=!isHeader&&submissionColumns.has(point.c),column=sourceColumns.find(c=>Number(c.getAttribute('min'))<=point.c+1&&Number(c.getAttribute('max'))>=point.c+1);
     let styleId=old?.getAttribute('s')??(old&&submission?(row.getAttribute('s')??column?.getAttribute('style')??0):styleFor(cell?.z||'',isHeader));
     if(typeof cell?.v==='number'&&cell.z&&XLSX.SSF.is_date(cell.z))styleId=dateDisplayStyle(Number(styleId));
+    if(typeof cell?.v==='number'&&cell.z==='#,##0.00'){
+      const key=String(styleId);if(!amountStyles.has(key)){const xf=xfs.children[Number(styleId)].cloneNode(true);xf.setAttribute('numFmtId',formatId(cell.z));xf.setAttribute('applyNumberFormat','1');amountStyles.set(key,append('cellXfs',xf));}styleId=amountStyles.get(key);
+    }
     if(submission)styleId=wrapStyle(styleId);
-    const next=writeCell(sheet,address,cell,styleId);
+    const next=writeCell(sheet,address,cell?.f?{...cell,f:renameSelf(cell.f)}:cell,styleId);
     // Retain unrelated cell metadata while replacing only value/formula payloads.
     if(old){for(const attr of old.attributes)if(!['r','s','t'].includes(attr.name))next.setAttribute(attr.name,attr.value);old.replaceWith(next);}
     else {const after=[...row.children].find(c=>c.localName==='c'&&XLSX.utils.decode_cell(c.getAttribute('r')).c>point.c);row.insertBefore(next,after||null);}
