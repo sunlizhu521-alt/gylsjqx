@@ -65,6 +65,32 @@ window.FundsExport = async function(sourceBytes, result) {
   const formatId=code=>{if(!code||code==='General')return 0;if(formats.has(code))return formats.get(code);const id=nextFormat++;numFmts.append(create(styles,'numFmt',{numFmtId:id,formatCode:code}));numFmts.setAttribute('count',numFmts.children.length);formats.set(code,id);return id;};
   const styleIds=new Map();
   const styleFor=(code='',header=false)=>{const key=header?'header':code;if(styleIds.has(key))return styleIds.get(key);const xf=create(styles,'xf',{numFmtId:formatId(code),fontId:header?headerFontId:fontId,fillId:header?fillId:0,borderId,xfId:0,applyFont:1,applyFill:1,applyBorder:1,applyAlignment:1,applyNumberFormat:1});xf.append(create(styles,'alignment',{horizontal:'center',vertical:'center',wrapText:1}));const id=append('cellXfs',xf);styleIds.set(key,id);return id;};
+  const appliedFormula='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
+  const appliedStyle=()=>{
+    let dxfs=first(styles,'dxfs');if(!dxfs){dxfs=create(styles,'dxfs',{count:0});styles.documentElement.insertBefore(dxfs,[...styles.documentElement.children].find(e=>['tableStyles','colors','extLst'].includes(e.localName))||null);}
+    const dxf=create(styles,'dxf'),fill=create(styles,'fill'),pattern=create(styles,'patternFill',{patternType:'solid'});pattern.append(create(styles,'fgColor',{rgb:'FFFF0000'}),create(styles,'bgColor',{indexed:64}));fill.append(pattern);dxf.append(fill);
+    const shape=node=>[node.namespaceURI,node.localName,[...node.attributes].filter(a=>a.namespaceURI!=='http://www.w3.org/2000/xmlns/').map(a=>[a.namespaceURI,a.localName,a.value]).sort((a,b)=>String(a).localeCompare(String(b))),[...node.children].map(shape)];
+    const expected=JSON.stringify(shape(dxf)),found=[...dxfs.children].findIndex(existing=>JSON.stringify(shape(existing))===expected);if(found>=0)return found;
+    const id=dxfs.children.length;dxfs.append(dxf);dxfs.setAttribute('count',dxfs.children.length);return id;
+  };
+  const markApplied=(doc,references)=>{
+    let removed=false;
+    for(const container of elements(doc,'conditionalFormatting')){
+      let removedHere=false;
+      for(const rule of [...container.children])if(rule.namespaceURI===S&&rule.localName==='cfRule'&&first(rule,'formula')?.textContent.trim()===appliedFormula){rule.remove();removed=removedHere=true;}
+      if(removedHere&&!container.children.length)container.remove();
+    }
+    const ranges=[...new Set(references)];if(!removed&&!ranges.length)return;
+    // A dedicated rule can be replaced next week without erasing the user's original fills or rules.
+    const rules=elements(doc,'cfRule').map(rule=>({rule,priority:Number(rule.getAttribute('priority'))})).filter(item=>Number.isInteger(item.priority)&&item.priority>0),priorities=[...new Set(rules.map(item=>item.priority))].sort((a,b)=>a-b);
+    for(const {rule,priority} of rules)rule.setAttribute('priority',String(priorities.indexOf(priority)+(ranges.length?2:1)));
+    if(!ranges.length)return;
+    const container=create(doc,'conditionalFormatting',{sqref:ranges.join(' ')}),rule=create(doc,'cfRule',{type:'expression',dxfId:appliedStyle(),priority:1}),formula=create(doc,'formula');formula.textContent=appliedFormula;rule.append(formula);container.append(rule);
+    const following=['dataValidations','hyperlinks','printOptions','pageMargins','pageSetup','headerFooter','rowBreaks','colBreaks','customProperties','cellWatches','ignoredErrors','smartTags','drawing','legacyDrawing','legacyDrawingHF','picture','oleObjects','controls','webPublishItems','tableParts','extLst'];
+    doc.documentElement.insertBefore(container,[...doc.documentElement.children].find(e=>following.includes(e.localName))||null);
+  };
+  const highlightedCells=result.highlights?.negotiatedCells??[],highlightedRows=result.highlights?.normalRows??[];
+  if(!Array.isArray(highlightedCells)||!Array.isArray(highlightedRows))throw Error('付款申请标红位置无效');
   const wrappedStyles=new Map();
   const wrapStyle=id=>{
     const original=xfs.children[Number(id)];if(!original)throw Error('谈判付款单元格样式缺失');
@@ -314,6 +340,13 @@ window.FundsExport = async function(sourceBytes, result) {
     await relocateRelated(sheetPath);
   }
   fitSheet(sheet,{r:maxRow,c:maxColumn},result.negotiated.headerRow||0);
+  const appliedCells=highlightedCells.flatMap(address=>{
+    if(typeof address!=='string'||!/^[A-Z]+[1-9]\d*$/.test(address))throw Error('谈判付款标红地址无效');
+    const point=XLSX.utils.decode_cell(address);if(point.r<=(result.negotiated.headerRow||0))return [];
+    if(point.r>maxRow||point.c>maxColumn)throw Error('谈判付款标红地址超出明细范围');
+    const moved=order?.indexOf(point.c);return [XLSX.utils.encode_cell({r:point.r,c:moved>=0?moved:point.c})];
+  });
+  markApplied(sheet,appliedCells);
   for(const entry of entries)if(entry!==selected){const id=entry.getAttributeNS(R,'id');elements(rels,'Relationship').find(e=>e.getAttribute('Id')===id)?.remove();entry.remove();}
   selected.setAttribute('name','谈判付款');selected.removeAttribute('state');
   let nextSheetId=Math.max(...entries.map(e=>Number(e.getAttribute('sheetId'))),0)+1;
@@ -330,7 +363,13 @@ window.FundsExport = async function(sourceBytes, result) {
     const range=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:allRows.length-1,c:headers.length-1}});
     generated.documentElement.insertBefore(create(generated,'dimension',{ref:range}),generated.documentElement.firstChild);
     fitSheet(generated,{r:allRows.length-1,c:headers.length-1},0,key==='Review');
-    if(key==='Normal')for(const col of elements(generated,'col'))if(FundsCore.NORMAL_HIDDEN_HEADERS.includes(headers[Number(col.getAttribute('min'))-1]))col.setAttribute('hidden','1');
+    if(key==='Normal'){
+      for(const col of elements(generated,'col'))if(FundsCore.NORMAL_HIDDEN_HEADERS.includes(headers[Number(col.getAttribute('min'))-1]))col.setAttribute('hidden','1');
+      markApplied(generated,highlightedRows.flatMap(row=>{
+        if(!Number.isInteger(row)||row<1||row>allRows.length)throw Error('正常付款标红行号无效');
+        return row===1?[]:['A'+row+':'+XLSX.utils.encode_col(headers.length-1)+row];
+      }));
+    }
     let newId='rIdFunds'+key,generatedPath='xl/worksheets/funds-'+key.toLowerCase()+'.xml';
     while(elements(rels,'Relationship').some(e=>e.getAttribute('Id')===newId))newId+='x';
     while(zip.file(generatedPath))generatedPath=generatedPath.replace('.xml','x.xml');
