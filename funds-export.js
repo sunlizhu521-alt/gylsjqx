@@ -68,7 +68,8 @@ window.FundsExport = async function(sourceBytes, result) {
   const appliedFormula='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
   const appliedStyle=()=>{
     let dxfs=first(styles,'dxfs');if(!dxfs){dxfs=create(styles,'dxfs',{count:0});styles.documentElement.insertBefore(dxfs,[...styles.documentElement.children].find(e=>['tableStyles','colors','extLst'].includes(e.localName))||null);}
-    const dxf=create(styles,'dxf'),fill=create(styles,'fill'),pattern=create(styles,'patternFill',{patternType:'solid'});pattern.append(create(styles,'fgColor',{rgb:'FFFF0000'}),create(styles,'bgColor',{indexed:64}));fill.append(pattern);dxf.append(fill);
+    // WPS reads the differential background, so both fill colors must be explicitly red.
+    const dxf=create(styles,'dxf'),fill=create(styles,'fill'),pattern=create(styles,'patternFill',{patternType:'solid'});pattern.append(create(styles,'fgColor',{rgb:'FFFF0000'}),create(styles,'bgColor',{rgb:'FFFF0000'}));fill.append(pattern);dxf.append(fill);
     const shape=node=>[node.namespaceURI,node.localName,[...node.attributes].filter(a=>a.namespaceURI!=='http://www.w3.org/2000/xmlns/').map(a=>[a.namespaceURI,a.localName,a.value]).sort((a,b)=>String(a).localeCompare(String(b))),[...node.children].map(shape)];
     const expected=JSON.stringify(shape(dxf)),found=[...dxfs.children].findIndex(existing=>JSON.stringify(shape(existing))===expected);if(found>=0)return found;
     const id=dxfs.children.length;dxfs.append(dxf);dxfs.setAttribute('count',dxfs.children.length);return id;

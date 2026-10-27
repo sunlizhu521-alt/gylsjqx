@@ -145,7 +145,7 @@ function fixture({ removeFirstApplication = false } = {}) {
           for (const cf of all(doc, 'conditionalFormatting')) for (const rule of all(cf, 'cfRule')) {
             if (!all(rule, 'formula').some(f => f.textContent === marker)) continue;
             const dxf = dxfs?.children[Number(rule.getAttribute('dxfId'))];
-            rules.push({ type: rule.getAttribute('type'), color: dxf && all(dxf, 'fgColor')[0]?.getAttribute('rgb') });
+            rules.push({ type: rule.getAttribute('type'), color: dxf && all(dxf, 'fgColor')[0]?.getAttribute('rgb'), background: dxf && all(dxf, 'bgColor')[0]?.getAttribute('rgb'), backgroundIndex: dxf && all(dxf, 'bgColor')[0]?.getAttribute('indexed') });
             for (const ref of cf.getAttribute('sqref').split(/\s+/)) { const range = XLSX.utils.decode_range(ref); for (let r = range.s.r; r <= range.e.r; r++) for (let c = range.s.c; c <= range.e.c; c++) cells.add(XLSX.utils.encode_cell({ r, c })); }
           }
           result[entry.getAttribute('name')] = { cells: [...cells].sort(), rules };
@@ -155,7 +155,7 @@ function fixture({ removeFirstApplication = false } = {}) {
       assert.deepEqual(metadata.谈判付款.cells, highlighted ? ['U2', 'U3'] : ['U3']);
       assert.deepEqual(metadata.正常付款.cells, C.NORMAL_HEADERS.map((_, c) => X.utils.encode_cell({ r: 1, c })).sort());
       assert.deepEqual(metadata.付款申请核对.cells, []);
-      for (const sheet of Object.values(metadata)) for (const rule of sheet.rules) { assert.equal(rule.type, 'expression'); assert.match(rule.color, /^(?:FF)?FF0000$/i); }
+      for (const sheet of Object.values(metadata)) for (const rule of sheet.rules) { assert.equal(rule.type, 'expression'); assert.match(rule.color, /^(?:FF)?FF0000$/i); assert.equal(rule.background, 'FFFF0000', 'WPS conditional-format background must be explicitly red'); assert.equal(rule.backgroundIndex, null); }
       assert.equal(X.utils.sheet_to_json(book.Sheets.付款申请核对).length, 0, '同额批次按日期确定后不再产生核对记录');
     }
 
