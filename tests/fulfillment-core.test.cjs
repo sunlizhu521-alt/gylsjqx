@@ -1,6 +1,6 @@
 const test=require('node:test'),assert=require('node:assert/strict'),X=require('../vendor/xlsx.full.min.js'),C=require('../fulfillment-core.js');
 function fixture(){const w=X.utils.book_new();for(const name of C.SHEETS){const h=[...C.COLUMNS.slice(0,23)].reverse().concat('下单日期');const r=h.map(k=>k==='下单日期'?'':k==='下单月份'?'2026-10':k==='采购下单人'?'原表采购员':k==='物料编码'?'00123':k==='SKU'?'SKU-001':k==='合同约定交期'?'2026年8月14日':k==='生产中交付时间'?'/':k==='未生产预计交付时间'?'':k==='未交付数量'?0:'样例');X.utils.book_append_sheet(w,X.utils.aoa_to_sheet([['标题'],h,r,r]),name);}return w;}
-test('四表按姓名顺序匹配不同列位，保留重复、零和文本编码',()=>{const r=C.merge(fixture());assert.equal(r.rows.length,8);assert.deepEqual(r.counts.map(x=>x.sheet),C.SHEETS);assert.equal(r.rows[0][0].v,'原表采购员');assert.equal(C.COLUMNS[1],'事业部');assert.equal(r.rows[0][7].v,'00123');assert.equal(r.rows[0][10].v,0);assert.equal(r.rows[0][16].t,'n');assert.equal(r.rows[0][17].v,'/');assert.equal(r.rows[0][18].v,'');const w=X.read(X.write(C.workbook(r),{type:'buffer',bookType:'xlsx'}),{cellNF:true});assert.equal(w.Sheets.汇总表.R2.z,C.DATE_FORMAT);assert.equal(w.Sheets.汇总表['!autofilter'].ref,'A1:U9');});
+test('四表按姓名顺序匹配不同列位，保留重复、零和文本编码',()=>{const r=C.merge(fixture());assert.equal(r.rows.length,8);assert.deepEqual(r.counts.map(x=>x.sheet),C.SHEETS);assert.equal(r.rows[0][0].v,'原表采购员');assert.equal(C.COLUMNS[1],'事业部');assert.equal(r.rows[0][7].v,'00123');assert.equal(r.rows[0][10].v,0);assert.equal(r.rows[0][16].t,'n');assert.equal(r.rows[0][17].v,'/');assert.equal(r.rows[0][18].v,'');const w=X.read(X.write(C.workbook(r),{type:'buffer',bookType:'xlsx'}),{cellNF:true});assert.equal(w.Sheets.汇总表.R2.t,'s');assert.equal(w.Sheets.汇总表.R2.z,'@');assert.equal(w.Sheets.汇总表.R2.v,'2026年8月14日');assert.equal(w.Sheets.汇总表['!autofilter'].ref,'A1:U9');});
 test('日期真实类型、1904体系、闰日、无效日期与空白',()=>{const c=C.dateCell({v:'2026-08-14 23:59:59'},false);assert.equal(X.SSF.format(c.z,c.v),'2026年8月14日');assert.equal(C.dateCell({v:c.v-1462},true).v,c.v);assert.ok(C.dateCell({v:'2026-02-29'}).invalid);assert.equal(C.dateCell({v:'2024-02-29'}).t,'n');assert.equal(C.dateCell({v:''}).v,'');assert.ok(C.dateCell({v:'10月中旬'}).invalid);});
 test('历史订单按2025年1月保存真实日期，忽略空格且不猜测其他说明',()=>{
  for(const value of ['历史订单',' 历史\n订单 '])for(const date1904 of [false,true]){const cell=C.dateCell({v:value},date1904,2030);assert.equal(cell.t,'n');assert.equal(cell.v,45658);assert.equal(X.SSF.format(cell.z,cell.v),'2025年1月');}
@@ -69,7 +69,7 @@ test('姓名日期后缀、三列映射、缺列留空及旧历史兼容',()=>{
  w.Sheets.邢芳芳=s;assert.throws(()=>C.merge(w),/多个工作表/);delete w.Sheets.邢芳芳;w.Sheets['邢芳芳备份']=s;delete w.Sheets['邢芳芳1017'];assert.throws(()=>C.merge(w),/缺少工作表/);
 });
 
-test('陆续交货取自然月末，文件名年份优先、显式年份优先并保留真实日期',()=>{
+test('陆续交货取自然月末，内部真实日期导出为完整年月日文本',()=>{
  const formatted=(value,year)=>{const c=C.dateCell({v:value},false,year);return X.SSF.format(c.z,c.v);};
  assert.equal(formatted('10月陆续交货',2026),'2026年10月31日');
  assert.equal(formatted(' 4月 陆续交货 ',2026),'2026年4月30日');
@@ -82,7 +82,7 @@ test('陆续交货取自然月末，文件名年份优先、显式年份优先�
  assert.equal(r.warnings.length,0);assert.equal(w.Sheets.徐英.G3.v,'2月陆续交货');
  const saved=X.read(X.write(C.workbook(r),{type:'buffer',bookType:'xlsx'}),{cellNF:true});
  const cell=saved.Sheets.汇总表.R2;
- assert.equal(cell.t,'n');assert.equal(X.SSF.format(cell.z,cell.v),'2028年2月29日');
+ assert.equal(cell.t,'s');assert.equal(cell.z,'@');assert.equal(cell.v,'2028年2月29日');
 });
 
 test('相同汇总补存或更新原文件时不推进对比基准',()=>{
@@ -118,11 +118,11 @@ test('汇总21列按指定顺序，月份及OA字段对应，旧缓存缺月份�
  const oldRow=structuredClone(result.rows[0]);oldRow[20]={t:'s',v:''};assert.equal(C.summaryRows([oldRow])[0][3].v,'');assert.equal(C.summaryRows([result.rows[0].slice(0,23)])[0][3].v,sheet.D2.v);
 });
 
-test('四人月份按各自表头读取，月份显示年月而交期保留具体日期',()=>{
+test('四人月份按各自表头读取，月份为真实日期，其余非数量列为文本且交期显示年月日',()=>{
  const book=X.utils.book_new(),months=['2025-11',46275,'历史订单','/'];
  for(const [i,name] of C.SHEETS.entries()){
   const columns=C.COLUMNS.filter(k=>k!=='下单日期'),headers=columns.slice(i*3).concat(columns.slice(0,i*3));
-  const row=headers.map(k=>k==='下单月份'?months[i]:k==='物料编码'?'000123':k==='SKU'?'000SKU':k==='OA备货单号'?'0000123':C.QUANTITY_FIELDS.includes(k)?1:['合同约定交期','生产中交付时间','未生产预计交付时间'].includes(k)?'2026-10-23':'样例');
+  const row=headers.map(k=>k==='下单月份'?months[i]:k==='运营'?101:k==='物料编码'?'000123':k==='SKU'?'000SKU':k==='OA备货单号'?'0000123':C.QUANTITY_FIELDS.includes(k)?1:['合同约定交期','生产中交付时间','未生产预计交付时间'].includes(k)?'2026-10-23':'样例');
   X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([headers,row]),name);
  }
  const original=structuredClone(book),result=C.merge(book),preview=C.summaryRows(result.rows),saved=X.read(X.write(C.workbook(result),{type:'buffer',bookType:'xlsx'}),{cellNF:true}).Sheets.汇总表;
@@ -130,7 +130,9 @@ test('四人月份按各自表头读取，月份显示年月而交期保留具�
  assert.deepEqual(result.warnings,[]);assert.deepEqual(book,original);
  for(let i=0;i<4;i++){
   const month=saved['D'+(i+2)];assert.equal(month.t,'n');assert.equal(month.z,'yyyy"年"m"月"');assert.equal(month.v,preview[i][3].v);
-  for(const col of ['R','S','T'])assert.equal(X.SSF.format(saved[col+(i+2)].z,saved[col+(i+2)].v),'2026年10月23日');
+  for(const col of ['R','S','T'])assert.equal(saved[col+(i+2)].v,'2026年10月23日');
+  for(let col=0;col<21;col++){if(col===3||(col>=11&&col<=16))continue;const cell=saved[X.utils.encode_cell({r:i+1,c:col})];assert.equal(cell.t,'s');assert.equal(cell.z,'@');assert.equal(typeof cell.v,'string');assert.equal(preview[i][col].t,'s');assert.equal(preview[i][col].z,'@');assert.equal(preview[i][col].v,cell.v);}
+  assert.equal(saved['C'+(i+2)].v,'101');
   for(const [col,value] of [['E','0000123'],['I','000123'],['J','000SKU']]){assert.equal(saved[col+(i+2)].t,'s');assert.equal(saved[col+(i+2)].v,value);}
  }
  assert.ok(C.workbook(result).Sheets.汇总表['!cols'][3].wch>=14);

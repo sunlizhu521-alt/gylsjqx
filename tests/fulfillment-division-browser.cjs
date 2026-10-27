@@ -29,12 +29,26 @@ function fixture(departments){
    assert.deepEqual(rows[0],C.SUMMARY_COLUMNS);assert.equal(rows[0][3],'下单月份');assert.equal(rows[0].length,21);
    assert.deepEqual(rows.slice(1).map(r=>r[8]),departments.flatMap((name,i)=>name===d?['M'+i]:[]));
    assert(rows.slice(1).every(r=>r[0]===d));assert.equal(w.Sheets.汇总表.D2.t,'n');assert.equal(w.Sheets.汇总表.D2.z,'yyyy"年"m"月"');assert.equal(w.Sheets.汇总表.D2.w,'2026年10月');
+   for(let r=1;r<rows.length;r++)for(const [c,field]of C.SUMMARY_COLUMNS.entries()){
+    const cell=w.Sheets.汇总表[X.utils.encode_cell({r,c})];
+    if(field==='下单月份')continue;
+    if(C.QUANTITY_FIELDS.includes(field)){if(cell?.v!==''){assert.equal(cell.t,'n');assert.equal(cell.z,'0');}}
+    else{assert.equal(cell.t,'s');assert.equal(cell.z,'@');}
+   }
+   const delivery=w.Sheets.汇总表.R2;assert.equal(delivery.v,'2026年10月31日');assert.equal(delivery.t,'s');assert.equal(delivery.z,'@');
    assert.equal(w.Sheets.汇总表.A1.s.fgColor.rgb,'315B9D');
    if(d===divisions[0])assert.equal(rows[1][11],0);
   }
-  const full=page.waitForEvent('download');await page.locator('#download').click();const w=X.read(await fs.readFile(await(await full).path()),{type:'buffer'});
+  const full=page.waitForEvent('download');await page.locator('#download').click();const w=X.read(await fs.readFile(await(await full).path()),{type:'buffer',cellNF:true});
   assert.deepEqual(w.SheetNames,['汇总表','差异',...C.SHEETS,'孙立柱']);
   assert.equal(X.utils.sheet_to_json(w.Sheets.汇总表).length,departments.length);
+  for(let r=1;r<=departments.length;r++)for(const [c,field]of C.COLUMNS.entries()){
+   const cell=w.Sheets.徐英[X.utils.encode_cell({r,c})];
+   if(field==='下单日期'||field==='下单月份'){assert.equal(cell.t,'n');assert.equal(cell.z,field==='下单月份'?'yyyy"年"m"月"':'yyyy"年"m"月"d"日"');}
+   else if(C.QUANTITY_FIELDS.includes(field)){assert.match(cell.z,/^0(?:\.0+)?$/);if(cell.v!=='')assert.equal(cell.t,'n');}
+   else{assert.equal(cell.t,'s');assert.equal(cell.z,'@');}
+  }
+  assert.equal(w.Sheets.徐英.Q2.v,'10月陆续交货','原工作表交期保留原文字，汇总表才展开为完整日期');
   await page.locator('#file').setInputFiles({name:'仅国内.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:fixture(['国内事业部'])});
   await page.waitForFunction(()=>!document.getElementById('file').disabled);
   assert(await page.locator('[data-download-division="海外事业一部"]').isDisabled());assert(await page.locator('[data-download-division="海外事业二部"]').isDisabled());

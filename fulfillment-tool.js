@@ -7,7 +7,7 @@ function updateDownloads(){
  $('download').disabled=blocked||!result||!sourceBytes;
  for(const button of divisionButtons){const hasRows=divisionRows(button.dataset.downloadDivision).length>0;button.disabled=blocked||!hasRows;button.title=hasRows?'仅下载该事业部的汇总表':'暂无该事业部数据';}
 }
-const conversionInfo=p=>({formulaCount:p.formulaCount,correctedCount:p.correctedCount,imageCount:p.imageCount,converted:p.converted,failed:p.issues.length>0});
+const conversionInfo=p=>({formulaCount:p.formulaCount,correctedCount:p.correctedCount,imageCount:p.imageCount,converted:p.converted,clearedFilterCount:p.clearedFilterCount||0,normalizedSheetCount:p.normalizedSheetCount||0,failed:p.issues.length>0});
 function checkPrepared(prepared,merged){const check=V.validate(prepared.book,merged,C);if(prepared.issues.length){check.passed=false;check.issues.unshift(...prepared.issues);}return check;}
 function resetCurrent(){result=null;sourceBytes=null;validation=null;formulaInfo=null;$('result').hidden=true;$('quantityValidation').hidden=true;$('warnings').textContent='';updateDownloads();}
 function render(){
@@ -16,7 +16,9 @@ function render(){
  for(const issue of validation?.issues||[]){const key=[issue.sheet,issue.cell,issue.field].join('\0');if(!groupedIssues.has(key))groupedIssues.set(key,{...issue,messages:[]});const group=groupedIssues.get(key);if(!group.messages.includes(issue.message))group.messages.push(issue.message);}
  $('quantityValidation').hidden=false;
  $('quantityStatus').textContent=validation?(validation.passed?'六个数量字段校验通过，可以下载。':`数量校验未通过：${groupedIssues.size} 处，请修正源表后重新上传。所有下载已暂停。`):'缺少原文件，无法校验数量，请重新上传。所有下载已暂停。';
- $('formulaStatus').textContent=formulaInfo?.failed?'存在无法转换的公式，具体位置见下方提示。':formulaInfo?.formulaCount?`已处理 ${formulaInfo.formulaCount} 个公式，修正 ${formulaInfo.correctedCount} 处保存结果${formulaInfo.imageCount?`；${formulaInfo.imageCount} 张公式图片已转为普通图片`:''}。下载的所有工作表均不含单元格公式。`:'下载的所有工作表均只保留数值和原有内容，不含单元格公式。';
+ $('formulaStatus').textContent=formulaInfo?.failed?'存在无法完成的公式或单元格转换，具体位置见下方提示。':formulaInfo?.formulaCount?`已处理 ${formulaInfo.formulaCount} 个公式，修正 ${formulaInfo.correctedCount} 处保存结果${formulaInfo.imageCount?`；${formulaInfo.imageCount} 张公式图片已转为普通图片`:''}。下载的所有工作表均不含单元格公式。`:'下载的所有工作表均只保留数值和原有内容，不含单元格公式。';
+ if(formulaInfo?.clearedFilterCount)$('formulaStatus').textContent=`已自动清除 ${formulaInfo.clearedFilterCount} 个工作表的筛选条件。`+$('formulaStatus').textContent;
+ if(formulaInfo?.normalizedSheetCount&&!formulaInfo.failed)$('formulaStatus').textContent+=`已统一 ${formulaInfo.normalizedSheetCount} 个工作表的日期、数量和文本格式。`;
  $('quantityChecks').innerHTML='<table><thead><tr>'+['来源工作表','数量字段','原表核算合计','汇总合计','差额（汇总－原表）','结果'].map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+(validation?.checks||[]).map(c=>'<tr>'+[c.sheet,c.field,number(c.sourceTotal),number(c.summaryTotal),number(c.difference),c.status].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
  $('quantityIssues').innerHTML=[...groupedIssues.values()].map(i=>'<li><strong>'+esc(i.sheet+(i.cell?'!'+i.cell:'')+' · '+i.field)+'</strong><br>'+i.messages.map(esc).join('<br>')+'</li>').join('');
  $('warnings').textContent=result.warnings.join('\n');
@@ -29,10 +31,10 @@ async function show(history){
  if(!history){$('status').textContent='等待首次上传';$('history').textContent='尚无历史数据。首次上传保存为基准，差异表仅有表头。';return;}
  filename=history.current.filename;sourceBytes=history.current.sourceBytes||null;formulaInfo=history.current.formulaInfo||null;
  if(sourceBytes){
-  const prepared=await FulfillmentValues.prepare(sourceBytes),merged=prepared.formulaCount?C.merge(prepared.book,filename):C.refreshQuantities(history.current.result,prepared.book),quantityChanged=JSON.stringify(merged.rows)!==JSON.stringify(history.current.result.rows);
+  const prepared=await FulfillmentValues.prepare(sourceBytes),rebuilt=prepared.formulaCount||prepared.clearedFilterCount||prepared.normalizedSheetCount,merged=rebuilt?C.merge(prepared.book,filename):C.refreshQuantities(history.current.result,prepared.book),quantityChanged=JSON.stringify(merged.rows)!==JSON.stringify(history.current.result.rows);
   validation=checkPrepared(prepared,merged);sourceBytes=prepared.bytes;
-  if(prepared.formulaCount||prepared.converted)formulaInfo=conversionInfo(prepared);
-  if(prepared.formulaCount||prepared.converted||quantityChanged){
+  if(rebuilt||prepared.converted)formulaInfo=conversionInfo(prepared);
+  if(rebuilt||prepared.converted||quantityChanged){
    history={...history,current:{...history.current,result:merged,sourceBytes,formulaInfo}};
    // Migrate only the current snapshot; the previous summary remains the recorded historical baseline.
    if(validation.passed)await FulfillmentCache.replace(history);

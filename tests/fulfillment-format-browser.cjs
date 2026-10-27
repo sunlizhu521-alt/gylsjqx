@@ -72,13 +72,19 @@ function checkSummary(sheet, expected) {
     assert.equal(cell('下单月份').w, row.month);
     for (const field of ['物料编码', 'SKU']) {
       assert.equal(cell(field).t, 's');
+      assert.equal(cell(field).z, '@');
       assert.equal(cell(field).v, row[field]);
     }
     assert.equal(cell('OA流程号').t, 's');
     assert.equal(cell('OA流程号').v, row.OA备货单号);
     for (const [field, text] of [['合同约定交期', '2026年11月2日'], ['生产中交付时间', '2026年11月3日'], ['为生产预计交付时间', '2026年11月4日']]) {
-      assert.equal(cell(field).t, 'n');
-      assert.equal(cell(field).w, text);
+      assert.equal(cell(field).t, 's');
+      assert.equal(cell(field).z, '@');
+      assert.equal(cell(field).v, text);
+    }
+    for (const field of C.SUMMARY_COLUMNS.filter(field => field !== '下单月份' && !quantities.includes(field))) {
+      assert.equal(cell(field).t, 's', field + '统一文本类型');
+      assert.equal(cell(field).z, '@', field + '统一文本格式');
     }
     for (const field of quantities) {
       const actual = cell(field);
@@ -94,6 +100,35 @@ function checkSummary(sheet, expected) {
   }
   assert(sheet['!cols'][3].wch >= 12, '年月与表头完整显示');
   assert.equal(sheet['!autofilter'].ref, `A1:U${expected.length + 1}`);
+}
+
+function checkSourceSheets(sourceBytes, exported, expected) {
+  const source = X.read(sourceBytes, { type: 'buffer', cellNF: true, cellStyles: true });
+  for (const [person, name] of source.SheetNames.entries()) {
+    const original = source.Sheets[name], actual = exported.Sheets[name];
+    assert.equal(actual['!ref'], original['!ref'], name + '范围保留');
+    assert.deepEqual(actual['!merges'], original['!merges'], name + '合并区域保留');
+    assert.deepEqual(actual['!rows'], original['!rows'], name + '行高保留');
+    assert.deepEqual(actual['!cols'], original['!cols'], name + '列宽保留');
+    const columns = X.utils.sheet_to_json(original, { header: 1 })[0].map(h => h.trim());
+    for (let r = 1; r <= 2; r++) for (const [c, field] of columns.entries()) {
+      const address = X.utils.encode_cell({ r, c }), cell = actual[address], row = expected[person * 2 + r - 1];
+      if (quantities.includes(field)) {
+        assert.equal(cell?.v ?? '', row[field], name + '!' + address + '数量保留');
+        if (row[field] !== '') assert.equal(cell.t, 'n');
+        assert.match(cell.z, /^0(?:\.0+)?$/);
+      } else if (field === '下单月份' || field === '下单日期') {
+        assert.equal(cell.t, 'n');
+        assert.equal(cell.z, field === '下单月份' ? monthFormat : 'yyyy"年"m"月"d"日"');
+        assert.equal(cell.w, field === '下单月份' ? row.month : '2024年1月12日');
+      } else {
+        assert.equal(cell.t, 's', name + '!' + address + '文本类型');
+        assert.equal(cell.z, '@');
+        assert.equal(cell.v, original[address]?.v ?? '', name + '!' + address + '原文字保留');
+      }
+      assert.equal(cell.f, undefined);
+    }
+  }
 }
 
 (async () => {
@@ -136,10 +171,8 @@ function checkSummary(sheet, expected) {
     assert.equal(diff.F2.v, 1);
     assert.equal(diff.F2.z, 'General', '差异表不套用汇总数字格式');
     assert.equal(diff.A1.s.fgColor.rgb, '315B9D');
-    const inputZip = await Zip.loadAsync(current.bytes), outputZip = await Zip.loadAsync(full.bytes);
-    for (const name of Object.keys(inputZip.files).filter(p => /^xl\/worksheets\/sheet\d+\.xml$/.test(p))) {
-      assert.equal(await outputZip.file(name).async('string'), await inputZip.file(name).async('string'), '保留原表 XML ' + name);
-    }
+    checkSourceSheets(current.bytes, full.book, current.expected);
+    const outputZip = await Zip.loadAsync(full.bytes);
     const diffXml = await outputZip.file('xl/worksheets/fulfillment2.xml').async('string');
     assert.match(diffXml, /ht="22"/);
     assert.match(diffXml, /ht="18"/);
@@ -171,6 +204,7 @@ function checkSummary(sheet, expected) {
     assert.equal(await (await Zip.loadAsync(restored.bytes)).file('xl/worksheets/fulfillment2.xml').async('string'), diffXml, '缓存格式升级不改变差异表内容和样式');
     await page.screenshot({ path: path.join(out, 'preview.png'), fullPage: true });
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ status: 'PASS', url, rows: current.expected.length, summaryColumns: 21, downloads: 4, monthDates: 'passed', quantityFormats: 'passed', sourceXml: 'unchanged', differences: 'unchanged', previousSnapshot: 'unchanged', output: out }));
+    checkSourceSheets(current.bytes, restored.book, current.expected);
+    console.log(JSON.stringify({ status: 'PASS', url, rows: current.expected.length, summaryColumns: 21, downloads: 4, monthDates: 'passed', quantityFormats: 'passed', sourceFormatting: 'passed', sourceLayout: 'unchanged', differences: 'unchanged', previousSnapshot: 'unchanged', output: out }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

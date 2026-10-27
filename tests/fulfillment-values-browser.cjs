@@ -117,6 +117,19 @@ function mergedTextFixture() {
   try {
     const page = await browser.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    async function xmlSnapshot(text, styles = false) {
+      return page.evaluate(({ text, styles }) => {
+        const doc = new DOMParser().parseFromString(text, 'application/xml');
+        const attrs = element => Object.fromEntries([...element.attributes].filter(a => a.prefix !== 'xmlns' && a.name !== 'xmlns').map(a => [a.name, a.value]).sort(([a], [b]) => a.localeCompare(b)));
+        const node = element => ({ name: element.localName, attrs: attrs(element), children: [...element.children].map(node), text: element.children.length ? '' : element.textContent });
+        if (styles) return Object.fromEntries([...doc.documentElement.children].map(element => [element.localName, node(element)]));
+        return {
+          structure: [...doc.documentElement.children].filter(element => element.localName !== 'sheetData').map(node),
+          rows: [...doc.getElementsByTagNameNS('*', 'row')].map(attrs),
+          cellStyles: [...doc.getElementsByTagNameNS('*', 'c')].map(cell => [cell.getAttribute('r'), cell.getAttribute('s') || '0'])
+        };
+      }, { text, styles });
+    }
     const url = new URL('fulfillment.html', process.env.QA_URL || 'http://127.0.0.1:8940/').href;
     await page.goto(url);
     const ready = () => page.waitForFunction(() => window.FulfillmentToolReady && window.FulfillmentValues && !document.getElementById('file').disabled);
@@ -182,8 +195,36 @@ function mergedTextFixture() {
     assert.equal(prepared.Sheets.辅助.A2.z, '0.000');
     assert.equal(prepared.Sheets.辅助['!merges'].length, 1);
     const [sourceZip, preparedZip] = await Promise.all([Zip.loadAsync(input), Zip.loadAsync(preparedBytes)]);
-    for (const file of ['xl/styles.xml', 'xl/worksheets/sheet1.xml', 'xl/worksheets/sheet2.xml', 'xl/worksheets/sheet3.xml']) {
-      assert.equal(await preparedZip.file(file).async('string'), await sourceZip.file(file).async('string'), '非公式区域保留原 XML：' + file);
+    const oldStyles = await xmlSnapshot(await sourceZip.file('xl/styles.xml').async('string'), true);
+    const newStyles = await xmlSnapshot(await preparedZip.file('xl/styles.xml').async('string'), true);
+    for (const [name, before] of Object.entries(oldStyles)) {
+      const after = newStyles[name];
+      assert.ok(after, '原样式分组仍存在：' + name);
+      if (['numFmts', 'cellXfs'].includes(name)) {
+        const { count: oldCount, ...oldAttrs } = before.attrs, { count: newCount, ...newAttrs } = after.attrs;
+        assert.deepEqual(newAttrs, oldAttrs, '样式分组属性保持：' + name);
+        assert.deepEqual(after.children.slice(0, before.children.length), before.children, '保留旧编号和原样式定义，仅追加新格式：' + name);
+        assert.equal(Number(newCount), after.children.length);
+      } else assert.deepEqual(after, before, '字体、填充、边框及其他原样式保持：' + name);
+    }
+    for (const name of Object.keys(newStyles)) assert.ok(oldStyles[name] || name === 'numFmts', '只允许新增数字格式分组');
+    for (let index = 1; index <= 6; index++) {
+      const file = 'xl/worksheets/sheet' + index + '.xml';
+      const before = await xmlSnapshot(await sourceZip.file(file).async('string'));
+      const after = await xmlSnapshot(await preparedZip.file(file).async('string'));
+      assert.deepEqual(after.structure, before.structure, '原工作表合并、列宽及其他结构保持：' + file);
+      assert.deepEqual(after.rows, before.rows, '原工作表行高等属性保持：' + file);
+      if (index >= 5) assert.deepEqual(after.cellStyles, before.cellStyles, '孙立柱及辅助表格式不变：' + file);
+    }
+    for (const name of ['徐英', '操思敏', '邢芳芳1017', '李奇']) {
+      const sheet = prepared.Sheets[name];
+      for (const field of quantities) {
+        const cell = sheet[X.utils.encode_cell({ r: 1, c: C.COLUMNS.indexOf(field) })];
+        assert.equal(cell.t, 'n', name + field + '使用真实数值');assert.equal(cell.z, '0');
+      }
+      assert.equal(sheet.X2.t, 'n');assert.equal(sheet.X2.z, C.DATE_FORMAT, '下单日期使用日期格式');
+      assert.equal(sheet.H2.t, 's');assert.equal(sheet.H2.z, '@', '物料编码使用文本格式');
+      assert.equal(sheet.I2.t, 's');assert.equal(sheet.I2.z, '@', 'SKU 使用文本格式');
     }
     assert.equal(preparedZip.file('xl/calcChain.xml'), null);
     assert.doesNotMatch(await preparedZip.file('xl/_rels/workbook.xml.rels').async('string'), /calcChain/);
@@ -232,7 +273,8 @@ function mergedTextFixture() {
     assert.equal(await page.locator('#download').isDisabled(), false);
     assert.deepEqual(await history(), legacyAfter, '迁移后重复打开不再改历史');
 
-    const corruptBefore = await putLegacy(await fixture({ formulas: false }), { corrupt: true });
+    const normalizedWithoutFormulas = Buffer.from(await page.evaluate(async bytes => Array.from(new Uint8Array((await FulfillmentValues.prepare(Uint8Array.from(bytes).buffer)).bytes)), [...await fixture({ formulas: false })]));
+    const corruptBefore = await putLegacy(normalizedWithoutFormulas, { corrupt: true });
     await assertBlocked();
     assert.deepEqual(await history(), corruptBefore, '无公式缓存结果不一致仍阻止，不能静默重建');
     await upload(input, '恢复更新版.xlsx');
@@ -254,14 +296,19 @@ function mergedTextFixture() {
       for (const field of quantities) assert.equal(row[C.SUMMARY_COLUMNS.indexOf(field)], expected.values[field], expected.sheet + '按表头读取“' + field + '”');
     }
 
-    const mergedInput=mergedTextFixture();await upload(mergedInput,'合并文本数量更新版.xlsx');
+    const mergedInput=mergedTextFixture(),mergedHash=hash(mergedInput);await upload(mergedInput,'合并文本数量更新版.xlsx');
     assert.equal(await page.locator('#download').isDisabled(),false,await page.locator('#quantityIssues').innerText());
     const mergedOutput=X.read((await getDownload()).bytes,{type:'buffer'}),mergedRows=X.utils.sheet_to_json(mergedOutput.Sheets.汇总表,{header:1});
     assert.equal(mergedRows.length,13);
     for(let i=0;i<12;i++)for(const field of quantities)assert.equal(mergedRows[i+1][C.SUMMARY_COLUMNS.indexOf(field)],i%3?0:field==='生产中产品'?474:100+quantities.indexOf(field));
     const mergedSourceZip=await Zip.loadAsync(mergedInput),mergedOutputZip=await Zip.loadAsync((await getDownload()).bytes);
-    for(const path of Object.keys(mergedSourceZip.files).filter(p=>/^xl\/worksheets\/sheet\d+\.xml$/.test(p)))assert.equal(await mergedSourceZip.file(path).async('string'),await mergedOutputZip.file(path).async('string'),'保留原文本及合并结构');
-    await page.evaluate(async()=>{const h=await FulfillmentCache.get(),C=FulfillmentCore;for(let i=0;i<h.current.result.rows.length;i++)for(const field of C.QUANTITY_FIELDS)h.current.result.rows[i][C.COLUMNS.indexOf(field)]={t:'s',v:i%3?'':field==='生产中产品'?'物料通用   474套左右':'约'+(100+C.QUANTITY_FIELDS.indexOf(field))+'件'};await FulfillmentCache.replace(h);});
+    for(const path of Object.keys(mergedSourceZip.files).filter(p=>/^xl\/worksheets\/sheet\d+\.xml$/.test(p))){
+      const before=await xmlSnapshot(await mergedSourceZip.file(path).async('string')),after=await xmlSnapshot(await mergedOutputZip.file(path).async('string'));
+      assert.deepEqual(after.structure,before.structure,'数量转值保留原合并、列宽和其他结构');assert.deepEqual(after.rows,before.rows,'数量转值保留原行属性');
+    }
+    for(const name of C.SHEETS){const sheet=mergedOutput.Sheets[name];for(const field of quantities){const column=Object.keys(sheet).find(address=>/^[A-Z]+1$/.test(address)&&sheet[address].v===field).replace(/1$/,'');for(let row=2;row<=4;row++){const cell=sheet[column+row];assert.equal(cell.t,'n');assert.equal(cell.v,row===2?(field==='生产中产品'?474:100+quantities.indexOf(field)):0,'源人员表合并数量只首行计入');}}}
+    assert.equal(hash(mergedInput),mergedHash,'上传原文件不改写');assert.match(await mergedSourceZip.file('xl/worksheets/sheet1.xml').async('string'),/物料通用/,'原输入仍保留文本数量');
+    await page.evaluate(async bytes=>{const h=await FulfillmentCache.get(),C=FulfillmentCore;h.current.sourceBytes=Uint8Array.from(bytes).buffer;for(let i=0;i<h.current.result.rows.length;i++)for(const field of C.QUANTITY_FIELDS)h.current.result.rows[i][C.COLUMNS.indexOf(field)]={t:'s',v:i%3?'':field==='生产中产品'?'物料通用   474套左右':'约'+(100+C.QUANTITY_FIELDS.indexOf(field))+'件'};await FulfillmentCache.replace(h);},[...mergedInput]);
     const oldQuantityHistory=await history();await page.reload();await ready();assert.equal(await page.locator('#download').isDisabled(),false);const normalizedHistory=await history();assert.equal(normalizedHistory.current.savedAt,oldQuantityHistory.current.savedAt);assert.deepEqual(normalizedHistory.previous,oldQuantityHistory.previous);
     assert.deepEqual(normalizedHistory.current.result.rows.slice(0,3).map(row=>row[C.COLUMNS.indexOf('生产中产品')].v),[474,0,0]);
     assert.deepEqual(errors, []);

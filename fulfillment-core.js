@@ -20,7 +20,7 @@ function summaryRows(rows){return rows.map(row=>SUMMARY_COLUMNS.map(key=>{
   const precision=(quantityText(cell.v).split('.')[1]||'').length;
   return {t:'n',v:cell.v,z:precision>250?'0.0000000000000000E+00':precision?'0.'+'0'.repeat(precision):'0'};
  }
- return cell;
+ return {t:'s',v:formatCell(cell),z:'@'};
 }));}
 const norm=v=>String(v??'').replace(/\s/g,'');
 function currentYear(){return Number(new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Shanghai',year:'numeric'}).format(new Date()));}
