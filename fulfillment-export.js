@@ -1,4 +1,4 @@
-/* Add generated sheets to the original XLSX package without rewriting its worksheets. */
+/* Add generated sheets to the values-only source package without rewriting its worksheets. */
 window.FulfillmentExport = async function(generatedBlob, sourceBytes) {
  const S='http://schemas.openxmlformats.org/spreadsheetml/2006/main', R='http://schemas.openxmlformats.org/officeDocument/2006/relationships';
  const parser=new DOMParser(),serializer=new XMLSerializer();
@@ -15,6 +15,10 @@ window.FulfillmentExport = async function(generatedBlob, sourceBytes) {
  const generated=await JSZip.loadAsync(await generatedBlob.arrayBuffer());
  const workbook=await parse(original,'xl/workbook.xml'),rels=await parse(original,'xl/_rels/workbook.xml.rels');
  const types=await parse(original,'[Content_Types].xml');
+ for(const relation of elements(rels,'Relationship').filter(e=>e.getAttribute('Type')===R+'/worksheet')){
+  const path=new URL(relation.getAttribute('Target'),'https://workbook.local/xl/workbook.xml').pathname.slice(1);
+  if(elements(await parse(original,path),'f').length)throw Error('原工作表仍含公式，请重新上传并完成公式转数值后下载');
+ }
  const styleRel=elements(rels,'Relationship').find(e=>e.getAttribute('Type')===R+'/styles');
  const resolve=target=>target.startsWith('/')?target.slice(1):'xl/'+target.replace(/^\.\//,'');
  const stylePath=styleRel?resolve(styleRel.getAttribute('Target')):'xl/styles.xml';

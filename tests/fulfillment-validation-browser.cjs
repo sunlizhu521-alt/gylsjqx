@@ -12,7 +12,7 @@ const quantities = ['未交付数量', '已下单未备料未生产', '已备料
 const divisions = ['海外事业一部', '海外事业二部', '国内事业部'];
 const mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-function fixture(change) {
+function fixture(change, withFormula = true) {
   const book = X.utils.book_new();
   for (const [person, name] of sheetNames.entries()) {
     const rows = [0, 1].map(row => C.COLUMNS.map(key => {
@@ -34,7 +34,7 @@ function fixture(change) {
     quantities.includes(key) ? 99999 : ({ '采购下单人': '孙立柱', '事业部': divisions[0], '物料编码': 'EXCLUDED' })[key] ?? ''
   )]), '孙立柱');
   const note = X.utils.aoa_to_sheet([['保留原始工作表', ''], [2, 3], [5]]);
-  note.A3.f = 'SUM(A2:B2)';
+  if (withFormula) note.A3.f = 'SUM(A2:B2)';
   note['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
   X.utils.book_append_sheet(book, note, '说明');
   if (change) change(book);
@@ -140,47 +140,50 @@ function staleFormula(field, formula = 'SUM(AA2:AA3)') {
       assert.equal(summary.slice(1).reduce((sum, row) => sum + row[col], 0), 224 + q * 8);
     }
     const [originalZip, outputZip] = await Promise.all([Zip.loadAsync(valid), Zip.loadAsync(output)]);
-    for (let n = 1; n <= sheetNames.length + 2; n++) {
+    for (let n = 1; n <= sheetNames.length + 1; n++) {
       const name = 'xl/worksheets/sheet' + n + '.xml';
       assert.equal(await outputZip.file(name).async('string'), await originalZip.file(name).async('string'), '保留原表 XML：' + name);
     }
+    assert.equal(exported.Sheets.说明.A3.v, 5);
+    assert.equal(exported.Sheets.说明.A3.f, undefined, '辅助工作表也必须转为数值');
 
-    const goodHistory = await history();
     for (const formula of ['SUM(AA2:AA3)', 'SUBTOTAL(9,AA2:AA3)']) {
-      const invalid = staleFormula(quantities[0], formula);
-      await upload(invalid.buffer, '旧公式结果.xlsx');
-      await assertBlocked(quantities[0], invalid.address);
-      assert.deepEqual(await history(), goodHistory, '校验失败不推进历史基准');
+      const stale = staleFormula(quantities[0], formula);
+      await upload(stale.buffer, '旧公式结果.xlsx');
+      assert.equal(await page.locator('#download').isDisabled(), false, '公式旧结果应重新计算后通过');
+      const current = (await history()).current.result;
+      assert.equal(current.rows[6][C.COLUMNS.indexOf(quantities[0])].v, 30);
     }
     for (const field of quantities.slice(1)) {
-      const invalid = staleFormula(field);
-      await upload(invalid.buffer, '其他数量字段公式异常.xlsx');
-      await assertBlocked(field, invalid.address);
-      assert.deepEqual(await history(), goodHistory);
-      const nonnumeric = fixture(book => { book.Sheets.李奇[invalid.address] = { t: 's', v: '错误数量' }; });
+      const stale = staleFormula(field);
+      await upload(stale.buffer, '其他数量字段旧公式.xlsx');
+      assert.equal(await page.locator('#download').isDisabled(), false);
+      assert.equal((await history()).current.result.rows[6][C.COLUMNS.indexOf(field)].v, 30);
+      const goodHistory = await history();
+      const nonnumeric = fixture(book => { book.Sheets.李奇[stale.address] = { t: 's', v: '错误数量' }; });
       await upload(nonnumeric, '其他数量字段文本异常.xlsx');
-      await assertBlocked(field, invalid.address);
+      await assertBlocked(field, stale.address);
       assert.deepEqual(await history(), goodHistory);
     }
 
     await upload(valid, '恢复有效上传.xlsx');
     assert.equal(await page.locator('#download').isDisabled(), false);
     assert.match(await page.locator('#quantityStatus').innerText(), /通过/);
-    assert.equal((await history()).previous, null, '恢复同一有效数据不推进基准');
 
     await putLegacyCache(valid);
     assert.equal(await page.locator('#download').isDisabled(), false, '旧缓存须从原文件重新核验');
     assert.match(await page.locator('#quantityStatus').innerText(), /通过/);
 
-    await putLegacyCache(valid, true);
+    await putLegacyCache(fixture(null, false), true);
     await assertBlocked(quantities[0], X.utils.encode_cell({ r: 1, c: C.COLUMNS.indexOf(quantities[0]) }), '徐英');
 
-    const cachedInvalid = staleFormula(quantities[0], 'SUBTOTAL(9,AA2:AA3)');
-    await putLegacyCache(cachedInvalid.buffer);
-    await assertBlocked(quantities[0], cachedInvalid.address);
+    const cachedStale = staleFormula(quantities[0], 'SUBTOTAL(9,AA2:AA3)');
+    await putLegacyCache(cachedStale.buffer);
+    assert.equal(await page.locator('#download').isDisabled(), false, '有公式的旧缓存应重新计算并重建汇总');
+    assert.equal((await history()).current.result.rows[6][C.COLUMNS.indexOf(quantities[0])].v, 30);
     await page.reload();
     await page.waitForFunction(() => window.FulfillmentToolReady && !document.getElementById('file').disabled);
-    await assertBlocked(quantities[0], cachedInvalid.address);
+    assert.equal(await page.locator('#download').isDisabled(), false);
     await upload(valid, '校验后有效上传.xlsx');
     assert.equal(await page.locator('#download').isDisabled(), false);
     assert.equal(await page.locator('#quantityIssues').innerText(), '', '有效上传应清除旧差异');

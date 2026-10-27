@@ -1,4 +1,4 @@
-(()=>{'use strict';const C=FulfillmentCore,V=FulfillmentValidation,$=id=>document.getElementById(id);let result=null,filename='',sourceBytes=null,validation=null,busy=false;
+(()=>{'use strict';const C=FulfillmentCore,V=FulfillmentValidation,$=id=>document.getElementById(id);let result=null,filename='',sourceBytes=null,validation=null,formulaInfo=null,busy=false;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const divisionButtons=[...document.querySelectorAll('[data-download-division]')];
 const divisionRows=division=>(result?.rows||[]).filter(row=>String(row[C.COLUMNS.indexOf('事业部')]?.v??'').trim()===division);
@@ -7,41 +7,37 @@ function updateDownloads(){
  $('download').disabled=blocked||!result||!sourceBytes;
  for(const button of divisionButtons){const hasRows=divisionRows(button.dataset.downloadDivision).length>0;button.disabled=blocked||!hasRows;button.title=hasRows?'仅下载该事业部的汇总表':'暂无该事业部数据';}
 }
-async function readWorkbook(bytes){
- const book=XLSX.read(bytes,{type:'array',cellDates:false,cellNF:true,cellStyles:true});
- const signature=new Uint8Array(bytes);
- if(signature[0]!==80||signature[1]!==75)return book;
- const zip=await JSZip.loadAsync(bytes),parse=text=>new DOMParser().parseFromString(text,'application/xml'),all=(doc,name)=>[...doc.getElementsByTagNameNS('*',name)];
- const workbook=parse(await zip.file('xl/workbook.xml').async('string')),rels=parse(await zip.file('xl/_rels/workbook.xml.rels').async('string'));
- const targets=new Map(all(rels,'Relationship').map(r=>[r.getAttribute('Id'),r.getAttribute('Target')]));
- for(const node of all(workbook,'sheet')){
-  const sheet=book.Sheets[node.getAttribute('name')],id=node.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id'),target=targets.get(id);
-  if(!sheet||!target)continue;
-  const path=new URL(target,'https://workbook.local/xl/workbook.xml').pathname.slice(1),part=zip.file(path);if(!part)continue;
-  const doc=parse(await part.async('string'));
-  sheet['!fulfillmentFilterActive']=all(doc,'filterColumn').length>0||all(doc,'sheetPr').some(n=>['1','true'].includes(n.getAttribute('filterMode')));
- }
- return book;
-}
-function resetCurrent(){result=null;sourceBytes=null;validation=null;$('result').hidden=true;$('quantityValidation').hidden=true;$('warnings').textContent='';updateDownloads();}
+const conversionInfo=p=>({formulaCount:p.formulaCount,correctedCount:p.correctedCount,imageCount:p.imageCount,converted:p.converted,failed:p.issues.length>0});
+function checkPrepared(prepared,merged){const check=V.validate(prepared.book,merged,C);if(prepared.issues.length){check.passed=false;check.issues.unshift(...prepared.issues);}return check;}
+function resetCurrent(){result=null;sourceBytes=null;validation=null;formulaInfo=null;$('result').hidden=true;$('quantityValidation').hidden=true;$('warnings').textContent='';updateDownloads();}
 function render(){
  const number=value=>value==null?'待核验':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:12});
  const groupedIssues=new Map();
  for(const issue of validation?.issues||[]){const key=[issue.sheet,issue.cell,issue.field].join('\0');if(!groupedIssues.has(key))groupedIssues.set(key,{...issue,messages:[]});const group=groupedIssues.get(key);if(!group.messages.includes(issue.message))group.messages.push(issue.message);}
  $('quantityValidation').hidden=false;
  $('quantityStatus').textContent=validation?(validation.passed?'六个数量字段校验通过，可以下载。':`数量校验未通过：${groupedIssues.size} 处，请修正源表后重新上传。所有下载已暂停。`):'缺少原文件，无法校验数量，请重新上传。所有下载已暂停。';
+ $('formulaStatus').textContent=formulaInfo?.failed?'存在无法转换的公式，具体位置见下方提示。':formulaInfo?.formulaCount?`已处理 ${formulaInfo.formulaCount} 个公式，修正 ${formulaInfo.correctedCount} 处保存结果${formulaInfo.imageCount?`；${formulaInfo.imageCount} 张公式图片已转为普通图片`:''}。下载的所有工作表均不含单元格公式。`:'下载的所有工作表均只保留数值和原有内容，不含单元格公式。';
  $('quantityChecks').innerHTML='<table><thead><tr>'+['来源工作表','数量字段','原表核算合计','汇总合计','差额（汇总－原表）','结果'].map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+(validation?.checks||[]).map(c=>'<tr>'+[c.sheet,c.field,number(c.sourceTotal),number(c.summaryTotal),number(c.difference),c.status].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
  $('quantityIssues').innerHTML=[...groupedIssues.values()].map(i=>'<li><strong>'+esc(i.sheet+(i.cell?'!'+i.cell:'')+' · '+i.field)+'</strong><br>'+i.messages.map(esc).join('<br>')+'</li>').join('');
  $('warnings').textContent=result.warnings.join('\n');
- $('count').textContent=`共 ${result.rows.length} 条，预览前 ${Math.min(100,result.rows.length)} 条；下载将汇总表放在首位，并保留差异表和全部原始工作表。`;
+ $('count').textContent=`共 ${result.rows.length} 条，预览前 ${Math.min(100,result.rows.length)} 条；下载将汇总表放在首位，并保留差异表和全部原工作表，所有单元格公式均转为值。`;
  const table=(columns,rows)=>'<table><thead><tr>'+columns.map(v=>'<th>'+esc(v)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(0,100).map(row=>'<tr>'+row.map(c=>'<td>'+esc(c.z?XLSX.SSF.format(c.z,c.v):c.v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
  $('preview').innerHTML=table(C.SUMMARY_COLUMNS,C.summaryRows(result.rows));$('diff-preview').innerHTML=validation?.passed?table(C.DIFF_COLUMNS,result.differences):'<p>本次数量未通过校验，未更新历史和差异。</p>';
  $('result').hidden=false;updateDownloads();
 }
 async function show(history){
  if(!history){$('status').textContent='等待首次上传';$('history').textContent='尚无历史数据。首次上传保存为基准，差异表仅有表头。';return;}
- filename=history.current.filename;sourceBytes=history.current.sourceBytes||null;
- validation=sourceBytes?V.validate(await readWorkbook(sourceBytes),history.current.result,C):null;
+ filename=history.current.filename;sourceBytes=history.current.sourceBytes||null;formulaInfo=history.current.formulaInfo||null;
+ if(sourceBytes){
+  const prepared=await FulfillmentValues.prepare(sourceBytes),merged=prepared.formulaCount?C.merge(prepared.book,filename):history.current.result;
+  validation=checkPrepared(prepared,merged);sourceBytes=prepared.bytes;
+  if(prepared.formulaCount||prepared.converted)formulaInfo=conversionInfo(prepared);
+  if(prepared.formulaCount||prepared.converted){
+   history={...history,current:{...history.current,result:merged,sourceBytes,formulaInfo}};
+   // Migrate only the current snapshot; the previous summary remains the recorded historical baseline.
+   if(validation.passed)await FulfillmentCache.replace(history);
+  }
+ }else validation=null;
  result={...history.current.result,differences:validation?.passed?C.difference(history.previous?.result,history.current.result):[]};
  const describe=s=>`${s.filename}（${new Date(s.savedAt).toLocaleString('zh-CN')}）`;
  $('history').textContent=`本次：${describe(history.current)}\n上次：${history.previous?describe(history.previous):'尚无，当前数据作为首次基准'}\n${validation?.passed?`差异：${result.differences.length} 个物料；数量为本次减上次。`:'缓存数据需通过数量校验后才能继续使用。'}`;
@@ -54,13 +50,14 @@ $('file').onchange=async()=>{
  await ready;const file=$('file').files[0];if(!file)return;
  resetCurrent();filename=file.name;
  if(file.size>60*1024*1024){$('status').textContent='文件超过60MB，请缩小后重试';return;}
- $('status').textContent='正在读取、对比并保存历史…';$('file').disabled=true;updateDownloads();
+ $('status').textContent='正在计算公式、校验数量并保存历史…';$('file').disabled=true;updateDownloads();
  try{
-  const bytes=await file.arrayBuffer();const book=await readWorkbook(bytes),merged=C.merge(book,file.name);
+  const prepared=await FulfillmentValues.prepare(await file.arrayBuffer()),merged=C.merge(prepared.book,file.name);
+  formulaInfo=conversionInfo(prepared);
   if(!merged.rows.length)throw Error('没有可合并的数据，未更新历史');
-  validation=V.validate(book,merged,C);
-  if(!validation.passed){sourceBytes=bytes;result={...merged,differences:[]};$('status').textContent='数量校验未通过，请查看下方差异。';$('history').textContent='本次文件未保存为历史基准，上次和本次已保存的历史保持不变。';render();return;}
-  const history=await FulfillmentCache.save({filename:file.name,savedAt:new Date().toISOString(),result:merged,sourceBytes:bytes});
+  validation=checkPrepared(prepared,merged);
+  if(!validation.passed){sourceBytes=prepared.bytes;result={...merged,differences:[]};$('status').textContent='数量校验未通过，请查看下方差异。';$('history').textContent='本次文件未保存为历史基准，上次和本次已保存的历史保持不变。';render();return;}
+  const history=await FulfillmentCache.save({filename:file.name,savedAt:new Date().toISOString(),result:merged,sourceBytes:prepared.bytes,formulaInfo});
   await show(history);
  }catch(e){resetCurrent();$('status').textContent='处理失败：'+e.message+'。保留原有历史，请重新上传。';}
  finally{$('file').disabled=false;$('file').value='';updateDownloads();}
