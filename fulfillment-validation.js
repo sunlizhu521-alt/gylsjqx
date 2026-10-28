@@ -1,4 +1,4 @@
-(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FulfillmentValidation=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
+(function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'),require('./fulfillment-core.js'));else root.FulfillmentValidation=factory(root.XLSX,root.FulfillmentCore);})(typeof globalThis!=='undefined'?globalThis:this,function(X,core){
 'use strict';
 const FIELDS=['未交付数量','已下单未备料未生产','已备料未生产','生产中产品','完工未发产品','已发货数量'];
 const norm=value=>String(value??'').replace(/\s/g,'');
@@ -138,9 +138,19 @@ function evaluator(sheet,onIssue,onFormula,options={}){
 }
 
 function materialize(book){
- const updates=[],issues=[],readers=new Map(),sheets=book.Sheets||{},names=Object.keys(sheets),copy={...book,Sheets:{...sheets}};let formulaCount=0,correctedCount=0;
+ const updates=[],issues=[],readers=new Map(),sheets=book.Sheets||{},names=Object.keys(sheets),copy={...book,Sheets:{...sheets}};let formulaCount=0,correctedCount=0,preservedAuxiliaryCount=0;
  const resolve=name=>{const matches=names.filter(item=>item.toLowerCase()===String(name).toLowerCase());if(matches.length!==1)throw Error(matches.length?'引用的工作表名称不唯一：'+name:'引用的工作表不存在：'+name);const actual=matches[0];if(!readers.has(actual))readers.set(actual,evaluator(sheets[actual],()=>{},()=>{},{valuesOnly:true,name:actual,resolve}));return readers.get(actual);};
- for(const name of names){copy.Sheets[name]={...sheets[name]};for(const [address,source] of Object.entries(sheets[name])){
+ for(const name of names){
+  const sheet=sheets[name],range=X.utils.decode_range(sheet['!ref']||'A1');let header=-1,requiredColumns=new Set();
+  if(core.SHEETS.some(person=>new RegExp('^'+person+'(?:[0-9]{4}|[0-9]{8})?$').test(norm(name)))){
+   for(let r=range.s.r;r<=Math.min(range.e.r,range.s.r+29);r++){
+    const fields=new Map();for(let c=range.s.c;c<=range.e.c;c++)fields.set(c,norm(sheet[X.utils.encode_cell({r,c})]?.v));
+    if([...fields.values()].includes('事业部')&&[...fields.values()].includes('物料编码')){
+     header=r;requiredColumns=new Set([...fields].filter(([,field])=>core.COLUMNS.includes(field)||['OA备货流程号','OA流程号','为生产预计交付时间'].includes(field)).map(([c])=>c));break;
+    }
+   }
+  }
+  copy.Sheets[name]={...sheet};for(const [address,source] of Object.entries(sheet)){
   if(!/^[A-Z]+[1-9]\d*$/.test(address)||!source||source.f==null&&source.F==null&&!source.D)continue;
   formulaCount++;
   try{
@@ -150,9 +160,18 @@ function materialize(book){
    for(const key of ['f','F','D','w','r','h'])delete cell[key];
    if(source.t!==type||(type==='n'?!finite(source.v)||!equal(source.v,value):source.v!==value))correctedCount++;
    copy.Sheets[name][address]=cell;updates.push({sheet:name,cell:address,value,type});
-  }catch(error){const reference=error.cell&&(error.cell!==address||error.sheet&&error.sheet!==name)?'引用 '+(error.sheet||name)+'!'+error.cell+'：':'',formula=String(source.f??'').replace(/^=/,''),shown=formula.slice(0,300)+(formula.length>300?'…':'');issues.push({sheet:name,cell:address,field:'',message:reference+error.message+(shown?'；公式：='+shown:''),kind:'formula'});}
+  }catch(error){
+   const position=X.utils.decode_cell(address);
+   if(header>=0&&position.r>header&&!requiredColumns.has(position.c)&&source.f&&!source.D&&(!source.F||source.F===address||source.F===address+':'+address)&&!/DISPIMG\s*\(/i.test(source.f)){
+    // Readers retain the original formulas: a summary field depending on this error must still fail.
+    const value=source.t==='e'?(source.w||X.utils.format_cell(source)||'#公式错误'):source.v??'',type=typeof value==='number'&&Number.isFinite(value)?'n':typeof value==='boolean'?'b':'s',cell={...source,t:type,v:type==='s'?String(value):value};
+    for(const key of ['f','F','D','w','r','h'])delete cell[key];
+    copy.Sheets[name][address]=cell;updates.push({sheet:name,cell:address,value:cell.v,type});preservedAuxiliaryCount++;continue;
+   }
+   const reference=error.cell&&(error.cell!==address||error.sheet&&error.sheet!==name)?'引用 '+(error.sheet||name)+'!'+error.cell+'：':'',formula=String(source.f??'').replace(/^=/,''),shown=formula.slice(0,300)+(formula.length>300?'…':'');issues.push({sheet:name,cell:address,field:'',message:reference+error.message+(shown?'；公式：='+shown:''),kind:'formula'});
+  }
  }}
- return {book:copy,updates,issues,formulaCount,correctedCount};
+ return {book:copy,updates,issues,formulaCount,correctedCount,preservedAuxiliaryCount};
 }
 
 function validate(book,result,core){

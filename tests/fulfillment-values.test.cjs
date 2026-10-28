@@ -66,3 +66,49 @@ test('四人六项数量列各自移位并含换行表头，按名称核算、�
  const converted=V.materialize(source);assert.deepEqual(converted.issues,[]);const result=C.merge(converted.book),check=V.validate(converted.book,result,C);assert.equal(check.passed,true,JSON.stringify(check.issues));
  const summary=C.summaryRows(result.rows);for(let r=0;r<result.rows.length;r++){const name=result.sources[r].sheet;for(const field of V.FIELDS){assert.equal(summary[r][C.SUMMARY_COLUMNS.indexOf(field)].v,expected.get(name)[field],name+' '+field);assert.equal(check.checks.find(c=>c.sheet===name&&c.field===field).sourceTotal,expected.get(name)[field]);}}
 });
+
+function brokenAuxiliaryFixture(){
+ const C=require('../fulfillment-core.js'),source=X.utils.book_new();
+ for(const name of C.SHEETS){
+  const row=name==='操思敏'?159:2,values=C.COLUMNS.map(field=>C.QUANTITY_FIELDS.includes(field)?0:({'物料编码':'TEST-'+name,'事业部':'国内事业部'})[field]||'');
+  const sheet=X.utils.aoa_to_sheet([C.COLUMNS]);X.utils.sheet_add_aoa(sheet,[values],{origin:'A'+row});
+  if(name==='操思敏'){
+   sheet.AI1={t:'s',v:'原表数量校验'};sheet.AJ1={t:'s',v:'原表校验结果'};
+   sheet.AI159={t:'e',v:23,w:'#REF!',f:'AG159+AH159-R159-#REF!'};
+   sheet.AJ159={t:'e',v:23,w:'#REF!',f:'IF(AI159=0,"一致","不一致")'};
+   sheet.K159=formula('SUM(L159:O159)',0);sheet.L159=numeric(1000);sheet.M159=numeric(200);sheet.N159=numeric(45);sheet['!ref']='A1:AJ159';
+  }
+  X.utils.book_append_sheet(source,sheet,name);
+ }
+ return source;
+}
+test('操思敏 AI159/AJ159 失效辅助公式转显示值，不阻止六项数量汇总且不采用旧零',()=>{
+ const C=require('../fulfillment-core.js'),F=require('../fulfillment-formats.js'),source=brokenAuxiliaryFixture(),before=JSON.stringify(source),result=V.materialize(source);
+ assert.deepEqual(result.issues,[]);assert.equal(result.preservedAuxiliaryCount,2);assert.equal(result.book.Sheets.操思敏.K159.v,1245);
+ for(const address of ['AI159','AJ159'])assert.deepEqual(result.book.Sheets.操思敏[address],{t:'s',v:'#REF!'});
+ const normalized=F.normalize(result.book);assert.deepEqual(normalized.issues,[]);const merged=C.merge(normalized.book),check=V.validate(normalized.book,merged,C);
+ assert.equal(check.passed,true,JSON.stringify(check.issues));assert.equal(merged.rows.length,4);assert.equal(merged.rows[1][C.COLUMNS.indexOf('未交付数量')].v,1245);
+ assert.equal(JSON.stringify(source),before);const reopened=X.read(X.write(normalized.book,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true});
+ for(const sheet of Object.values(reopened.Sheets))for(const cell of Object.values(sheet))if(cell&&typeof cell==='object')assert.equal(cell.f,undefined);
+ assert.equal(reopened.Sheets.操思敏.AI159.v,'#REF!');assert.equal(reopened.Sheets.操思敏.K159.t,'n');assert.equal(reopened.Sheets.操思敏.K159.z,'0');
+});
+test('辅助列保留空白、零、文本显示结果；四人名称后带日期也适用',()=>{
+ const source=brokenAuxiliaryFixture(),sheet=source.Sheets.操思敏;
+ sheet.AI159={t:'n',f:'#REF!'};sheet.AJ159={t:'n',v:0,f:'AI159+1'};
+ sheet.AK1={t:'s',v:'辅助判断'};sheet.AK159={t:'s',v:'原标记',f:'UNKNOWNFUNCTION(1)'};sheet['!ref']='A1:AK159';
+ source.Sheets.操思敏1028=sheet;delete source.Sheets.操思敏;
+ const result=V.materialize(source);assert.deepEqual(result.issues,[]);assert.equal(result.preservedAuxiliaryCount,3);
+ assert.deepEqual(['AI159','AJ159','AK159'].map(key=>result.book.Sheets.操思敏1028[key].v),['',0,'原标记']);
+});
+test('数量或其他汇总字段引用失效辅助公式时仍阻止，不能用被保留的缓存绕过校验',()=>{
+ for(const address of ['K159','H159','U159','Q159']){
+  const source=brokenAuxiliaryFixture();source.Sheets.操思敏.AI159={t:'n',v:100,f:'#REF!'};source.Sheets.操思敏[address]=formula('AI159',100);
+  const result=V.materialize(source);assert(result.issues.some(issue=>issue.cell===address&&/AI159/.test(issue.message)),address);assert.equal(result.book.Sheets.操思敏[address].f,'AI159');
+ }
+ const source=brokenAuxiliaryFixture();source.Sheets.李奇.K2=formula("'操思敏'!AI159",0);const result=V.materialize(source);
+ assert(result.issues.some(issue=>issue.sheet==='李奇'&&issue.cell==='K2'&&/操思敏!AI159/.test(issue.message)));
+});
+test('数量表头移动到 AI 列后按字段保护，不能按固定列认作辅助公式',()=>{
+ const source=brokenAuxiliaryFixture(),sheet=source.Sheets.操思敏;sheet.AI1={t:'s',v:'未交付\n数量'};sheet.K1={t:'s',v:'旧辅助列'};
+ const result=V.materialize(source);assert(result.issues.some(issue=>issue.cell==='AI159'&&/#REF!/.test(issue.message)));
+});

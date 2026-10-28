@@ -7,7 +7,7 @@ function updateDownloads(){
  $('download').disabled=blocked||!result||!sourceBytes;
  for(const button of divisionButtons){const hasRows=divisionRows(button.dataset.downloadDivision).length>0;button.disabled=blocked||!hasRows;button.title=hasRows?'仅下载该事业部的汇总表':'暂无该事业部数据';}
 }
-const conversionInfo=p=>({formulaCount:p.formulaCount,correctedCount:p.correctedCount,imageCount:p.imageCount,converted:p.converted,clearedFilterCount:p.clearedFilterCount||0,normalizedSheetCount:p.normalizedSheetCount||0,failed:p.issues.length>0});
+const conversionInfo=p=>({formulaCount:p.formulaCount,correctedCount:p.correctedCount,preservedAuxiliaryCount:p.preservedAuxiliaryCount||0,imageCount:p.imageCount,converted:p.converted,clearedFilterCount:p.clearedFilterCount||0,normalizedSheetCount:p.normalizedSheetCount||0,failed:p.issues.length>0});
 function checkPrepared(prepared,merged){const check=V.validate(prepared.book,merged,C);if(prepared.issues.length){check.passed=false;check.issues.unshift(...prepared.issues);}return check;}
 function resetCurrent(){result=null;sourceBytes=null;validation=null;formulaInfo=null;$('result').hidden=true;$('quantityValidation').hidden=true;$('warnings').textContent='';updateDownloads();}
 function render(){
@@ -19,6 +19,7 @@ function render(){
  $('formulaStatus').textContent=formulaInfo?.failed?'存在无法完成的公式或单元格转换，具体位置见下方提示。':formulaInfo?.formulaCount?`已处理 ${formulaInfo.formulaCount} 个公式，修正 ${formulaInfo.correctedCount} 处保存结果${formulaInfo.imageCount?`；${formulaInfo.imageCount} 张公式图片已转为普通图片`:''}。下载的所有工作表均不含单元格公式。`:'下载的所有工作表均只保留数值和原有内容，不含单元格公式。';
  if(formulaInfo?.clearedFilterCount)$('formulaStatus').textContent=`已自动清除 ${formulaInfo.clearedFilterCount} 个工作表的筛选条件。`+$('formulaStatus').textContent;
  if(formulaInfo?.normalizedSheetCount&&!formulaInfo.failed)$('formulaStatus').textContent+=`已统一 ${formulaInfo.normalizedSheetCount} 个工作表的日期、数量和文本格式。`;
+ if(formulaInfo?.preservedAuxiliaryCount&&!formulaInfo.failed)$('formulaStatus').textContent+=`${formulaInfo.preservedAuxiliaryCount} 个不参与汇总的辅助列公式已移除，保留原显示结果。`;
  $('quantityChecks').innerHTML='<table><thead><tr>'+['来源工作表','数量字段','原表核算合计','汇总合计','差额（汇总－原表）','结果'].map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+(validation?.checks||[]).map(c=>'<tr>'+[c.sheet,c.field,number(c.sourceTotal),number(c.summaryTotal),number(c.difference),c.status].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
  $('quantityIssues').innerHTML=[...groupedIssues.values()].map(i=>'<li><strong>'+esc(i.sheet+(i.cell?'!'+i.cell:'')+' · '+i.field)+'</strong><br>'+i.messages.map(esc).join('<br>')+'</li>').join('');
  $('warnings').textContent=result.warnings.join('\n');

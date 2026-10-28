@@ -14,7 +14,7 @@ const materialCodes = ['1007010122', '1007010122', '1007010123', '1007010123', '
 const detailValues = [1245, 50, 1050, 50, 140];
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
-async function fixture({ unsupported = false, formulas = true } = {}) {
+async function fixture({ unsupported = false, formulas = true, brokenAuxiliary = false, quantityDependency = false } = {}) {
   const book = X.utils.book_new();
   for (const [index, name] of [...C.SHEETS, '孙立柱'].entries()) {
     const rowCount = name === '李奇' ? 5 : 1;
@@ -42,6 +42,16 @@ async function fixture({ unsupported = false, formulas = true } = {}) {
       sheet['!ref'] = 'A1:AD6';
     }
     if (name === '孙立柱') sheet.K2 = formulas ? { t: 'n', v: 0, f: "'辅助'!A2" } : { t: 'n', v: 11 };
+    if (name === '操思敏' && brokenAuxiliary) {
+      for (const address of Object.keys(sheet).filter(key => /^[A-Z]+2$/.test(key))) {
+        sheet[address.replace(/2$/, '159')] = sheet[address]; delete sheet[address];
+      }
+      sheet.AI1 = { t: 's', v: '原表数量校验' }; sheet.AJ1 = { t: 's', v: '原表检查结果' };
+      sheet.AI159 = { t: 'e', v: 23, f: 'AG159+AH159-R159-#REF!' };
+      sheet.AJ159 = { t: 'e', v: 23, f: 'IF(AI159=0,"一致","不一致")' };
+      if (quantityDependency) sheet.K159 = { t: 'n', v: 0, f: 'AI159' };
+      sheet['!ref'] = 'A1:AJ159';
+    }
     X.utils.book_append_sheet(book, sheet, name === '邢芳芳' ? '邢芳芳1017' : name);
   }
   const helper = X.utils.aoa_to_sheet([['计算辅助', '', '', '', '判断', '空白结果', '数值判断'], [11, 1256, 0, 0.3, '一致', '', 11], ['保留合并内容']]);
@@ -260,6 +270,32 @@ function mergedTextFixture() {
     const message = (await page.locator('#status').innerText()) + '\n' + (await page.locator('#quantityIssues').innerText());
     assert.match(message, /辅助/); assert.match(message, /D2/); assert.match(message, /公式|函数|计算/);
     assert.deepEqual(await history(), goodHistory, '失败不覆盖历史或允许旧结果下载');
+
+    const brokenInput = await fixture({ brokenAuxiliary: true }), brokenHash = hash(brokenInput);
+    await upload(brokenInput, '辅助校验失效更新版.xlsx');
+    assert.equal(await page.locator('#download').isDisabled(), false, await page.locator('#quantityIssues').innerText());
+    assert.match(await page.locator('#formulaStatus').innerText(), /2 个不参与汇总的辅助列公式已移除/);
+    assert.equal(await page.locator('#quantityIssues').innerText(), '');
+    const repaired = X.read((await getDownload()).bytes, { type: 'buffer', cellNF: true });
+    assertNoFormulas(repaired);
+    assert.equal(repaired.Sheets.操思敏.AI159.v, '#REF!'); assert.equal(repaired.Sheets.操思敏.AJ159.v, '#REF!');
+    assert.equal(repaired.Sheets.操思敏.AI159.t, 's'); assert.equal(repaired.Sheets.操思敏.AI159.z, '@');
+    assert.equal(repaired.Sheets.李奇.K2.v, 1245, '数量公式仍重算，不能采用旧零');
+    assert.equal(X.utils.sheet_to_json(repaired.Sheets.汇总表, { header: 1 }).length, 9, '移除公式不删除数据行');
+    for (const division of divisions) {
+      const divided = X.read((await getDownload('[data-download-division="' + division + '"]')).bytes, { type: 'buffer' });
+      assert.deepEqual(divided.SheetNames, ['汇总表']); assertNoFormulas(divided);
+    }
+    assert.equal(hash(brokenInput), brokenHash);
+    const repairedHistory = await history();
+    await page.reload(); await ready();
+    assert.equal(await page.locator('#download').isDisabled(), false);
+    assert.match(await page.locator('#formulaStatus').innerText(), /2 个不参与汇总的辅助列公式已移除/);
+    assert.deepEqual(await history(), repairedHistory, '重新打开不推进历史基准');
+    await upload(await fixture({ brokenAuxiliary: true, quantityDependency: true }), '数量依赖失效更新版.xlsx');
+    await assertBlocked();
+    assert.match(await page.locator('#quantityIssues').innerText(), /AI159/);
+    assert.deepEqual(await history(), repairedHistory, '数量依赖坏公式仍阻止，不可用辅助列旧值绕过');
 
     const legacyBefore = await putLegacy(input);
     assert.equal(await page.locator('#download').isDisabled(), false, '旧缓存有公式时须迁移而非沿用旧值');

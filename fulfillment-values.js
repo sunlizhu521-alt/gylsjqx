@@ -216,7 +216,7 @@ async function prepare(input){
   const sheetRels=parse(await zip.file(relPath(sheet.path)).async('string')),drawing=children(sheet.doc.documentElement,'drawing')[0],relation=all(sheetRels,'Relationship').find(n=>n.getAttribute('Id')===drawing.getAttributeNS(NS.r,'id')),path=partPath(relation.getAttribute('Target'),sheet.path),doc=parse(await zip.file(path).async('string')),rels=parse(await zip.file(relPath(path)).async('string'));
   for(const plan of plans){const pic=all(doc,'pic').find(p=>all(p,'cNvPr')[0]?.getAttribute('name')===plan.cell+' '+plan.name),id=pic&&all(pic,'blip')[0]?.getAttributeNS(NS.r,'embed'),imageRel=all(rels,'Relationship').find(n=>n.getAttribute('Id')===id);if(!imageRel||!zip.file(partPath(imageRel.getAttribute('Target'),path)))throw Error(sheet.name+'!'+plan.cell+' 图片未完整保留');}
  }
- return {book,bytes,issues:[],formulaCount,correctedCount:materialized.correctedCount,imageCount:images.length,converted,clearedFilterCount,normalizedSheetCount,formatWarnings};
+ return {book,bytes,issues:[],formulaCount,correctedCount:materialized.correctedCount,preservedAuxiliaryCount:materialized.preservedAuxiliaryCount,imageCount:images.length,converted,clearedFilterCount,normalizedSheetCount,formatWarnings};
 }
 window.FulfillmentValues={prepare};
 })();
