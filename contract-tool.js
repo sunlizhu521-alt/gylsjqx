@@ -12,6 +12,7 @@
     pdf: 'application/pdf',
   };
   const ONLYOFFICE_ORIGIN = 'https://edit.chaxus.com';
+  const CONVERTER_LOAD_TIMEOUT = 60000;
   const CONVERSION_TIMEOUT = 240000;
   const NUMERIC_BUSINESS_FIELDS = new Set(['sequence', 'quantity', 'taxUnitPrice', 'taxAmount', 'taxRate']);
   const RIGHT_SIDE_VALUE_FIELDS = new Set(['contractNumber', 'deliveryPlace', 'deliveryTime', 'signDate']);
@@ -776,8 +777,9 @@
     try {
       const blob = state.templateType === 'docx' ? await generateDocx() : await generateXlsx();
       state.output = blob; state.outputFileName = `${C.sanitizeFileName($('outputName').value)}.${state.templateType}`;
-      $('generateContract').textContent = '正在转换PDF…'; status('合同副本已生成，正在浏览器内转换PDF；首次加载可能需要一些时间…');
+      $('generateContract').textContent = '正在转换PDF…';
       let pdfFile = await convertContractToPdf(blob, state.outputFileName);
+      status('PDF已转换，正在准备预览…');
       try { state.outputPdf = await preparePdfPreview(pdfFile, false); }
       catch (error) {
         if (error.code !== 'PDF_PARSE_FAILED') throw error;
@@ -945,20 +947,27 @@
       }
       throw lastError || new Error('PDF转换测试接口没有返回有效文件');
     }
-    await ensureConverterFrame();
-    const buffer = await blob.arrayBuffer();
-    await requestConverter('document:open-buffer', { fileName, buffer, readonly: false }, 'document:opened', [buffer]);
-    let lastError;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
+    try {
+      status('正在加载PDF转换组件；首次使用需要下载组件，请稍候…');
+      await ensureConverterFrame();
+      const buffer = await blob.arrayBuffer();
+      status('PDF转换组件已就绪，正在读取合同…');
+      await requestConverter('document:open-buffer', { fileName, buffer, readonly: false }, 'document:opened', [buffer]);
+      status('合同已读取，正在排版并生成PDF；首次加载字体可能需要一些时间…');
+      let lastError;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
         const result = await requestConverter('document:save', { targetExt: 'PDF' }, 'document:saved');
-        return await normalizePdfFile(result.file, fileName.replace(/\.[^.]+$/, '.pdf'));
-      } catch (error) {
-        lastError = error;
-        if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 500));
+        try { return await normalizePdfFile(result.file, fileName.replace(/\.[^.]+$/, '.pdf')); }
+        catch (error) {
+          lastError = error;
+          if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 500));
+        }
       }
+      throw lastError || new Error('PDF转换组件没有返回有效文件');
+    } catch (error) {
+      resetConverter(error);
+      throw error;
     }
-    throw lastError || new Error('PDF转换组件没有返回有效文件');
   }
 
   async function normalizePdfFile(value, fileName) {
@@ -978,36 +987,61 @@
     if (converterFrame?.dataset.ready === 'true') return Promise.resolve();
     if (converterReadyPromise) return converterReadyPromise;
     converterReadyPromise = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        converterReadyPromise = null;
-        reject(new Error('PDF转换组件加载超时，请检查网络后重试'));
-      }, CONVERSION_TIMEOUT);
-      converterReadyResolve = () => { clearTimeout(timeout); resolve(); };
-      converterFrame = document.createElement('iframe');
-      converterFrame.className = 'onlyoffice-converter-frame';
-      converterFrame.title = '浏览器本地PDF转换组件'; converterFrame.tabIndex = -1; converterFrame.setAttribute('aria-hidden', 'true');
-      converterFrame.src = `${ONLYOFFICE_ORIGIN}/editor?embed=1&locale=zh-CN&embedOrigin=${encodeURIComponent(location.origin)}`;
-      converterFrame.addEventListener('error', () => { clearTimeout(timeout); converterReadyPromise = null; reject(new Error('PDF转换组件加载失败，请检查网络后重试')); }, { once: true });
-      document.body.append(converterFrame);
+      const frame = document.createElement('iframe');
+      converterFrame = frame;
+      converterReadyId = `contract-ready-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      // The editor may initialize after its load event and never emit document:ready.
+      const probe = () => frame.contentWindow?.postMessage({ id: converterReadyId, type: 'document:get-state' }, ONLYOFFICE_ORIGIN);
+      const interval = setInterval(probe, 1000);
+      const timeout = setTimeout(() => resetConverter(new Error('PDF转换组件加载超时，请检查网络后重新点击生成；无需重新上传文件')), CONVERTER_LOAD_TIMEOUT);
+      const finish = error => {
+        clearTimeout(timeout); clearInterval(interval); frame.removeEventListener('load', probe);
+        converterReadyResolve = null; converterReadyReject = null; converterReadyId = null;
+        if (error) reject(error);
+        else { frame.dataset.ready = 'true'; resolve(); }
+      };
+      converterReadyResolve = () => finish();
+      converterReadyReject = error => finish(error);
+      frame.className = 'onlyoffice-converter-frame';
+      frame.title = '浏览器本地PDF转换组件'; frame.tabIndex = -1; frame.setAttribute('aria-hidden', 'true');
+      frame.src = `${ONLYOFFICE_ORIGIN}/editor?embed=1&locale=zh-CN&embedOrigin=${encodeURIComponent(location.origin)}`;
+      frame.addEventListener('load', probe);
+      frame.addEventListener('error', () => {
+        if (frame === converterFrame) resetConverter(new Error('PDF转换组件加载失败，请检查网络后重新点击生成；无需重新上传文件'));
+      }, { once: true });
+      document.body.append(frame);
     });
     return converterReadyPromise;
+  }
+
+  function resetConverter(error) {
+    converterReadyReject?.(error);
+    converterReadyPromise = null;
+    converterFrame?.remove(); converterFrame = null;
+    for (const request of converterRequests.values()) { clearTimeout(request.timeout); request.reject(error); }
+    converterRequests.clear();
   }
 
   function requestConverter(type, payload, expectedType, transfer = []) {
     const id = `contract-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => { converterRequests.delete(id); reject(new Error('PDF转换超时，请重新生成')); }, CONVERSION_TIMEOUT);
+      const timeout = setTimeout(() => {
+        converterRequests.delete(id);
+        reject(new Error(`${type === 'document:open-buffer' ? '读取合同' : '生成PDF'}超时，请重新点击生成；无需重新上传文件`));
+      }, CONVERSION_TIMEOUT);
       converterRequests.set(id, { expectedType, resolve, reject, timeout });
-      converterFrame.contentWindow.postMessage({ id, type, payload }, ONLYOFFICE_ORIGIN, transfer);
+      try { converterFrame.contentWindow.postMessage({ id, type, payload }, ONLYOFFICE_ORIGIN, transfer); }
+      catch (error) { clearTimeout(timeout); converterRequests.delete(id); reject(error); }
     });
   }
 
   let converterReadyResolve = null;
+  let converterReadyReject = null;
+  let converterReadyId = null;
   function handleConverterMessage(event) {
-    if (event.origin !== ONLYOFFICE_ORIGIN || !event.data?.type?.startsWith('document:')) return;
-    if (event.data.type === 'document:ready') {
-      if (converterFrame) converterFrame.dataset.ready = 'true';
-      converterReadyResolve?.(); converterReadyResolve = null;
+    if (event.origin !== ONLYOFFICE_ORIGIN || !converterFrame || event.source !== converterFrame.contentWindow || typeof event.data?.type !== 'string' || !event.data.type.startsWith('document:')) return;
+    if (event.data.type === 'document:ready' || (event.data.type === 'document:state' && converterReadyId && event.data.id === converterReadyId)) {
+      converterReadyResolve?.();
       return;
     }
     const request = converterRequests.get(event.data.id);
