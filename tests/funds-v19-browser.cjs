@@ -10,6 +10,7 @@ const {fixtures}=require('./funds-fixtures.cjs');
  ['手工状态冲突供应商','迈德斯特','',40,0,'保留矛盾状态',40,'','孙立柱','','是',46349,'',40,'','','','1、11月25日－40.00',40,'人工确认',40]]);
  sheet.N2={t:'n',v:300,f:'G2-E2'};sheet.S2={t:'n',v:300,f:'SUM(U2:AG2)'};sheet.T2={t:'s',v:'一致',f:'IF(ROUND(S2,2)=ROUND(G2,2),"一致","不一致")'};
  sheet.S3={t:'n',v:0,f:'SUM(U3:AG3)'};sheet.S4={t:'n',v:40,f:'SUM(U4:AG4)'};sheet.T3={t:'s',v:'一致',f:'IF(ROUND(S3,2)=ROUND(G3,2),"一致","不一致")'};
+ for(const row of [2,3,4])sheet['L'+row].z='yyyy-mm-dd';
  for(let c=20;c<33;c++)sheet[X.utils.encode_cell({r:0,c})].z=Core.DATE_FORMAT;
  sheet['!merges']=[{s:{r:1,c:14},e:{r:2,c:14}}];sheet['!rows']=[{hpt:30},{hpt:60},{hpt:30},{hpt:30}];sheet['!cols']=headers.map(()=>({wch:24}));sheet['!cols'][17]={wch:52};sheet.XFD117={t:'z'};sheet['!ref']='A1:XFD117';
  X.utils.book_append_sheet(book,sheet,'谈判付款');
@@ -68,8 +69,8 @@ const {fixtures}=require('./funds-fixtures.cjs');
   }
   assert.deepEqual(s['!merges'],src['!merges']);
   if(!process.env.FUNDS_V19_FILE){
-   for(const address of ['L2','L3']){assert.equal(s[address].v,46329);assert.equal(s[address].t,'n');assert.equal(X.SSF.format(s[address].z,s[address].v),'2026年11月3日');}
-   assert.equal(await frame.locator('#negotiatedPreview tbody tr').first().locator('td').nth(11).innerText(),'2026年11月3日');
+   for(const address of ['L2','L3']){assert.equal(s[address].v,46349);assert.equal(s[address].t,'n');assert.equal(X.SSF.format(s[address].z,s[address].v),'2026-11-23');}
+   assert.equal(await frame.locator('#negotiatedPreview tbody tr').first().locator('td').nth(11).innerText(),'2026-11-23');
   }
   for(let c=20;c<33;c++){
    const address=X.utils.encode_cell({r:0,c}),d=X.SSF.parse_date_code(s[address].v),label=`${d.y}年${d.m}月${d.d}日`;
@@ -86,8 +87,22 @@ const {fixtures}=require('./funds-fixtures.cjs');
   // Switching tools keeps the uploaded V19 and its prepared download.
   await page.locator('.tool-tab:not([data-tool="funds"])').first().click();
   await page.locator('.tool-tab[data-tool="funds"]').click();assert(await frame.locator('#download').isEnabled());
+  if(!process.env.FUNDS_V19_FILE){
+   // Replace the ledger under the same filename, with a previous export as negotiated input.
+   // Normal due dates must follow the latest ledger; negotiated dates must stay unchanged.
+   const latest=X.read(data.ledger,{cellNF:true});latest.Sheets['对账明细-李奇'].I2={t:'n',v:46357,z:Core.DATE_FORMAT};
+   await frame.locator('#negotiatedFile:not([disabled])').setInputFiles({name:'negotiated.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:output});
+   await frame.locator('#ledgerFile:not([disabled])').setInputFiles({name:'ledger.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(X.write(latest,{type:'buffer',bookType:'xlsx'}))});
+   assert(await frame.locator('#download').isDisabled());await frame.locator('#analyze:not([disabled])').click();await frame.locator('#download:not([disabled])').waitFor();
+   const event=page.waitForEvent('download');await frame.locator('#download').click();const next=await event,updated=X.read(await fs.readFile(await next.path()),{cellNF:true});
+   for(const address of ['L2','L3'])assert.equal(updated.Sheets.谈判付款[address].v,46349);
+   if(!process.env.FUNDS_CLASSIFICATION_QA){
+    assert.equal(updated.Sheets.正常付款.J2.v,46357);assert.equal(updated.Sheets.正常付款.J2.t,'n');assert.equal(updated.Sheets.正常付款.J2.z,Core.DATE_FORMAT);assert.equal(updated.Sheets.正常付款.Z2.v,'2026/11/23周');
+    assert.equal(await frame.locator('#normalPreview tbody tr').first().locator('td').nth(9).innerText(),'2026年12月1日');
+   }
+  }
   assert.deepEqual(errors,[]);await fs.writeFile('/private/tmp/funds-v19-browser-output.xlsx',output);
   await frame.locator('#negotiatedPreviewSection').screenshot({path:'/private/tmp/funds-v19-browser-preview.png'});
-  console.log('PASS V19 homepage upload → 39 columns → download; original financial values/formulas/status/merges, typed week headers, detail layout and tool switching');
+  console.log('PASS V19 homepage upload → 39 columns → download; original financial values/formulas/status/merges, negotiated due dates preserved, latest ledger dates refreshed in normal preview/export, typed week headers and tool switching');
  }finally{await browser.close();}
-})().catch(e=>{console.error(e.message);process.exit(1);});
+})().catch(e=>{console.error(e);process.exit(1);});

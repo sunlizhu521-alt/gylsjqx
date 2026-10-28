@@ -214,29 +214,8 @@ function build(inputs,decisions={}){
    const merged=(negotiated.sheet['!merges']||[]).some(m=>r.r>=m.s.r&&r.r<=m.e.r&&c>=m.s.c&&c<=m.e.c&&(r.r!==m.s.r||c!==m.s.c));
    if(blank(target.values[h])&&usable(source)&&!merged)set(target,h,cell(source.v));
   }
-  // Use the record's original OA number, not the supplemented value in target.values.
-  applyDueDate(target);
   target.record={...r,values:{...target.values}};return target;
  });
- function applyDueDate(target){
-  const key=classification(target.record).key,ids=oas(target.record);
-  if(!key||!hasPaymentOA(target.record)||!ids.length)return;
-  const matches=ledger.filter(r=>classification(r).key===key&&hasPaymentOA(r)&&oas(r).length&&!identifiersConflict(ids,oas(r)));if(!matches.length)return;
-  const candidates=matches.map(r=>({record:r,date:date(r.values['应付款时间'],r.date1904)}));
-  if(candidates.every(c=>c.date.v===''&&!c.date.invalid))return;
-  const dates=new Map();for(const c of candidates)if(!c.date.invalid&&c.date.v!=='')dates.set(c.date.v,c.date);
-  const column=targetCols['应付款时间'],row=target.record.r;
-  const merged=(negotiated.sheet['!merges']||[]).some(m=>row>=m.s.r&&row<=m.e.r&&column>=m.s.c&&column<=m.e.c&&(m.s.r!==m.e.r||m.s.c!==m.e.c));
-  if(merged){issue('due-date:'+target.record.id,'due-date','应付款时间位于合并单元格中，保留原值及合并结构，请核对。',target.record);return;}
-  let chosen=dates.size===1&&candidates.every(c=>!c.date.invalid&&c.date.v!=='')?[...dates.values()][0]:null;
-  if(!chosen){
-   const choices=[{value:'keep',label:'保留原应付款时间'},...[...dates].map(([serial,d])=>({value:'date:'+serial,label:'采用 '+X.SSF.format(DATE_FORMAT,d.v)}))];
-   const sources=candidates.map(c=>recordLabel(c.record)+'；应付款时间 '+(str(c.record.values['应付款时间']?.w??value(c.record,'应付款时间'))||'空白')).join('\n');
-   const answer=issue('due-date:'+target.record.id,'due-date','按供应商名称＋申请付款金额＋对公付款 OA 号匹配到的应付款时间不一致、为空或无法识别，保留原值，请核对。\n'+sources,target.record,choices)[0];
-   if(answer?.startsWith('date:'))chosen=dates.get(Number(answer.slice(5)));
-  }
-  if(chosen)set(target,'应付款时间',{...chosen,v:chosen.v-(negotiated.date1904?1462:0)});
- }
  const targets=[...negotiatedObjects,...normalObjects];
  function set(target,key,c){if(!target.normal&&targetCols[key]===undefined)return;target.values[key]=clone(c);if(!target.normal)updateMap.set(X.utils.encode_cell({r:target.record.r,c:targetCols[key]}),clone(c));}
  function applyFinancial(target){
@@ -594,11 +573,11 @@ function build(inputs,decisions={}){
  }
  function normalCell(target,key){
   if(key==='跟单员')return cell(target.record.owner);
-  if(key==='申请付款的日期')return paymentWeek(target.values['应付款时间'],target.record.date1904,1);
+  if(key==='申请付款的日期')return paymentWeek(target.record.values['应付款时间'],target.record.date1904,1);
   if(key==='是否对账'){
    return cell(hasPaymentOA(target.record)?'已对账':'未对账');
   }
-  const original=target.values[key];if(!original)return empty();
+  const original=key==='应付款时间'?target.record.values[key]:target.values[key];if(!original)return empty();
   if(key==='剩余金额'&&original.f&&target.values['已付金额']!==target.record.values['已付金额'])return clone(original);
   if(original.t==='e'||(original.f&&(original.v==null||original.v===''))){issue('cell:'+target.record.id+':'+key,'formula','“'+key+'”公式结果不可用，输出保留错误提示，请在源表重算后上传或确认保留。',target.record);return cell(original.w||'公式结果不可用');}
   if(['登记月份','开票时间','应付款时间'].includes(key)){

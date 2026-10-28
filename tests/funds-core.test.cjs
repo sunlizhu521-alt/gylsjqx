@@ -593,57 +593,39 @@ test('已在谈判源表的分类命中记录不进入付款申请核对，其�
  assert.equal(applicationAndOAReviews(C.build(i)).length,0,'存在任一谈判分类即生效');
 });
 
-test('谈判应付款时间按供应商、申请金额和OA号更新，不依赖主体并保留财务字段',()=>{
- const i=fixture(),n=i.negotiated.book.Sheets['10月谈判付款主表'];
- X.utils.sheet_add_aoa(n,[['应付时间'],['旧日期']],{origin:'N1'});
- set(i,'ledger','付款主体',2,'其他主体');set(i,'ledger','应付款时间',2,'2026年11月12日');
- const before=JSON.stringify(i),r=C.build(i),d=r.negotiated.rows[0][13];
- assert.equal(X.SSF.format(C.DATE_FORMAT,d.v),'2026年11月12日');assert.equal(d.t,'n');assert.equal(d.z,C.DATE_FORMAT);
- assert.equal(r.negotiated.rows[0][4].v,0);assert.equal(r.negotiated.rows[0][10].v,100);assert.equal(r.negotiated.rows[0][12].f,'G2');assert.equal(JSON.stringify(i),before);
-});
-test('谈判应付日期未匹配或源日期空白保留原值，不把空金额作为零匹配',()=>{
- for(const [field,v] of [['供应商名称','其他供应商'],['申请付款金额',101],['申请付款金额',''],['申请付款金额','异常'],['应付款时间','']]){
-  const i=fixture(),n=i.negotiated.book.Sheets['10月谈判付款主表'];X.utils.sheet_add_aoa(n,[['应付款时间'],['原日期']],{origin:'N1'});set(i,'ledger',field,2,v);
-  const r=C.build(i);assert.equal(r.negotiated.rows[0][13].v,'原日期');assert(!r.negotiated.updates.some(u=>u.address==='N2'));
- }
- const i=fixture();set(i,'ledger','申请付款金额',2,0);set(i,'negotiated','申请付款金额',2,0);
- const r=C.build(i);assert.equal(X.SSF.format(C.DATE_FORMAT,r.negotiated.rows[0][r.negotiated.headers.indexOf('应付款时间')].v),'2026年10月31日');
-});
-test('同键多笔日期一致可更新，日期冲突或错误保留并允许核对选择',()=>{
- for(const [raw,conflict] of [['2026年10月31日',false],['2026-11-01',true],['',true],[{t:'e',v:23},true],[{t:'n',f:'A99'},true],['2026-02-30',true]]){
-  const i=fixture(),l=i.ledger.book.Sheets['对账明细-李奇'],n=i.negotiated.book.Sheets['10月谈判付款主表'];X.utils.sheet_add_aoa(n,[['应付款时间'],['原日期']],{origin:'N1'});
-  const row=X.utils.sheet_to_json(l,{header:1})[1].slice();row[8]=raw;X.utils.sheet_add_aoa(l,[row],{origin:-1});
-  const r=C.build(i),q=r.issues.find(q=>q.kind==='due-date');assert.equal(!!q,conflict);
-  if(conflict){assert.equal(r.negotiated.rows[0][13].v,'原日期');assert(q.message.includes('对账明细-李奇'));assert.equal(C.build(i,{[q.id]:['keep']}).negotiated.rows[0][13].v,'原日期');const choice=q.choices.find(c=>c.value.startsWith('date:'));assert.equal(C.build(i,{[q.id]:[choice.value]}).negotiated.rows[0][13].v,Number(choice.value.slice(5)));}
-  else assert.equal(X.SSF.format(C.DATE_FORMAT,r.negotiated.rows[0][13].v),'2026年10月31日');
+test('谈判应付日期仅使用谈判表，台账同键匹配、冲突或空白都不覆盖',()=>{
+ for(const header of ['应付时间','应付款时间'])for(const original of ['2026年12月31日','原约定日期','',0,{t:'n',v:46387,z:C.DATE_FORMAT},{t:'n',v:46387,f:'DATE(2026,12,31)',z:C.DATE_FORMAT}]){
+  const i=fixture(),n=i.negotiated.book.Sheets['10月谈判付款主表'],l=i.ledger.book.Sheets['对账明细-李奇'];
+  X.utils.sheet_add_aoa(n,[[header],[original]],{origin:'N1'});set(i,'ledger','应付款时间',2,'2026年11月12日');
+  const row=X.utils.sheet_to_json(l,{header:1})[1].slice();row[8]='2027-01-01';X.utils.sheet_add_aoa(l,[row],{origin:-1});
+  const before=JSON.stringify(i),r=C.build(i,{'due-date:10月谈判付款主表!2':['date:46325']});
+  assert.deepEqual(r.negotiated.rows[0][13],n.N2);assert(!r.negotiated.updates.some(u=>u.address==='N2'));assert(!r.issues.some(q=>q.kind==='due-date'));assert.equal(JSON.stringify(i),before);
  }
 });
-test('谈判应付日期正确处理不同日期体系，保留合并单元格',()=>{
- for(const from1904 of [false,true])for(const to1904 of [false,true]){
-  const i=fixture();i.ledger.book.Workbook={WBProps:{date1904:from1904}};i.negotiated.book.Workbook={WBProps:{date1904:to1904}};set(i,'ledger','应付款时间',2,{t:'n',v:46325-(from1904?1462:0)});
-  const r=C.build(i),d=r.negotiated.rows[0][r.negotiated.headers.indexOf('应付款时间')];assert.equal(d.v,46325-(to1904?1462:0));
- }
- const i=fixture(),n=i.negotiated.book.Sheets['10月谈判付款主表'];X.utils.sheet_add_aoa(n,[['应付款时间'],['合并日期']],{origin:'N1'});n['!merges']=[{s:{r:1,c:13},e:{r:2,c:13}}];
- const r=C.build(i);assert.equal(r.negotiated.rows[0][13].v,'合并日期');assert(r.issues.some(q=>q.kind==='due-date'&&q.message.includes('合并')));
-});
-
-test('更新谈判应付日期必须同时匹配原付款OA号，缺失或不一致不退回供应商金额匹配',()=>{
- for(const role of ['ledger','negotiated'])for(const id of ['', '   ', 'MDST-DGFK202610010010', 'OTHER-123', {t:'e',v:23}, {t:'n',f:'A99'}]){
-  const i=fixture(),n=i.negotiated.book.Sheets['10月谈判付款主表'];X.utils.sheet_add_aoa(n,[['应付款时间'],['原日期']],{origin:'N1'});set(i,role,'对公付款0A流程号',2,id);
-  const before=JSON.stringify(i),r=C.build(i);assert.equal(r.negotiated.rows[0][13].v,'原日期');assert(!r.negotiated.updates.some(u=>u.address==='N2'));assert.equal(JSON.stringify(i),before);
+test('谈判空白或缺少应付时间不从台账补齐，合并单元格和日期体系保留',()=>{
+ const missing=fixture(),r=C.build(missing),index=r.negotiated.headers.indexOf('应付款时间');assert.equal(r.negotiated.rows[0][index].v,'');
+ for(const date1904 of [false,true]){
+  const i=fixture(),n=i.negotiated.book.Sheets['10月谈判付款主表'];i.negotiated.book.Workbook={WBProps:{date1904}};
+  X.utils.sheet_add_aoa(n,[['应付款时间'],[{t:'n',v:46387-(date1904?1462:0),z:C.DATE_FORMAT}]],{origin:'N1'});n['!merges']=[{s:{r:1,c:13},e:{r:2,c:13}}];
+  const before=JSON.stringify(i),result=C.build(i);assert.deepEqual(result.negotiated.rows[0][13],n.N2);assert(!result.issues.some(q=>q.kind==='due-date'));assert(!result.negotiated.updates.some(u=>u.address==='N2'));assert.equal(JSON.stringify(i),before);
  }
 });
-test('同供应商同金额不同OA时仅取匹配流程日期，同OA多日期仍核对',()=>{
- const i=fixture(),l=i.ledger.book.Sheets['对账明细-李奇'],n=i.negotiated.book.Sheets['10月谈判付款主表'];X.utils.sheet_add_aoa(n,[['应付款时间'],['原日期']],{origin:'N1'});
- const row=X.utils.sheet_to_json(l,{header:1})[1].slice();row[3]='OTHER-123';row[8]='2026-12-31';X.utils.sheet_add_aoa(l,[row],{origin:-1});
- let r=C.build(i);assert.equal(X.SSF.format(C.DATE_FORMAT,r.negotiated.rows[0][13].v),'2026年10月31日');assert(!r.issues.some(q=>q.kind==='due-date'));
- set(i,'ledger','对公付款0A流程号',4,'MDST-DGFK20261001001');r=C.build(i);assert.equal(r.negotiated.rows[0][13].v,'原日期');assert(r.issues.some(q=>q.kind==='due-date'));
+test('正常付款按各人员台账表头和本行读取应付时间，同供应商多笔不串日期',()=>{
+ const i=fixture(),l=i.ledger.book.Sheets['对账明细-李奇'],row=X.utils.sheet_to_json(l,{header:1})[2].slice();
+ row[3]='MDST-DGFK20261001003';row[8]='2026-11-09';row[9]='AP000003';X.utils.sheet_add_aoa(l,[row],{origin:-1});
+ set(i,'ledger','应付款时间',3,'2026-11-02');
+ const xu=X.utils.aoa_to_sheet([LH.map(h=>h==='应付款时间'?'应付时间':h).reverse(),row.map((v,c)=>c===3?'MDST-DGFK20261001004':c===8?'2026-11-16':v).reverse()]);i.ledger.book.Sheets['对账明细-徐英']=xu;
+ const before=JSON.stringify(i),r=C.build(i);assert.equal(r.normalRows.length,3);
+ assert.deepEqual(r.normalRows.map(row=>X.SSF.format('yyyy-mm-dd',row[9].v)),['2026-11-02','2026-11-09','2026-11-16']);
+ assert.deepEqual(r.normalRows.map(row=>row.at(-1).v),['2026/10/26周','2026/11/02周','2026/11/09周']);assert(r.normalRows.every(row=>row[9].t==='n'&&row[9].z===C.DATE_FORMAT));assert.equal(JSON.stringify(i),before);
+ set(i,'ledger','应付款时间',3,'2026-12-01');const latest=C.build(i);assert.equal(X.SSF.format('yyyy-mm-dd',latest.normalRows[0][9].v),'2026-12-01');assert.equal(latest.normalRows[0].at(-1).v,'2026/11/23周');
 });
-test('应付日期匹配多个OA号必须完整相同，忽略顺序和重复但不接受部分重叠',()=>{
- for(const [id,match] of [['OTHER-123；MDST-DGFK20261001001',true],['MDST-DGFK20261001001；OTHER-123；OTHER-123',true],['MDST-DGFK20261001001',false],['OTHER-123；THIRD-456',false]]){
-  const i=fixture(),n=i.negotiated.book.Sheets['10月谈判付款主表'];X.utils.sheet_add_aoa(n,[['应付款时间'],['原日期']],{origin:'N1'});set(i,'negotiated','对公付款0A流程号',2,'MDST-DGFK20261001001；OTHER-123');set(i,'ledger','对公付款0A流程号',2,id);
-  const r=C.build(i);assert.equal(r.negotiated.rows[0][13].v==='原日期',!match);
- }
+test('正常付款应付时间按台账日期体系转换，保留空白、文本和公式异常核对',()=>{
+ for(const [raw,date1904,expected] of [
+  [{t:'n',v:46328,z:C.DATE_FORMAT},false,46328],[{t:'n',v:44866,z:C.DATE_FORMAT},true,46328],
+  [{t:'n',v:46328,f:'DATE(2026,11,2)'},false,46328],['2026年11月2日',false,46328],['',false,''],['月底协商',false,'月底协商']
+ ]){const i=fixture();i.ledger.book.Workbook={WBProps:{date1904}};set(i,'ledger','应付款时间',3,raw);const r=C.build(i);assert.equal(r.normalRows[0][9].v,expected);}
+ for(const raw of [{t:'n',f:'DATE(2026,11,2)'},{t:'e',v:23,w:'#REF!'}]){const i=fixture();set(i,'ledger','应付款时间',3,raw);const r=C.build(i);assert(r.issues.some(q=>q.kind==='formula'&&q.message.includes('应付款时间')));assert.equal(r.normalRows[0].at(-1).v,'日期待确认');}
 });
 
 test('全额申请后又有分批申请，超额仍确认已提交，实付金额以台账为准',()=>{
