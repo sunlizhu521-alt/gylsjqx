@@ -16,7 +16,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright'),assert=req
   const output=await FulfillmentExport(blob,prepared.bytes),bytes=await output.arrayBuffer(),book=XLSX.read(bytes,{type:'array',cellNF:true});
   const a=await JSZip.loadAsync(source),b=await JSZip.loadAsync(bytes);
   const originalXml=await a.file('xl/worksheets/sheet2.xml').async('string'),outputXml=await b.file('xl/worksheets/sheet2.xml').async('string');
-  const date=book.Sheets[book.SheetNames[0]].R2;
+  const date=book.Sheets[book.SheetNames[0]].S2;
   return {names:book.SheetNames,unchanged:originalXml===outputXml,rejectedFormula,formula:book.Sheets.汇总表.A3.f,value:book.Sheets.汇总表.A3.v,merges:book.Sheets.汇总表['!merges'],hidden:book.Workbook.Sheets[3].Hidden,defined:book.Workbook.Names[0].Sheet,date:XLSX.SSF.format(date.z,date.v,{date1904:true})};
  });
  assert.deepEqual(result.names,['汇总表（本次）','差异（本次）','汇总表','差异']);

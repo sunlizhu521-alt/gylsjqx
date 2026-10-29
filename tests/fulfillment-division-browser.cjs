@@ -26,21 +26,21 @@ function fixture(departments){
    const w=X.read(await fs.readFile(await dl.path()),{type:'buffer',cellNF:true,cellStyles:true});
    assert.deepEqual(w.SheetNames,['汇总表']);
    const rows=X.utils.sheet_to_json(w.Sheets.汇总表,{header:1,defval:''});
-   assert.deepEqual(rows[0],C.SUMMARY_COLUMNS);assert.equal(rows[0][3],'下单月份');assert.equal(rows[0].length,21);
-   assert.deepEqual(rows.slice(1).map(r=>r[8]),departments.flatMap((name,i)=>name===d?['M'+i]:[]));
-   assert(rows.slice(1).every(r=>r[0]===d));assert.equal(w.Sheets.汇总表.D2.t,'n');assert.equal(w.Sheets.汇总表.D2.z,'yyyy"年"m"月"');assert.equal(w.Sheets.汇总表.D2.w,'2026年10月');
+   assert.deepEqual(rows[0],C.SUMMARY_COLUMNS);assert.equal(rows[0][4],'下单月份');assert.equal(rows[0].length,22);
+   assert.deepEqual(rows.slice(1).map(r=>r[9]),departments.flatMap((name,i)=>name===d?['M'+i]:[]));
+   assert(rows.slice(1).every(r=>r[1]===d && r[0]==='徐英'));assert.equal(w.Sheets.汇总表.E2.t,'n');assert.equal(w.Sheets.汇总表.E2.z,'yyyy"年"m"月"');assert.equal(w.Sheets.汇总表.E2.w,'2026年10月');
    for(let r=1;r<rows.length;r++)for(const [c,field]of C.SUMMARY_COLUMNS.entries()){
     const cell=w.Sheets.汇总表[X.utils.encode_cell({r,c})];
     if(field==='下单月份')continue;
     if(C.QUANTITY_FIELDS.includes(field)){if(cell?.v!==''){assert.equal(cell.t,'n');assert.equal(cell.z,'0');}}
     else{assert.equal(cell.t,'s');assert.equal(cell.z,'@');}
    }
-   const delivery=w.Sheets.汇总表.R2;assert.equal(delivery.v,'2026年10月31日');assert.equal(delivery.t,'s');assert.equal(delivery.z,'@');
+   const delivery=w.Sheets.汇总表.S2;assert.equal(delivery.v,'2026年10月31日');assert.equal(delivery.t,'s');assert.equal(delivery.z,'@');
    assert.equal(w.Sheets.汇总表.A1.s.fgColor.rgb,'315B9D');
-   if(d===divisions[0])assert.equal(rows[1][11],0);
+   if(d===divisions[0])assert.equal(rows[1][12],0);
   }
   const full=page.waitForEvent('download');await page.locator('#download').click();const w=X.read(await fs.readFile(await(await full).path()),{type:'buffer',cellNF:true});
-  assert.deepEqual(w.SheetNames,['汇总表','差异',...C.SHEETS,'孙立柱']);
+  assert.deepEqual(w.SheetNames,['汇总表','合并核对','差异',...C.SHEETS,'孙立柱']);
   assert.equal(X.utils.sheet_to_json(w.Sheets.汇总表).length,departments.length);
   for(let r=1;r<=departments.length;r++)for(const [c,field]of C.COLUMNS.entries()){
    const cell=w.Sheets.徐英[X.utils.encode_cell({r,c})];

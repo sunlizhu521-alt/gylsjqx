@@ -62,8 +62,8 @@ function fixture(delta = 0) {
 
 function checkSummary(sheet, expected) {
   assert.deepEqual(X.utils.sheet_to_json(sheet, { header: 1 })[0], C.SUMMARY_COLUMNS);
-  assert.equal(sheet.D1.v, '下单月份');
-  assert.equal(C.SUMMARY_COLUMNS.length, 21);
+  assert.equal(sheet.E1.v, '下单月份');
+  assert.equal(C.SUMMARY_COLUMNS.length, 22);
   assert.equal(X.utils.decode_range(sheet['!ref']).e.r, expected.length);
   for (const [index, row] of expected.entries()) {
     const cell = field => sheet[X.utils.encode_cell({ r: index + 1, c: C.SUMMARY_COLUMNS.indexOf(field) })];
@@ -98,8 +98,8 @@ function checkSummary(sheet, expected) {
       if (Number.isInteger(row[field])) assert.equal(actual.z, '0');
     }
   }
-  assert(sheet['!cols'][3].wch >= 12, '年月与表头完整显示');
-  assert.equal(sheet['!autofilter'].ref, `A1:U${expected.length + 1}`);
+  assert(sheet['!cols'][4].wch >= 12, '年月与表头完整显示');
+  assert.equal(sheet['!autofilter'].ref, `A1:V${expected.length + 1}`);
 }
 
 function checkSourceSheets(sourceBytes, exported, expected) {
@@ -157,15 +157,15 @@ function checkSourceSheets(sourceBytes, exported, expected) {
     const baseline = fixture(-1), current = fixture();
     await upload(baseline.bytes, '基准2026.10.16更新版.xlsx');
     await upload(current.bytes, '格式2026.10.23更新版.xlsx');
-    assert.equal(await page.locator('#preview thead th').nth(3).innerText(), '下单月份');
-    assert.deepEqual(await page.locator('#preview tbody tr td:nth-child(4)').allTextContents(), current.expected.map(r => r.month));
+    assert.equal(await page.locator('#preview thead th').nth(4).innerText(), '下单月份');
+    assert.deepEqual(await page.locator('#preview tbody tr td:nth-child(5)').allTextContents(), current.expected.map(r => r.month));
     for (const field of quantities) {
       const column = C.SUMMARY_COLUMNS.indexOf(field) + 1;
       assert.deepEqual(await page.locator('#preview tbody tr td:nth-child(' + column + ')').allTextContents(), current.expected.map(r => r[field] === '' ? '' : Number(r[field]).toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 12 })));
     }
     const full = await download('#download', '完整汇总.xlsx');
     checkSummary(full.book.Sheets.汇总表, current.expected);
-    assert.deepEqual(full.book.SheetNames, ['汇总表', '差异', '徐英', '操思敏', '邢芳芳1017', '李奇']);
+    assert.deepEqual(full.book.SheetNames, ['汇总表', '合并核对', '差异', '徐英', '操思敏', '邢芳芳1017', '李奇']);
     const diff = full.book.Sheets.差异;
     assert.deepEqual(X.utils.sheet_to_json(diff, { header: 1 })[0], C.DIFF_COLUMNS);
     assert.equal(diff.F2.v, 1);
@@ -173,7 +173,7 @@ function checkSourceSheets(sourceBytes, exported, expected) {
     assert.equal(diff.A1.s.fgColor.rgb, '315B9D');
     checkSourceSheets(current.bytes, full.book, current.expected);
     const outputZip = await Zip.loadAsync(full.bytes);
-    const diffXml = await outputZip.file('xl/worksheets/fulfillment2.xml').async('string');
+    const diffXml = await outputZip.file('xl/worksheets/fulfillment3.xml').async('string');
     assert.match(diffXml, /ht="22"/);
     assert.match(diffXml, /ht="18"/);
     for (const division of divisions) {
@@ -198,13 +198,13 @@ function checkSourceSheets(sourceBytes, exported, expected) {
     assert.equal(after.current.filename, before.current.filename);
     assert.deepEqual(after.previous, before.previous, '显示格式升级不推进历史基准');
     assert.deepEqual(after.current.result.rows.map(r => quantities.map(k => r[C.COLUMNS.indexOf(k)].v)), before.current.result.rows.map(r => quantities.map(k => r[C.COLUMNS.indexOf(k)].v)));
-    assert.deepEqual(await page.locator('#preview tbody tr td:nth-child(4)').allTextContents(), current.expected.map(r => r.month));
+    assert.deepEqual(await page.locator('#preview tbody tr td:nth-child(5)').allTextContents(), current.expected.map(r => r.month));
     const restored = await download('#download', '缓存恢复汇总.xlsx');
     checkSummary(restored.book.Sheets.汇总表, current.expected);
-    assert.equal(await (await Zip.loadAsync(restored.bytes)).file('xl/worksheets/fulfillment2.xml').async('string'), diffXml, '缓存格式升级不改变差异表内容和样式');
+    assert.equal(await (await Zip.loadAsync(restored.bytes)).file('xl/worksheets/fulfillment3.xml').async('string'), diffXml, '缓存格式升级不改变差异表内容和样式');
     await page.screenshot({ path: path.join(out, 'preview.png'), fullPage: true });
     assert.deepEqual(errors, []);
     checkSourceSheets(current.bytes, restored.book, current.expected);
-    console.log(JSON.stringify({ status: 'PASS', url, rows: current.expected.length, summaryColumns: 21, downloads: 4, monthDates: 'passed', quantityFormats: 'passed', sourceFormatting: 'passed', sourceLayout: 'unchanged', differences: 'unchanged', previousSnapshot: 'unchanged', output: out }));
+    console.log(JSON.stringify({ status: 'PASS', url, rows: current.expected.length, summaryColumns: 22, downloads: 4, monthDates: 'passed', quantityFormats: 'passed', sourceFormatting: 'passed', sourceLayout: 'unchanged', differences: 'unchanged', previousSnapshot: 'unchanged', output: out }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -3,7 +3,7 @@
 const SHEETS=['徐英','操思敏','邢芳芳','李奇'];
 const COLUMNS=['采购下单人','事业部','销售分渠道','运营','供应商简称','产品线','系列','物料编码','SKU','物料名称','未交付数量','已下单未备料未生产','已备料未生产','生产中产品','完工未发产品','已发货数量','合同约定交期','生产中交付时间','未生产预计交付时间','是否正常履约','下单月份','OA备货单号','采购订单号','下单日期'];
 const QUANTITY_FIELDS=COLUMNS.slice(10,16);
-const SUMMARY_COLUMNS=['事业部','销售分渠道','运营','下单月份','OA流程号','供应商简称','产品线','系列','物料编码','SKU','物料名称','未交付数量','已下单未备料未生产','已备料未生产','生产中产品','完工未发产品','已发货数量','合同约定交期','生产中交付时间','为生产预计交付时间','是否正常履约'];
+const SUMMARY_COLUMNS=['采购跟单员','事业部','销售分渠道','运营','下单月份','OA流程号','供应商简称','产品线','系列','物料编码','SKU','物料名称','未交付数量','已下单未备料未生产','已备料未生产','生产中产品','完工未发产品','已发货数量','合同约定交期','生产中交付时间','为生产预计交付时间','是否正常履约'];
 const DATE_FORMAT='yyyy"年"m"月"d"日"';
 const MONTH_FORMAT='yyyy"年"m"月"';
 const quantityText=value=>value.toLocaleString('en-US',{useGrouping:false,maximumSignificantDigits:21});
@@ -12,7 +12,8 @@ function formatCell(cell){
  if(cell?.t==='n'&&/^0(?:\.0+)?$/.test(cell.z||''))return quantityText(cell.v);
  return cell?.z?X.SSF.format(cell.z,cell.v):String(cell?.v??'');
 }
-function summaryRows(rows){return rows.map(row=>SUMMARY_COLUMNS.map(key=>{
+function summaryRows(rows,sources=[]){return rows.map((row,index)=>SUMMARY_COLUMNS.map(key=>{
+ if(key==='采购跟单员')return {t:'s',v:sources[index]?.sheet||'',z:'@'};
  const sourceKey=key==='OA流程号'?'OA备货单号':key==='为生产预计交付时间'?'未生产预计交付时间':key;
  const cell=defaultCell(sourceKey,row[COLUMNS.indexOf(sourceKey)]);
  if(sourceKey==='下单月份'){const date=dateCell(cell);return date.invalid?cell:date.t==='n'?{...date,z:MONTH_FORMAT}:date;}
@@ -72,7 +73,7 @@ function merge(book,filename=''){
  const selected=SHEETS.map(person=>{const matches=Object.keys(book.Sheets).filter(name=>new RegExp('^'+person+'(?:[0-9]{4}|[0-9]{8})?$').test(norm(name)));if(!matches.length)throw Error('缺少工作表：'+person);if(matches.length>1)throw Error(person+'：匹配到多个工作表（'+matches.join('、')+'），请仅保留本次需要合并的版本');return matches[0];});
  const rows=[],sources=[],counts=[],warnings=[];
  for(const name of selected){const sheet=book.Sheets[name],range=X.utils.decode_range(sheet['!ref']||'A1');let hr=-1,map;
- for(let r=range.s.r;r<=Math.min(range.e.r,range.s.r+29);r++){const h={};for(let c=range.s.c;c<=range.e.c;c++){let key=norm(sheet[X.utils.encode_cell({r,c})]?.v);if(['OA备货流程号','OA流程号'].includes(key))key='OA备货单号';if(key==='为生产预计交付时间')key='未生产预计交付时间';if(key)(h[key]??=[]).push(c);}if(h['物料编码']&&h['事业部']){hr=r;map=h;break;}}
+ for(let r=range.s.r;r<=Math.min(range.e.r,range.s.r+29);r++){const h={};for(let c=range.s.c;c<=range.e.c;c++){let key=norm(sheet[X.utils.encode_cell({r,c})]?.v);if(['OA备货流程号','OA流程号'].includes(key))key='OA备货单号';if(key==='为生产预计交付时间')key='未生产预计交付时间';if(key==='销售分渠道部')key='销售分渠道';if(key)(h[key]??=[]).push(c);}if(h['物料编码']&&h['事业部']){hr=r;map=h;break;}}
  if(hr<0)throw Error(name+'：找不到明细表头');
  for(const key of COLUMNS){if(!map[key]){if(COLUMNS.indexOf(key)>=20){if(key!=='下单日期')warnings.push(name+'：缺少列“'+key+'”，'+(key==='OA备货单号'?'已填“无”':'已留空'));continue;}throw Error(name+'：缺少列“'+key+'”');}if(map[key].length!==1)throw Error(name+'：重复列“'+key+'”');}
  let count=0;
@@ -140,8 +141,63 @@ function advance(history,current){
  return {version:1,previous,current};
 }
 
+const REVIEW_COLUMNS=['核对类型','来源工作表','来源位置','物料编码','运营','下单时间','核对字段','原值','建议值','原表合计','汇总合计','差额','结果','需要处理'];
+const OPERATOR_CHANNELS=Object.fromEntries([
+ ['倪芷涵 王程','海外事业一部*欧洲部*亚马逊英国组'],
+ ['雷维明 王青萍 胡鑫敏 富晓霞 范俊 赵雅杰 张梦露','海外事业一部*欧洲部*亚马逊欧盟组'],
+ ['金何强 王鑫','海外事业一部*多渠道部'],
+ ['薛文乐 赵恬幸','海外事业一部*美洲部'],
+ ['王志豪','国内事业部*TEMU业务部']
+].flatMap(([names,channel])=>names.split(' ').map(name=>[name,channel])));
+const OVERSEAS_CHANNELS=new Set(Object.values(OPERATOR_CHANNELS).filter(channel=>channel.startsWith('海外事业一部*')));
+function reviewRows(result,validation){
+ const records=[],contexts=new Map(),cutoff=dateCell({v:'2026-10-01'}).v;
+ const text=(row,key)=>formatCell(row[COLUMNS.indexOf(key)]);
+ for(const [index,row] of result.rows.entries()){
+  const source=result.sources?.[index]||{},date=row[COLUMNS.indexOf('下单日期')],month=defaultCell('下单月份',row[COLUMNS.indexOf('下单月份')]);
+  const hasDate=norm(date?.v)!=='',hasMonth=norm(month?.v)!=='',parsedDate=hasDate?dateCell(date):null,parsedMonth=hasMonth?dateCell(month):null;
+  const time=[hasDate?'下单日期：'+formatCell(date):'',hasMonth?'下单月份：'+formatCell(month):''].filter(Boolean).join('；');
+  const context={'来源工作表':source.sheet||'汇总表','来源位置':source.row?'第 '+source.row+' 行':'汇总第 '+(index+2)+' 行','物料编码':text(row,'物料编码'),'运营':text(row,'运营'),'下单时间':time};
+  contexts.set(source.sheet+'\0'+source.row,{context,row});
+  const dateProblems=[];
+  if(!hasDate&&!hasMonth)dateProblems.push('下单日期和下单月份均为空');
+  if(hasDate&&parsedDate?.t!=='n')dateProblems.push('下单日期无法识别');
+  if(hasMonth&&parsedMonth?.t!=='n')dateProblems.push('下单月份无法识别');
+  if(parsedDate?.t==='n'&&parsedMonth?.t==='n'&&(parsedDate.v>=cutoff)!==(parsedMonth.v>=cutoff))dateProblems.push('下单日期和下单月份对2026年10月起的范围判断不一致');
+  if(dateProblems.length)records.push({...context,'核对类型':'日期范围','核对字段':'下单日期／下单月份','原值':time,'结果':'需核对','需要处理':dateProblems.join('；')+'。请核实并填写正确的下单时间，再重新上传；本行暂不判断运营归属。'});
+  const eligible=!dateProblems.length&&(hasDate?parsedDate:parsedMonth)?.v>=cutoff;
+  const operator=norm(text(row,'运营')),channel=eligible&&Object.hasOwn(OPERATOR_CHANNELS,operator)?OPERATOR_CHANNELS[operator]:null;
+  for(const field of ['事业部','销售分渠道']){
+   const value=text(row,field),suggestion=channel?(field==='事业部'?channel.split('*')[0]:channel):'',problems=[];
+   if(!norm(value))problems.push(field+'为空');
+   if(suggestion&&norm(value)!==suggestion)problems.push('与运营对应关系不一致');
+   if(eligible&&field==='销售分渠道'&&norm(text(row,'事业部'))==='海外事业一部'&&!OVERSEAS_CHANNELS.has(norm(value)))problems.push('海外事业一部须填写四种指定渠道之一');
+   if(problems.length)records.push({...context,'核对类型':'事业部／渠道','核对字段':field,'原值':value,'建议值':suggestion,'结果':'需核对','需要处理':problems.join('；')+'。'+(suggestion?'请核实是否应改为“'+suggestion+'”，确认后修改源表并重新上传。':'请核实该行所属'+field+'并补正源表，再重新上传；未推断建议值。')});
+  }
+ }
+ for(const check of validation?.checks||[])records.push({'核对类型':'数量合计','来源工作表':check.sheet,'核对字段':check.field,'原表合计':check.sourceTotal,'汇总合计':check.summaryTotal,'差额':check.difference,'结果':check.status,'需要处理':check.status==='通过'?'无需处理':'请查看对应工作表、数量字段的异常位置，核实源值及公式后重新上传；通过前不能下载汇总。'});
+ const grouped=new Map();
+ for(const issue of validation?.issues||[]){
+  const key=[issue.sheet,issue.cell,issue.field].join('\0');if(!grouped.has(key))grouped.set(key,{...issue,messages:new Set()});grouped.get(key).messages.add(issue.message);
+ }
+ for(const issue of grouped.values()){
+  const rowNumber=String(issue.cell||'').match(/(?:^|[A-Z])([1-9]\d*)$/)?.[1],item=contexts.get(issue.sheet+'\0'+rowNumber);
+  records.push({...item?.context,'核对类型':'数量／转换异常','来源工作表':issue.sheet,'来源位置':issue.cell||'工作表','核对字段':issue.field||'公式／来源映射','原值':item&&COLUMNS.includes(issue.field)?text(item.row,issue.field):'','结果':'待核验','需要处理':[...issue.messages].join('；')+'。请核实此处源值、公式及引用，修正后重新上传；通过前不能下载汇总。'});
+ }
+ if(!validation)records.push({'核对类型':'数量／转换异常','来源工作表':'汇总表','核对字段':'来源文件','结果':'待核验','需要处理':'缺少原文件，无法核验数量；请重新上传原始履约文件。'});
+ return records.map(record=>REVIEW_COLUMNS.map(key=>{
+  const value=record[key]??'';if(typeof value==='number'&&Number.isFinite(value)){const precision=(quantityText(value).split('.')[1]||'').length;return {t:'n',v:value,z:precision>250?'0.0000000000000000E+00':precision?'0.'+'0'.repeat(precision):'0'};}
+  return {t:'s',v:String(value),z:'@'};
+ }));
+}
+function reviewSheet(rows){
+ const sheet=X.utils.aoa_to_sheet([REVIEW_COLUMNS]);rows.forEach((row,r)=>row.forEach((cell,c)=>sheet[X.utils.encode_cell({r:r+1,c})]={...cell}));
+ sheet['!ref']=`A1:N${rows.length+1}`;sheet['!autofilter']={ref:sheet['!ref']};
+ sheet['!cols']=REVIEW_COLUMNS.map((key,col)=>({wch:[key,...rows.map(row=>formatCell(row[col]))].reduce((max,text)=>Math.max(max,[...text].reduce((width,ch)=>width+(ch.charCodeAt(0)>255?2:1),0)+4),20)}));
+ return sheet;
+}
 function columnWidth(key){return key==='物料名称'?42:['下单日期','合同约定交期','生产中交付时间','未生产预计交付时间'].includes(key)?23:key==='SKU'?26:20;}
 function exportFilename(input){const base=String(input??'').trim().replace(/\.xlsx?$/i,'').trim()||'订单履约表';return (/更新版$/.test(base)?base.replace(/更新版$/,'汇总版'):/汇总版$/.test(base)?base:base+'汇总版')+'.xlsx';}
-function workbook(result){const rows=summaryRows(result.rows);const s=X.utils.aoa_to_sheet([SUMMARY_COLUMNS]);rows.forEach((row,r)=>row.forEach((cell,c)=>s[X.utils.encode_cell({r:r+1,c})]={...cell}));s['!ref']=`A1:${X.utils.encode_col(SUMMARY_COLUMNS.length-1)}${rows.length+1}`;s['!autofilter']={ref:s['!ref']};s['!cols']=SUMMARY_COLUMNS.map((key,col)=>({wch:[key,...rows.map(row=>formatCell(row[col]))].reduce((max,text)=>Math.max(max,[...text].reduce((width,ch)=>width+(ch.charCodeAt(0)>255?2:1),0)+4),columnWidth(key))}));const w=X.utils.book_new();X.utils.book_append_sheet(w,s,'汇总表');if(result.differences){const d=X.utils.aoa_to_sheet([DIFF_COLUMNS]);result.differences.forEach((row,r)=>row.forEach((cell,c)=>d[X.utils.encode_cell({r:r+1,c})]={...cell}));d['!ref']=`A1:F${result.differences.length+1}`;d['!autofilter']={ref:d['!ref']};d['!cols']=DIFF_COLUMNS.map((key,col)=>({wch:Math.max(20,...[key,...result.differences.map(r=>String(r[col].v))].map(v=>[...v].reduce((n,c)=>n+(c.charCodeAt(0)>255?2:1),4)))}));X.utils.book_append_sheet(w,d,'差异');}return w;}
-return {SUMMARY_COLUMNS,summaryRows,formatCell,currentScope,DIFF_COLUMNS,aggregate,difference,advance,SHEETS,COLUMNS,QUANTITY_FIELDS,quantityCell,refreshQuantities,DATE_FORMAT,columnWidth,dateCell,merge,workbook,exportFilename};
+function workbook(result){const rows=summaryRows(result.rows,result.sources);const s=X.utils.aoa_to_sheet([SUMMARY_COLUMNS]);rows.forEach((row,r)=>row.forEach((cell,c)=>s[X.utils.encode_cell({r:r+1,c})]={...cell}));s['!ref']=`A1:${X.utils.encode_col(SUMMARY_COLUMNS.length-1)}${rows.length+1}`;s['!autofilter']={ref:s['!ref']};s['!cols']=SUMMARY_COLUMNS.map((key,col)=>({wch:[key,...rows.map(row=>formatCell(row[col]))].reduce((max,text)=>Math.max(max,[...text].reduce((width,ch)=>width+(ch.charCodeAt(0)>255?2:1),0)+4),columnWidth(key))}));const w=X.utils.book_new();X.utils.book_append_sheet(w,s,'汇总表');if(result.review)X.utils.book_append_sheet(w,reviewSheet(result.review),'合并核对');if(result.differences){const d=X.utils.aoa_to_sheet([DIFF_COLUMNS]);result.differences.forEach((row,r)=>row.forEach((cell,c)=>d[X.utils.encode_cell({r:r+1,c})]={...cell}));d['!ref']=`A1:F${result.differences.length+1}`;d['!autofilter']={ref:d['!ref']};d['!cols']=DIFF_COLUMNS.map((key,col)=>({wch:Math.max(20,...[key,...result.differences.map(r=>String(r[col].v))].map(v=>[...v].reduce((n,c)=>n+(c.charCodeAt(0)>255?2:1),4)))}));X.utils.book_append_sheet(w,d,'差异');}return w;}
+return {REVIEW_COLUMNS,reviewRows,reviewSheet,SUMMARY_COLUMNS,summaryRows,formatCell,currentScope,DIFF_COLUMNS,aggregate,difference,advance,SHEETS,COLUMNS,QUANTITY_FIELDS,quantityCell,refreshQuantities,DATE_FORMAT,columnWidth,dateCell,merge,workbook,exportFilename};
 });

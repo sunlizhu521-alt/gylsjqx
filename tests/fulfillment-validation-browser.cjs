@@ -128,21 +128,22 @@ function staleFormula(field, formula = 'SUM(AA2:AA3)') {
     assert.equal(download.suggestedFilename(), '合成订单2026.10.23汇总版.xlsx');
     const output = await fs.readFile(await download.path());
     const exported = X.read(output, { type: 'buffer', cellNF: true });
-    assert.deepEqual(exported.SheetNames, ['汇总表', '差异', ...sheetNames, '孙立柱', '说明']);
+    assert.deepEqual(exported.SheetNames, ['汇总表', '合并核对', '差异', ...sheetNames, '孙立柱', '说明']);
     const summary = X.utils.sheet_to_json(exported.Sheets.汇总表, { header: 1, defval: '' });
     assert.deepEqual(summary[0], C.SUMMARY_COLUMNS);
-    assert.equal(summary[0].length, 21);
+    assert.equal(summary[0].length, 22);
     assert.equal(summary.length - 1, 8);
-    assert.deepEqual(summary.slice(1).map(row => row[8]), people.flatMap((_, person) => [0, 1].map(row => 'SYN-' + person + '-' + row)));
+    assert.deepEqual(summary.slice(1).map(row => row[9]), people.flatMap((_, person) => [0, 1].map(row => 'SYN-' + person + '-' + row)));
     for (const [q, field] of quantities.entries()) {
       const col = summary[0].indexOf(field);
       assert(summary.slice(1).every(row => typeof row[col] === 'number'), field + '必须导出数字');
       assert.equal(summary.slice(1).reduce((sum, row) => sum + row[col], 0), 224 + q * 8);
     }
-    const [originalZip, outputZip] = await Promise.all([Zip.loadAsync(valid), Zip.loadAsync(output)]);
+    const preparedBytes = Buffer.from((await history()).current.sourceBytes);
+    const [originalZip, outputZip] = await Promise.all([Zip.loadAsync(preparedBytes), Zip.loadAsync(output)]);
     for (let n = 1; n <= sheetNames.length + 1; n++) {
       const name = 'xl/worksheets/sheet' + n + '.xml';
-      assert.equal(await outputZip.file(name).async('string'), await originalZip.file(name).async('string'), '保留原表 XML：' + name);
+      assert.equal(await outputZip.file(name).async('string'), await originalZip.file(name).async('string'), '保留转值并规范格式后的原表 XML：' + name);
     }
     assert.equal(exported.Sheets.说明.A3.v, 5);
     assert.equal(exported.Sheets.说明.A3.f, undefined, '辅助工作表也必须转为数值');
@@ -174,7 +175,8 @@ function staleFormula(field, formula = 'SUM(AA2:AA3)') {
     assert.equal(await page.locator('#download').isDisabled(), false, '旧缓存须从原文件重新核验');
     assert.match(await page.locator('#quantityStatus').innerText(), /通过/);
 
-    await putLegacyCache(fixture(null, false), true);
+    const normalized = Buffer.from(await page.evaluate(async bytes => Array.from(new Uint8Array((await FulfillmentValues.prepare(Uint8Array.from(bytes).buffer)).bytes)), [...fixture(null, false)]));
+    await putLegacyCache(normalized, true);
     await assertBlocked(quantities[0], X.utils.encode_cell({ r: 1, c: C.COLUMNS.indexOf(quantities[0]) }), '徐英');
 
     const cachedStale = staleFormula(quantities[0], 'SUBTOTAL(9,AA2:AA3)');

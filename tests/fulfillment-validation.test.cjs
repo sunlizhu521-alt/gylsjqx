@@ -39,7 +39,7 @@ test('六字段任一字段被改写都会发现',()=>{
 test('源字段缺失重复或汇总列缺失会阻止',()=>{
  const book=fixture(),result=C.merge(book);delete book.Sheets.徐英.K1;assert.equal(V.validate(book,result,C).passed,false);
  book.Sheets.徐英.K1={t:'s',v:'已发货数量'};assert.equal(V.validate(book,result,C).passed,false);
- const clean=fixture();const badCore={...C,summaryRows:rows=>C.summaryRows(rows).map(row=>{delete row[11];return row;})};assert.equal(V.validate(clean,C.merge(clean),badCore).passed,false);
+ const clean=fixture();const badCore={...C,summaryRows:rows=>C.summaryRows(rows).map(row=>{delete row[C.SUMMARY_COLUMNS.indexOf('未交付数量')];return row;})};assert.equal(V.validate(clean,C.merge(clean),badCore).passed,false);
 });
 test('空白与数值零均可校验，唯一文本数量提取数字，其余异常仍阻止',()=>{
  for(const cell of [undefined,{t:'s',v:''},{t:'n',v:0}]){const book=fixture();book.Sheets.李奇.K2=cell;assert.equal(validate(book).passed,true);}

@@ -146,7 +146,7 @@ function materialize(book){
    for(let r=range.s.r;r<=Math.min(range.e.r,range.s.r+29);r++){
     const fields=new Map();for(let c=range.s.c;c<=range.e.c;c++)fields.set(c,norm(sheet[X.utils.encode_cell({r,c})]?.v));
     if([...fields.values()].includes('事业部')&&[...fields.values()].includes('物料编码')){
-     header=r;requiredColumns=new Set([...fields].filter(([,field])=>core.COLUMNS.includes(field)||['OA备货流程号','OA流程号','为生产预计交付时间'].includes(field)).map(([c])=>c));break;
+     header=r;requiredColumns=new Set([...fields].filter(([,field])=>core.COLUMNS.includes(field)||['OA备货流程号','OA流程号','为生产预计交付时间','销售分渠道部'].includes(field)).map(([c])=>c));break;
     }
    }
   }
@@ -184,7 +184,7 @@ function validate(book,result,core){
   if(matches.length!==1){issue(person,'','',matches.length?'匹配到多张来源工作表，无法核验':'缺少来源工作表','sheet');selected.push({name:person,invalid:true});}
   else selected.push({name:matches[0],sheet:book.Sheets[matches[0]]});
  }
- let summaries=[];try{summaries=core.summaryRows(result.rows||[]);}catch(error){issue('汇总表','','','汇总列生成失败：'+error.message,'summary');}
+ let summaries=[];try{summaries=core.summaryRows(result.rows||[],result.sources);}catch(error){issue('汇总表','','','汇总列生成失败：'+error.message,'summary');}
  const output=new Map(),rowCount=(result.rows||[]).length;
  if((result.sources||[]).length!==rowCount||summaries.length!==rowCount)issue('汇总表','','','汇总记录与来源映射的数量不一致','mapping');
  for(let i=0;i<rowCount;i++){

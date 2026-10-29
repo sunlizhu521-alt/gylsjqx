@@ -245,13 +245,13 @@ function mergedTextFixture() {
     const exported = X.read(download.bytes, { type: 'buffer', cellNF: true });
     assertNoFormulas(exported);
     assert.deepEqual([exported.Sheets.辅助.E2.v, exported.Sheets.辅助.F2.v, exported.Sheets.辅助.G2.v], ['一致', '', 11]);
-    assert.deepEqual(exported.SheetNames, ['汇总表', '差异', '徐英', '操思敏', '邢芳芳1017', '李奇', '孙立柱', '辅助']);
+    assert.deepEqual(exported.SheetNames, ['汇总表', '合并核对', '差异', '徐英', '操思敏', '邢芳芳1017', '李奇', '孙立柱', '辅助']);
     const rows = X.utils.sheet_to_json(exported.Sheets.汇总表, { header: 1, defval: '' });
     assert.deepEqual(rows[0], C.SUMMARY_COLUMNS);
     assert.equal(rows.length - 1, 8, '保留全部明细，不因公式删行或合并物料');
-    assert.deepEqual(rows.slice(-5).map(row => [row[8], row[11]]), materialCodes.map((code, index) => [code, detailValues[index]]));
-    assert.equal(rows.filter(row => row[8] === materialCodes[0]).reduce((sum, row) => sum + row[11], 0), 1295);
-    assert.equal(rows.filter(row => row[8] === materialCodes[2]).reduce((sum, row) => sum + row[11], 0), 1240);
+    assert.deepEqual(rows.slice(-5).map(row => [row[C.SUMMARY_COLUMNS.indexOf('物料编码')], row[C.SUMMARY_COLUMNS.indexOf('未交付数量')]]), materialCodes.map((code, index) => [code, detailValues[index]]));
+    assert.equal(rows.filter(row => row[C.SUMMARY_COLUMNS.indexOf('物料编码')] === materialCodes[0]).reduce((sum, row) => sum + row[C.SUMMARY_COLUMNS.indexOf('未交付数量')], 0), 1295);
+    assert.equal(rows.filter(row => row[C.SUMMARY_COLUMNS.indexOf('物料编码')] === materialCodes[2]).reduce((sum, row) => sum + row[C.SUMMARY_COLUMNS.indexOf('未交付数量')], 0), 1240);
     const outputZip = await Zip.loadAsync(download.bytes);
     for (const name of Object.keys(preparedZip.files).filter(name => /^xl\/worksheets\/sheet\d+\.xml$/.test(name))) {
       assert.equal(await outputZip.file(name).async('string'), await preparedZip.file(name).async('string'), '值版原表导出时完整保留：' + name);
