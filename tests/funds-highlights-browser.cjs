@@ -67,7 +67,7 @@ function fixture({ removeFirstApplication = false } = {}) {
     async function snapshot() {
       return frame.locator('body').evaluate(() => Object.fromEntries(['negotiatedPreview', 'normalPreview', 'reviewPreview'].map(id => [id, {
         headers: [...document.querySelectorAll('#' + id + ' th')].map(cell => ({ text: cell.textContent, applied: !!cell.closest('.funds-applied') })),
-        rows: [...document.querySelectorAll('#' + id + ' tbody tr')].map(row => [...row.cells].map(cell => ({ text: cell.textContent, applied: !!cell.closest('.funds-applied'), hidden: cell.hidden, color: getComputedStyle(cell.closest('.funds-applied') || cell).backgroundColor })))
+        rows: [...document.querySelectorAll('#' + id + ' tbody tr')].map(row => [...row.cells].map(cell => ({ text: cell.textContent, title:cell.title, applied: !!cell.closest('.funds-applied'), hidden: cell.hidden, color: getComputedStyle(cell.closest('.funds-applied') || cell).backgroundColor })))
       }])));
     }
     function checkPreview(actual, highlighted) {
@@ -77,6 +77,8 @@ function fixture({ removeFirstApplication = false } = {}) {
       assert(firstDate >= 0 && secondDate >= 0, '批次日期表头完整');
       assert.equal(n.rows.length, 2); assert.equal(normal.rows.length, 2);
       assert.equal(n.rows[0][firstDate].applied, highlighted);
+      assert.equal(n.rows[0][firstDate].title,highlighted?'申请日期（资金整理）：2026年10月27日':'');
+      const applicationDate=normal.headers.findIndex(h=>h.text==='申请日期');assert.equal(applicationDate,normal.headers.findIndex(h=>h.text==='是否提交付款申请单')+1);assert.equal(normal.rows[0][applicationDate].text,'2026年10月27日');assert.equal(normal.rows[1][applicationDate].text,'');
       if (highlighted) assert.equal(n.rows[0][firstDate].color, 'rgb(255, 0, 0)');
       assert.equal(n.rows[0][secondDate].applied, false, '未申请60不标红');
       assert.equal(n.rows[1][firstDate].applied, true, '两批相同40按日期先后标记最早批次');
@@ -125,6 +127,8 @@ function fixture({ removeFirstApplication = false } = {}) {
       const book = X.read(bytes, { type: 'buffer', cellNF: true, cellStyles: true });
       assert.deepEqual(book.SheetNames, ['谈判付款', '正常付款', '付款申请核对']);
       const n = book.Sheets.谈判付款, normal = book.Sheets.正常付款;
+      assert.equal(n.U2.c?.[0]?.t,highlighted?'申请日期（资金整理）：2026年10月27日':undefined);assert.equal(n.U3.c[0].t,'申请日期（资金整理）：2026年10月27日');assert.equal(n.V2.c,undefined);
+      const actualDate=normal[X.utils.encode_cell({r:1,c:C.NORMAL_HEADERS.indexOf('申请日期')})];assert.equal(actualDate.t,'n');assert.equal(X.SSF.format(actualDate.z,actualDate.v),'2026年10月27日');
       for (const row of [2, 3]) {
         const r = records[row - 2];
         assert.deepEqual([n['U' + row].v, n['V' + row].v], r.plan, '原分批金额不变');
@@ -174,7 +178,7 @@ function fixture({ removeFirstApplication = false } = {}) {
       await fs.mkdir(process.env.QA_OUT, { recursive: true });
       await frame.locator('#negotiatedPreview td.funds-applied').first().scrollIntoViewIfNeeded();
       await frame.locator('#negotiatedPreview').screenshot({ path: process.env.QA_OUT + '/negotiated.png' });
-      await frame.locator('#normalPreview td.funds-applied').first().scrollIntoViewIfNeeded();
+      await frame.locator('#normalPreview tbody tr').first().locator('td').nth(C.NORMAL_HEADERS.indexOf('申请日期')).scrollIntoViewIfNeeded();
       await frame.locator('#normalPreview').screenshot({ path: process.env.QA_OUT + '/normal.png' });
       await fs.writeFile(process.env.QA_OUT + '/synthetic-highlight.xlsx', first);
     }
@@ -186,6 +190,6 @@ function fixture({ removeFirstApplication = false } = {}) {
     await analyze(false);
     const second = await download(2); await checkExport(second, false);
     assert.deepEqual(errors, []);
-    console.log('PASS: homepage upload, first/re-read preview, earliest equal-amount installment and full normal-row red fill, no unnecessary review, original formulas, hidden columns, fresh-input CF replacement');
+    console.log('PASS: native application-date notes and normal date column; homepage upload, first/re-read preview, earliest equal-amount installment and full normal-row red fill, no unnecessary review, original formulas, hidden columns, fresh-input CF replacement');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

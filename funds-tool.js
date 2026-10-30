@@ -57,7 +57,7 @@
       for (let i=0;i<headers.length;i++){
         const td=tr.insertCell(),text=valueText(row[i],date1904);td.hidden=hiddenColumns[i];td.textContent=flowColumn[i]?text.replace(/\r\n|[\r\n]/g,'；'):text;if(flowColumn[i])td.className='flow-code';if(headers[i]==='谈判明细')td.className='batch-detail';if(id==='reviewPreview'&&headers[i]==='核对说明')td.className='review-detail';
         const applied=id==='normalPreview'?appliedRows.has(r+2):id==='negotiatedPreview'&&appliedCells.has(XLSX.utils.encode_cell({r:r+result.negotiated.headerRow+1,c:result.negotiated.columnOrder[i]}));
-        if(applied){td.classList.add('funds-applied');td.title='已匹配本次付款申请';}
+        if(applied){td.classList.add('funds-applied');td.title=id==='negotiatedPreview'?(result.applicationComments?.[XLSX.utils.encode_cell({r:r+result.negotiated.headerRow+1,c:result.negotiated.columnOrder[i]})]||'已匹配本次付款申请'):'已匹配本次付款申请';}
       }
     }
     $(id).replaceChildren(table);

@@ -100,3 +100,21 @@ test('付款归属不明的100个同额日期候选分条完整列出，不产�
  }
  assert.deepEqual(found,expected,'所有日期与地址按原顺序保留，不丢失、不重复');
 });
+test('申请日期只随本次匹配输出，重复申请日期去重排序并附于同一批次',()=>{
+ const i=fixture([100,100],[100,100,100]),apps=sheet(i,'applications');apps.A2.v='2026-10-23';apps.A3.v='2026-10-20';apps.A4.v='2026-10-23';
+ const before=JSON.stringify(i),r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,['L2']);assert.deepEqual(r.applicationComments,{L2:'申请日期（资金整理）：2026年10月20日；2026年10月23日'});
+ const c=r.normalRows[0][r.normalHeaders.indexOf('申请日期')];assert.equal(c.t,'n');assert.equal(c.z,C.DATE_FORMAT);assert.equal(X.SSF.format(c.z,c.v),'2026年10月27日');assert.equal(JSON.stringify(i),before);
+ apps.E5.v=79;sheet(i,'ledger')[X.utils.encode_cell({r:2,c:C.NORMAL_HEADERS.indexOf('申请日期')})]={t:'s',v:'历史日期不沿用'};const next=C.build(i);assert.equal(next.normalRows[0][next.normalHeaders.indexOf('申请日期')].v,'');
+});
+test('多次正常申请日期合并，异常和空日期明确显示，日期采用申请文件纪元',()=>{
+ const i=fixture(),apps=sheet(i,'applications'),normalRow=X.utils.sheet_to_json(apps,{header:1})[2];
+ X.utils.sheet_add_aoa(apps,[[...normalRow],[...normalRow]],{origin:-1});apps.A3={t:'n',v:44860};apps.A4={t:'s',v:'2026-10-26'};apps.A5={t:'s',v:'2026-10-27'};
+ i.applications.book.Workbook={WBProps:{date1904:true}};let r=C.build(i);assert.equal(r.normalRows[0][r.normalHeaders.indexOf('申请日期')].v,'2026年10月26日；2026年10月27日');
+ apps.A2.v='';apps.A3={t:'e',v:23,w:'#REF!'};apps.A4.v='';apps.A5.v='日期待确认';r=C.build(i);
+ assert.equal(r.applicationComments.L2,'申请日期（资金整理）：日期未填写');assert.equal(r.normalRows[0][r.normalHeaders.indexOf('申请日期')].v,'日期待核对：#REF!；日期未填写；日期待核对：日期待确认');
+});
+test('独立同额申请依次分配的批注只包含各自日期，未标红批次无批注',()=>{
+ const i=fixture([100,100,100],[100,100]),apps=sheet(i,'applications');apps.D2.v=apps.D3.v='';const r=C.build(i);
+ assert.deepEqual(r.applicationComments,{L2:'申请日期（资金整理）：2026年10月20日',M2:'申请日期（资金整理）：2026年10月21日'});
+ apps.F2.v=apps.F3.v='正常付款';const next=C.build(i);assert.deepEqual(next.applicationComments,{});
+});

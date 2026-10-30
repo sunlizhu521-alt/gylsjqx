@@ -1,7 +1,7 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FundsCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
+const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','申请日期','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
 const ADDED_HEADERS=['提交付款申请单日期','提交时间汇总','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号','付款自然周'];
 const SUPPLEMENT_HEADERS=['对公付款0A流程号','付款主体','单据号【财务应付单】'];
 const NORMAL_HIDDEN_HEADERS=['单据号【财务应付单】','OA合同编号','合同总金额','是否对账'];
@@ -81,6 +81,18 @@ function submissionDates(c,date1904){
  for(const part of parts){const d=date({v:part},date1904);if(d.invalid||d.v==='')return null;values.push(X.SSF.format('yyyy-mm-dd',d.v));}
  return values;
 }
+// Dates come only from this upload's matched applications, never retained submission state.
+function applicationDateCell(matched){
+ const valid=new Map(),other=new Set();
+ for(const r of matched){
+  const source=r.values['申请日期'],d=date(source,r.date1904);
+  if(!d.invalid&&d.v!=='')valid.set(d.v,d);
+  else other.add(source?.v==null||source.v===''?'日期未填写':'日期待核对：'+str(source.w??source.v).replace(/[\r\n]+/g,' '));
+ }
+ const dates=[...valid].sort((a,b)=>a[0]-b[0]);
+ if(dates.length===1&&!other.size)return dates[0][1];
+ return cell([...dates.map(([,d])=>X.SSF.format(DATE_FORMAT,d.v)),...other].join('；'));
+}
 function submissionSummary(matched){
  return cell(matched.map((r,i)=>{
   const d=date(r.values['申请日期'],r.date1904),valid=!d.invalid&&d.v!=='';
@@ -134,7 +146,7 @@ function build(inputs,decisions={}){
   if(names.length!==1)throw Error('资金台账中'+person+'的对账明细'+(names.length?'存在多个版本':'缺失'));
   const parsed=table(inputs.ledger,names[0],['供应商名称','申请付款金额']);for(const record of parsed.records)record.owner=person;return parsed;
  });
- const ledger=ledgerTables.flatMap(t=>t.records),issues=[],updateMap=new Map(),reviewRows=[],highlightReviews=[],highlightedNegotiated=new Set(),highlightedNormal=new Set();
+ const ledger=ledgerTables.flatMap(t=>t.records),issues=[],updateMap=new Map(),reviewRows=[],highlightReviews=[],highlightedNegotiated=new Set(),highlightedNormal=new Set(),applicationComments={};
  function issue(id,kind,message,rec,choices=[{value:'keep',label:'保留原值'}],multiple=false){
   const requested=Array.isArray(decisions[id])?decisions[id]:[],allowed=new Set(choices.map(c=>c.value));
   const valid=requested.length>0&&requested.every(v=>allowed.has(v))&&new Set(requested).size===requested.length&&(multiple||requested.length===1)&&(!(requested.includes('keep')||requested.includes('not-submitted'))||requested.length===1);
@@ -205,7 +217,7 @@ function build(inputs,decisions={}){
   const owners=[...new Set(matches.map(r=>r.owner))];return owners.length===1?owners[0]:'';
  }
  function reviewOwner(target){return target.normal?target.record.owner:usable(target.values['跟单员'])?str(target.values['跟单员'].v):ledgerOwner(target.record);}
- const normalObjects=normal.map((r,i)=>({record:r,normal:true,index:i,sourceOA:clone(r.values['对公付款0A流程号']),values:{...r.values}}));
+ const normalObjects=normal.map((r,i)=>({record:r,normal:true,index:i,sourceOA:clone(r.values['对公付款0A流程号']),values:{...r.values,'申请日期':empty()}}));
  const negotiatedObjects=negotiated.records.map(r=>{
   const target={record:r,normal:false,sourceOA:clone(r.values['对公付款0A流程号']),values:{...r.values}},key=classification(r).key;
   const candidates=key?ledger.filter(l=>classification(l).key===key&&[...SUPPLEMENT_HEADERS,'OA合同编号'].every(h=>compatible(r,l,h))):[];
@@ -254,6 +266,7 @@ function build(inputs,decisions={}){
   if(matched.length)highlightedNormal.add(target.index+2);
   set(target,'是否提交付款申请单',cell(matched.length?'已提交':'未申请'));
   set(target,'提交时间汇总',submissionSummary(matched));
+  set(target,'申请日期',applicationDateCell(matched));
  }
  function applySubmissionDetails(target,matched){
   const dates=[];let invalid=false;
@@ -262,11 +275,11 @@ function build(inputs,decisions={}){
   if(invalid||historical===null){reviewApplication(target,'申请或提交日期为空/异常，请核对。');return;}
   set(target,'提交付款申请单日期',cell([...new Set([...dates,...historical])].sort().join('\n')));
  }
+ function submissionKey(r){
+  const ids=applicationIds(r),info=classification(r);return ids.length&&info.key?JSON.stringify([[...new Set(ids)].sort(),info.key]):null;
+ }
  function uniqueSubmissions(matched){
-  const seen=new Set();return matched.filter(r=>{
-   const ids=applicationIds(r),info=classification(r);if(!ids.length||!info.key)return true;
-   const key=JSON.stringify([[...new Set(ids)].sort(),info.key]);if(seen.has(key))return false;seen.add(key);return true;
-  });
+  const seen=new Set();return matched.filter(r=>{const key=submissionKey(r);if(!key)return true;if(seen.has(key))return false;seen.add(key);return true;});
  }
  function highlightBatches(target,matched,ambiguous=[]){
   if(!matched.length&&!ambiguous.length)return;
@@ -298,10 +311,15 @@ function build(inputs,decisions={}){
     reviewApplication(target,'申请标红核对：申请金额 '+amountText(application.values['申请付款金额'])+'；'+reason+'，本笔未标红。'+label+'：'+candidates+'。申请来源：'+sourceLabel(application)+'。'+location+'需要处理：'+actions[reason]+'。',true);
    }
   }
-  for(const application of matched){
+  for(const application of uniqueSubmissions(matched)){
    const amount=money(application.values['申请付款金额']).cents,exact=amount!==undefined&&amount>0n?batches.filter(b=>b.amount===amount):[];
    const remaining=exact.filter(b=>!highlightedNegotiated.has(b.address)).sort((a,b)=>a.date-b.date),first=remaining[0];
-   if(first&&remaining.every(b=>b.valid)&&!first.merged&&(remaining.length===1||first.date<remaining[1].date)){highlightedNegotiated.add(first.address);continue;}
+   if(first&&remaining.every(b=>b.valid)&&!first.merged&&(remaining.length===1||first.date<remaining[1].date)){
+    highlightedNegotiated.add(first.address);
+    const key=submissionKey(application),dates=applicationDateCell(key?matched.filter(r=>submissionKey(r)===key):[application]);
+    applicationComments[first.address]='申请日期（资金整理）：'+(dates.t==='n'?X.SSF.format(DATE_FORMAT,dates.v):dates.v);
+    continue;
+   }
    const reason=amount===undefined||amount<=0n?'申请金额为空、异常或非正数':!exact.length?'未找到金额相等的分批':!remaining.length?'同额分批已全部对应其他申请':remaining.some(b=>!b.valid)?'分批日期无法识别，不能按日期排序':first.merged?'分批金额或日期表头位于合并单元格，归属不清':'最早日期存在多个同额批次，归属不清';
    reviewCandidates(application,reason,exact);
   }
@@ -529,7 +547,7 @@ function build(inputs,decisions={}){
   if(supplierConflicts.has(target))continue;
   if(group.ambiguous.length){
    confirmSubmissionStatus(target,[...new Set(group.reasons)].join(' '));
-   reviewApplication(target,[...new Set(group.reasons)].join('\n'));highlightBatches(target,uniqueSubmissions(matched),group.ambiguous);continue;
+   reviewApplication(target,[...new Set(group.reasons)].join('\n'));highlightBatches(target,matched,group.ambiguous);continue;
   }
   set(target,'提交时间汇总',submissionSummary(matched));
   if(!matched.length){
@@ -548,7 +566,7 @@ function build(inputs,decisions={}){
    if(total>info.cents)reviewApplication(target,'申请超额：累计 '+centsText(total)+'，应申请 '+amountText(target.values['申请付款金额'])+'。');
   }
   applySubmissionDetails(target,matched);
-  highlightBatches(target,uniqueMatched);
+  highlightBatches(target,matched);
  }
  // Scan the full application source once, independently of payment targets and their review exclusions.
  const duplicateApplications=new Map();
@@ -594,7 +612,7 @@ function build(inputs,decisions={}){
  const columnOrder=negHeaders.map((_,i)=>i),dateColumn=targetCols['提交付款申请单日期'],summaryColumn=targetCols['提交时间汇总'];
  if(dateColumn!==undefined&&summaryColumn!==undefined&&Math.abs(dateColumn-summaryColumn)!==1){columnOrder.splice(summaryColumn,1);columnOrder.splice(columnOrder.indexOf(dateColumn)+1,0,summaryColumn);}
  reviewRows.push(...highlightReviews);
- return {normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,highlights:{negotiatedCells:[...highlightedNegotiated],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
+ return {normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,highlights:{negotiatedCells:[...highlightedNegotiated],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
 }
 return {PEOPLE,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText};
 });

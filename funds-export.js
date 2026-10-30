@@ -302,6 +302,69 @@ window.FundsExport = async function(sourceBytes, result) {
     try{const value=evaluateCell(address);c.removeAttribute('t');const v=create(sheet,'v');v.textContent=String(Math.round((value+Number.EPSILON)*1e8)/1e8);c.append(v);}catch(_){window.FundsExport.lastWarnings.push('谈判付款!'+address+' 保留公式，需在 Excel/WPS 打开时重新计算。');}
   }
   // Move the existing column XML, including styles and references, instead of rebuilding the source sheet.
+  // Patch native notes before column relocation so notes and their VML anchors move together.
+  const commentPrefix='申请日期（资金整理）：',commentAuthor='资金整理';
+  const commentEntries=Object.entries(result.applicationComments||{}).filter(([address])=>highlightedCells.includes(address));
+  const sheetRelationsPath=relPath(sheetPath),sheetRelations=zip.file(sheetRelationsPath)?await parse(zip,sheetRelationsPath):parseText(`<Relationships xmlns="${P}"/>`);
+  const findRelation=type=>elements(sheetRelations,'Relationship').find(r=>r.getAttribute('Type')===R+'/'+type);
+  const oldCommentRelation=findRelation('comments');
+  if(oldCommentRelation||commentEntries.length){
+    const comments=oldCommentRelation?await parse(zip,resolve(sheetPath,oldCommentRelation.getAttribute('Target'))):parseText(`<comments xmlns="${S}"><authors/><commentList/></comments>`);
+    const authors=first(comments,'authors'),list=first(comments,'commentList');
+    if(!authors||!list)throw Error('谈判付款原批注结构无法识别，未覆盖原批注');
+    const textOf=node=>elements(node,'t').map(t=>t.textContent).join('');
+    // A dedicated line identifies only our generated annotation; retain manual notes and rich text.
+    for(const comment of elements(list,'comment')){
+      const text=first(comment,'text');if(!text||!textOf(text).split(/\r?\n/).some(line=>line.startsWith(commentPrefix)))continue;
+      for(const part of [...text.children]){
+        const original=part.localName==='t'?part.textContent:textOf(part),clean=original.split(/\r?\n/).filter(line=>!line.startsWith(commentPrefix)).join('\n');
+        if(clean===original)continue;
+        if(!clean.trim()){part.remove();continue;}
+        const t=create(comments,'t');t.setAttribute('xml:space','preserve');t.textContent=clean;
+        if(part.localName==='r'){for(const child of [...part.children])if(child.localName==='t')child.remove();part.append(t);}else part.replaceWith(t);
+      }
+      if(!textOf(text).trim())comment.remove();
+    }
+    let authorId=elements(authors,'author').findIndex(a=>a.textContent===commentAuthor);
+    if(authorId<0&&commentEntries.length){authorId=authors.children.length;const author=create(comments,'author');author.textContent=commentAuthor;authors.append(author);}
+    for(const [address,message] of commentEntries){
+      if(!/^[A-Z]+[1-9]\d*$/.test(address)||typeof message!=='string'||!message.startsWith(commentPrefix)||/[\r\n]/.test(message))throw Error('申请日期批注数据无效');
+      let comment=elements(list,'comment').find(c=>c.getAttribute('ref')===address);
+      if(!comment){comment=create(comments,'comment',{ref:address,authorId});comment.append(create(comments,'text'));list.append(comment);}
+      const text=first(comment,'text');
+      for(const t of [...text.children].filter(c=>c.localName==='t')){const run=create(comments,'r');t.replaceWith(run);run.append(t);}
+      const run=create(comments,'r'),t=create(comments,'t');t.setAttribute('xml:space','preserve');t.textContent=(textOf(text)?'\n':'')+message;run.append(t);text.append(run);
+    }
+    const addRelation=(type,path)=>{
+      let id='rIdFunds'+type;while(elements(sheetRelations,'Relationship').some(r=>r.getAttribute('Id')===id))id+='x';
+      const rel=sheetRelations.createElementNS(P,'Relationship');for(const [k,v] of Object.entries({Id:id,Type:R+'/'+type,Target:'/'+path}))rel.setAttribute(k,v);sheetRelations.documentElement.append(rel);return rel;
+    };
+    const uniquePath=base=>{let path=base;while(zip.file(path))path=path.replace(/(\.[^.]+)$/,'x$1');return path;};
+    const commentPath=oldCommentRelation?resolve(sheetPath,oldCommentRelation.getAttribute('Target')):uniquePath('xl/comments-funds.xml');
+    if(!oldCommentRelation){addRelation('comments',commentPath);const type=types.createElementNS(types.documentElement.namespaceURI,'Override');type.setAttribute('PartName','/'+commentPath);type.setAttribute('ContentType','application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml');types.documentElement.append(type);}
+    save(commentPath,comments);
+    // Reuse SheetJS's native VML note shapes, keeping existing shapes (including controls) intact.
+    const legacy=first(sheet,'legacyDrawing'),vmlRelation=legacy?elements(sheetRelations,'Relationship').find(r=>r.getAttribute('Id')===legacy.getAttributeNS(R,'id')):null;
+    let vmlPath=vmlRelation?resolve(sheetPath,vmlRelation.getAttribute('Target')):null,vml=vmlPath?await parse(zip,vmlPath):null;
+    const refs=new Set(elements(list,'comment').map(c=>c.getAttribute('ref')));
+    const noteAddress=shape=>{const data=first(shape,'ClientData');return data?.getAttribute('ObjectType')==='Note'?XLSX.utils.encode_cell({r:Number(first(data,'Row')?.textContent),c:Number(first(data,'Column')?.textContent)}):null;};
+    if(vml)for(const shape of elements(vml,'shape')){const address=noteAddress(shape);if(address&&!refs.has(address))shape.remove();}
+    const existing=new Set(vml?elements(vml,'shape').map(noteAddress):[]),missing=[...refs].filter(ref=>!existing.has(ref));
+    if(missing.length){
+      const scratch=XLSX.utils.book_new(),notes={};for(const ref of missing){notes[ref]={t:'s',v:'',c:[{a:commentAuthor,t:'申请日期'}]};notes[ref].c.hidden=true;}
+      notes['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:maxRow,c:maxColumn}});XLSX.utils.book_append_sheet(scratch,notes,'批注');
+      const parts=await JSZip.loadAsync(XLSX.write(scratch,{type:'array',bookType:'xlsx'})),path=Object.keys(parts.files).find(p=>p.endsWith('.vml'));
+      if(!path)throw Error('申请日期批注图形生成失败');const generated=await parse(parts,path);
+      if(!vml){vml=generated;vmlPath=uniquePath('xl/drawings/funds-comments.vml');const relation=addRelation('vmlDrawing',vmlPath),drawing=create(sheet,'legacyDrawing');drawing.setAttributeNS(R,'r:id',relation.getAttribute('Id'));sheet.documentElement.insertBefore(drawing,[...sheet.documentElement.children].find(n=>['legacyDrawingHF','picture','oleObjects','controls','webPublishItems','tableParts','extLst'].includes(n.localName))||null);}
+      else{
+        for(const type of elements(generated,'shapetype'))if(!elements(vml,'shapetype').some(t=>t.getAttribute('id')===type.getAttribute('id')))vml.documentElement.append(vml.importNode(type,true));
+        let id=1024;const ids=new Set(elements(vml,'shape').map(s=>s.getAttribute('id')));
+        for(const shape of elements(generated,'shape')){while(ids.has('_x0000_s'+id))id++;const next=vml.importNode(shape,true);next.setAttribute('id','_x0000_s'+id);ids.add('_x0000_s'+id++);vml.documentElement.append(next);}
+      }
+      if(!elements(types,'Default').some(t=>t.getAttribute('Extension')==='vml')){const type=types.createElementNS(types.documentElement.namespaceURI,'Default');type.setAttribute('Extension','vml');type.setAttribute('ContentType','application/vnd.openxmlformats-officedocument.vmlDrawing');types.documentElement.append(type);}
+    }
+    if(vml)save(vmlPath,vml);save(sheetRelationsPath,sheetRelations);
+  }
   const order=result.negotiated.columnOrder;
   if(order?.some((old,index)=>old!==index)){
     if(new Set(order).size!==order.length||order.some(c=>!Number.isInteger(c)||c<0||c>=order.length))throw Error('谈判付款列顺序无效');
