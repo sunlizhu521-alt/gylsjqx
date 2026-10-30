@@ -217,6 +217,11 @@ function build(inputs,decisions={}){
   const owners=[...new Set(matches.map(r=>r.owner))];return owners.length===1?owners[0]:'';
  }
  function reviewOwner(target){return target.normal?target.record.owner:usable(target.values['跟单员'])?str(target.values['跟单员'].v):ledgerOwner(target.record);}
+ // Sort before assigning output row numbers so formulas and highlights follow their records.
+ normal.sort((a,b)=>{
+  const left=paymentWeek(a.values['应付款时间'],a.date1904,1).v,right=paymentWeek(b.values['应付款时间'],b.date1904,1).v;
+  return (left==='日期待确认')-(right==='日期待确认')||left.localeCompare(right);
+ });
  const normalObjects=normal.map((r,i)=>({record:r,normal:true,index:i,sourceOA:clone(r.values['对公付款0A流程号']),values:{...r.values,'申请日期':empty()}}));
  const negotiatedObjects=negotiated.records.map(r=>{
   const target={record:r,normal:false,sourceOA:clone(r.values['对公付款0A流程号']),values:{...r.values}},key=classification(r).key;

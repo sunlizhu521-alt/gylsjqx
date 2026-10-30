@@ -118,3 +118,23 @@ test('独立同额申请依次分配的批注只包含各自日期，未标红�
  assert.deepEqual(r.applicationComments,{L2:'申请日期（资金整理）：2026年10月20日',M2:'申请日期（资金整理）：2026年10月21日'});
  apps.F2.v=apps.F3.v='正常付款';const next=C.build(i);assert.deepEqual(next.applicationComments,{});
 });
+test('正常付款按申请付款的日期升序，同周稳定、无效日期置后，标红与公式跟随记录',()=>{
+ for(const date1904 of [false,true]){
+  const i=fixture(),ledger=sheet(i,'ledger'),headers=C.NORMAL_HEADERS,base=X.utils.sheet_to_json(ledger)[1];
+  const setDue=(s,row,value)=>{s[X.utils.encode_cell({r:row-1,c:headers.indexOf('应付款时间')})]=typeof value==='object'?value:{t:typeof value==='number'?'n':'s',v:value};};
+  setDue(ledger,3,'2027-01-04');
+  const cases=[['空白',''],['同周先','2026-11-08'],['跨年','2026-01-01'],['同周后','2026-11-02'],['文本异常','未确定'],['日期零',0],['错误公式',{t:'e',v:23,w:'#REF!',f:'A99'}],['无缓存公式',{t:'n',f:'A99'}],['数值日期',46328-(date1904?1462:0)],['年末','2026-12-31']];
+  cases.forEach(([name,due],j)=>{
+   const record={...base,'供应商名称':name,'对公付款0A流程号':'MDST-DGFK202611'+String(j+1).padStart(5,'0'),'申请付款金额':81+j,'已付金额':j,'是否结清':'否'};
+   X.utils.sheet_add_aoa(ledger,[headers.map(h=>record[h]??'')],{origin:-1});setDue(ledger,j+4,due);
+  });
+  i.ledger.book.Workbook={WBProps:{date1904}};
+  const before=JSON.stringify(i),r=C.build(i),at=h=>headers.indexOf(h),names=r.normalRows.map(row=>row[at('供应商名称')].v);
+  assert.deepEqual(names,[...(date1904?['日期零']:[]),'跨年','同周先','同周后','数值日期','年末','正常供应商','空白','文本异常',...(date1904?[]:['日期零']),'错误公式','无缓存公式']);
+  const validCount=date1904?7:6;assert.deepEqual(r.normalRows.slice(0,validCount).map(row=>row[at('申请付款的日期')].v),[...(date1904?['1903/12/21周']:[]),'2025/12/22周','2026/10/26周','2026/10/26周','2026/10/26周','2026/12/21周','2026/12/28周']);
+  assert(r.normalRows.slice(validCount).every(row=>row[at('申请付款的日期')].v==='日期待确认'));
+  const submitted=names.indexOf('正常供应商');assert.deepEqual(r.highlights.normalRows,[submitted+2]);assert.equal(r.normalRows[submitted][at('申请日期')].v,46322);assert.equal(r.normalRows[submitted][at('是否提交付款申请单')].v,'已提交');
+  for(const [j,row]of r.normalRows.entries()){assert.equal(row[at('剩余金额')].f,'I'+(j+2)+'-N'+(j+2));assert.equal(row[at('剩余金额')].v,row[at('申请付款金额')].v-row[at('已付金额')].v);}
+  assert.equal(JSON.stringify(i),before);assert.deepEqual(C.build(i).normalRows,r.normalRows);assert.deepEqual(r.applicationComments,{L2:'申请日期（资金整理）：2026年10月20日'});
+ }
+});

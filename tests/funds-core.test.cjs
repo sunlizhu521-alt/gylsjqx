@@ -618,7 +618,7 @@ test('正常付款按各人员台账表头和本行读取应付时间，同供�
  const before=JSON.stringify(i),r=C.build(i);assert.equal(r.normalRows.length,3);
  assert.deepEqual(r.normalRows.map(row=>X.SSF.format('yyyy-mm-dd',row[9].v)),['2026-11-02','2026-11-09','2026-11-16']);
  assert.deepEqual(r.normalRows.map(row=>row.at(-1).v),['2026/10/26周','2026/11/02周','2026/11/09周']);assert(r.normalRows.every(row=>row[9].t==='n'&&row[9].z===C.DATE_FORMAT));assert.equal(JSON.stringify(i),before);
- set(i,'ledger','应付款时间',3,'2026-12-01');const latest=C.build(i);assert.equal(X.SSF.format('yyyy-mm-dd',latest.normalRows[0][9].v),'2026-12-01');assert.equal(latest.normalRows[0].at(-1).v,'2026/11/23周');
+ set(i,'ledger','应付款时间',3,'2026-12-01');const latest=C.build(i);assert.deepEqual(latest.normalRows.map(row=>X.SSF.format('yyyy-mm-dd',row[9].v)),['2026-11-09','2026-11-16','2026-12-01']);assert.equal(latest.normalRows.at(-1).at(-1).v,'2026/11/23周');
 });
 test('正常付款应付时间按台账日期体系转换，保留空白、文本和公式异常核对',()=>{
  for(const [raw,date1904,expected] of [

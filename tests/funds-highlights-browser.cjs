@@ -189,7 +189,23 @@ function fixture({ removeFirstApplication = false } = {}) {
     await upload('applications', fixture({ removeFirstApplication: true }).applications);
     await analyze(false);
     const second = await download(2); await checkExport(second, false);
+    // Deliberately reverse the two normal rows across years; previews, formulas and fills must follow the sorted records.
+    const dated=X.read(data.ledger,{cellNF:true}),ledger=dated.Sheets['对账明细-李奇'];
+    ledger.I4={t:'s',v:'2027-01-04'};ledger.I5={t:'s',v:'2026-11-02'};
+    await upload('ledger',write(dated));await frame.locator('#analyze:not([disabled])').click();await frame.locator('#download:not([disabled])').waitFor();
+    const sortedPreview=(await snapshot()).normalPreview,at=key=>C.NORMAL_HEADERS.indexOf(key);
+    assert.deepEqual(sortedPreview.rows.map(row=>row[at('供应商名称')].text),[records[3].supplier,records[2].supplier]);
+    assert.deepEqual(sortedPreview.rows.map(row=>row[at('申请付款的日期')].text),['2026/10/26周','2026/12/28周']);
+    assert(sortedPreview.rows[0].every(c=>!c.applied));assert(sortedPreview.rows[1].every(c=>c.applied));
+    const sortedBytes=await download(3),sortedBook=X.read(sortedBytes,{cellNF:true,cellStyles:true}),sorted=sortedBook.Sheets.正常付款;
+    const output=X.utils.sheet_to_json(sorted);assert.deepEqual(output.map(row=>row['供应商名称']),[records[3].supplier,records[2].supplier]);
+    assert.deepEqual(output.map(row=>row['申请付款的日期']),['2026/10/26周','2026/12/28周']);
+    assert.equal(sorted.P2.f,'I2-N2');assert.equal(sorted.P2.v,200);assert.equal(sorted.P3.f,'I3-N3');assert.equal(sorted.P3.v,100);
+    for(const r of [2,3])for(let c=0;c<C.NORMAL_HEADERS.length;c++)assert.equal(/^(?:FF)?FF0000$/i.test(sorted[X.utils.encode_cell({r:r-1,c})].s?.fgColor?.rgb||''),r===3,'排序后整行标红必须随记录移动，包括隐藏列');
+    assert.equal(sorted[X.utils.encode_cell({r:1,c:at('申请日期')})].v??'','');assert.equal(sorted[X.utils.encode_cell({r:2,c:at('申请日期')})].v,46322);
+    assert.equal(sortedBook.Sheets.谈判付款.U3.c[0].t,'申请日期（资金整理）：2026年10月27日');
+    if(process.env.QA_OUT){await fs.writeFile(process.env.QA_OUT+'/sorted-dates.xlsx',sortedBytes);await frame.locator('#normalPreview tbody tr').first().locator('td').nth(at('申请付款的日期')).scrollIntoViewIfNeeded();await frame.locator('#normalPreview').screenshot({path:process.env.QA_OUT+'/sorted-dates.png'});}
     assert.deepEqual(errors, []);
-    console.log('PASS: native application-date notes and normal date column; homepage upload, first/re-read preview, earliest equal-amount installment and full normal-row red fill, no unnecessary review, original formulas, hidden columns, fresh-input CF replacement');
+    console.log('PASS: ascending application payment dates with matching formulas and highlights; native application-date notes and normal date column; homepage upload, first/re-read preview, earliest equal-amount installment and full normal-row red fill, no unnecessary review, original formulas, hidden columns, fresh-input CF replacement');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
