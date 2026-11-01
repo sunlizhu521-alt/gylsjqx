@@ -98,8 +98,8 @@ const {fixtures}=require('./funds-fixtures.cjs');
    for(const address of ['L2','L3'])assert.equal(updated.Sheets.谈判付款[address].v,46349);
    if(!process.env.FUNDS_CLASSIFICATION_QA){
     const normal=updated.Sheets.正常付款,grid=X.utils.sheet_to_json(normal,{header:1}),r=grid.findIndex(row=>row[grid[0].indexOf('对公付款0A流程号')]==='MDST-DGFK20261024001');
-    assert(r>0);const due=normal[X.utils.encode_cell({r,c:grid[0].indexOf('应付款时间')})];assert.equal(due.v,46357);assert.equal(due.t,'n');assert.equal(due.z,Core.DATE_FORMAT);assert.equal(grid[r][grid[0].indexOf('申请付款的日期')],'2026/11/23周');
-    assert.equal(await frame.locator('#normalPreview tbody tr').filter({hasText:'正常供应商1'}).locator('td').nth(9).innerText(),'2026年12月1日');
+    assert(r>0);const due=normal[X.utils.encode_cell({r,c:grid[0].indexOf('应付时间')})];assert.equal(due.v,46357);assert.equal(due.t,'n');assert.equal(due.z,Core.DATE_FORMAT);assert.equal(grid[r][grid[0].indexOf('申请付款的日期')],'2026/11/23周');
+    assert.equal(await frame.locator('#normalPreview tbody tr').filter({hasText:'正常供应商1'}).locator('td').nth(Core.NORMAL_HEADERS.indexOf('应付时间')).innerText(),'2026年12月1日');
    }
   }
   assert.deepEqual(errors,[]);await fs.writeFile('/private/tmp/funds-v19-browser-output.xlsx',output);

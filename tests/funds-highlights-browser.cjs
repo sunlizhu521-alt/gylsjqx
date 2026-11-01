@@ -136,8 +136,8 @@ function fixture({ removeFirstApplication = false } = {}) {
         assert.equal(n['F' + row].f, 'D' + row + '-E' + row); assert.equal(n['L' + row].f, 'SUM(U' + row + ':V' + row + ')');
         assert.equal(n['L' + row].v, r.amount); assert.equal(n['G' + row].v, '否');
       }
-      assert.deepEqual([normal.I2.v, normal.N2.v, normal.P2.v, normal.I3.v, normal.N3.v, normal.P3.v], [123.45, 23.45, 100, 200, 0, 200]);
-      assert.equal(normal.P2.f, 'I2-N2'); assert.equal(normal.P3.f, 'I3-N3');
+      assert.deepEqual([normal.G2.v, normal.N2.v, normal.P2.v, normal.G3.v, normal.N3.v, normal.P3.v], [123.45, 23.45, 100, 200, 0, 200]);
+      assert.equal(normal.P2.f, 'G2-N2'); assert.equal(normal.P3.f, 'G3-N3');
       for (const header of C.NORMAL_HIDDEN_HEADERS) assert.equal(normal['!cols'][C.NORMAL_HEADERS.indexOf(header)].hidden, true);
       const metadata = await frame.locator('body').evaluate(async (_, { bytes, marker }) => {
         const zip = await JSZip.loadAsync(Uint8Array.from(bytes)), parse = text => new DOMParser().parseFromString(text, 'application/xml'), all = (doc, name) => [...doc.getElementsByTagNameNS('*', name)];
@@ -200,7 +200,7 @@ function fixture({ removeFirstApplication = false } = {}) {
     const sortedBytes=await download(3),sortedBook=X.read(sortedBytes,{cellNF:true,cellStyles:true}),sorted=sortedBook.Sheets.正常付款;
     const output=X.utils.sheet_to_json(sorted);assert.deepEqual(output.map(row=>row['供应商名称']),[records[3].supplier,records[2].supplier]);
     assert.deepEqual(output.map(row=>row['申请付款的日期']),['2026/10/26周','2026/12/28周']);
-    assert.equal(sorted.P2.f,'I2-N2');assert.equal(sorted.P2.v,200);assert.equal(sorted.P3.f,'I3-N3');assert.equal(sorted.P3.v,100);
+    assert.equal(sorted.P2.f,'G2-N2');assert.equal(sorted.P2.v,200);assert.equal(sorted.P3.f,'G3-N3');assert.equal(sorted.P3.v,100);
     for(const r of [2,3])for(let c=0;c<C.NORMAL_HEADERS.length;c++)assert.equal(/^(?:FF)?FF0000$/i.test(sorted[X.utils.encode_cell({r:r-1,c})].s?.fgColor?.rgb||''),r===3,'排序后整行标红必须随记录移动，包括隐藏列');
     assert.equal(sorted[X.utils.encode_cell({r:1,c:at('申请日期')})].v??'','');assert.equal(sorted[X.utils.encode_cell({r:2,c:at('申请日期')})].v,46322);
     assert.equal(sortedBook.Sheets.谈判付款.U3.c[0].t,'申请日期（资金整理）：2026年10月27日');

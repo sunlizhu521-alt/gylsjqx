@@ -42,7 +42,7 @@ function assign(sheet,row,values){const headers=fields(sheet);for(const [key,val
   }
   const before=input.negotiated.book.Sheets[data.sheetName];assert.deepEqual(neg['!merges'],before['!merges']);assert.equal(X.utils.decode_range(neg['!ref']).e.r,X.utils.decode_range(before['!ref']).e.r);
   for(const address of ['D2','E2','G2','K2','N2','Q2','O2']){assert.equal(neg[address].v,before[address].v,'原谈判内容保留 '+address);assert.equal(neg[address].f,before[address].f,'原谈判公式保留 '+address);}
-  assert.equal(normal.P2.f,'I2-N2');assert.equal(normal.P2.v,100);assert.deepEqual(errors,[]);
+  assert.equal(normal.P2.f,'G2-N2');assert.equal(normal.P2.v,100);assert.deepEqual(errors,[]);
   console.log('PASS: negotiated and normal cross-supplier OA conflicts preserve original OA, flow and application fields; both identities, amounts, flow IDs and source rows appear in review; preview equals four-sheet download; negotiated records, merges and financial formulas preserved.');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1);});

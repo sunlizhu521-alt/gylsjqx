@@ -36,6 +36,15 @@ function set(input,role,header,row,value,sheet){const b=input[role].book,s=b.She
 const update=(r,address)=>r.negotiated.updates.find(u=>u.address===address)?.cell;
 const paidReviews=r=>legacyReviews(r).filter(row=>row[5].v.startsWith('已付金额同步核对：'));
 const financial=r=>r.negotiated.rows.map(row=>['已付金额','剩余付款金额','是否结清'].map(h=>row[r.negotiated.headers.indexOf(h)]?.v));
+test('正常付款七个常用字段相邻，改名后金额日期与公式仍取同一来源',()=>{
+ const i=fixture(),r=C.build(i),expected=['跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间'];
+ assert.deepEqual(r.normalHeaders.slice(1,8),expected);assert.equal(r.normalHeaders.length,27);assert.equal(r.normalHeaders[0],'登记月份');assert.deepEqual(r.normalHeaders.slice(8,10),['开票时间','开票金额']);
+ const row=Object.fromEntries(r.normalHeaders.map((h,c)=>[h,r.normalRows[0][c]]));
+ assert.equal(row['摘要'].v,'九月货款');assert.equal(row['本次申请付款金额'].v,100);assert.equal(row['本次申请付款金额'].t,'n');assert.equal(row['本次申请付款金额'].z,'#,##0.00');
+ assert.equal(row['应付时间'].t,'n');assert.equal(X.SSF.format(row['应付时间'].z,row['应付时间'].v),'2026年10月31日');assert.equal(row['剩余金额'].f,'G2-N2');assert.equal(row['剩余金额'].v,row['本次申请付款金额'].v-row['已付金额'].v);
+ const s=i.ledger.book.Sheets['对账明细-李奇'];s[X.utils.encode_cell({r:0,c:LH.indexOf('申请付款金额')})].v='本次申请付款金额';s[X.utils.encode_cell({r:0,c:LH.indexOf('应付款时间')})].v='应付时间';
+ assert.deepEqual(C.build(i).normalRows,r.normalRows);assert.deepEqual(C.build(i).progressRows,r.progressRows);
+});
 test('谈判按台账实付同步三项，零实付有效，已申请和归档不当实付',()=>{
  for(const [total,paid,left,status] of [[100,0,100,'否'],[100,20,80,'否'],[100,100,0,'是'],[0,0,0,'是'],[0.3,0.1,0.2,'否']]){
   const i=fixture();for(const role of ['ledger','negotiated'])set(i,role,'申请付款金额',2,total);
@@ -144,7 +153,7 @@ test('正常付款汇总保留零元及日期空白或异常提示，1904日期�
  }
 });
 test('五张台账、谈判付款从台账同步、正常付款字段顺序、OA状态与不修改源表',()=>{
- const input=fixture(),before=JSON.stringify(input),r=C.build(input);assert.equal(r.stats.pending,0);assert.equal(r.stats.normalRows,1);assert.equal(r.stats.negotiatedRows,1);assert.deepEqual(r.normalHeaders,C.NORMAL_HEADERS);assert.equal(r.negotiated.rows[0][4].v,20);assert.equal(r.negotiated.rows[0][10].v,80);assert(!r.negotiated.updates.some(u=>['L2','M2'].includes(u.address)));assert.equal(r.normalRows[0][15].f,'I2-N2');assert.equal(r.normalRows[0][15].v,0);assert.equal(r.normalRows[0][14].v,'是');assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('申请人')].v,'李奇');assert.equal(r.normalRows[0][0].t,'n');assert.equal(r.normalRows[0][5].z,C.DATE_FORMAT);assert.equal(JSON.stringify(input),before);assert.equal(r.negotiated.rows[0][12].f,'G2');
+ const input=fixture(),before=JSON.stringify(input),r=C.build(input);assert.equal(r.stats.pending,0);assert.equal(r.stats.normalRows,1);assert.equal(r.stats.negotiatedRows,1);assert.deepEqual(r.normalHeaders,C.NORMAL_HEADERS);assert.equal(r.negotiated.rows[0][4].v,20);assert.equal(r.negotiated.rows[0][10].v,80);assert(!r.negotiated.updates.some(u=>['L2','M2'].includes(u.address)));assert.equal(r.normalRows[0][15].f,'G2-N2');assert.equal(r.normalRows[0][15].v,0);assert.equal(r.normalRows[0][14].v,'是');assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('申请人')].v,'李奇');assert.equal(r.normalRows[0][0].t,'n');assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('开票时间')].z,C.DATE_FORMAT);assert.equal(JSON.stringify(input),before);assert.equal(r.negotiated.rows[0][12].f,'G2');
 });
 test('谈判工作表名称包含匹配：零、一、多张及选择合法性',()=>{
  const i=fixture();assert.deepEqual(C.negotiatedSheets(i.negotiated.book),['10月谈判付款主表']);X.utils.book_append_sheet(i.negotiated.book,X.utils.aoa_to_sheet([NH]),'谈判付款-反馈');assert.throws(()=>C.build(i),/请选择/);i.negotiated.sheetName='10月谈判付款主表';assert.doesNotThrow(()=>C.build(i));i.negotiated.sheetName='不存在';assert.throws(()=>C.build(i),/请选择/);i.negotiated.book=book('普通表',NH,[]);assert.throws(()=>C.build(i),/未找到名称/);
@@ -210,18 +219,18 @@ test('已有追加字段不重复新增，源表空行和非授权字段保持�
  const i=fixture(),s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];X.utils.sheet_add_aoa(s,[['提交付款申请单日期','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号']],{origin:'N1'});s['!ref']='A1:T4';s.L4={t:'s',v:'尾注'};const r=C.build(i);assert.equal(r.negotiated.headers.length,23);assert.equal(r.negotiated.headers[20],'应付款时间');assert.equal(r.negotiated.headers[21],'提交时间汇总');assert.equal(r.negotiated.headers.at(-1),'付款自然周');assert.equal(r.negotiated.rows.length,3);assert.equal(r.negotiated.headers.filter(h=>h==='流程编号').length,1);assert.equal(r.negotiated.rows[2][11].v,'尾注');assert(!r.negotiated.updates.some(u=>u.address==='L4'));
 });
 test('1904来源日期转换为1900体系，原表不变',()=>{
- const i=fixture();i.ledger.book.Workbook={WBProps:{date1904:true}};set(i,'ledger','开票时间',3,{t:'n',v:44834,z:'yyyy-mm-dd'});const r=C.build(i);assert.equal(r.normalRows[0][5].v,44834+1462);assert.equal(i.ledger.book.Sheets['对账明细-李奇'].E3.v,44834);
+ const i=fixture();i.ledger.book.Workbook={WBProps:{date1904:true}};set(i,'ledger','开票时间',3,{t:'n',v:44834,z:'yyyy-mm-dd'});const r=C.build(i);assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('开票时间')].v,44834+1462);assert.equal(i.ledger.book.Sheets['对账明细-李奇'].E3.v,44834);
 });
 test('登记月份和应付款时间无法识别时完整保留原文，不产生日期核对阻断',()=>{
  for(const [month,due] of [['10月登记',' 月底前付款\n以通知为准 '],['2026-13','2026-02-30'],['/','待定'],['','']]){
-  const i=fixture();set(i,'ledger','月份',3,month);set(i,'ledger','应付款时间',3,due);const before=JSON.stringify(i),r=C.build(i);assert.equal(r.normalRows[0][0].v,month);assert.equal(r.normalRows[0][9].v,due);assert.equal(r.normalRows[0][0].t,'s');assert.equal(r.normalRows[0][9].t,'s');assert.equal(r.issues.some(x=>x.kind==='date'),false);assert.equal(r.stats.pending,0);assert.equal(JSON.stringify(i),before);
+  const i=fixture();set(i,'ledger','月份',3,month);set(i,'ledger','应付款时间',3,due);const before=JSON.stringify(i),r=C.build(i);assert.equal(r.normalRows[0][0].v,month);assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('应付时间')].v,due);assert.equal(r.normalRows[0][0].t,'s');assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('应付时间')].t,'s');assert.equal(r.issues.some(x=>x.kind==='date'),false);assert.equal(r.stats.pending,0);assert.equal(JSON.stringify(i),before);
  }
 });
 test('登记月份和应付款时间有效时仍导出真实Excel日期及相应格式',()=>{
- const i=fixture();set(i,'ledger','月份',3,'2026-10');set(i,'ledger','应付款时间',3,'2026年10月31日');const r=C.build(i),month=r.normalRows[0][0],due=r.normalRows[0][9];assert.equal(month.t,'n');assert.equal(X.SSF.format('yyyy-mm-dd',month.v),'2026-10-01');assert.equal(month.z,'yyyy"年"m"月"');assert.equal(due.t,'n');assert.equal(X.SSF.format('yyyy-mm-dd',due.v),'2026-10-31');assert.equal(due.z,C.DATE_FORMAT);assert.equal(r.stats.pending,0);
+ const i=fixture();set(i,'ledger','月份',3,'2026-10');set(i,'ledger','应付款时间',3,'2026年10月31日');const r=C.build(i),month=r.normalRows[0][0],due=r.normalRows[0][C.NORMAL_HEADERS.indexOf('应付时间')];assert.equal(month.t,'n');assert.equal(X.SSF.format('yyyy-mm-dd',month.v),'2026-10-01');assert.equal(month.z,'yyyy"年"m"月"');assert.equal(due.t,'n');assert.equal(X.SSF.format('yyyy-mm-dd',due.v),'2026-10-31');assert.equal(due.z,C.DATE_FORMAT);assert.equal(r.stats.pending,0);
 });
 test('开票时间无法识别仍保留原文并要求日期核对',()=>{
- const i=fixture();set(i,'ledger','月份',3,'10月登记');set(i,'ledger','应付款时间',3,'月末付款');set(i,'ledger','开票时间',3,'开票待确认');const r=C.build(i),issues=r.issues.filter(x=>x.kind==='date');assert.equal(r.normalRows[0][5].v,'开票待确认');assert.equal(issues.length,1);assert.equal(issues[0].id,'date:对账明细-李奇!3:开票时间');assert.equal(issues[0].resolved,false);assert.equal(r.stats.pending,1);
+ const i=fixture();set(i,'ledger','月份',3,'10月登记');set(i,'ledger','应付款时间',3,'月末付款');set(i,'ledger','开票时间',3,'开票待确认');const r=C.build(i),issues=r.issues.filter(x=>x.kind==='date');assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('开票时间')].v,'开票待确认');assert.equal(issues.length,1);assert.equal(issues[0].id,'date:对账明细-李奇!3:开票时间');assert.equal(issues[0].resolved,false);assert.equal(r.stats.pending,1);
 });
 test('OA只读取指定字段，其他重复明细列不构成冲突',()=>{
  const i=fixture();i.oa.book=book('Sheet0',[...OH,'备注','备注'],[{'流程编号':'MDST-DGFK20261001001','当前节点':'财务审核','未操作者':'测试人员','流程状态':'未归档','申请人':'李奇'}]);assert.doesNotThrow(()=>C.build(i));
@@ -244,21 +253,21 @@ test('旧分类否或空但名称金额命中谈判表时只保留谈判原表�
  for(const flag of ['否','']){const i=fixture();set(i,'ledger','是否谈判付款',2,flag);const before=JSON.stringify(i);const r=C.build(i);assert.equal(r.normalRows.length,1);assert.equal(r.normalRows[0][2].v,'测试供应商乙');assert.equal(r.stats.negotiatedLedgerRows,1);assert.equal(r.stats.unclassifiedLedgerRows,0);assert.equal(update(r,'E2').v,20);assert.equal(JSON.stringify(i),before);}
 });
 test('同名不同金额分别分类，同名同金额跨主体按出现性归类且谈判付款原样保留',()=>{
- const i=fixture();set(i,'ledger','供应商名称',3,'测试供应商甲');set(i,'ledger','申请付款金额',3,101);let r=C.build(i);assert.equal(r.normalRows.length,1);assert.equal(r.normalRows[0][8].v,101);
+ const i=fixture();set(i,'ledger','供应商名称',3,'测试供应商甲');set(i,'ledger','申请付款金额',3,101);let r=C.build(i);assert.equal(r.normalRows.length,1);assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('本次申请付款金额')].v,101);
  set(i,'ledger','申请付款金额',3,100);set(i,'ledger','付款主体',3,'国源');r=C.build(i);assert.equal(r.normalRows.length,0);assert.equal(r.stats.negotiatedLedgerRows,2);assert.equal(r.stats.negotiatedRows,1);assert.equal(update(r,'E2').v,20);
 });
 test('分类按分精确比较，规范空白、全角名称和金额表示，零值有效而空金额不算零',()=>{
  const i=fixture();set(i,'ledger','是否谈判付款',2,'否');set(i,'ledger','供应商名称',2,' 测试供应商Ａ ');set(i,'negotiated','供应商',2,'测试供应商A');set(i,'ledger','申请付款金额',2,'￥1,000.20');set(i,'negotiated','申请付款金额',2,1000.2);let r=C.build(i);assert.equal(r.stats.negotiatedLedgerRows,1);assert.equal(r.normalRows.length,1);
- set(i,'ledger','申请付款金额',2,0);set(i,'negotiated','申请付款金额',2,0);r=C.build(i);assert.equal(r.stats.negotiatedLedgerRows,1);set(i,'ledger','申请付款金额',2,'');r=C.build(i);assert.equal(r.stats.negotiatedLedgerRows,0);assert.equal(r.stats.unclassifiedLedgerRows,0);assert.equal(r.normalRows.length,2);assert.equal(r.normalRows[0][8].v,'');assert.equal(r.issues.some(x=>x.id==='classification:对账明细-李奇!2'),false);
+ set(i,'ledger','申请付款金额',2,0);set(i,'negotiated','申请付款金额',2,0);r=C.build(i);assert.equal(r.stats.negotiatedLedgerRows,1);set(i,'ledger','申请付款金额',2,'');r=C.build(i);assert.equal(r.stats.negotiatedLedgerRows,0);assert.equal(r.stats.unclassifiedLedgerRows,0);assert.equal(r.normalRows.length,2);assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('本次申请付款金额')].v,'');assert.equal(r.issues.some(x=>x.id==='classification:对账明细-李奇!2'),false);
 });
 test('空白及异常金额直接纳入正常付款，保留金额并忽略旧分类决策',()=>{
  for(const amount of ['', '/', -1, '0.001', {t:'n',f:'A99'},{t:'e',v:23,w:'#REF!'}]){
-  const i=fixture();set(i,'ledger','申请付款金额',3,amount);const before=JSON.stringify(i),r=C.build(i,{'classification:对账明细-李奇!3':['keep']});assert.equal(r.issues.some(x=>x.kind==='classification'),false);assert.equal(r.normalRows.length,1);assert.equal(r.stats.unclassifiedLedgerRows,0);assert.equal(r.normalRows[0][8].v,typeof amount==='object'?amount.w||'公式结果不可用':amount);assert.equal(r.normalRows[0][16].v,'否');assert.equal(r.negotiated.rows.length,1);assert.equal(JSON.stringify(i),before);
+  const i=fixture();set(i,'ledger','申请付款金额',3,amount);const before=JSON.stringify(i),r=C.build(i,{'classification:对账明细-李奇!3':['keep']});assert.equal(r.issues.some(x=>x.kind==='classification'),false);assert.equal(r.normalRows.length,1);assert.equal(r.stats.unclassifiedLedgerRows,0);assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('本次申请付款金额')].v,typeof amount==='object'?amount.w||'公式结果不可用':amount);assert.equal(r.normalRows[0][16].v,'否');assert.equal(r.negotiated.rows.length,1);assert.equal(JSON.stringify(i),before);
  }
 });
 test('供应商为空白或错误时自动正常付款，不删除谈判原记录',()=>{
  for(const supplier of ['', '　\n', {t:'n',f:'A99'},{t:'e',v:23,w:'#REF!'}]){
-  const i=fixture();set(i,'ledger','是否谈判付款',2,'否');set(i,'ledger','供应商名称',2,supplier);const before=JSON.stringify(i),r=C.build(i);assert.equal(r.stats.negotiatedRows,1);assert.equal(r.stats.negotiatedLedgerRows,0);assert.equal(r.normalRows.length,2);assert.equal(r.normalRows[0][8].v,100);assert.equal(r.normalRows[0][16].v,'否');assert.equal(r.stats.unclassifiedLedgerRows,0);assert.equal(r.issues.some(x=>x.kind==='classification'),false);assert.equal(JSON.stringify(i),before);
+  const i=fixture();set(i,'ledger','是否谈判付款',2,'否');set(i,'ledger','供应商名称',2,supplier);const before=JSON.stringify(i),r=C.build(i);assert.equal(r.stats.negotiatedRows,1);assert.equal(r.stats.negotiatedLedgerRows,0);assert.equal(r.normalRows.length,2);assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('本次申请付款金额')].v,100);assert.equal(r.normalRows[0][16].v,'否');assert.equal(r.stats.unclassifiedLedgerRows,0);assert.equal(r.issues.some(x=>x.kind==='classification'),false);assert.equal(JSON.stringify(i),before);
  }
 });
 test('正常付款仅保留原OA有值的记录，匹配流程及旧对账值不能替代原OA',()=>{
@@ -270,7 +279,7 @@ test('正常付款仅保留原OA有值的记录，匹配流程及旧对账值不
 });
 test('无OA正常记录不进入金额日期及申请核对，保留后续顺序并重排公式行号',()=>{
  const i=fixture(),s=i.ledger.book.Sheets['对账明细-李奇'],row=X.utils.sheet_to_json(s,{header:1})[2];X.utils.sheet_add_aoa(s,[row,row],{origin:-1});set(i,'ledger','供应商名称',4,'保留供应商丙');set(i,'ledger','供应商名称',5,'保留供应商丁');set(i,'ledger','对公付款0A流程号',4,'MDST-DGFK20261001901');set(i,'ledger','对公付款0A流程号',5,'MDST-DGFK20261001902');X.utils.sheet_add_aoa(i.oa.book.Sheets.Sheet0,[['MDST-DGFK20261001901','财务审核','测试人员','未归档','李奇','保留供应商丙',100],['MDST-DGFK20261001902','财务审核','测试人员','未归档','李奇','保留供应商丁',100]],{origin:-1});set(i,'ledger','对公付款0A流程号',3,'');set(i,'ledger','申请付款金额',3,'异常金额');set(i,'ledger','开票时间',3,'异常日期');i.applications.book=book('付款申请汇总',AH,[]);const before=JSON.stringify(i),r=C.build(i);
- assert.deepEqual(r.normalRows.map(row=>row[2].v),['保留供应商丙','保留供应商丁']);assert.deepEqual(r.normalRows.map(row=>row[15].f),['I2-N2','I3-N3']);assert.equal(r.stats.excludedNormalRows,1);assert.equal(r.stats.pending,0);assert.equal(legacyReviews(r).filter(row=>row[0].v==='正常付款').length,0);assert.equal(legacyReviews(r).some(row=>row[1].v==='测试供应商乙'),false);assert.equal(JSON.stringify(i),before);
+ assert.deepEqual(r.normalRows.map(row=>row[2].v),['保留供应商丙','保留供应商丁']);assert.deepEqual(r.normalRows.map(row=>row[15].f),['G2-N2','G3-N3']);assert.equal(r.stats.excludedNormalRows,1);assert.equal(r.stats.pending,0);assert.equal(legacyReviews(r).filter(row=>row[0].v==='正常付款').length,0);assert.equal(legacyReviews(r).some(row=>row[1].v==='测试供应商乙'),false);assert.equal(JSON.stringify(i),before);
 });
 test('未带原OA的记录不触发分类待核对，谈判原表和谈判匹配记录仍完整保留',()=>{
  const i=fixture(),s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]],row=X.utils.sheet_to_json(s,{header:1})[1];row[6]='';X.utils.sheet_add_aoa(s,[row],{origin:-1});set(i,'ledger','供应商名称',3,'测试供应商甲');set(i,'ledger','申请付款金额',3,101);for(const r of [2,3])set(i,'ledger','对公付款0A流程号',r,'');set(i,'negotiated','对公付款0A流程号',2,'');const before=JSON.stringify(i),r=C.build(i);
@@ -618,15 +627,15 @@ test('正常付款按各人员台账表头和本行读取应付时间，同供�
  set(i,'ledger','应付款时间',3,'2026-11-02');
  const xu=X.utils.aoa_to_sheet([LH.map(h=>h==='应付款时间'?'应付时间':h).reverse(),row.map((v,c)=>c===3?'MDST-DGFK20261001004':c===8?'2026-11-16':v).reverse()]);i.ledger.book.Sheets['对账明细-徐英']=xu;
  const before=JSON.stringify(i),r=C.build(i);assert.equal(r.normalRows.length,3);
- assert.deepEqual(r.normalRows.map(row=>X.SSF.format('yyyy-mm-dd',row[9].v)),['2026-11-02','2026-11-09','2026-11-16']);
- assert.deepEqual(r.normalRows.map(row=>row.at(-1).v),['2026/10/26周','2026/11/02周','2026/11/09周']);assert(r.normalRows.every(row=>row[9].t==='n'&&row[9].z===C.DATE_FORMAT));assert.equal(JSON.stringify(i),before);
- set(i,'ledger','应付款时间',3,'2026-12-01');const latest=C.build(i);assert.deepEqual(latest.normalRows.map(row=>X.SSF.format('yyyy-mm-dd',row[9].v)),['2026-11-09','2026-11-16','2026-12-01']);assert.equal(latest.normalRows.at(-1).at(-1).v,'2026/11/23周');
+ assert.deepEqual(r.normalRows.map(row=>X.SSF.format('yyyy-mm-dd',row[C.NORMAL_HEADERS.indexOf('应付时间')].v)),['2026-11-02','2026-11-09','2026-11-16']);
+ assert.deepEqual(r.normalRows.map(row=>row.at(-1).v),['2026/10/26周','2026/11/02周','2026/11/09周']);assert(r.normalRows.every(row=>row[C.NORMAL_HEADERS.indexOf('应付时间')].t==='n'&&row[C.NORMAL_HEADERS.indexOf('应付时间')].z===C.DATE_FORMAT));assert.equal(JSON.stringify(i),before);
+ set(i,'ledger','应付款时间',3,'2026-12-01');const latest=C.build(i);assert.deepEqual(latest.normalRows.map(row=>X.SSF.format('yyyy-mm-dd',row[C.NORMAL_HEADERS.indexOf('应付时间')].v)),['2026-11-09','2026-11-16','2026-12-01']);assert.equal(latest.normalRows.at(-1).at(-1).v,'2026/11/23周');
 });
 test('正常付款应付时间按台账日期体系转换，保留空白、文本和公式异常核对',()=>{
  for(const [raw,date1904,expected] of [
   [{t:'n',v:46328,z:C.DATE_FORMAT},false,46328],[{t:'n',v:44866,z:C.DATE_FORMAT},true,46328],
   [{t:'n',v:46328,f:'DATE(2026,11,2)'},false,46328],['2026年11月2日',false,46328],['',false,''],['月底协商',false,'月底协商']
- ]){const i=fixture();i.ledger.book.Workbook={WBProps:{date1904}};set(i,'ledger','应付款时间',3,raw);const r=C.build(i);assert.equal(r.normalRows[0][9].v,expected);}
+ ]){const i=fixture();i.ledger.book.Workbook={WBProps:{date1904}};set(i,'ledger','应付款时间',3,raw);const r=C.build(i);assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('应付时间')].v,expected);}
  for(const raw of [{t:'n',f:'DATE(2026,11,2)'},{t:'e',v:23,w:'#REF!'}]){const i=fixture();set(i,'ledger','应付款时间',3,raw);const r=C.build(i);assert(r.issues.some(q=>q.kind==='formula'&&q.message.includes('应付款时间')));assert.equal(r.normalRows[0].at(-1).v,'日期待确认');}
 });
 
@@ -901,7 +910,7 @@ test('正常付款跟单员取五个人的台账sheet，兼容日期后缀且不
   b.Sheets['对账明细-李奇']=X.utils.aoa_to_sheet(rows.slice(0,2));X.utils.sheet_add_aoa(b.Sheets[name],[rows[2]],{origin:-1});
   const renamed=name+(index%2?'1026':'20261026');b.Sheets[renamed]=b.Sheets[name];delete b.Sheets[name];b.SheetNames[b.SheetNames.indexOf(name)]=renamed;
   X.utils.sheet_add_aoa(b.Sheets[renamed],[['跟单员'],['手填其他人'],['手填其他人']],{origin:'R1'});set(i,'oa','申请人',3,'OA申请人');
-  const before=JSON.stringify(i),r=C.build(i);assert.equal(r.normalHeaders[1],'跟单员');assert.equal(r.normalRows.length,1);assert.equal(r.normalRows[0][1].v,person);assert.equal(r.normalRows[0][8].v,100);assert.equal(JSON.stringify(i),before);
+  const before=JSON.stringify(i),r=C.build(i);assert.equal(r.normalHeaders[1],'跟单员');assert.equal(r.normalRows.length,1);assert.equal(r.normalRows[0][1].v,person);assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('本次申请付款金额')].v,100);assert.equal(JSON.stringify(i),before);
  }
 });
 test('核对跟单员覆盖OA缺失和付款申请核对，保留来源列及谈判表原结构',()=>{

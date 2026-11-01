@@ -1,7 +1,7 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FundsCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','申请日期','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
+const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间','开票时间','开票金额','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','申请日期','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
 const ADDED_HEADERS=['提交付款申请单日期','提交时间汇总','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号','付款自然周'];
 const SUPPLEMENT_HEADERS=['对公付款0A流程号','付款主体','单据号【财务应付单】'];
 const NORMAL_HIDDEN_HEADERS=['单据号【财务应付单】','OA合同编号','合同总金额','是否对账'];
@@ -19,7 +19,7 @@ const clone=c=>c?{...c}:empty();
 const aliases={月份:'登记月份',所属月份:'登记月份',供应商:'供应商名称',供应商全称:'供应商名称',对公付款OA流程号:'对公付款0A流程号',付款OA号:'对公付款0A流程号',应付时间:'应付款时间',已付款金额:'已付金额',剩余付款金额:'剩余金额',合同号:'OA合同编号',合同金额:'合同总金额',本次申请付款金额:'申请付款金额',付款事由:'摘要'};
 const canonical=v=>aliases[norm(v)]||norm(v);
 const BATCH_HEADERS=['谈判明细','分批总金额','核对'];
-const relevant=new Set([...NORMAL_HEADERS,...ADDED_HEADERS,...BATCH_HEADERS,'付款分类','申请日期','备注','对接人','创建人','流程编号','流程编码','核对说明']);
+const relevant=new Set([...NORMAL_HEADERS.map(canonical),...ADDED_HEADERS,...BATCH_HEADERS,'付款分类','申请日期','备注','对接人','创建人','流程编号','流程编码','核对说明']);
 const entity=v=>({'浙江迈德斯特医疗器械科技有限公司':'迈德斯特','杭州国源养老科技有限公司':'国源'}[norm(v)]||norm(v));
 function money(c){
  if(c?.t==='e'||(c?.f&&(c.v==null||c.v==='')))return {invalid:true};
@@ -156,7 +156,7 @@ function build(inputs,decisions={}){
   issues.push({id,kind,message,source:rec.source,targetLabel:recordLabel(rec),choices,multiple,resolved:valid,selected:answer});return answer;
  }
  const headerRecord=t=>({source:{file:t.name,sheet:t.sheetName,row:t.headerRow+1},values:{}});
- for(const t of ledgerTables){const absent=NORMAL_HEADERS.filter(k=>k!=='跟单员').slice(0,17).filter(k=>k!=='是否谈判付款'&&t.map[k]===undefined);if(absent.length)issue('headers:'+t.sheetName,'missing-header','缺少字段，输出保留空白：'+absent.join('、'),headerRecord(t));}
+ for(const t of ledgerTables){const absent=NORMAL_HEADERS.map(canonical).filter(k=>k!=='跟单员').slice(0,17).filter(k=>k!=='是否谈判付款'&&t.map[k]===undefined);if(absent.length)issue('headers:'+t.sheetName,'missing-header','缺少字段，输出保留空白：'+absent.join('、'),headerRecord(t));}
  const absentFlow=['收款单位','付款金额',...FLOW_FIELDS].filter(k=>flow.map[k]===undefined);
  if(absentFlow.length)issue('headers:'+flow.sheetName,'missing-header','缺少字段，无法据此自动匹配或更新：'+absentFlow.join('、'),headerRecord(flow));
  const targetCols={...negotiated.map},negHeaders=[...negotiated.headers];
@@ -249,7 +249,7 @@ function build(inputs,decisions={}){
   if((declared&&declared!==expected)||(!declared&&retained&&retained!==expected)){const chosen=issue('settlement:'+target.record.id,'settlement','台账结清状态与申请金额减已付金额矛盾。',target.record,[{value:'keep',label:'保留原付款情况'},{value:'recalculate',label:'确认以明确金额重算并更新结清状态'}])[0];if(chosen!=='recalculate')return;}
   set(target,'已付金额',amountCell(p.cents));set(target,'是否结清',cell(expected));
   const r=target.index+2;
-  set(target,'剩余金额',{...amountCell(balance),f:X.utils.encode_col(NORMAL_HEADERS.indexOf('申请付款金额'))+r+'-'+X.utils.encode_col(NORMAL_HEADERS.indexOf('已付金额'))+r});
+  set(target,'剩余金额',{...amountCell(balance),f:X.utils.encode_col(NORMAL_HEADERS.indexOf('本次申请付款金额'))+r+'-'+X.utils.encode_col(NORMAL_HEADERS.indexOf('已付金额'))+r});
  }
  normalObjects.forEach(applyFinancial);
  const applicationsByKey=new Map();
@@ -613,7 +613,7 @@ function build(inputs,decisions={}){
   }
   return {t:typeof original.v==='number'?'n':'s',v:original.v??'',...(original.z?{z:original.z}:{})};
  }
- const normalRows=normalObjects.map(t=>NORMAL_HEADERS.map(h=>h==='是否谈判付款'?cell('否'):normalCell(t,h)));
+ const normalRows=normalObjects.map(t=>NORMAL_HEADERS.map(h=>h==='是否谈判付款'?cell('否'):normalCell(t,canonical(h))));
  const rows=[];for(let r=negotiated.headerRow+1;r<=negotiated.range.e.r;r++)rows.push(negHeaders.map((_,c)=>clone(updateMap.get(X.utils.encode_cell({r,c}))||negotiated.sheet[X.utils.encode_cell({r,c})])));
  const updates=[...updateMap].map(([address,c])=>({address,cell:c}));
  const columnOrder=negHeaders.map((_,i)=>i),dateColumn=targetCols['提交付款申请单日期'],summaryColumn=targetCols['提交时间汇总'];

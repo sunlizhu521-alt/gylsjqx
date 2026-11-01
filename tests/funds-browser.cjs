@@ -101,7 +101,7 @@ function compareNegotiated(before,after){
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理']);compareNegotiated(original.Sheets[selectedName],saved.Sheets.谈判付款);if(!real){assert.equal(saved.Sheets.谈判付款.L2.v,original.Sheets[selectedName].L2.v);assert.equal(saved.Sheets.谈判付款.L2.z,original.Sheets[selectedName].L2.z,'缺原OA号的日期及格式保留');assert.equal(saved.Sheets.谈判付款.L3.v,46329);assert.equal(X.SSF.format(saved.Sheets.谈判付款.L3.z,46329),'2026年11月3日');}
   const negotiatedHeaders=fields(saved.Sheets.谈判付款),previewColumnNames=await frame.locator('#negotiatedPreview th').allTextContents();assert.equal(Math.abs(negotiatedHeaders['提交付款申请单日期']-negotiatedHeaders['提交时间汇总']),1);for(const key of ['提交付款申请单日期','提交时间汇总','是否提交付款申请单','流程编号'])assert.equal(previewColumnNames.indexOf(key),negotiatedHeaders[key]);
   for(const sheet of Object.values(saved.Sheets)){assert.equal(sheet['!autofilter'].ref,sheet['!ref'],'三个sheet首行筛选覆盖全部列');for(const row of sheet['!rows']||[])if(row){assert(sheet===saved.Sheets.付款申请核对?row.hpt>=30:row.hpt===30);assert(!row.hidden);}assert((sheet['!cols']||[]).slice(0,X.utils.decode_range(sheet['!ref']).e.c+1).every((c,i)=>c.width>=12&&c.width<=(sheet===saved.Sheets.付款申请核对?255:X.utils.sheet_to_json(sheet,{header:1})[0][i]&&['流程编号','付款自然周','申请付款的日期','对公付款0A流程号','开票时间','OA合同编号'].includes(X.utils.sheet_to_json(sheet,{header:1})[0][i])?255:80)),'列宽自适应且有合理范围');}
-  for(const [col,min] of [[4,32],[5,22],[11,32]])assert(saved.Sheets.正常付款['!cols'][col].width>=min,'正常付款 E/F/L 必须充分加宽');
+  for(const [col,min] of [[NORMAL_HEADERS.indexOf('对公付款0A流程号'),32],[NORMAL_HEADERS.indexOf('开票时间'),22],[NORMAL_HEADERS.indexOf('OA合同编号'),32]])assert(saved.Sheets.正常付款['!cols'][col].width>=min,'正常付款 OA 号、开票时间和合同编号必须充分加宽');
   const normal=X.utils.sheet_to_json(saved.Sheets.正常付款,{header:1,defval:''});assert.deepEqual(normal[0],NORMAL_HEADERS);assert.deepEqual(normal.slice(1).map(row=>row[1]),coreResult.normalRows.map(row=>row[1].v));
   assert.deepEqual(normal.slice(1).map(row=>row[NORMAL_HEADERS.indexOf('提交时间汇总')]),previewSubmissions,'提交时间汇总的预览与导出一致');
   assert.deepEqual(normal.slice(1).map(row=>row[NORMAL_HEADERS.indexOf('申请付款的日期')]),previewWeeks,'申请付款的日期预览与导出一致');
@@ -241,7 +241,7 @@ function compareNegotiated(before,after){
     }else{
      const rows=X.utils.sheet_to_json(checked);assert.equal(rows.length,4);assert.equal(rows.some(row=>row['供应商名称']==='正常供应商1'),false);
      assert(rows.every(row=>row['对公付款0A流程号']&&row['是否对账']==='已对账'));
-     assert.equal(checked.P2.f,'I2-N2','排除原首行后，余额公式使用实际输出行');
+     assert.equal(checked.P2.f,'G2-N2','排除原首行后，余额公式使用实际输出行');
      assert.equal(X.utils.sheet_to_json(downloadedBook.Sheets.付款申请核对).some(row=>row['供应商名称']==='正常供应商1'&&!row['核对说明'].includes('付款进度核对：')),false);
      compareNegotiated(original.Sheets[selectedName],downloadedBook.Sheets.谈判付款);
     }
@@ -289,7 +289,7 @@ function compareNegotiated(before,after){
    const event=page.waitForEvent('download');await frame.locator('#download').click();const d=await event,checked=X.read(await fs.readFile(await d.path()),{type:'buffer',cellNF:true,cellStyles:true});
    assert.deepEqual(X.utils.sheet_to_json(checked.Sheets.正常付款).map(row=>row['供应商名称']),['正常供应商2','正常供应商3','正常供应商4','正常供应商5']);
    compareNegotiated(original.Sheets[selectedName],checked.Sheets.谈判付款);assert.equal(X.utils.sheet_to_json(checked.Sheets.谈判付款).some(row=>row['供应商']==='正常供应商1'),false,'不得自动新增谈判明细');
-   assert.equal(checked.Sheets.正常付款.P2.f,'I2-N2','排除记录后余额公式仍对应实际行');assert.deepEqual(errors,[]);
+   assert.equal(checked.Sheets.正常付款.P2.f,'G2-N2','排除记录后余额公式仍对应实际行');assert.deepEqual(errors,[]);
   }
   console.log(JSON.stringify({status:'PASS',real,initialPending,normalRows:normal.length-1,applicationReviewRows:applicationReview.length-1,output:out,metadata}));
  }finally{await browser.close();}
