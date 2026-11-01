@@ -57,6 +57,16 @@
     const subject = subjectName(g.subject).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
     return `${period}${subject}${money(g.total).replace(/,/g, '')}.${extension}`;
   }
+  function printDownloadName(groups) {
+    if (!groups?.length) throw new Error('没有可下载的付款申请单');
+    const dates = groups.map(g => {
+      const planned = date(g.info['计划付款日期']);
+      if (!planned) throw new Error(`${g.subject}：请填写计划付款日期并重新生成后下载`);
+      return planned;
+    }).sort();
+    const [, month, day] = dates[0].split('-');
+    return `${Number(month)}月${Number(day)}日付款申请单-打印.docx`;
+  }
 
   function bankSummary(value, supplier = '') {
     const raw = text(value);
@@ -184,7 +194,7 @@
     else if (!groups.size && !errors.length) errors.push('本次申请付款金额均为 0，没有需要生成的付款明细');
     return { errors, groups: [...groups.values()] };
   }
-  const api = { fields, required, infoFields, cents, money, upper, text, date, weekFriday, analyze, downloadName, subjectName, bankSummary, buildDirectory, resolveBank };
+  const api = { fields, required, infoFields, cents, money, upper, text, date, weekFriday, analyze, downloadName, printDownloadName, subjectName, bankSummary, buildDirectory, resolveBank };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PaymentCore = api;
 })(typeof window === 'undefined' ? globalThis : window);

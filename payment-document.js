@@ -249,6 +249,8 @@
       for (const side of ['top', 'left', 'bottom', 'right']) prop(margins, side, { w: Math.floor(result.pad * 20), type: 'dxa' });
       children(children(b.element, 'tblGrid')[0], 'gridCol').forEach((c, i) => c.setAttributeNS(W, 'w:w', Math.floor(b.grid[i] * 20)));
       for (const row of b.rows) {
+        // Template row margins must not override the padding used by measurement.
+        for (const exception of children(row.element, 'tblPrEx')) remove(exception, ['tblCellMar']);
         const rp = prop(row.element, 'trPr'); remove(rp, ['trHeight']);
         prop(rp, 'cantSplit');
         prop(rp, 'trHeight', { val: Math.ceil(row.contentHeight * 20), hRule: 'atLeast' });

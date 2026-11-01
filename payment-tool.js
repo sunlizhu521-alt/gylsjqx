@@ -334,8 +334,9 @@
         files.push({ docx: await D.docx(template, [layout]), pdf: await D.pdf([layout]) });
         if (revision !== state.revision) return;
       }
+      const combinedWord = groups.length === 1 ? files[0].docx : await D.docx(template, layouts);
       if (revision !== state.revision) return;
-      state.outputs = { files, layouts, groups };
+      state.outputs = { files, layouts, groups, combinedWord };
       showOutputs();
     } catch (e) { if (revision === state.revision) status(e.message, true); }
     finally {
@@ -350,9 +351,8 @@
       if (!state.outputs) await generate();
       const outputs = state.outputs;
       if (!outputs) return;
-      const downloads = outputs.groups.map((group, i) => ({ blob: outputs.files[i].docx, name: C.downloadName([group], 'docx') }));
-      downloads.forEach(file => downloadBlob(file.blob, file.name));
-      status(`已开始下载 ${downloads.length} 个 Word 文件，每个付款主体一个文件。`);
+      downloadBlob(outputs.combinedWord, C.printDownloadName(outputs.groups));
+      status(`已开始下载合并 Word，共 ${outputs.groups.length} 个付款主体，每个主体一页。`);
     } catch (e) { status(e.message, true); }
   }
   function showOutputs() {
@@ -381,7 +381,7 @@
       b.hidden = combined && groups.length > 1;
       b.disabled = b.hidden;
     });
-    status(`已生成 ${layouts.length} 页，每个付款主体一页；可一键下载全部 Word，或按付款主体分别下载 Word 和 PDF。`);
+    status(`已生成 ${layouts.length} 页，每个付款主体一页；可一键下载合并 Word，或按付款主体分别下载 Word 和 PDF。`);
   }
   window.PaymentTool = { mount };
 })();

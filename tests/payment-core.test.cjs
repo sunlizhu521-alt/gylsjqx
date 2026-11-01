@@ -174,6 +174,15 @@ test('download name uses planned date, short subject and exact numeric total',()
  assert.throws(()=>C.downloadName([group,group],'pdf'),/分别下载/);
  assert.equal(C.downloadName([{...group,subject:'乙/公司',total:1n}],'pdf'),'2026-09-25乙_公司0.01.pdf');
 });
+test('combined print Word uses the earliest planned month and day and validates every subject',()=>{
+ const group=date=>({subject:'甲公司',info:{计划付款日期:date}});
+ assert.equal(C.printDownloadName([group('2026-11-06')]),'11月6日付款申请单-打印.docx');
+ assert.equal(C.printDownloadName([group('2026-11-06'),group('2026-11-06')]),'11月6日付款申请单-打印.docx');
+ assert.equal(C.printDownloadName([group('2027-01-01'),group('2026-12-31')]),'12月31日付款申请单-打印.docx');
+ assert.throws(()=>C.printDownloadName([]),/没有可下载/);
+ assert.throws(()=>C.printDownloadName([group('2026-11-06'),group('')]),/计划付款日期/);
+ assert.throws(()=>C.printDownloadName([group('2026-02-30')]),/日期无效/);
+});
 
 test('exact zero payment rows are omitted; order, nonzero cents and source data are preserved',()=>{
  const rows=[row({本次申请付款金额:0,付款主体:'仅零主体'}),row({_row:3,本次申请付款金额:'0.00',经办人:'不同人'}),row({_row:4,本次申请付款金额:'0.01'}),row({_row:5,本次申请付款金额:'2.20'})];
