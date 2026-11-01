@@ -8,6 +8,7 @@ const {fixtures}=require('./funds-fixtures.cjs');
  ['谈判甲公司','迈德斯特','MDST-DGFK20261024010',300,0,'原摘要',300,'AP00030010','李奇','是','否',46349,'票到30天',300,'保留合并备注','','原人工沟通','1、11月25日－80.00\n2、12月25日－220.00',300,'一致',80,220],
  ['谈判乙公司','迈德斯特','MDST-DGFK20261024011',0,null,'保留空已付',0,'AP00030011','徐英','是','原结清信息',46349,'',null,'','','人工核对','','',null,0],
  ['手工状态冲突供应商','迈德斯特','',40,0,'保留矛盾状态',40,'','孙立柱','','是',46349,'',40,'','','','1、11月25日－40.00',40,'人工确认',40]]);
+ sheet.G1.v='OA-申请付款金额';
  sheet.N2={t:'n',v:300,f:'G2-E2'};sheet.S2={t:'n',v:300,f:'SUM(U2:AG2)'};sheet.T2={t:'s',v:'一致',f:'IF(ROUND(S2,2)=ROUND(G2,2),"一致","不一致")'};
  sheet.S3={t:'n',v:0,f:'SUM(U3:AG3)'};sheet.S4={t:'n',v:40,f:'SUM(U4:AG4)'};sheet.T3={t:'s',v:'一致',f:'IF(ROUND(S3,2)=ROUND(G3,2),"一致","不一致")'};
  for(const row of [2,3,4])sheet['L'+row].z='yyyy-mm-dd';
@@ -69,6 +70,8 @@ const {fixtures}=require('./funds-fixtures.cjs');
   }
   assert.deepEqual(s['!merges'],src['!merges']);
   if(!process.env.FUNDS_V19_FILE){
+   assert.equal(s.A1.v,'供应商');assert.equal(s.G1.v,'OA-申请付款金额');assert.equal(s.G2.v,300);assert.equal(s.G2.t,'n');
+   assert.equal(await frame.locator('#negotiatedPreview thead th').nth(6).innerText(),'OA-申请付款金额');
    for(const address of ['L2','L3']){assert.equal(s[address].v,46349);assert.equal(s[address].t,'n');assert.equal(X.SSF.format(s[address].z,s[address].v),'2026-11-23');}
    assert.equal(await frame.locator('#negotiatedPreview tbody tr').first().locator('td').nth(11).innerText(),'2026-11-23');
   }

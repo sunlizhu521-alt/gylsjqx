@@ -36,6 +36,28 @@ function set(input,role,header,row,value,sheet){const b=input[role].book,s=b.She
 const update=(r,address)=>r.negotiated.updates.find(u=>u.address===address)?.cell;
 const paidReviews=r=>legacyReviews(r).filter(row=>row[5].v.startsWith('已付金额同步核对：'));
 const financial=r=>r.negotiated.rows.map(row=>['已付金额','剩余付款金额','是否结清'].map(h=>row[r.negotiated.headers.indexOf(h)]?.v));
+test('谈判表兼容供应商及OA-申请付款金额，保留源表名称、数值和公式',()=>{
+ for(const amount of [100,0,'',100.01]){
+  const input=fixture(),sheet=input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]];
+  sheet.A1.v='供应商名称';sheet.G2={t:typeof amount==='number'?'n':'s',v:amount};
+  const original=C.build(input);
+  sheet.A1.v='供应商';sheet.G1.v='OA-申请付款金额';
+  const source=JSON.stringify(input),actual=C.build(input);
+  assert.deepEqual(actual.negotiated.rows,original.negotiated.rows);
+  assert.deepEqual(actual.negotiated.updates,original.negotiated.updates);
+  for(const key of ['normalRows','reviewRows','progressRows','highlights','stats'])assert.deepEqual(actual[key],original[key],key);
+  assert.equal(actual.negotiated.headers[0],'供应商');assert.equal(actual.negotiated.headers[6],'OA-申请付款金额');
+  assert.equal(actual.negotiated.rows[0][12].f,'G2');
+  assert.equal(JSON.stringify(input),source,'不修改上传源表');
+ }
+ const input=fixture(),sheet=input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]];
+ sheet.G1.v=' ＯＡ－申请付款金额\n';assert.equal(C.build(input).negotiated.rows.length,1);
+});
+test('新旧申请金额表头同时出现仍提示重复字段，禁止静默选列',()=>{
+ const input=fixture(),sheet=input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]];
+ sheet.N1={t:'s',v:'OA-申请付款金额'};sheet.N2={t:'n',v:200};sheet['!ref']='A1:N2';
+ assert.throws(()=>C.build(input),/字段“申请付款金额”重复/);
+});
 test('正常付款七个常用字段相邻，改名后金额日期与公式仍取同一来源',()=>{
  const i=fixture(),r=C.build(i),expected=['跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间'];
  assert.deepEqual(r.normalHeaders.slice(1,8),expected);assert.equal(r.normalHeaders.length,27);assert.equal(r.normalHeaders[0],'登记月份');assert.deepEqual(r.normalHeaders.slice(8,10),['开票时间','开票金额']);
