@@ -19,7 +19,7 @@ const clone=c=>c?{...c}:empty();
 const aliases={月份:'登记月份',所属月份:'登记月份',供应商:'供应商名称',供应商全称:'供应商名称',对公付款OA流程号:'对公付款0A流程号',付款OA号:'对公付款0A流程号',应付时间:'应付款时间',已付款金额:'已付金额',剩余付款金额:'剩余金额',合同号:'OA合同编号',合同金额:'合同总金额',本次申请付款金额:'申请付款金额',付款事由:'摘要'};
 const canonical=v=>aliases[norm(v)]||norm(v);
 const BATCH_HEADERS=['谈判明细','分批总金额','核对'];
-const relevant=new Set([...NORMAL_HEADERS,...ADDED_HEADERS,...BATCH_HEADERS,'付款分类','申请日期','备注','对接人','创建人','流程编号','流程编码']);
+const relevant=new Set([...NORMAL_HEADERS,...ADDED_HEADERS,...BATCH_HEADERS,'付款分类','申请日期','备注','对接人','创建人','流程编号','流程编码','核对说明']);
 const entity=v=>({'浙江迈德斯特医疗器械科技有限公司':'迈德斯特','杭州国源养老科技有限公司':'国源'}[norm(v)]||norm(v));
 function money(c){
  if(c?.t==='e'||(c?.f&&(c.v==null||c.v==='')))return {invalid:true};
@@ -680,7 +680,7 @@ function build(inputs,decisions={}){
    else if(ids.length===1)paymentStatus=status==='归档'?'已付款':'未付款';
   }
   for(const h of FLOW_FIELDS)values[h]=cell(flowValues[h].join('\n'));
-  values['是否已付款']=cell(paymentStatus);
+  values['是否已付款']=cell(usable(application.values['核对说明'])&&norm(value(application,'核对说明')).includes('重新申请')?'重新申请':paymentStatus);
   if(notes.length){const source=application.source;reviewRows.push([cell(type||'待核对'),values['供应商名称'],values['付款主体'],values['申请付款金额'],cell('已提交'),cell('付款进度核对：'+(sourceText(reference)||'OA号空白')+'。\n需要处理：'+[...new Set(notes)].join('。\n')+'。'),cell(source.file),cell(source.sheet),cell(source.row),values['跟单员']]);}
   return PROGRESS_HEADERS.map(h=>values[h]);
  });

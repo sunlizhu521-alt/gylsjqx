@@ -49,6 +49,10 @@ const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
   if(process.env.QA_OUT){await fs.mkdir(process.env.QA_OUT,{recursive:true});await fs.writeFile(process.env.QA_OUT+'/progress.xlsx',bytes);await frame.locator('#progressPreviewSection').scrollIntoViewIfNeeded();await frame.locator('#progressPreviewSection').screenshot({path:process.env.QA_OUT+'/progress.png'});await frame.locator('#progressPreview tbody tr').first().locator('td').last().scrollIntoViewIfNeeded();await frame.locator('#progressPreviewSection').screenshot({path:process.env.QA_OUT+'/progress-status.png'});}
   // A previous export may be reused as the negotiated source, but flow status must come from the latest OA upload.
   await upload('negotiated',bytes);set(input,'oa','流程状态',2,'未归档');set(input,'oa','流程状态',6,'未归档');await upload('oa');await analyze();const second=await download(2);await verify(second,['未付款','未付款','未付款','未付款','待核对','待核对','待核对']);
-  assert.deepEqual(errors,[]);console.log(JSON.stringify({base,rows:7,sheets:C.OUTPUT_SHEETS,preview:true,export:true,latestUpload:true,errors}));
+  // A per-application reapply note takes precedence over archived, unarchived and multi-flow states.
+  X.utils.sheet_add_aoa(input.applications.book.Sheets.付款申请汇总,[['核对说明'],['需重新申请'],['重新申请'],[''],[''],[''],[''],['重新申请']],{origin:'G1'});
+  set(input,'oa','流程状态',2,'归档');set(input,'oa','流程状态',6,'归档');await upload('oa');await upload('applications');await analyze();await verify(await download(3),['重新申请','重新申请','已付款','未付款','待核对','待核对','重新申请']);
+  for(const row of [2,3,8])set(input,'applications','核对说明',row,'');await upload('applications');await analyze();await verify(await download(4),['已付款','未付款','已付款','未付款','待核对','待核对','待核对']);
+  assert.deepEqual(errors,[]);console.log(JSON.stringify({base,rows:7,sheets:C.OUTPUT_SHEETS,preview:true,export:true,latestUpload:true,reapply:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

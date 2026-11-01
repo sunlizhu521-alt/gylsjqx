@@ -73,3 +73,16 @@ test('付款分类沿用台账谈判优先规则，应付时间不会误取台�
 test('多OA换行文本统一显示，最新上传OA状态变化不沿用旧状态',()=>{
  const i=fixture();set(i,'applications','流程编码',2,ID(1)+'\n'+ID(2));const p=records(C.build(i))[0];assert.equal(p['对公付款OA号'].v,ID(1)+'；'+ID(2));assert.equal(p['是否已付款'].v,'待核对');
 });
+
+test('核对说明含重新申请时优先显示重新申请，只影响该笔进度状态',()=>{
+ for(const note of ['重新申请','退回后重新申请付款','重新\n申请',{t:'s',v:'重新申请',f:'"重新申请"'}]){
+  const i=fixture(),before=C.build(i);X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['核对说明'],[note]],{origin:'G1'});
+  const r=C.build(i),p=records(r);assert.equal(p[0]['是否已付款'].v,'重新申请');assert.equal(p[0]['流程状态'].v,'归档');assert.equal(p[2]['是否已付款'].v,'已付款','同OA重复申请只按本行说明判断');
+  for(const key of ['normalRows','negotiated','highlights','applicationComments','issues','reviewRows'])assert.deepEqual(r[key],before[key]);
+  for(const code of ['',ID(99),ID(1)+' / '+ID(2)]){set(i,'applications','流程编码',2,code);assert.equal(records(C.build(i))[0]['是否已付款'].v,'重新申请');}
+ }
+ for(const note of ['',0,'核对通过',{t:'e',v:'重新申请'},{t:'s',f:'A1'}]){
+  const i=fixture();X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['核对说明'],[note]],{origin:'G1'});assert.equal(records(C.build(i))[0]['是否已付款'].v,'已付款');
+ }
+ const i=fixture();X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['核对说明'],[''],['重新申请']],{origin:'G1'});assert.equal(records(C.build(i))[1]['是否已付款'].v,'重新申请','未归档也优先采用重新申请');
+});
