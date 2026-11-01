@@ -35,7 +35,7 @@
   function invalidate() {
     result = null; preparedBlob = null;
     for (const id of Object.keys(decisions)) delete decisions[id];
-    for (const id of ['results','negotiatedPreviewSection','normalPreviewSection','reviewPreviewSection']) $(id).hidden = true;
+    for (const id of ['results','negotiatedPreviewSection','normalPreviewSection','reviewPreviewSection','progressPreviewSection']) $(id).hidden = true;
     controls();
   }
   function valueText(cell, date1904=false) {
@@ -48,7 +48,7 @@
   function preview(id, headers, rows, date1904=false) {
     const table = document.createElement('table'), head = table.createTHead().insertRow(), body = table.createTBody();
     const appliedRows = new Set(result?.highlights?.normalRows || []), appliedCells = new Set(result?.highlights?.negotiatedCells || []);
-    const singleLineHeaders=['流程编号','付款自然周','申请付款的日期',...(id==='normalPreview'?['对公付款0A流程号','开票时间','OA合同编号']:[])];
+    const singleLineHeaders=['流程编号','付款自然周','申请付款的日期',...(id==='progressPreview'?['对公付款OA号','申请日期','应付时间']:[]),...(id==='normalPreview'?['对公付款0A流程号','开票时间','OA合同编号']:[])];
     const hiddenColumns=headers.map(title=>id==='normalPreview'&&FundsCore.NORMAL_HIDDEN_HEADERS.includes(title));
     const flowColumn=headers.map(title=>singleLineHeaders.includes(String(title).normalize('NFKC').replace(/\s+/g,'')));
     for (const [i,title] of headers.entries()) { const th = document.createElement('th'); th.textContent = title;th.hidden=hiddenColumns[i];if(flowColumn[i])th.className='flow-code'; head.append(th); }
@@ -57,6 +57,7 @@
       for (let i=0;i<headers.length;i++){
         const td=tr.insertCell(),text=valueText(row[i],date1904);td.hidden=hiddenColumns[i];td.textContent=flowColumn[i]?text.replace(/\r\n|[\r\n]/g,'；'):text;if(flowColumn[i])td.className='flow-code';if(headers[i]==='谈判明细')td.className='batch-detail';if(id==='reviewPreview'&&headers[i]==='核对说明')td.className='review-detail';
         const applied=id==='normalPreview'?appliedRows.has(r+2):id==='negotiatedPreview'&&appliedCells.has(XLSX.utils.encode_cell({r:r+result.negotiated.headerRow+1,c:result.negotiated.columnOrder[i]}));
+        if(id==='progressPreview'&&headers[i]==='是否已付款'&&row[i]?.v==='已付款'){td.classList.add('funds-applied');td.title='OA流程状态：归档';}
         if(applied){td.classList.add('funds-applied');td.title=id==='negotiatedPreview'?(result.applicationComments?.[XLSX.utils.encode_cell({r:r+result.negotiated.headerRow+1,c:result.negotiated.columnOrder[i]})]||'已匹配本次付款申请'):'已匹配本次付款申请';}
       }
     }
@@ -98,13 +99,15 @@
       result = FundsCore.build(source,decisions);
       $('results').hidden = false;
       $('pendingCount').textContent = pending();
-      $('stats').textContent = `谈判付款 ${result.stats.negotiatedRows} 条；正常付款 ${result.normalRows.length} 条；流程编号已填写 ${result.stats.oaMatched} 条；付款申请核对表 ${result.reviewRows.length} 条；待处理 ${pending()} 项。`;
+      $('stats').textContent = `谈判付款 ${result.stats.negotiatedRows} 条；正常付款 ${result.normalRows.length} 条；流程编号已填写 ${result.stats.oaMatched} 条；付款申请核对表 ${result.reviewRows.length} 条；付款进度 ${result.progressRows.length} 条；待处理 ${pending()} 项。`;
       $('classificationSummary').textContent = `资金台账 ${result.stats.ledgerRows} 条：${result.stats.negotiatedLedgerRows} 条按台账标记、付款申请分类或谈判表识别为谈判付款，${result.normalRows.length} 条正常付款，${result.stats.excludedNormalRows} 条无对公付款 OA 号未纳入正常付款，${result.stats.unclassifiedLedgerRows} 条暂未分类。`;
       showIssues();
       preview('normalPreview',result.normalHeaders,result.normalRows);
       const order=result.negotiated.columnOrder,negotiatedHeaders=order.map(c=>result.negotiated.headers[c]);
       preview('negotiatedPreview',negotiatedHeaders,result.negotiated.rows.map(row=>order.map(c=>row[c])),Boolean(inputs.negotiated.book.Workbook?.WBProps?.date1904));
       preview('reviewPreview',result.reviewHeaders,result.reviewRows.map(row=>row.map((cell,i)=>result.reviewHeaders[i]==='核对说明'?{...cell,v:FundsCore.formatReviewText(cell.v)}:cell)));
+      preview('progressPreview',result.progressHeaders,result.progressRows);
+      $('progressPreviewSection').hidden = false;
       $('negotiatedPreviewSection').hidden = false; $('normalPreviewSection').hidden = false; $('reviewPreviewSection').hidden = false;
       $('status').textContent = pending() ? `已完成整理，请处理下方 ${pending()} 项核对。` : '核对已完成，正在验证导出结果…';
       if (!pending()) {
@@ -112,7 +115,12 @@
         const blob = await FundsExport(inputs.negotiated.bytes,result);
         if (FundsExport.lastWarnings?.length) throw Error('以下公式无法完成结果校验，请调整源公式后重新上传：'+FundsExport.lastWarnings.join('；'));
         const saved = XLSX.read(await blob.arrayBuffer(),{type:'array',cellNF:true});
-        if (saved.SheetNames.join('|') !== '谈判付款|正常付款|付款申请核对') throw Error('导出工作表检查未通过');
+        if (saved.SheetNames.join('|') !== FundsCore.OUTPUT_SHEETS.join('|')) throw Error('导出工作表检查未通过');
+        const progress=saved.Sheets['付款进度整理'],progressRange=XLSX.utils.decode_range(progress['!ref']);
+        if(progressRange.e.c!==result.progressHeaders.length-1||result.progressHeaders.some((h,c)=>progress[XLSX.utils.encode_cell({r:0,c})]?.v!==h))throw Error('付款进度表头检查未通过');
+        const progressRows=result.progressRows.map((_,r)=>result.progressHeaders.map((_,c)=>progress[XLSX.utils.encode_cell({r:r+1,c})]));
+        if(progressRange.e.r!==result.progressRows.length)throw Error('付款进度记录数量检查未通过');
+        preview('progressPreview',result.progressHeaders,progressRows,Boolean(saved.Workbook?.WBProps?.date1904));
         const sheet = saved.Sheets['谈判付款'];
         const rows = result.negotiated.rows.map((_,index)=>result.negotiated.headers.map((_,col)=>sheet[XLSX.utils.encode_cell({r:index+result.negotiated.headerRow+1,c:col})]));
         preview('negotiatedPreview',negotiatedHeaders,rows,Boolean(saved.Workbook?.WBProps?.date1904));
@@ -121,7 +129,7 @@
       }
     } catch (e) {
       result = null; $('results').hidden = true;
-      for (const id of ['normalPreviewSection','negotiatedPreviewSection','reviewPreviewSection']) $(id).hidden = true;
+      for (const id of ['normalPreviewSection','negotiatedPreviewSection','reviewPreviewSection','progressPreviewSection']) $(id).hidden = true;
       $('status').textContent = (review?'核对失败：':'整理失败：') + e.message;
     }
     busy = false; controls();
@@ -162,7 +170,7 @@
   $('onlyPending').addEventListener('change',()=>{if(result)showIssues();});
   $('download').addEventListener('click',async()=>{
     if (busy || !result || !preparedBlob || pending()) return;
-    busy = true; controls(); $('status').textContent = '正在生成三张工作表，请稍候…';
+    busy = true; controls(); $('status').textContent = '正在生成四张工作表，请稍候…';
     let url;
     try {
       const blob = preparedBlob;

@@ -82,7 +82,7 @@ test('重复申请的无批提醒只保留一次，正常付款按真实输出�
 test('几十笔不匹配申请每笔单独核对，保持短提示且不罗列无关日期',()=>{
  const i=fixture(Array(20).fill(9999),Array.from({length:40},(_,n)=>n+1)),r=C.build(i),lines=reviews(r);assert.equal(lines.length,40);assert.equal(r.stats.pending,0);assert.deepEqual(r.highlights.negotiatedCells,[]);
  for(const line of lines){assert.match(line[5].v,/候选日期：无金额相等的批次/);assert.doesNotMatch(line[5].v,/2026年11月/);assert(line[5].v.length<350);assert.equal((line[5].v.match(/申请来源：/g)||[]).length,1);assert.match(line[5].v,/需要处理/);}
- const firstHighlight=r.reviewRows.findIndex(row=>row[5].v.startsWith('申请标红核对：'));assert(r.reviewRows.slice(firstHighlight).every(row=>row[5].v.startsWith('申请标红核对：')));
+ const firstHighlight=r.reviewRows.findIndex(row=>row[5].v.startsWith('申请标红核对：'));assert(r.reviewRows.slice(firstHighlight).filter(row=>!row[5].v.startsWith('付款进度核对：')).every(row=>row[5].v.startsWith('申请标红核对：')));
 });
 test('保留的历史已提交状态不能冒充本次匹配，源数据前置标题不改变原单元格坐标',()=>{
  const i=fixture();sheet(i,'oa').B3={t:'s',v:'另一个供应商'};const r=C.build(i);assert.equal(r.normalRows[0][r.normalHeaders.indexOf('是否提交付款申请单')].v,'已提交');assert.deepEqual(r.highlights.normalRows,[]);

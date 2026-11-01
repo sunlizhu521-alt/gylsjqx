@@ -6,6 +6,8 @@ const ADDED_HEADERS=['提交付款申请单日期','提交时间汇总','是否�
 const SUPPLEMENT_HEADERS=['对公付款0A流程号','付款主体','单据号【财务应付单】'];
 const NORMAL_HIDDEN_HEADERS=['单据号【财务应付单】','OA合同编号','合同总金额','是否对账'];
 const REVIEW_HEADERS=['付款类别','供应商名称','付款主体','申请付款金额','是否提交付款申请单','核对说明','来源文件','来源工作表','来源行号','跟单员'];
+const PROGRESS_HEADERS=['申请日期','跟单员','供应商名称','付款主体','对公付款OA号','申请付款金额','应付时间','当前节点','未操作者','流程状态','申请人','是否已付款'];
+const OUTPUT_SHEETS=['谈判付款','正常付款','付款申请核对','付款进度整理'];
 const FLOW_FIELDS=['当前节点','未操作者','流程状态','申请人'];
 const OA_FIELDS=['流程编号','收款单位','付款金额',...FLOW_FIELDS];
 const DATE_FORMAT='yyyy"年"m"月"d"日"';
@@ -617,7 +619,72 @@ function build(inputs,decisions={}){
  const columnOrder=negHeaders.map((_,i)=>i),dateColumn=targetCols['提交付款申请单日期'],summaryColumn=targetCols['提交时间汇总'];
  if(dateColumn!==undefined&&summaryColumn!==undefined&&Math.abs(dateColumn-summaryColumn)!==1){columnOrder.splice(summaryColumn,1);columnOrder.splice(columnOrder.indexOf(dateColumn)+1,0,summaryColumn);}
  reviewRows.push(...highlightReviews);
- return {normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,highlights:{negotiatedCells:[...highlightedNegotiated],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
+ // Progress is application-grained: never deduplicate it or infer paid amounts from workflow status.
+ const progressFlows=new Map();
+ for(const r of flow.records)if(r.values['流程编号']?.t!=='e'){const id=flowId(r);if(!progressFlows.has(id))progressFlows.set(id,[]);progressFlows.get(id).push(r);}
+ const sourcePosition=r=>r.source.file+' / '+r.source.sheet+' 第 '+r.source.row+' 行';
+ const sourceText=c=>c?.t==='e'?c.w||'Excel错误':c?.f&&(c.v==null||c.v==='')?'公式结果不可用':str(c?.v);
+ const progressRows=applications.records.map(application=>{
+  const notes=[],ids=applicationIds(application),info=classification(application),reference=application.values[applicationOAField];
+  const values=Object.fromEntries(PROGRESS_HEADERS.map(h=>[h,empty()]));
+  for(const h of ['供应商名称','付款主体']){values[h]=cell(sourceText(application.values[h]));if(!usable(application.values[h]))notes.push(h+'为空或异常，请核实申请汇总');}
+  values['对公付款OA号']={...cell(sourceText(reference).replace(/\r\n|[\r\n]/g,'；')),z:'@'};
+  const amount=money(application.values['申请付款金额']);
+  values['申请付款金额']=amount.cents===undefined?cell(sourceText(application.values['申请付款金额'])):amountCell(amount.cents);
+  if(amount.cents===undefined||amount.cents<0n)notes.push('申请付款金额为空或异常，请核实本次申请付款金额');
+  function readDate(record,header,output){
+   const raw=record.values[header],parsed=date(raw,record.date1904);
+   if(parsed.invalid||parsed.v===''||raw?.t==='e'||(raw?.f&&(raw.v==null||raw.v===''))){notes.push(output+'为空或无法识别，请核实 '+sourcePosition(record));return cell(sourceText(raw));}
+   return parsed;
+  }
+  values['申请日期']=readDate(application,'申请日期','申请日期');
+  function locate(records,label){
+   let matches=info.name?records.filter(r=>classification(r).name===info.name&&compatible(application,r,'付款主体')&&r.values['对公付款0A流程号']?.t!=='e'):[];
+   if(ids.length)matches=matches.filter(r=>ids.length===1&&oas(r).length===1&&oas(r)[0]===ids[0]);
+   else matches=matches.filter(r=>info.key&&classification(r).key===info.key);
+   if(matches.length>1&&info.cents!==undefined){const exact=matches.filter(r=>classification(r).cents===info.cents);if(exact.length)matches=exact;}
+   if(matches.length===1)return matches[0];
+   notes.push(label+(matches.length?'对应多笔记录（'+matches.slice(0,4).map(sourcePosition).join('；')+(matches.length>4?'；共 '+matches.length+' 笔':'')+'），请确认唯一来源':'未找到唯一对应记录，请核对 OA号、供应商、付款主体及金额'));
+   return null;
+  }
+  const ledgerMatch=locate(ledger,'跟单员/资金台账');
+  if(ledgerMatch)values['跟单员']=cell(ledgerMatch.owner);
+  let type=applicationTypes.get(application),dueRecord;
+  if(applications.map['付款分类']===undefined){
+   const negotiatedMatch=negotiatedObjects.some(t=>info.key&&classification(t.record).key===info.key||ids.length===1&&oas(t.record).includes(ids[0])&&classification(t.record).name===info.name&&compatible(application,t.record,'付款主体'));
+   type=negotiatedMatch||norm(value(ledgerMatch||{values:{}},'是否谈判付款'))==='是'?'谈判付款':ledgerMatch?'正常付款':'';
+  }
+  if(type==='正常付款'&&ledgerMatch&&(norm(value(ledgerMatch,'是否谈判付款'))==='是'||isApplicationNegotiated(ledgerMatch)||negotiatedKeys.has(classification(ledgerMatch).key))){
+   type='谈判付款';notes.push('申请分类与现有款项分类不同，应付时间按谈判表读取，请核实付款分类');
+  }
+  if(type==='谈判付款')dueRecord=locate(negotiatedObjects.map(t=>t.record),'应付时间/谈判付款');
+  else if(type==='正常付款')dueRecord=ledgerMatch;
+  else notes.push('付款分类未确认，无法确定应付时间来源，请核实申请汇总付款分类');
+  if(dueRecord)values['应付时间']=readDate(dueRecord,'应付款时间','应付时间');
+  else if(type==='正常付款')notes.push('应付时间未填充，请核实资金台账对应记录');
+  const flowValues=Object.fromEntries(FLOW_FIELDS.map(h=>[h,[]]));let paymentStatus='待核对';
+  if(!ids.length)notes.push('对公付款OA号为空或无法识别，请补充申请汇总流程编码');
+  if(ids.length>1)notes.push('一笔申请含多个 OA号，请核实各流程付款进度及金额归属');
+  for(const id of ids){
+   const matches=progressFlows.get(id)||[],prefix=ids.length>1?id+'：':'';
+   const versions=[...new Map(matches.map(r=>[JSON.stringify(FLOW_FIELDS.map(h=>[norm(sourceText(r.values[h])),r.values[h]?.t==='e'||!!(r.values[h]?.f&&(r.values[h].v==null||r.values[h].v===''))])),r])).values()];
+   if(versions.length!==1){
+    notes.push(versions.length?'流程 '+id+' 的进度信息冲突，请核实 '+matches.slice(0,4).map(sourcePosition).join('；'):'OA流程表未找到 '+id+'，请核实编号或重新导出完整流程表（'+flow.name+' / '+flow.sheetName+'）');
+    if(ids.length>1)for(const h of FLOW_FIELDS)flowValues[h].push(prefix+'待核对');
+    continue;
+   }
+   const matched=versions[0],invalid=FLOW_FIELDS.filter(h=>matched.values[h]?.t==='e'||(matched.values[h]?.f&&(matched.values[h].v==null||matched.values[h].v==='')));
+   for(const h of FLOW_FIELDS)flowValues[h].push(prefix+sourceText(matched.values[h]));
+   const status=norm(value(matched,'流程状态'));
+   if(invalid.length||!['归档','未归档'].includes(status))notes.push('流程 '+id+' 的'+(invalid.length?invalid.join('、'):'流程状态')+'为空或异常，请核实 '+sourcePosition(matched));
+   else if(ids.length===1)paymentStatus=status==='归档'?'已付款':'未付款';
+  }
+  for(const h of FLOW_FIELDS)values[h]=cell(flowValues[h].join('\n'));
+  values['是否已付款']=cell(paymentStatus);
+  if(notes.length){const source=application.source;reviewRows.push([cell(type||'待核对'),values['供应商名称'],values['付款主体'],values['申请付款金额'],cell('已提交'),cell('付款进度核对：'+(sourceText(reference)||'OA号空白')+'。\n需要处理：'+[...new Set(notes)].join('。\n')+'。'),cell(source.file),cell(source.sheet),cell(source.row),values['跟单员']]);}
+  return PROGRESS_HEADERS.map(h=>values[h]);
+ });
+ return {progressHeaders:[...PROGRESS_HEADERS],progressRows,normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,highlights:{negotiatedCells:[...highlightedNegotiated],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
 }
-return {PEOPLE,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText};
+return {PEOPLE,PROGRESS_HEADERS,OUTPUT_SHEETS,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText};
 });

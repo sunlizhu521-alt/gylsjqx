@@ -1,0 +1,75 @@
+const test=require('node:test'),assert=require('node:assert/strict'),X=require('../vendor/xlsx.full.min.js'),C=require('../funds-core.js');
+const {fixture,set,append,ID,LH,AH,OH,book}=require('./funds-progress-fixtures.cjs');
+const records=r=>r.progressRows.map(row=>Object.fromEntries(r.progressHeaders.map((h,c)=>[h,row[c]])));
+const review=r=>r.reviewRows.filter(row=>row[5].v.startsWith('付款进度核对：'));
+const display=c=>c.t==='n'&&c.z?X.SSF.format(c.z,c.v):c.v;
+test('每笔申请一行、重复及未进入付款表申请保留，来源日期金额类型正确，归档仅改变新表状态',()=>{
+ const i=fixture(),before=JSON.stringify(i),r=C.build(i),p=records(r);
+ assert.equal(p.length,4);assert.deepEqual(p.map(row=>row['申请付款金额'].v),[40,200,40,0]);
+ assert.deepEqual(p.map(row=>row['是否已付款'].v),['已付款','未付款','已付款','未付款']);
+ assert.deepEqual(p.map(row=>row['跟单员'].v),['李奇','徐英','李奇','']);
+ assert.equal(display(p[0]['应付时间']),'2026年11月6日');assert.equal(display(p[1]['应付时间']),'2026年11月9日');
+ assert.equal(display(p[0]['申请日期']),'2026年11月1日');assert.equal(p[0]['申请日期'].t,'n');assert.equal(p[3]['申请付款金额'].t,'n');assert.equal(p[0]['对公付款OA号'].t,'s');
+ assert.equal(p[0]['付款主体'].v,'浙江迈德斯特医疗器械科技有限公司');assert.equal(p[0]['申请人'].v,'OA申请人');
+ assert.equal(r.stats.pending,0);assert.equal(review(r).length,1);assert.match(review(r)[0][5].v,/跟单员.*资金台账/);assert.equal(review(r)[0][8].v,5);
+ assert.deepEqual(r.highlights.negotiatedCells,['M2']);assert.equal(r.negotiated.rows[0][4].v,0);assert.equal(r.negotiated.rows[0][5].f,'D2-E2');assert.equal(JSON.stringify(i),before);
+});
+test('分批申请优先编号名称主体、候选多笔才用金额区分，不按同名猜测',()=>{
+ const i=fixture(),source=i.ledger.book.Sheets['对账明细-李奇'],original=X.utils.sheet_to_json(source,{header:1})[1];
+ append(i,'ledger',original.map((v,c)=>c===7?40:v));let p=records(C.build(i));assert.equal(p[0]['跟单员'].v,'李奇');
+ append(i,'ledger',original.map((v,c)=>c===7?40:v),'对账明细-操思敏');p=records(C.build(i));assert.equal(p[0]['跟单员'].v,'');
+ set(i,'applications','付款主体',2,'国源');p=records(C.build(i));assert.equal(p[0]['跟单员'].v,'');assert.equal(p[0]['应付时间'].v,'');
+ set(i,'applications','供应商全称',3,'另一个供应商');assert.equal(records(C.build(i))[1]['跟单员'].v,'');
+});
+test('没有OA按名称金额匹配来源，错误OA不降级名称匹配，缺失流程一律待核对',()=>{
+ for(const code of ['',ID(99),'未提交OA']){
+  const i=fixture();set(i,'applications','流程编码',3,code);const r=C.build(i),p=records(r)[1];
+  assert.equal(p['是否已付款'].v,'待核对');assert.equal(p['跟单员'].v,code===ID(99)?'':'徐英');assert.equal(p['对公付款OA号'].v,code);
+  assert(review(r).some(row=>row[8].v===3));assert.equal(r.stats.pending,0);
+ }
+});
+test('OA同号信息一致可复用，信息冲突不选第一行；多个OA逐号列出且不拆金额',()=>{
+ const i=fixture();append(i,'oa',[ID(1),'合成供应商1',100,'另一节点','合成审核人','归档','OA申请人']);
+ let r=C.build(i),p=records(r)[0];assert.equal(p['是否已付款'].v,'待核对');assert.equal(p['当前节点'].v,'');assert.match(review(r)[0][5].v,/进度信息冲突.*Sheet0 第/);
+ const j=fixture();set(j,'applications','流程编码',2,ID(1)+' / '+ID(2));r=C.build(j);p=records(r)[0];
+ assert.equal(p['是否已付款'].v,'待核对');assert.equal(p['申请付款金额'].v,40);assert.equal(r.progressRows.length,4);assert.match(p['流程状态'].v,new RegExp(ID(1)+'：归档.*'+ID(2)+'：未归档','s'));assert.equal(p['跟单员'].v,'');
+});
+test('只认归档与未归档，空白异常错误单元格及无缓存公式不会判成已付款',()=>{
+ for(const status of ['', '已归档', '归档中', '已撤销', {t:'e',v:23,w:'#REF!'}, {t:'s',f:'A1'}]){
+  const i=fixture();set(i,'oa','流程状态',3,status);const r=C.build(i);assert.equal(records(r)[1]['是否已付款'].v,'待核对');assert(review(r).some(row=>row[8].v===3));
+ }
+ const i=fixture();set(i,'oa','当前节点',3,{t:'e',v:23});assert.equal(records(C.build(i))[1]['是否已付款'].v,'待核对');
+});
+test('空白、零值、金额异常、日期异常及1904日期分别保留，不隐式变零',()=>{
+ for(const value of ['',0,'0.001','异常',-1,{t:'e',v:23,w:'#REF!'}]){
+  const i=fixture();set(i,'applications','本次申请付款金额',5,value);const r=C.build(i),c=records(r)[3]['申请付款金额'];
+  assert.equal(c.v,typeof value==='object'?'#REF!':value);assert.equal(c.t,typeof value==='number'?'n':'s');assert.equal(r.progressRows.length,4);
+ }
+ const i=fixture();set(i,'applications','申请日期',3,'日期未知');let r=C.build(i);assert.equal(records(r)[1]['申请日期'].v,'日期未知');assert.match(review(r).find(row=>row[8].v===3)[5].v,/申请日期为空或无法识别/);
+ i.applications.book.Workbook={WBProps:{date1904:true}};set(i,'applications','申请日期',3,46328-1462);r=C.build(i);assert.equal(display(records(r)[1]['申请日期']),'2026年11月2日');
+});
+test('旧合同号兼容；新流程编码列存在且为空时不回退；不依据OA申请人填跟单员',()=>{
+ const i=fixture(),s=i.applications.book.Sheets.付款申请汇总;s.D1.v='合同号';assert.equal(records(C.build(i))[0]['是否已付款'].v,'已付款');
+ X.utils.sheet_add_aoa(s,[['流程编码'],['']],{origin:'G1'});let p=records(C.build(i))[0];assert.equal(p['对公付款OA号'].v,'');assert.equal(p['是否已付款'].v,'待核对');assert.equal(p['跟单员'].v,'');
+});
+test('原三表金额、提交标红及公式与上一版一致，进度核对不增加下载阻断',()=>{
+ const i=fixture(),first=C.build(i),again=C.build(i);assert.deepEqual(again,first);
+ assert.deepEqual(first.normalRows.map(row=>row[C.NORMAL_HEADERS.indexOf('供应商名称')].v),['合成供应商2','合成供应商3']);
+ assert.equal(first.normalRows[0][C.NORMAL_HEADERS.indexOf('申请付款的日期')].v,'2026/11/02周');
+ assert.equal(first.applicationComments.M2,'申请日期（资金整理）：2026年11月1日；2026年11月3日');
+ set(i,'oa','流程状态',2,'未归档');set(i,'oa','流程状态',6,'未归档');assert.equal(records(C.build(i))[0]['是否已付款'].v,'未付款');
+ assert.deepEqual(C.build(i).highlights,first.highlights);
+});
+test('没有申请时仍输出固定12列表头与空进度表',()=>{
+ const i=fixture();i.applications.book=book('付款申请汇总',[AH]);const r=C.build(i);assert.deepEqual(r.progressRows,[]);assert.deepEqual(r.progressHeaders,['申请日期','跟单员','供应商名称','付款主体','对公付款OA号','申请付款金额','应付时间','当前节点','未操作者','流程状态','申请人','是否已付款']);
+ assert.equal(C.OUTPUT_SHEETS.length,4);
+});
+
+test('付款分类沿用台账谈判优先规则，应付时间不会误取台账日期',()=>{
+ const i=fixture();set(i,'applications','付款分类',2,'正常付款');const r=C.build(i),p=records(r)[0];
+ assert.equal(display(p['应付时间']),'2026年11月6日');assert.equal(r.normalRows.some(row=>row[2].v==='合成供应商1'),false);assert.match(review(r).find(row=>row[8].v===2)[5].v,/付款分类/);
+ const j=fixture();delete j.applications.book.Sheets.付款申请汇总.F1;assert.equal(display(records(C.build(j))[0]['应付时间']),'2026年11月6日');
+});
+test('多OA换行文本统一显示，最新上传OA状态变化不沿用旧状态',()=>{
+ const i=fixture();set(i,'applications','流程编码',2,ID(1)+'\n'+ID(2));const p=records(C.build(i))[0];assert.equal(p['对公付款OA号'].v,ID(1)+'；'+ID(2));assert.equal(p['是否已付款'].v,'待核对');
+});

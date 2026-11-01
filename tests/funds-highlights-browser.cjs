@@ -125,7 +125,7 @@ function fixture({ removeFirstApplication = false } = {}) {
     }
     async function checkExport(bytes, highlighted) {
       const book = X.read(bytes, { type: 'buffer', cellNF: true, cellStyles: true });
-      assert.deepEqual(book.SheetNames, ['谈判付款', '正常付款', '付款申请核对']);
+      assert.deepEqual(book.SheetNames, ['谈判付款', '正常付款', '付款申请核对', '付款进度整理']);
       const n = book.Sheets.谈判付款, normal = book.Sheets.正常付款;
       assert.equal(n.U2.c?.[0]?.t,highlighted?'申请日期（资金整理）：2026年10月27日':undefined);assert.equal(n.U3.c[0].t,'申请日期（资金整理）：2026年10月27日');assert.equal(n.V2.c,undefined);
       const actualDate=normal[X.utils.encode_cell({r:1,c:C.NORMAL_HEADERS.indexOf('申请日期')})];assert.equal(actualDate.t,'n');assert.equal(X.SSF.format(actualDate.z,actualDate.v),'2026年10月27日');

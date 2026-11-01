@@ -53,7 +53,7 @@ const {fixtures}=require('./funds-fixtures.cjs');
   assert(await frame.locator('th').evaluateAll(cells=>cells.every(c=>getComputedStyle(c).whiteSpace==='nowrap'&&c.scrollWidth<=c.clientWidth+1)));
   const downloadPromise=page.waitForEvent('download');await frame.locator('#download').click();const download=await downloadPromise;
   const output=await fs.readFile(await download.path()),saved=X.read(output,{cellStyles:true,cellNF:true}),s=saved.Sheets.谈判付款,src=source.Sheets.谈判付款;
-  assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对']);assert.equal(s['!ref'],'A1:AM'+(expected.negotiated.sourceRange.e.r+1));
+  assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理']);assert.equal(s['!ref'],'A1:AM'+(expected.negotiated.sourceRange.e.r+1));
   const reviewNotes=X.utils.sheet_to_json(saved.Sheets.付款申请核对).map(row=>row['核对说明']);
   assert.deepEqual(await frame.locator('#reviewPreview tbody tr td:nth-child(6)').allTextContents(),reviewNotes,'预览和下载核对说明一致');
   for(const note of reviewNotes.filter(text=>text.includes('申请标红核对：'))){assert.match(note,/需要处理：/);assert.match(note,/申请来源：/);assert.match(note,/本笔未标红/);}
@@ -97,8 +97,9 @@ const {fixtures}=require('./funds-fixtures.cjs');
    const event=page.waitForEvent('download');await frame.locator('#download').click();const next=await event,updated=X.read(await fs.readFile(await next.path()),{cellNF:true});
    for(const address of ['L2','L3'])assert.equal(updated.Sheets.谈判付款[address].v,46349);
    if(!process.env.FUNDS_CLASSIFICATION_QA){
-    assert.equal(updated.Sheets.正常付款.J2.v,46357);assert.equal(updated.Sheets.正常付款.J2.t,'n');assert.equal(updated.Sheets.正常付款.J2.z,Core.DATE_FORMAT);assert.equal(updated.Sheets.正常付款.Z2.v,'2026/11/23周');
-    assert.equal(await frame.locator('#normalPreview tbody tr').first().locator('td').nth(9).innerText(),'2026年12月1日');
+    const normal=updated.Sheets.正常付款,grid=X.utils.sheet_to_json(normal,{header:1}),r=grid.findIndex(row=>row[grid[0].indexOf('对公付款0A流程号')]==='MDST-DGFK20261024001');
+    assert(r>0);const due=normal[X.utils.encode_cell({r,c:grid[0].indexOf('应付款时间')})];assert.equal(due.v,46357);assert.equal(due.t,'n');assert.equal(due.z,Core.DATE_FORMAT);assert.equal(grid[r][grid[0].indexOf('申请付款的日期')],'2026/11/23周');
+    assert.equal(await frame.locator('#normalPreview tbody tr').filter({hasText:'正常供应商1'}).locator('td').nth(9).innerText(),'2026年12月1日');
    }
   }
   assert.deepEqual(errors,[]);await fs.writeFile('/private/tmp/funds-v19-browser-output.xlsx',output);

@@ -21,7 +21,7 @@ function assign(sheet,row,values){const headers=fields(sheet);for(const [key,val
   await frame.locator('#negotiatedSheet option').filter({hasText:data.sheetName}).first().waitFor({state:'attached'});await frame.locator('#negotiatedSheet').selectOption(data.sheetName);await frame.locator('#analyze:not([disabled])').click();await frame.locator('#download:not([disabled])').waitFor({timeout:60000});
   assert.equal(await frame.locator('#pendingCount').textContent(),'0');
   const event=page.waitForEvent('download');await frame.locator('#download').click();const download=await event,saved=X.read(await fs.readFile(await download.path()),{cellNF:true,cellStyles:true});
-  assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对']);
+  assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理']);
   const normal=saved.Sheets.正常付款,neg=saved.Sheets.谈判付款,review=saved.Sheets.付款申请核对,normalFields=fields(normal),negFields=fields(neg);
   for(const [sheetName,sheet,headers,expectedRows,expectedHeaders] of [['正常付款',normal,normalFields,result.normalRows,result.normalHeaders],['付款申请核对',review,fields(review),result.reviewRows,result.reviewHeaders]]){
    assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1})[0],expectedHeaders);
@@ -43,6 +43,6 @@ function assign(sheet,row,values){const headers=fields(sheet);for(const [key,val
   const before=input.negotiated.book.Sheets[data.sheetName];assert.deepEqual(neg['!merges'],before['!merges']);assert.equal(X.utils.decode_range(neg['!ref']).e.r,X.utils.decode_range(before['!ref']).e.r);
   for(const address of ['D2','E2','G2','K2','N2','Q2','O2']){assert.equal(neg[address].v,before[address].v,'原谈判内容保留 '+address);assert.equal(neg[address].f,before[address].f,'原谈判公式保留 '+address);}
   assert.equal(normal.P2.f,'I2-N2');assert.equal(normal.P2.v,100);assert.deepEqual(errors,[]);
-  console.log('PASS: negotiated and normal cross-supplier OA conflicts preserve original OA, flow and application fields; both identities, amounts, flow IDs and source rows appear in review; preview equals three-sheet download; negotiated records, merges and financial formulas preserved.');
+  console.log('PASS: negotiated and normal cross-supplier OA conflicts preserve original OA, flow and application fields; both identities, amounts, flow IDs and source rows appear in review; preview equals four-sheet download; negotiated records, merges and financial formulas preserved.');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1);});

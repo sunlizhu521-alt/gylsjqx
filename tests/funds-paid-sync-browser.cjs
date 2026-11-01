@@ -27,7 +27,7 @@ const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
   };
   const verify=async(output,paid)=>{
    const saved=X.read(output.bytes,{cellNF:true}),s=saved.Sheets.谈判付款,headers=X.utils.sheet_to_json(s,{header:1})[0];
-   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对']);
+   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理']);
    assert.equal(s.E2.v,paid);assert.equal(s.N2.v,300-paid);assert.equal(s.N2.f,"'谈判付款'!G2-'谈判付款'!E2");assert.equal(s.N3.f,"'谈判付款'!G3-'谈判付款'!E3");assert.equal(s.N3.v,0);assert.equal(s.K2.v,paid===300?'是':'否');
    assert.equal(s.E2.t,'n');assert.equal(s.E2.z,'#,##0.00');assert.equal(s.N2.z,'#,##0.00');
    assert.equal(s.Q2.f,'G2-P2');assert.equal(s.Q2.v,220);assert.equal(s.P2.v,80);assert.equal(s.G2.v,300);assert.equal(s.O2.v,'必须保留的人工备注');assert.deepEqual(s['!merges'],sheet['!merges']);
