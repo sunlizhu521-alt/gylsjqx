@@ -34,11 +34,33 @@ test('OA同号信息一致可复用，信息冲突不选第一行；多个OA逐�
  const j=fixture();set(j,'applications','流程编码',2,ID(1)+' / '+ID(2));r=C.build(j);p=records(r)[0];
  assert.equal(p['是否已付款'].v,'待核对');assert.equal(p['申请付款金额'].v,40);assert.equal(r.progressRows.length,4);assert.match(p['流程状态'].v,new RegExp(ID(1)+'：归档.*'+ID(2)+'：未归档','s'));assert.equal(p['跟单员'].v,'');
 });
-test('只认归档与未归档，空白异常错误单元格及无缓存公式不会判成已付款',()=>{
+test('非办理人执行节点按归档与未归档判断，空白异常错误单元格及无缓存公式不会判成已付款',()=>{
  for(const status of ['', '已归档', '归档中', '已撤销', {t:'e',v:23,w:'#REF!'}, {t:'s',f:'A1'}]){
   const i=fixture();set(i,'oa','流程状态',3,status);const r=C.build(i);assert.equal(records(r)[1]['是否已付款'].v,'待核对');assert(review(r).some(row=>row[8].v===3));
  }
  const i=fixture();set(i,'oa','当前节点',3,{t:'e',v:23});assert.equal(records(C.build(i))[1]['是否已付款'].v,'待核对');
+});
+test('当前节点为办理人执行时进度显示已付款，包括未归档或空白流程状态',()=>{
+ for(const status of ['未归档','归档','']){
+  const i=fixture(),before=C.build(i);set(i,'oa','当前节点',3,' 办理人执行\n');set(i,'oa','流程状态',3,status);
+  const source=JSON.stringify(i),r=C.build(i),p=records(r)[1];
+  assert.equal(p['是否已付款'].v,'已付款');assert.equal(p['流程状态'].v,status);
+  assert.deepEqual(r.highlights,before.highlights);assert.deepEqual(r.negotiated,before.negotiated);
+  for(const h of ['已付金额','剩余金额','是否结清'])assert.deepEqual(r.normalRows.map(row=>row[C.NORMAL_HEADERS.indexOf(h)]),before.normalRows.map(row=>row[C.NORMAL_HEADERS.indexOf(h)]));
+  assert.equal(JSON.stringify(i),source,'不修改输入台账或OA记录');
+ }
+ for(const node of ['', '财务审批','待办理人执行','办理人执行、财务审批']){
+  const i=fixture();set(i,'oa','当前节点',3,node);assert.equal(records(C.build(i))[1]['是否已付款'].v,'未付款');
+ }
+});
+test('办理人执行仍保留重新申请优先、OA冲突和异常字段待核对规则',()=>{
+ const i=fixture();set(i,'oa','当前节点',3,'办理人执行');X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['核对说明'],[''],['重新申请']],{origin:'G1'});
+ assert.equal(records(C.build(i))[1]['是否已付款'].v,'重新申请');
+ for(const status of [{t:'e',v:23,w:'#REF!'},{t:'s',f:'A1'}]){
+  const j=fixture();set(j,'oa','当前节点',3,'办理人执行');set(j,'oa','流程状态',3,status);assert.equal(records(C.build(j))[1]['是否已付款'].v,'待核对');
+ }
+ const conflict=fixture();set(conflict,'oa','当前节点',2,'办理人执行');assert.equal(records(C.build(conflict))[0]['是否已付款'].v,'待核对','同OA多个节点冲突不按一行判断');
+ const multi=fixture();set(multi,'oa','当前节点',3,'办理人执行');set(multi,'applications','流程编码',3,ID(1)+' / '+ID(2));assert.equal(records(C.build(multi))[1]['是否已付款'].v,'待核对');
 });
 test('空白、零值、金额异常、日期异常及1904日期分别保留，不隐式变零',()=>{
  for(const value of ['',0,'0.001','异常',-1,{t:'e',v:23,w:'#REF!'}]){

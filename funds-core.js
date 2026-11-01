@@ -675,9 +675,9 @@ function build(inputs,decisions={}){
    }
    const matched=versions[0],invalid=FLOW_FIELDS.filter(h=>matched.values[h]?.t==='e'||(matched.values[h]?.f&&(matched.values[h].v==null||matched.values[h].v==='')));
    for(const h of FLOW_FIELDS)flowValues[h].push(prefix+sourceText(matched.values[h]));
-   const status=norm(value(matched,'流程状态'));
-   if(invalid.length||!['归档','未归档'].includes(status))notes.push('流程 '+id+' 的'+(invalid.length?invalid.join('、'):'流程状态')+'为空或异常，请核实 '+sourcePosition(matched));
-   else if(ids.length===1)paymentStatus=status==='归档'?'已付款':'未付款';
+   const status=norm(value(matched,'流程状态')),executing=norm(value(matched,'当前节点'))==='办理人执行';
+   if(invalid.length||(!executing&&!['归档','未归档'].includes(status)))notes.push('流程 '+id+' 的'+(invalid.length?invalid.join('、'):'流程状态')+'为空或异常，请核实 '+sourcePosition(matched));
+   else if(ids.length===1)paymentStatus=executing||status==='归档'?'已付款':'未付款';
   }
   for(const h of FLOW_FIELDS)values[h]=cell(flowValues[h].join('\n'));
   values['是否已付款']=cell(usable(application.values['核对说明'])&&norm(value(application,'核对说明')).includes('重新申请')?'重新申请':paymentStatus);

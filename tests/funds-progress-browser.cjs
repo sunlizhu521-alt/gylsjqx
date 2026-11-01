@@ -56,6 +56,11 @@ const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
   X.utils.sheet_add_aoa(input.applications.book.Sheets.付款申请汇总,[['核对说明'],['需重新申请'],['重新申请'],[''],[''],[''],[''],['重新申请']],{origin:'G1'});
   set(input,'oa','流程状态',2,'归档');set(input,'oa','流程状态',6,'归档');await upload('oa');await upload('applications');await analyze();await verify(await download(3),['重新申请','重新申请','已付款','未付款','待核对','待核对','重新申请']);
   for(const row of [2,3,8])set(input,'applications','核对说明',row,'');await upload('applications');await analyze();await verify(await download(4),['已付款','未付款','已付款','未付款','待核对','待核对','待核对']);
+  for(const row of [2,3,6]){set(input,'oa','当前节点',row,'办理人执行');set(input,'oa','流程状态',row,'未归档');}
+  await upload('oa');await analyze();await verify(await download(5),['已付款','已付款','已付款','未付款','待核对','待核对','待核对']);
+  assert.equal(await frame.locator('#progressPreview tbody tr').nth(1).locator('td').nth(11).getAttribute('title'),'OA当前节点：办理人执行');
+  for(const row of [2,3,6])set(input,'oa','当前节点',row,'财务审批');
+  await upload('oa');await analyze();await verify(await download(6),['未付款','未付款','未付款','未付款','待核对','待核对','待核对']);
   assert.deepEqual(errors,[]);console.log(JSON.stringify({base,rows:7,sheets:C.OUTPUT_SHEETS,preview:true,export:true,latestUpload:true,reapply:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
