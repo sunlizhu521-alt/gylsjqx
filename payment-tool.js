@@ -85,7 +85,7 @@
       <p class="payment-hint">引用供应商名录时，“开户银行及账号”显示银行名称和卡号；未引用名录时整理原明细的单位和账号。账号空格保留，原始明细不改。</p>
       <div id="paymentStatus" role="status" aria-live="polite"></div>
       <div id="paymentGroups"></div>
-      <div class="payment-actions"><button id="paymentGenerate" class="primary-button" ${state.busy ? 'disabled' : ''}>${state.busy ? '正在排版…' : '核对并生成预览'}</button><button class="secondary-button" data-payment-download="docx" disabled>下载 Word</button><button class="secondary-button" data-payment-download="pdf" disabled>下载 PDF 打印版</button></div>
+      <div class="payment-actions"><button id="paymentGenerate" class="primary-button" ${state.busy ? 'disabled' : ''}>${state.busy ? '正在排版…' : '核对并生成预览'}</button><button id="paymentDownloadWord" class="secondary-button" ${state.busy ? 'disabled' : ''}>一键下载 Word</button><button class="secondary-button" data-payment-download="docx" disabled>下载 Word</button><button class="secondary-button" data-payment-download="pdf" disabled>下载 PDF 打印版</button></div>
       <p class="payment-hint">PDF 已按 85% 缩放排入纸张，打印请选择“实际大小 / 100%”。Word 可编辑，不同 Word/WPS 的字体替换可能影响分页；固定打印请使用 PDF。</p>
       <div id="paymentPages"></div>
     </div>`;
@@ -96,6 +96,7 @@
     root.querySelector('#paymentResetTemplate').addEventListener('click', () => uploadTemplate(null));
     root.querySelector('#paymentSheet').addEventListener('change', e => { invalidate(); state.sheet = e.target.value; analyzeSheet(); renderGroups(); });
     root.querySelector('#paymentGenerate').addEventListener('click', generate);
+    root.querySelector('#paymentDownloadWord').addEventListener('click', downloadAllWord);
     root.onclick = e => {
       const button = e.target.closest('[data-payment-download]');
       if (!button || button.disabled) return;
@@ -322,6 +323,7 @@
       }
       state.busy = true;
       const button = root.querySelector('#paymentGenerate'); button.disabled = true; button.textContent = '正在排版…';
+      root.querySelector('#paymentDownloadWord').disabled = true;
       status('正在测量内容并压缩到每主体一页…');
       const groups = a.groups.map(g => ({ ...g, info: { ...g.info } }));
       const template = state.template;
@@ -339,7 +341,19 @@
     finally {
       state.busy = false;
       const button = root.querySelector('#paymentGenerate'); if (button) { button.disabled = false; button.textContent = '核对并生成预览'; }
+      const download = root.querySelector('#paymentDownloadWord'); if (download) download.disabled = state.restoring;
     }
+  }
+  async function downloadAllWord() {
+    if (state.busy || state.restoring) return;
+    try {
+      if (!state.outputs) await generate();
+      const outputs = state.outputs;
+      if (!outputs) return;
+      const downloads = outputs.groups.map((group, i) => ({ blob: outputs.files[i].docx, name: C.downloadName([group], 'docx') }));
+      downloads.forEach(file => downloadBlob(file.blob, file.name));
+      status(`已开始下载 ${downloads.length} 个 Word 文件，每个付款主体一个文件。`);
+    } catch (e) { status(e.message, true); }
   }
   function showOutputs() {
     const { layouts, groups } = state.outputs;
@@ -367,7 +381,7 @@
       b.hidden = combined && groups.length > 1;
       b.disabled = b.hidden;
     });
-    status(`已生成 ${layouts.length} 页，每个付款主体一页；请按付款主体分别下载 Word 和 PDF。`);
+    status(`已生成 ${layouts.length} 页，每个付款主体一页；可一键下载全部 Word，或按付款主体分别下载 Word 和 PDF。`);
   }
   window.PaymentTool = { mount };
 })();

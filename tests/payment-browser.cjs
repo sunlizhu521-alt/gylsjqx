@@ -20,6 +20,7 @@ const base = (extra = {}) => ({
     await page.clock.setFixedTime(new Date('2026-11-02T02:00:00Z'));
     let expectedFriday = '2026-11-06';
     const errors = []; page.on('pageerror', e => errors.push(e.message));
+    const downloadLog = []; page.on('download', d => downloadLog.push(d.suggestedFilename()));
     await page.goto(process.env.QA_URL || 'http://127.0.0.1:8899/');
     assert.equal(await page.title(), '供应链数据清洗');
     assert.match(await page.locator('#toolTitle').innerText(), /资金整理/);
@@ -57,9 +58,26 @@ const base = (extra = {}) => ({
       if (name === 'synthetic-single') assert.equal(download.suggestedFilename(), `2026-11-06甲公司2205.00.${kind}`);
       const p = path.join(out, `${name}.${kind}`); await download.saveAs(p); return p;
     }
-    await upload([base({合同总金额:'',已付金额:'  ',票据状态:'未开票',应付时间:46328.5,付款分类:'加急 AP00027464（￥175714.10） AP00027463（￥7049.90） AP00027462（￥-89156.00）',备注:'原备注不输出',对接人:'张三'})], {keepDefault:true}); await generate();
-    assert.match(await page.locator('#paymentStatus').innerText(), /已生成 1 页/);
+    async function downloadAll(names) {
+      const downloads = []; let complete, timer;
+      const finished = new Promise(resolve => { complete = resolve; });
+      const collect = d => { downloads.push(d); if (downloads.length === names.length) complete(); };
+      page.on('download', collect);
+      try {
+        await page.locator('#paymentDownloadWord').click();
+        await Promise.race([finished, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Batch Word downloads missing')), 30000); })]);
+        assert.deepEqual(downloads.map(d => d.suggestedFilename()), names);
+        return await Promise.all(downloads.map(async d => {
+          const file = path.join(out, d.suggestedFilename()); await d.saveAs(file); return file;
+        }));
+      } finally { clearTimeout(timer); page.off('download', collect); }
+    }
+    assert.equal(await page.locator('#paymentGenerate + #paymentDownloadWord').count(), 1);
+    await upload([base({合同总金额:'',已付金额:'  ',票据状态:'未开票',应付时间:46328.5,付款分类:'加急 AP00027464（￥175714.10） AP00027463（￥7049.90） AP00027462（￥-89156.00）',备注:'原备注不输出',对接人:'张三'})], {keepDefault:true});
+    const direct = await downloadAll(['2026-11-06甲公司2205.00.docx']);
+    assert.match(await page.locator('#paymentStatus').innerText(), /已开始下载 1 个 Word/);
     const sample = await save('docx', 'synthetic-single'); await save('pdf', 'synthetic-single');
+    assert.deepEqual(await fs.readFile(direct[0]), await fs.readFile(sample), 'one-click and individual Word downloads use the same result');
     const docStats = await page.evaluate(async bytes => {
       const z = await JSZip.loadAsync(new Uint8Array(bytes));
       const d = new DOMParser().parseFromString(await z.file('word/document.xml').async('string'), 'application/xml');
@@ -88,13 +106,20 @@ const base = (extra = {}) => ({
     assert.equal(await page.locator('#embeddedTools iframe[data-tool="funds"]').isVisible(), true);
     await page.locator('[data-tool="payment"]').click();
     assert.equal(await page.locator('[data-field="计划付款日期"]').inputValue(), '2026-09-26');
+    const changed = await downloadAll(['2026-09-26甲公司2205.00.docx']);
+    const changedXml = await page.evaluate(async bytes => (await (await JSZip.loadAsync(new Uint8Array(bytes))).file('word/document.xml').async('string')), [...await fs.readFile(changed[0])]);
+    assert.ok(changedXml.includes('2026年09月26日'), 'one-click regenerates after editing and switching tools');
     await upload([base({应付时间:44866.5,付款分类:'正常付款',对接人:'张三',备注:'原备注不输出',合同总金额:0,已付金额:0})], {date1904:true});
     const detailCells = await page.locator('#paymentGroups tbody tr').first().locator('td').allTextContents();
     assert.equal(detailCells[4], '0'); assert.equal(detailCells[5], '0');
     assert.equal(detailCells[8], '货款，11月2日前付款'); assert.equal(detailCells[9], '正常付款-张三');
     await upload([base({应付时间:'日期不明确'})]);
     assert.match(await page.locator('#paymentGroups').innerText(), /应付时间.*请核对付款期限/);
-    await upload([base({ 本次申请付款金额: '' })]); await generate();
+    await upload([base({ 本次申请付款金额: '' })]);
+    const beforeInvalid = downloadLog.length;
+    await page.locator('#paymentDownloadWord').click();
+    assert.match(await page.locator('#paymentStatus').innerText(), /请先上传并修正付款明细/);
+    assert.equal(downloadLog.length, beforeInvalid, 'invalid input cannot download previous files');
     assert.match(await page.locator('#paymentGroups').innerText(), /第 2 行/);
     assert.equal(await page.locator('[data-payment-download="docx"]').isDisabled(), true);
     await upload([base({ 付款主体: '' })]);
@@ -209,6 +234,14 @@ const base = (extra = {}) => ({
       const file = await save('pdf', `stress-${i}`, i);
       assert.equal(await page.evaluate(async bytes => (await PDFLib.PDFDocument.load(new Uint8Array(bytes))).getPageCount(), [...await fs.readFile(file)]), 1);
     }
+    const batch = await downloadAll(['2026-09-25单笔主体2205.00.docx','2026-09-25多笔主体0.30.docx','2026-09-25短明细主体49.50.docx']);
+    for (const [i, file] of batch.entries()) assert.deepEqual(await fs.readFile(file), await fs.readFile(path.join(out, i ? `stress-${i}.docx` : 'stress.docx')));
+    await page.locator('[data-field="计划付款日期"]').nth(2).fill('');
+    const beforeMissingDate = downloadLog.length;
+    await page.locator('#paymentDownloadWord').click();
+    await page.waitForFunction(() => document.querySelector('#paymentStatus').textContent.includes('请填写计划付款日期'));
+    assert.equal(downloadLog.length, beforeMissingDate, 'validate every filename before starting any batch download');
+    await page.locator('[data-field="计划付款日期"]').nth(2).fill('2026-09-25'); await generate();
     const pageCount = await page.evaluate(async bytes => (await PDFLib.PDFDocument.load(new Uint8Array(bytes))).getPageCount(), [...await fs.readFile(pdfPath)]);
     assert.equal(pageCount, 1);
     await page.screenshot({ path: path.join(out, 'desktop.png'), fullPage: false });
