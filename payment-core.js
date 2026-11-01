@@ -131,6 +131,15 @@
     if (d.getUTCFullYear() !== +m[1] || d.getUTCMonth() !== +m[2] - 1 || d.getUTCDate() !== +m[3]) throw new Error('日期无效');
     return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
   }
+  function weekFriday(now = new Date()) {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(now).map(p => [p.type, p.value]));
+    const friday = new Date(Date.UTC(+parts.year, +parts.month - 1, +parts.day));
+    // Monday-Sunday is one week, so weekends use the Friday just passed.
+    friday.setUTCDate(friday.getUTCDate() + 4 - (friday.getUTCDay() + 6) % 7);
+    return friday.toISOString().slice(0, 10);
+  }
   function analyze(headers, records) {
     const errors = [], groups = new Map();
     const missing = required.filter(f => !headers.includes(f));
@@ -146,7 +155,15 @@
       if (!groups.has(subject)) groups.set(subject, { subject, rows: [], total: 0n, info: {}, choices: {}, checks: [] });
       const group = groups.get(subject);
       const row = { ...record };
-      row['备注'] = [record['备注'], record['对接人']].map(v => text(v).trim()).filter(Boolean).join('-');
+      for (const field of ['合同总金额', '已付金额']) if (!text(row[field]).trim()) row[field] = '/';
+      row['票据状态'] = '已开票';
+      row['备注'] = [record['付款分类'], record['对接人']].map(v => text(v).trim()).filter(Boolean).join('-');
+      try {
+        const due = text(record['应付时间'] ?? record['应付款时间']).trim();
+        const parsed = due && due !== '/' ? date(due.replace(/[ T]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/, '')) : '';
+        const deadline = parsed ? `${Number(parsed.slice(5, 7))}月${Number(parsed.slice(8, 10))}日前付款` : '';
+        row['付款事由'] = [text(record['付款事由']).trim(), deadline].filter(Boolean).join('，');
+      } catch (e) { errors.push(`第 ${source} 行：应付时间${e.message}，请核对付款期限`); }
       try { row._cents = cents(record['本次申请付款金额']); group.total += row._cents; }
       catch (e) { errors.push(`第 ${source} 行：本次申请付款金额${e.message}`); }
       if (group.total > MAX_CENTS) errors.push(`${subject}：合计超出支持范围`);
@@ -154,20 +171,20 @@
       catch (e) { errors.push(`第 ${source} 行：申请日期${e.message}`); }
       group.rows.push(row);
     }
+    const plannedDate = weekFriday();
     for (const group of groups.values()) {
       for (const field of infoFields) {
         const choices = [...new Set(group.rows.map(r => text(r[field]).trim()))];
         group.choices[field] = choices;
         group.info[field] = choices.length === 1 ? choices[0] : '';
       }
-      group.info['计划付款日期'] = '';
-
+      group.info['计划付款日期'] = plannedDate;
     }
     if (!records.length) errors.push('工作表没有付款明细');
     else if (!groups.size && !errors.length) errors.push('本次申请付款金额均为 0，没有需要生成的付款明细');
     return { errors, groups: [...groups.values()] };
   }
-  const api = { fields, required, infoFields, cents, money, upper, text, date, analyze, downloadName, subjectName, bankSummary, buildDirectory, resolveBank };
+  const api = { fields, required, infoFields, cents, money, upper, text, date, weekFriday, analyze, downloadName, subjectName, bankSummary, buildDirectory, resolveBank };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PaymentCore = api;
 })(typeof window === 'undefined' ? globalThis : window);

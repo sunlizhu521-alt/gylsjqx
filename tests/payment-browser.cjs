@@ -17,6 +17,8 @@ const base = (extra = {}) => ({
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const page = await context.newPage();
+    await page.clock.setFixedTime(new Date('2026-11-02T02:00:00Z'));
+    let expectedFriday = '2026-11-06';
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.goto(process.env.QA_URL || 'http://127.0.0.1:8899/');
     assert.equal(await page.title(), '供应链数据清洗');
@@ -30,11 +32,15 @@ const base = (extra = {}) => ({
         if (options.ignoredTotalError) ws[XLSX.utils.encode_cell({r:1,c:headers.indexOf('付款总金额')})] = {t:'e',v:7,f:'1/0'};
         if (options.formulaError) ws.L2 = { t: 'e', v: 15, f: '1/0' };
         const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '付款明细');
+        if (options.date1904) wb.Workbook = {WBProps:{date1904:true}};
         return Array.from(new Uint8Array(XLSX.write(wb, { type: 'array', bookType: options.xls ? 'biff8' : 'xlsx' })));
-      }, { rows, headers: ['填写时间', ...C.required.filter(h => !options.noBank || h !== '开户银行及账号'), '对接人', ...(options.ignoredTotalError ? ['付款总金额'] : [])], options });
+      }, { rows, headers: ['填写时间', ...C.required.filter(h => !options.noBank || h !== '开户银行及账号'), '对接人', '付款分类', '应付时间', ...(options.ignoredTotalError ? ['付款总金额'] : [])], options });
       await page.locator('#paymentExcel').setInputFiles({ name: options.xls ? '测试.xls' : '测试.xlsx', mimeType: 'application/octet-stream', buffer: Buffer.from(array) });
       await page.waitForFunction(() => !document.querySelector('[data-reference="detail"]').textContent.includes('正在读取') && document.querySelector('#paymentGroups').textContent.length > 0);
-      for (const input of await page.locator('[data-field="计划付款日期"]').all()) await input.fill('2026-09-25');
+      for (const input of await page.locator('[data-field="计划付款日期"]').all()) {
+        assert.equal(await input.inputValue(), expectedFriday);
+        if (!options.keepDefault) await input.fill('2026-09-25');
+      }
     }
     async function generate() {
       await page.waitForFunction(() => [...document.querySelectorAll('[data-reference]')].every(e => !e.textContent.includes('正在读取')));
@@ -46,20 +52,26 @@ const base = (extra = {}) => ({
       const wait = page.waitForEvent('download');
       await page.locator(`[data-payment-download="${kind}"]:visible`).nth(index).click();
       const download = await wait;
-      assert.match(download.suggestedFilename(), new RegExp('^2026-09-25.+[0-9]+\\.[0-9]{2}\\.' + kind + '$'));
-      if (name === 'synthetic-single') assert.equal(download.suggestedFilename(), `2026-09-25甲公司2205.00.${kind}`);
+      const plannedDate = await page.locator('[data-field="计划付款日期"]').nth(index).inputValue();
+      assert.match(download.suggestedFilename(), new RegExp('^' + plannedDate + '.+[0-9]+\\.[0-9]{2}\\.' + kind + '$'));
+      if (name === 'synthetic-single') assert.equal(download.suggestedFilename(), `2026-11-06甲公司2205.00.${kind}`);
       const p = path.join(out, `${name}.${kind}`); await download.saveAs(p); return p;
     }
-    await upload([base({备注:'加急 AP00027464（￥175714.10） AP00027463（￥7049.90） AP00027462（￥-89156.00）',对接人:'张三'})]); await generate();
+    await upload([base({合同总金额:'',已付金额:'  ',票据状态:'未开票',应付时间:46328.5,付款分类:'加急 AP00027464（￥175714.10） AP00027463（￥7049.90） AP00027462（￥-89156.00）',备注:'原备注不输出',对接人:'张三'})], {keepDefault:true}); await generate();
     assert.match(await page.locator('#paymentStatus').innerText(), /已生成 1 页/);
     const sample = await save('docx', 'synthetic-single'); await save('pdf', 'synthetic-single');
     const docStats = await page.evaluate(async bytes => {
       const z = await JSZip.loadAsync(new Uint8Array(bytes));
       const d = new DOMParser().parseFromString(await z.file('word/document.xml').async('string'), 'application/xml');
       const ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
-      return { sizes: [...d.getElementsByTagNameNS(ns, 'tbl')[1].getElementsByTagNameNS(ns, 'sz')].filter(e=>e.parentNode.parentNode.localName==='r').map(e=>Number(e.getAttributeNS(ns,'val'))), widths: [...d.getElementsByTagNameNS(ns, 'tbl')[1].getElementsByTagNameNS(ns, 'gridCol')].map(e=>Number(e.getAttributeNS(ns,'w'))), text: [...d.getElementsByTagNameNS(ns, 't')].map(e => e.textContent).join(''), sections: d.getElementsByTagNameNS(ns, 'sectPr').length };
+      const cells = [...d.getElementsByTagNameNS(ns, 'tbl')[1].getElementsByTagNameNS(ns, 'tr')[1].getElementsByTagNameNS(ns, 'tc')].map(c => [...c.getElementsByTagNameNS(ns, 't')].map(t => t.textContent).join(''));
+      return { cells, sizes: [...d.getElementsByTagNameNS(ns, 'tbl')[1].getElementsByTagNameNS(ns, 'sz')].filter(e=>e.parentNode.parentNode.localName==='r').map(e=>Number(e.getAttributeNS(ns,'val'))), widths: [...d.getElementsByTagNameNS(ns, 'tbl')[1].getElementsByTagNameNS(ns, 'gridCol')].map(e=>Number(e.getAttributeNS(ns,'w'))), text: [...d.getElementsByTagNameNS(ns, 't')].map(e => e.textContent).join(''), sections: d.getElementsByTagNameNS(ns, 'sectPr').length };
     }, [...await fs.readFile(sample)]);
     assert.equal(docStats.sections, 1);
+    assert.equal(docStats.cells[4], '/'); assert.equal(docStats.cells[5], '/'); assert.equal(docStats.cells[7], '已开票');
+    assert.equal(docStats.cells[8], '货款，11月2日前付款');
+    assert.ok(docStats.text.includes('2026年11月06日'));
+    assert.doesNotMatch(docStats.text, /未开票|原备注不输出/);
     assert.ok(docStats.sizes.length > 0 && docStats.sizes.every(size => size === 11), 'payment detail text uses exactly 5.5pt');
     assert.ok(docStats.text.includes('AP00027462（￥-89156.00）-张三'));
     assert.ok(docStats.widths[9] > docStats.widths[4], 'long remarks receive more width than empty amount columns');
@@ -76,6 +88,12 @@ const base = (extra = {}) => ({
     assert.equal(await page.locator('#embeddedTools iframe[data-tool="funds"]').isVisible(), true);
     await page.locator('[data-tool="payment"]').click();
     assert.equal(await page.locator('[data-field="计划付款日期"]').inputValue(), '2026-09-26');
+    await upload([base({应付时间:44866.5,付款分类:'正常付款',对接人:'张三',备注:'原备注不输出',合同总金额:0,已付金额:0})], {date1904:true});
+    const detailCells = await page.locator('#paymentGroups tbody tr').first().locator('td').allTextContents();
+    assert.equal(detailCells[4], '0'); assert.equal(detailCells[5], '0');
+    assert.equal(detailCells[8], '货款，11月2日前付款'); assert.equal(detailCells[9], '正常付款-张三');
+    await upload([base({应付时间:'日期不明确'})]);
+    assert.match(await page.locator('#paymentGroups').innerText(), /应付时间.*请核对付款期限/);
     await upload([base({ 本次申请付款金额: '' })]); await generate();
     assert.match(await page.locator('#paymentGroups').innerText(), /第 2 行/);
     assert.equal(await page.locator('[data-payment-download="docx"]').isDisabled(), true);
@@ -89,7 +107,7 @@ const base = (extra = {}) => ({
     assert.equal(await page.locator('[data-confirm]').count(), 0);
     assert.doesNotMatch(await page.locator('#paymentGroups').innerText(), /行付款总金额/);
     assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
-    await upload([base({本次申请付款金额:0,备注:'ZERO-OMIT'}),base({本次申请付款金额:'0.01',备注:'KEEP-ONE',开户银行及账号:'未知银行原文'}),base({本次申请付款金额:'2.20',备注:'KEEP-TWO'})]); await generate();
+    await upload([base({本次申请付款金额:0,对接人:'ZERO-OMIT'}),base({本次申请付款金额:'0.01',对接人:'KEEP-ONE',开户银行及账号:'未知银行原文'}),base({本次申请付款金额:'2.20',对接人:'KEEP-TWO'})]); await generate();
     assert.doesNotMatch(await page.locator('#paymentGroups').innerText(), /银行信息无法明确识别|ZERO-OMIT/);
     assert.match(await page.locator('#paymentGroups').innerText(), /2 笔/);
     const filtered = await save('docx','zero-filtered'); await save('pdf','zero-filtered');
@@ -180,7 +198,7 @@ const base = (extra = {}) => ({
     await page.locator('#paymentClearDirectory').click();
     assert.match(await page.locator('[data-reference="directory"]').innerText(), /未引用/);
     assert.equal(await page.locator('[data-payment-download="docx"]').isDisabled(),true);
-    const stress = [base({ 付款主体: '单笔主体' }), ...Array.from({ length: 30 }, (_, i) => base({ 付款主体: '多笔主体', 备注: `记录${i+1}`, 本次申请付款金额: '0.01' })), ...Array.from({ length: 45 }, (_, i) => base({ 付款主体: '短明细主体', 开户银行及账号: '测试银行 0012 3456', 本次申请付款金额: '1.10', 备注: `记录${i+1}` }))];
+    const stress = [base({ 付款主体: '单笔主体' }), ...Array.from({ length: 30 }, (_, i) => base({ 付款主体: '多笔主体', 对接人: `记录${i+1}`, 本次申请付款金额: '0.01' })), ...Array.from({ length: 45 }, (_, i) => base({ 付款主体: '短明细主体', 开户银行及账号: '测试银行 0012 3456', 本次申请付款金额: '1.10', 对接人: `记录${i+1}` }))];
     await upload(stress); await generate();
     assert.match(await page.locator('#paymentStatus').innerText(), /已生成 3 页/);
     assert.match(await page.locator('#paymentPages').innerText(), /继续压缩/);
@@ -225,8 +243,10 @@ const base = (extra = {}) => ({
       const records = await Promise.all(['detail','template','directory'].map(k => PaymentCache.get(k)));
       return records.map(r => ({name:r.name,time:r.time}));
     });
+    await page.clock.setFixedTime(new Date('2026-11-09T02:00:00Z')); expectedFriday = '2026-11-13';
     await page.reload(); await page.locator('[data-tool="payment"]').click();
     await page.waitForFunction(() => !document.querySelector('#paymentExcel').disabled);
+    assert.equal(await page.locator('[data-field="计划付款日期"]').inputValue(), expectedFriday);
     for (const [i,kind] of ['detail','template','directory'].entries()) assert.equal(await page.locator(`[data-reference="${kind}"]`).innerText(), '引用时间：'+savedNames[i].time);
     assert.match(await page.locator('label.payment-upload').nth(1).innerText(), /缓存模板.docx/);
     await page.locator('[data-field="计划付款日期"]').fill('2026-09-25'); await generate();

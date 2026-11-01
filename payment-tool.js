@@ -261,7 +261,7 @@
         let value = matrix[i][j] ?? '';
         const cell = sheet[XLSX.utils.encode_cell({ r: range.s.r + i, c: range.s.c + j })];
         if (cell?.t === 'e' || (cell?.f && cell.v == null)) errors.push(`第 ${record._row} 行 ${h}：公式错误或缺少计算结果，请在 Excel 中重算保存`);
-        if (h === '申请日期' && typeof value === 'number') {
+        if (['申请日期', '应付时间', '应付款时间'].includes(h) && typeof value === 'number') {
           const d = XLSX.SSF.parse_date_code(value, { date1904: !!state.workbook.Workbook?.WBProps?.date1904 });
           value = d ? `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}` : value;
         }

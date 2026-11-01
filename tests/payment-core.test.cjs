@@ -63,6 +63,42 @@ test('real dates validate and leap-day errors are not silently normalized', () =
   assert.equal(C.date(''),'');
   for(const d of ['2026-02-29','2026-13-01','2026-00-02','9/25/26'])assert.throws(()=>C.date(d));
 });
+test('planned payment defaults to the Friday of the current Beijing Monday-Sunday week', () => {
+  const cases = [
+    ['2026-11-02T02:00:00Z', '2026-11-06'],
+    ['2026-11-06T02:00:00Z', '2026-11-06'],
+    ['2026-11-07T02:00:00Z', '2026-11-06'],
+    ['2026-11-08T15:59:59Z', '2026-11-06'],
+    ['2026-11-08T16:00:00Z', '2026-11-13'],
+    ['2026-12-31T02:00:00Z', '2027-01-01'],
+    ['2024-02-29T02:00:00Z', '2024-03-01'],
+  ];
+  for (const [now, expected] of cases) assert.equal(C.weekFriday(new Date(now)), expected, now);
+  const expected = C.weekFriday();
+  const a = C.analyze(C.required, [row(), row({付款主体:'乙公司'})]);
+  assert.deepEqual(a.groups.map(g => g.info['计划付款日期']), [expected, expected]);
+});
+test('blank contract and paid amounts become slashes without changing zero or source values', () => {
+  for (const value of ['', '  ', null, undefined, 0, '0.00', '/', 1234.56, '#VALUE!']) {
+    const source = row({合同总金额:value, 已付金额:value, 开户银行及账号:'', 备注:''});
+    const output = C.analyze(C.required, [source]).groups[0].rows[0];
+    const expected = value == null || String(value).trim() === '' ? '/' : value;
+    assert.equal(output['合同总金额'], expected);
+    assert.equal(output['已付金额'], expected);
+    assert.equal(source['合同总金额'], value);
+    assert.equal(source['已付金额'], value);
+    assert.equal(output['开户银行及账号'], '');
+    assert.equal(output['备注'], '');
+  }
+});
+test('invoice status is always issued and source records stay unchanged', () => {
+  for (const value of ['', null, '未开票', '部分开票', '已开票']) {
+    const source = row({票据状态:value});
+    const output = C.analyze(C.required, [source]).groups[0].rows[0];
+    assert.equal(output['票据状态'], '已开票');
+    assert.equal(source['票据状态'], value);
+  }
+});
 test('sum limit and formula error text block calculation',()=>{
   const a=C.analyze(C.required,[row({本次申请付款金额:'999999999999.99'}),row({本次申请付款金额:1})]);
   assert.match(a.errors.join(''),/合计超出/);
@@ -165,11 +201,25 @@ test('付款总金额列可以完全缺失，总额仅取本次申请付款金�
  const b=C.analyze([...C.required,'付款总金额'],[row({付款总金额:'#DIV/0!'})]);assert.deepEqual(b.errors,[]);assert.equal(b.groups[0].total,220500n);
 });
 
-test('备注与对接人合并，空值不加连接符且不修改原始记录',()=>{
+test('付款分类与对接人合并到备注，不使用旧备注、空值不加连接符且不修改原始记录',()=>{
  for(const [note,contact,expected] of [['加急','张三','加急-张三'],['','张三','张三'],['加急','','加急'],[null,undefined,''],['  加急  ',' 张三 ','加急-张三'],[0,'张三','0-张三'],['/','张三','/-张三']]){
-  const source=row({备注:note,对接人:contact});
-  const result=C.analyze([...C.required,'对接人'],[source]);
-  assert.deepEqual(result.errors,[]);assert.equal(result.groups[0].rows[0].备注,expected);assert.equal(source.备注,note);
-  assert.equal(C.analyze([...C.required,'对接人'],[source]).groups[0].rows[0].备注,expected);
+  const source=row({付款分类:note,对接人:contact,备注:'原备注不输出'});
+  const result=C.analyze([...C.required,'付款分类','对接人'],[source]);
+  assert.deepEqual(result.errors,[]);assert.equal(result.groups[0].rows[0].备注,expected);assert.equal(source.付款分类,note);assert.equal(source.备注,'原备注不输出');
+  assert.equal(C.analyze([...C.required,'付款分类','对接人'],[source]).groups[0].rows[0].备注,expected);
+ }
+});
+test('付款事由附加应付时间的月日前付款，兼容日期文本、时间及空值',()=>{
+ for(const [due,expected] of [['2026-11-02','货款，11月2日前付款'],['2026年11月2日','货款，11月2日前付款'],['2026/11/2 08:30:00','货款，11月2日前付款'],['2028-02-29','货款，2月29日前付款'],['','货款'],[null,'货款'],['/','货款']]){
+  const source=row({付款事由:'货款',应付时间:due});
+  const result=C.analyze([...C.required,'应付时间'],[source]);
+  assert.deepEqual(result.errors,[]);assert.equal(result.groups[0].rows[0].付款事由,expected);assert.equal(source.付款事由,'货款');assert.equal(source.应付时间,due);
+ }
+ const alias=C.analyze([...C.required,'应付款时间'],[row({应付款时间:'2026-11-02',付款事由:''})]);
+ assert.equal(alias.groups[0].rows[0].付款事由,'11月2日前付款');
+ for(const due of ['2026-02-29','11月内','不确定',0,'#VALUE!']){
+  const result=C.analyze([...C.required,'应付时间'],[row({应付时间:due,付款事由:'货款'})]);
+  assert.match(result.errors.join(''),/第 2 行：应付时间.*请核对付款期限/);
+  assert.equal(result.groups[0].rows[0].付款事由,'货款');
  }
 });
