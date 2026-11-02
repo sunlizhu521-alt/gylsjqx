@@ -3,6 +3,31 @@ const {fixture,set,append,ID,LH,AH,OH,book}=require('./funds-progress-fixtures.c
 const records=r=>r.progressRows.map(row=>Object.fromEntries(r.progressHeaders.map((h,c)=>[h,row[c]])));
 const review=r=>r.reviewRows.filter(row=>row[5].v.startsWith('付款进度核对：'));
 const display=c=>c.t==='n'&&c.z?X.SSF.format(c.z,c.v):c.v;
+test('重新申请不进入付款申请核对，仍保留进度、提交状态、金额及标红',()=>{
+ const i=fixture();set(i,'applications','流程编码',5,ID(99));
+ const before=C.build(i);assert(review(before).some(row=>row[8].v===5));
+ X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['核对说明'],['需重新申请'],[''],['重新申请'],['退回后重新申请']],{origin:'G1'});
+ const source=JSON.stringify(i),r=C.build(i);
+ assert.equal(r.reviewRows.length,0);assert.deepEqual(records(r).map(row=>row['是否已付款'].v),['重新申请','未付款','重新申请','重新申请']);
+ for(const key of ['normalRows','negotiated','highlights','applicationComments','stats'])assert.deepEqual(r[key],before[key],key);
+ assert.equal(JSON.stringify(i),source);
+ set(i,'applications','核对说明',5,'');assert(review(C.build(i)).some(row=>row[8].v===5),'重新上传取消说明后恢复核对');
+});
+test('重复核对仅统计未标重新申请的记录；普通记录及异常说明不误排除',()=>{
+ const i=fixture();X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['核对说明'],['重新申请']],{origin:'G1'});
+ let r=C.build(i);assert(!r.reviewRows.some(row=>row[5].v.startsWith('重复提交')));assert.equal(review(r).length,1);
+ append(i,'applications',['2026-11-05','合成供应商1','迈德斯特',ID(1),40,'谈判付款']);
+ r=C.build(i);const duplicates=r.reviewRows.filter(row=>row[5].v.startsWith('重复提交'));assert.equal(duplicates.length,1);assert.match(duplicates[0][5].v,/共 2 次/);assert.equal(duplicates[0][8].v,4);
+ for(const note of ['', '需核实', {t:'e',v:23,w:'重新申请'}, {t:'s',f:'A99'}]){
+  const j=fixture();X.utils.sheet_add_aoa(j.applications.book.Sheets.付款申请汇总,[['核对说明']],{origin:'G1'});set(j,'applications','核对说明',5,note);
+  assert(review(C.build(j)).some(row=>row[8].v===5));
+ }
+});
+test('重新申请不掩盖台账或OA自身核对',()=>{
+ const i=fixture();X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['核对说明'],['重新申请'],['重新申请'],['重新申请'],['重新申请']],{origin:'G1'});
+ set(i,'oa','收款单位',3,'不同供应商');const r=C.build(i);
+ assert(r.reviewRows.some(row=>row[5].v.startsWith('OA供应商冲突')));assert.equal(review(r).length,0);
+});
 test('每笔申请一行、重复及未进入付款表申请保留，来源日期金额类型正确，归档仅改变新表状态',()=>{
  const i=fixture(),before=JSON.stringify(i),r=C.build(i),p=records(r);
  assert.equal(p.length,4);assert.deepEqual(p.map(row=>row['申请付款金额'].v),[40,200,40,0]);
@@ -96,11 +121,12 @@ test('多OA换行文本统一显示，最新上传OA状态变化不沿用旧状�
  const i=fixture();set(i,'applications','流程编码',2,ID(1)+'\n'+ID(2));const p=records(C.build(i))[0];assert.equal(p['对公付款OA号'].v,ID(1)+'；'+ID(2));assert.equal(p['是否已付款'].v,'待核对');
 });
 
-test('核对说明含重新申请时优先显示重新申请，只影响该笔进度状态',()=>{
+test('核对说明含重新申请时优先显示重新申请，不改变付款状态金额和标红',()=>{
  for(const note of ['重新申请','退回后重新申请付款','重新\n申请',{t:'s',v:'重新申请',f:'"重新申请"'}]){
   const i=fixture(),before=C.build(i);X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['核对说明'],[note]],{origin:'G1'});
   const r=C.build(i),p=records(r);assert.equal(p[0]['是否已付款'].v,'重新申请');assert.equal(p[0]['流程状态'].v,'归档');assert.equal(p[2]['是否已付款'].v,'已付款','同OA重复申请只按本行说明判断');
-  for(const key of ['normalRows','negotiated','highlights','applicationComments','issues','reviewRows'])assert.deepEqual(r[key],before[key]);
+  for(const key of ['normalRows','negotiated','highlights','applicationComments','issues'])assert.deepEqual(r[key],before[key]);
+  assert.deepEqual(r.reviewRows,before.reviewRows.filter(row=>!row[5].v.startsWith('重复提交')));
   for(const code of ['',ID(99),ID(1)+' / '+ID(2)]){set(i,'applications','流程编码',2,code);assert.equal(records(C.build(i))[0]['是否已付款'].v,'重新申请');}
  }
  for(const note of ['',0,'核对通过',{t:'e',v:'重新申请'},{t:'s',f:'A1'}]){

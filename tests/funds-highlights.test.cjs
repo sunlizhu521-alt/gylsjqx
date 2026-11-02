@@ -17,6 +17,15 @@ function fixture(plans=[100],amounts=[100]){
 const sheet=(i,role)=>i[role].book.Sheets[i[role].book.SheetNames[0]];
 const reviews=r=>r.reviewRows.filter(row=>row[5].v.startsWith('申请标红核对：'));
 const state=r=>r.negotiated.rows[0][r.negotiated.headers.indexOf('是否提交付款申请单')].v;
+test('重新申请不生成标红批次核对，同额普通申请仍独立核对且不改变金额状态',()=>{
+ for(const amounts of [[60],[60,60],[60,40]]){
+  const i=fixture([100],amounts),before=C.build(i),s=sheet(i,'applications');
+  X.utils.sheet_add_aoa(s,[['核对说明'],['重新申请']],{origin:'G1'});
+  const r=C.build(i),lines=reviews(r);assert.equal(lines.length,amounts.length===1?0:1);
+  if(lines.length){assert.match(lines[0][5].v,/申请.xlsx \/ 申请汇总 第 3 行/);assert.doesNotMatch(lines[0][5].v,/申请.xlsx \/ 申请汇总 第 2 行/);}
+  assert.deepEqual(r.highlights,before.highlights);assert.equal(state(r),state(before));
+ }
+});
 test('逐笔精确匹配只标一个分批单元格，正常付款只标本次匹配行，保留原公式和源对象',()=>{
  const i=fixture([60,40],[60]);sheet(i,'negotiated').L2={t:'n',v:60,f:'D2-40'};const before=JSON.stringify(i),r=C.build(i);
  assert.deepEqual(r.highlights,{negotiatedCells:['L2'],normalRows:[2]});assert.equal(state(r),'已经提交部分');assert.equal(r.negotiated.rows[0][11].f,'D2-40');assert.equal(r.stats.pending,0);assert.equal(reviews(r).length,0);assert.equal(JSON.stringify(i),before);

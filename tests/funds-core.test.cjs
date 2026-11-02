@@ -32,6 +32,23 @@ function fixture(){
  const oaRows=[main,normal].map(r=>({'流程编号':r['对公付款0A流程号'],'当前节点':'财务审核','未操作者':'测试人员','流程状态':'未归档','申请人':'李奇','收款单位':r['供应商名称'],'付款金额':r['申请付款金额']}));
  return {ledger:{book:ledger,name:'资金.xlsx'},negotiated:{book:negotiated,name:'谈判.xlsx'},applications:{book:book('付款申请汇总',AH,appRows),name:'申请.xlsx'},oa:{book:book('Sheet0',OH,oaRows),name:'OA.xlsx'}};
 }
+test('孙立柱以对账时间替代开票时间时忽略缺列表头，输出开票时间仍留空且保留来源日期',()=>{
+ for(const suffix of ['', '1102']){
+  const i=fixture(),ledger=i.ledger.book,source=ledger.Sheets['对账明细-李奇'],rows=X.utils.sheet_to_json(source,{header:1}),name='对账明细-孙立柱'+suffix;
+  const sheet=X.utils.aoa_to_sheet([LH,rows[2]]);sheet.E1.v='对账时间';sheet.E2={t:'s',v:'2026-11-01'};
+  delete ledger.Sheets['对账明细-孙立柱'];ledger.Sheets[name]=sheet;ledger.SheetNames=ledger.SheetNames.map(n=>n==='对账明细-孙立柱'?name:n);
+  const before=JSON.stringify(i),r=C.build(i),row=r.normalRows.find(row=>row[1].v==='孙立柱');
+  assert.equal(r.issues.some(q=>q.id==='headers:'+name),false);assert.equal(row[C.NORMAL_HEADERS.indexOf('开票时间')].v,'');assert.equal(row[6].v,100);assert.equal(JSON.stringify(i),before);
+ }
+});
+test('忽略孙立柱改名字段不放过其他缺列；其他人员仍检查开票时间',()=>{
+ const i=fixture(),sheet=i.ledger.book.Sheets['对账明细-孙立柱'];sheet.E1.v='对账时间';delete sheet.F1;
+ i.ledger.book.Sheets['对账明细-徐英'].E1.v='对账时间';const r=C.build(i);
+ const sun=r.issues.find(q=>q.id==='headers:对账明细-孙立柱'),xu=r.issues.find(q=>q.id==='headers:对账明细-徐英');
+ assert.match(sun.message,/开票金额/);assert.doesNotMatch(sun.message,/开票时间/);assert.match(xu.message,/开票时间/);
+ const missing=fixture();delete missing.ledger.book.Sheets['对账明细-孙立柱'].E1;
+ assert(C.build(missing).issues.some(q=>q.id==='headers:对账明细-孙立柱'&&q.message.includes('开票时间')));
+});
 function set(input,role,header,row,value,sheet){const b=input[role].book,s=b.Sheets[sheet||b.SheetNames[0]],h=X.utils.sheet_to_json(s,{header:1})[0],c=h.indexOf(header);assert(c>=0);s[X.utils.encode_cell({r:row-1,c})]=typeof value==='object'&&value!==null?value:{t:typeof value==='number'?'n':'s',v:value};}
 const update=(r,address)=>r.negotiated.updates.find(u=>u.address===address)?.cell;
 const paidReviews=r=>legacyReviews(r).filter(row=>row[5].v.startsWith('已付金额同步核对：'));

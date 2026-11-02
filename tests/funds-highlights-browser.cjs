@@ -26,6 +26,7 @@ function fixture({ removeFirstApplication = false } = {}) {
     const rows = [ledgerHeaders];
     if (person === '李奇') for (const [i, r] of records.entries()) rows.push([46300, r.supplier, '迈德斯特', r.id, 46300, r.amount, '合成货款', r.amount, 46328, 'AP2026102700' + i, 'HT-SYN-' + i, r.amount, r.paid, '否', r.amount - r.paid, r.type === '谈判付款' ? '是' : '否', '未申请']);
     const sheet = X.utils.aoa_to_sheet(rows);
+    if (person === '孙立柱') sheet.E1.v = '对账时间';
     for (let row = 2; row <= rows.length; row++) for (const col of ['A', 'E', 'I']) sheet[col + row].z = 'yyyy"年"m"月"d"日"';
     X.utils.book_append_sheet(ledger, sheet, '对账明细-' + person);
   }

@@ -21,6 +21,10 @@ const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
   async function verify(bytes,expectedStates){
    const saved=X.read(bytes,{type:'buffer',cellNF:true,cellStyles:true}),core=C.build(input),sheet=saved.Sheets.付款进度整理;
    assert.deepEqual(saved.SheetNames,C.OUTPUT_SHEETS);assert.equal(core.stats.pending,0);
+   const expectedReviews=core.reviewRows.map(row=>row.map((c,index)=>index===5?C.formatReviewText(c.v):c.v));
+   assert.deepEqual(X.utils.sheet_to_json(saved.Sheets.付款申请核对,{header:1,defval:''}).slice(1),expectedReviews);
+   assert.deepEqual(await frame.locator('#reviewPreview tbody tr').evaluateAll(rows=>rows.map(tr=>[...tr.cells].map(td=>td.textContent))),core.reviewRows.map(row=>row.map((c,index)=>index===5?C.formatReviewText(c.v):X.utils.format_cell(c))));
+   for(const [index,state]of expectedStates.entries())if(state==='重新申请')assert(!core.reviewRows.some(row=>row[6].v===input.applications.name&&row[8].v===index+2),'重新申请的来源行不进入核对表');
    assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1})[0],C.PROGRESS_HEADERS);assert.equal(X.utils.decode_range(sheet['!ref']).e.r,7);
    const rows=X.utils.sheet_to_json(sheet,{header:1}).slice(1);assert.deepEqual(rows.map(row=>row[11]),expectedStates);assert.deepEqual(rows.map(row=>row[5]),[40,200,40,0,12,18,20]);
    for(let r=0;r<core.progressRows.length;r++)for(let c=0;c<12;c++){
