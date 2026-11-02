@@ -462,8 +462,9 @@ function build(inputs,decisions={}){
   const ids=oas(target.record),supplier=norm(value(target.record,'供应商名称')),amount=money(target.record.values['申请付款金额']);
   const valid=supplier&&target.record.values['供应商名称']?.t!=='e'&&amount.cents!==undefined&&amount.cents>=0n;
   const problems=target.normal?flowProblems:r=>flowProblems(r).filter(f=>f==='流程编号'||FLOW_FIELDS.includes(f));
-  const exact=target.normal?(valid?flowRecords.filter(r=>payee(r)===supplier&&money(r.values['付款金额']).cents===amount.cents):[]):
+  let exact=target.normal?(valid?flowRecords.filter(r=>payee(r)===supplier&&money(r.values['付款金额']).cents===amount.cents):[]):
    [...new Map(ids.flatMap(id=>flows.get(id)||[]).map(r=>[JSON.stringify([flowId(r),...FLOW_FIELDS.map(f=>str(value(r,f))),problems(r)]),r])).values()];
+  if(target.normal){const identified=exact.filter(r=>ids.includes(flowId(r)));if(identified.length)exact=identified;}
   if(!exact.length)return;
   const invalid=exact.filter(r=>problems(r).length);
   const conflictIds=[...new Set(exact.map(flowId))].filter(id=>(target.normal?flows.get(id):exact.filter(r=>flowId(r)===id)).length>1);

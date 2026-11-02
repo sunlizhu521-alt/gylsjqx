@@ -39,7 +39,7 @@ function fixture({ removeFirstApplication = false } = {}) {
   }
   const applications = [['申请日期', '供应商全称', '付款主体', '流程编码', '本次申请付款金额', '付款分类']];
   records.slice(0, 3).forEach((r, i) => { if (!removeFirstApplication || i !== 0) applications.push(['2026-10-27', r.supplier, '迈德斯特', r.id, r.plan ? 40 : r.amount, r.type]); });
-  const oa = [['流程编号', '当前节点', '未操作者', '流程状态', '申请人', '收款单位', '付款金额'], ...records.map(r => [r.id, '财务审核', '合成审核人', '未归档', '李奇', r.supplier, r.amount])];
+  const oa = [['流程编号', '当前节点', '未操作者', '流程状态', '申请人', '收款单位', '付款金额'], ...records.map(r => [r.id, r.id===records[3].id?'复核':'财务审核', '合成审核人', '未归档', r.id===records[3].id?'徐英':'李奇', r.supplier, r.amount])];
   return { ledger: write(ledger), negotiated: write(negotiated), applications: write(sheetBook('付款申请汇总', applications)), oa: write(sheetBook('Sheet0', oa)) };
 }
 
@@ -76,6 +76,9 @@ function fixture({ removeFirstApplication = false } = {}) {
       const firstDate = n.headers.findIndex(h => h.text === '2026年10月26日'), secondDate = n.headers.findIndex(h => h.text === '2026年11月2日');
       assert(firstDate >= 0 && secondDate >= 0, '批次日期表头完整');
       assert.equal(n.rows.length, 2); assert.equal(normal.rows.length, 2);
+      assert.deepEqual(normal.rows.map(row=>row[normal.headers.findIndex(h=>h.text==='流程编号')].text),[records[2].id,records[3].id]);
+      assert.deepEqual(normal.rows.map(row=>row[normal.headers.findIndex(h=>h.text==='当前节点')].text),['财务审核','复核']);
+      assert.deepEqual(normal.rows.map(row=>row[normal.headers.findIndex(h=>h.text==='申请人')].text),['李奇','徐英']);
       assert.equal(n.rows[0][firstDate].applied, highlighted);
       assert.equal(n.rows[0][firstDate].title,highlighted?'申请日期（资金整理）：2026年10月27日':'');
       const applicationDate=normal.headers.findIndex(h=>h.text==='申请日期');assert.equal(applicationDate,normal.headers.findIndex(h=>h.text==='是否提交付款申请单')+1);assert.equal(normal.rows[0][applicationDate].text,'2026年10月27日');assert.equal(normal.rows[1][applicationDate].text,'');
@@ -138,6 +141,7 @@ function fixture({ removeFirstApplication = false } = {}) {
       }
       assert.deepEqual([normal.G2.v, normal.N2.v, normal.P2.v, normal.G3.v, normal.N3.v, normal.P3.v], [123.45, 23.45, 100, 123.45, 0, 123.45]);
       assert.deepEqual([normal.E2.v,normal.E3.v],[records[2].id,records[3].id]);assert.deepEqual([normal.R2.v,normal.R3.v],['已提交','未申请']);
+      assert.deepEqual([normal.Y2.v,normal.Y3.v],[records[2].id,records[3].id]);assert.deepEqual([normal.U2.v,normal.U3.v],['财务审核','复核']);assert.deepEqual([normal.X2.v,normal.X3.v],['李奇','徐英']);
       assert.equal(normal.P2.f, 'G2-N2'); assert.equal(normal.P3.f, 'G3-N3');
       for (const header of C.NORMAL_HIDDEN_HEADERS) assert.equal(normal['!cols'][C.NORMAL_HEADERS.indexOf(header)].hidden, true);
       const metadata = await frame.locator('body').evaluate(async (_, { bytes, marker }) => {
