@@ -254,7 +254,22 @@ function build(inputs,decisions={}){
  normalObjects.forEach(applyFinancial);
  const applicationsByKey=new Map();
  for(const record of applications.records){const key=classification(record).key;if(key){if(!applicationsByKey.has(key))applicationsByKey.set(key,[]);applicationsByKey.get(key).push(record);}}
+ function normalApplications(target){
+  const key=classification(target.record).key,ids=oas(target.record),matched=[],ambiguous=[];
+  const peers=normalObjects.filter(t=>classification(t.record).key===key);
+  for(const r of (applicationsByKey.get(key)||[]).filter(r=>eligibleApplication(r,true))){
+   const reference=r.values[applicationOAField],targetReference=target.values['对公付款0A流程号'];
+   if([reference,targetReference].some(c=>c?.t==='e'||(c?.f&&(c.v==null||c.v===''))))continue;
+   const applicationCodes=applicationIds(r);
+   if(ids.length&&applicationCodes.length){
+    if(applicationCodes.every(id=>ids.includes(id)))matched.push(r);
+   }else if(peers.length===1)matched.push(r);
+   else ambiguous.push(r);
+  }
+  return {matched,ambiguous,peers};
+ }
  function matchingApplications(target,preferOA=false){
+  if(target.normal)return normalApplications(target).matched;
   if(preferOA){
    const ids=oas(target.record),matched=applications.records.filter(r=>eligibleApplication(r,target.normal)&&applicationIds(r).some(id=>ids.includes(id)));
    if(matched.length)return matched;
@@ -269,11 +284,12 @@ function build(inputs,decisions={}){
   (highlightReview?highlightReviews:reviewRows).push([cell(target.normal?'正常付款':'谈判付款'),cell(display(target.values['供应商名称'])),cell(display(target.values['付款主体'])),amount.cents!==undefined?amountCell(amount.cents):cell(display(target.values['申请付款金额'])),cell(status),cell(message),cell(source.file),cell(source.sheet),cell(source.row),cell(reviewOwner(target))]);
  }
  function applyApplications(target){
-  const matched=matchingApplications(target);
+  const {matched,ambiguous,peers}=normalApplications(target);
   if(matched.length)highlightedNormal.add(target.index+2);
   set(target,'是否提交付款申请单',cell(matched.length?'已提交':'未申请'));
   set(target,'提交时间汇总',submissionSummary(matched));
   set(target,'申请日期',applicationDateCell(matched));
+  if(ambiguous.length)reviewApplication(target,'付款申请归属核对：同一供应商、同一申请金额对应多笔正常付款，缺少有效 OA 号，无法区分。\n当前付款 OA 号：'+(str(target.values['对公付款0A流程号']?.v)||'空白')+'。\n候选付款 OA 号：'+[...new Set(peers.map(t=>str(t.values['对公付款0A流程号']?.v)||'空白'))].join('、')+'。\n申请来源：'+ambiguous.map(r=>r.source.file+' / '+r.source.sheet+' 第 '+r.source.row+' 行').join('；')+'。\n需要处理：核实并补充付款申请汇总的流程编码及台账的对公付款0A流程号，再重新上传；本次未将这些申请计入提交状态或标红。');
  }
  function applySubmissionDetails(target,matched){
   const dates=[];let invalid=false;

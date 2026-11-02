@@ -15,7 +15,7 @@ const records = [
   { supplier: '唯一分批合成供应商', id: 'MDST-DGFK20261027001', amount: 100, paid: 10, type: '谈判付款', plan: [40, 60] },
   { supplier: '同额分批合成供应商', id: 'MDST-DGFK20261027002', amount: 80, paid: 0, type: '谈判付款', plan: [40, 40] },
   { supplier: '正常已申请合成供应商', id: 'MDST-DGFK20261027003', amount: 123.45, paid: 23.45, type: '正常付款' },
-  { supplier: '正常未申请合成供应商', id: 'MDST-DGFK20261027004', amount: 200, paid: 0, type: '正常付款' }
+  { supplier: '正常已申请合成供应商', id: 'MDST-DGFK20261027004', amount: 123.45, paid: 0, type: '正常付款' }
 ];
 const write = book => Buffer.from(X.write(book, { type: 'buffer', bookType: 'xlsx' }));
 const sheetBook = (name, rows) => { const b = X.utils.book_new(); X.utils.book_append_sheet(b, X.utils.aoa_to_sheet(rows), name); return b; };
@@ -136,7 +136,8 @@ function fixture({ removeFirstApplication = false } = {}) {
         assert.equal(n['F' + row].f, 'D' + row + '-E' + row); assert.equal(n['L' + row].f, 'SUM(U' + row + ':V' + row + ')');
         assert.equal(n['L' + row].v, r.amount); assert.equal(n['G' + row].v, '否');
       }
-      assert.deepEqual([normal.G2.v, normal.N2.v, normal.P2.v, normal.G3.v, normal.N3.v, normal.P3.v], [123.45, 23.45, 100, 200, 0, 200]);
+      assert.deepEqual([normal.G2.v, normal.N2.v, normal.P2.v, normal.G3.v, normal.N3.v, normal.P3.v], [123.45, 23.45, 100, 123.45, 0, 123.45]);
+      assert.deepEqual([normal.E2.v,normal.E3.v],[records[2].id,records[3].id]);assert.deepEqual([normal.R2.v,normal.R3.v],['已提交','未申请']);
       assert.equal(normal.P2.f, 'G2-N2'); assert.equal(normal.P3.f, 'G3-N3');
       for (const header of C.NORMAL_HIDDEN_HEADERS) assert.equal(normal['!cols'][C.NORMAL_HEADERS.indexOf(header)].hidden, true);
       const metadata = await frame.locator('body').evaluate(async (_, { bytes, marker }) => {
@@ -195,16 +196,26 @@ function fixture({ removeFirstApplication = false } = {}) {
     await upload('ledger',write(dated));await frame.locator('#analyze:not([disabled])').click();await frame.locator('#download:not([disabled])').waitFor();
     const sortedPreview=(await snapshot()).normalPreview,at=key=>C.NORMAL_HEADERS.indexOf(key);
     assert.deepEqual(sortedPreview.rows.map(row=>row[at('供应商名称')].text),[records[3].supplier,records[2].supplier]);
+    assert.deepEqual(sortedPreview.rows.map(row=>row[at('对公付款0A流程号')].text),[records[3].id,records[2].id]);
     assert.deepEqual(sortedPreview.rows.map(row=>row[at('申请付款的日期')].text),['2026/10/26周','2026/12/28周']);
     assert(sortedPreview.rows[0].every(c=>!c.applied));assert(sortedPreview.rows[1].every(c=>c.applied));
     const sortedBytes=await download(3),sortedBook=X.read(sortedBytes,{cellNF:true,cellStyles:true}),sorted=sortedBook.Sheets.正常付款;
     const output=X.utils.sheet_to_json(sorted);assert.deepEqual(output.map(row=>row['供应商名称']),[records[3].supplier,records[2].supplier]);
     assert.deepEqual(output.map(row=>row['申请付款的日期']),['2026/10/26周','2026/12/28周']);
-    assert.equal(sorted.P2.f,'G2-N2');assert.equal(sorted.P2.v,200);assert.equal(sorted.P3.f,'G3-N3');assert.equal(sorted.P3.v,100);
+    assert.equal(sorted.P2.f,'G2-N2');assert.equal(sorted.P2.v,123.45);assert.equal(sorted.P3.f,'G3-N3');assert.equal(sorted.P3.v,100);
     for(const r of [2,3])for(let c=0;c<C.NORMAL_HEADERS.length;c++)assert.equal(/^(?:FF)?FF0000$/i.test(sorted[X.utils.encode_cell({r:r-1,c})].s?.fgColor?.rgb||''),r===3,'排序后整行标红必须随记录移动，包括隐藏列');
     assert.equal(sorted[X.utils.encode_cell({r:1,c:at('申请日期')})].v??'','');assert.equal(sorted[X.utils.encode_cell({r:2,c:at('申请日期')})].v,46322);
     assert.equal(sortedBook.Sheets.谈判付款.U3.c[0].t,'申请日期（资金整理）：2026年10月27日');
     if(process.env.QA_OUT){await fs.writeFile(process.env.QA_OUT+'/sorted-dates.xlsx',sortedBytes);await frame.locator('#normalPreview tbody tr').first().locator('td').nth(at('申请付款的日期')).scrollIntoViewIfNeeded();await frame.locator('#normalPreview').screenshot({path:process.env.QA_OUT+'/sorted-dates.png'});}
+    // Replacing the application OA must move dates and red fill to that OA only, even at the same amount.
+    const switched=X.read(fixture({removeFirstApplication:true}).applications);switched.Sheets.付款申请汇总.D3.v=records[3].id;
+    await upload('applications',write(switched));await frame.locator('#analyze:not([disabled])').click();await frame.locator('#download:not([disabled])').waitFor();
+    const switchedPreview=(await snapshot()).normalPreview;assert.deepEqual(switchedPreview.rows.map(r=>r[at('是否提交付款申请单')].text),['已提交','未申请']);
+    assert(switchedPreview.rows[0].every(c=>c.applied));assert(switchedPreview.rows[1].every(c=>!c.applied));
+    const switchedBook=X.read(await download(4),{cellNF:true,cellStyles:true}),switchedNormal=switchedBook.Sheets.正常付款;
+    assert.deepEqual([switchedNormal.E2.v,switchedNormal.E3.v],[records[3].id,records[2].id]);assert.deepEqual([switchedNormal.R2.v,switchedNormal.R3.v],['已提交','未申请']);
+    assert.equal(switchedNormal.S2.v,46322);assert.equal(switchedNormal.S3.v??'','');assert.match(switchedNormal.T2.v,/2026-10-27-123.45/);assert.equal(switchedNormal.T3.v??'','');
+    for(const r of [2,3])for(let c=0;c<C.NORMAL_HEADERS.length;c++)assert.equal(/^(?:FF)?FF0000$/i.test(switchedNormal[X.utils.encode_cell({r:r-1,c})].s?.fgColor?.rgb||''),r===2);
     assert.deepEqual(errors, []);
     console.log('PASS: ascending application payment dates with matching formulas and highlights; native application-date notes and normal date column; homepage upload, first/re-read preview, earliest equal-amount installment and full normal-row red fill, no unnecessary review, original formulas, hidden columns, fresh-input CF replacement');
   } finally { await browser.close(); }
