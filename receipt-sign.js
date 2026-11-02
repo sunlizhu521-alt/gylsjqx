@@ -1,7 +1,5 @@
 (()=>{'use strict';
-const $=id=>document.getElementById(id),W=1190,H=1684,PAD=55;
-let book=null,fileName='',documentCount=0,signature=null,busy=false,pageIndex=0;
-const layouts=new Map(),positions=new Map(),preview=$('preview'),ctx=preview.getContext('2d');
+const XLSX=typeof module==='object'&&module.exports?require('./vendor/xlsx.full.min.js'):globalThis.XLSX;
 const text=cell=>String(cell?.w??cell?.v??'');
 function supplierName(sheet){
  const range=XLSX.utils.decode_range(sheet['!ref']);
@@ -18,10 +16,38 @@ function supplierName(sheet){
  }
  return '';
 }
+function receiptQuantity(sheet){
+ const range=XLSX.utils.decode_range(sheet['!ref']),headers=[],totals=[];
+ const normalized=c=>text(c).normalize('NFKC').replace(/\s+/g,'');
+ for(let r=range.s.r;r<=range.e.r;r++)for(let c=range.s.c;c<=range.e.c;c++){
+  const label=normalized(sheet[XLSX.utils.encode_cell({r,c})]);
+  if(['实收数量','入库数量','数量'].includes(label))headers.push({r,c,label});
+ }
+ const preferred=headers.filter(h=>h.label==='实收数量'),columns=preferred.length?preferred:headers;
+ if(columns.length!==1)throw Error('无法唯一识别实收数量列，请检查入库单表头');
+ const header=columns[0];
+ for(let r=header.r+1;r<=range.e.r;r++){
+  let label='';for(let c=range.s.c;c<=range.e.c;c++){const value=normalized(sheet[XLSX.utils.encode_cell({r,c})]);if(/^(?:合计|总计)[：:]?$/.test(value))label=value;}
+  if(label)totals.push(sheet[XLSX.utils.encode_cell({r,c:header.c})]);
+ }
+ if(totals.length!==1)throw Error('无法唯一识别实收数量的合计，请检查入库单合计行');
+ const total=totals[0],value=String(total?.v??'').normalize('NFKC').trim();
+ if(total?.t==='e'||!['n','s'].includes(total?.t)||! /^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(value))throw Error('实收数量合计为空或不是有效数字，请核实后重新上传');
+ return value.replace(/,/g,'');
+}
 function receiptFileName(sheets){
  const names=[...new Set(Object.values(sheets).map(sheet=>supplierName(sheet)||'未识别供应商'))];
- return '入库单-'+names.join('、').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/\s+/g,' ').trim()+'.pdf';
+ const quantities=Object.entries(sheets).map(([name,sheet])=>{try{return receiptQuantity(sheet);}catch(e){throw Error(name+'：'+e.message);}});
+ const precision=Math.max(0,...quantities.map(v=>(v.split('.')[1]||'').length)),scale=10n**BigInt(precision);
+ const total=quantities.reduce((sum,value)=>{const parts=value.replace(/^[+-]/,'').split('.'),n=BigInt(parts[0])*scale+BigInt((parts[1]||'').padEnd(precision,'0'));return sum+(value.startsWith('-')?-n:n);},0n);
+ const digits=(total<0n?-total:total).toString().padStart(precision+1,'0');
+ const quantity=(total<0n?'-':'')+(precision?(digits.slice(0,-precision)+'.'+digits.slice(-precision)).replace(/\.?0+$/,''):digits);
+ return '入库单-'+names.join('、').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/\s+/g,' ').trim()+'-'+quantity+'.pdf';
 }
+if(typeof module==='object'&&module.exports){module.exports={receiptFileName};return;}
+const $=id=>document.getElementById(id),W=1190,H=1684,PAD=55;
+let book=null,fileName='',documentCount=0,signature=null,busy=false,pageIndex=0;
+const layouts=new Map(),positions=new Map(),preview=$('preview'),ctx=preview.getContext('2d');
 function wrap(c,value,width){
  const lines=[];for(const paragraph of value.replace(/\r/g,'').split('\n')){let line='';for(const char of paragraph){if(line&&c.measureText(line+char).width>width){lines.push(line);line=char;}else line+=char;}lines.push(line);}return lines;
 }
