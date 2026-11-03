@@ -63,7 +63,10 @@ function parse(book,fileName){
  const result=[...groups.values()].map(g=>({...g,quantity:decimalText(g.quantity),amount:g.amount.toString(),items:[...g.items.values()].map(item=>{if(item.names.size>1)warnings.push(g.buyer+' / '+g.supplier+'：物料 '+item.code+' 存在不同名称，已全部保留');return {code:item.code,name:[...item.names].join('\n'),price:decimalText(item.price),quantity:decimalText(item.quantity),amount:item.amount.toString(),note:[...item.notes].join('\n'),sources:item.sources};})}));
  return {groups:result,count,quantity:decimalText(grandQuantity),amount:grandAmount.toString(),warnings};
 }
-function defaults(today){return {reconcileDate:today,cutoff:'',terms:'票到90天付款',balance:'',receipts:'',afterSales:'',returns:'',invoiced:'',uninvoiced:'',note:'',phone:'',invoices:Array.from({length:5},()=>({month:'',status:'',amount:''}))};}
+function defaults(month){
+ const next=new Date(date(month+'-01')+'T00:00:00Z');next.setUTCMonth(next.getUTCMonth()+1,10);
+ return {reconcileDate:next.toISOString().slice(0,10),cutoff:'',terms:'票到90天付款',balance:'',receipts:'',afterSales:'',returns:'',invoiced:'',uninvoiced:'',note:'',phone:'',invoices:Array.from({length:5},()=>({month:'',status:'',amount:''}))};
+}
 function footer(group,input){
  const data={...input},labels={balance:'上期余额',receipts:'本期收款',afterSales:'售后费用',returns:'退货金额',invoiced:'已开票欠款',uninvoiced:'未开票欠款'};
  for(const [k,label]of Object.entries(labels)){const n=decimal(input[k],label,2);data[k]=n===null?'':amountText(n);}

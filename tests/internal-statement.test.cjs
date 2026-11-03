@@ -29,8 +29,12 @@ test('同编码不同名称完整保留并提示，标识不安全数字不猜�
  const r=C.parse(book([row(),row({物料名称:'另一个名称'})]),'源.xlsx');assert.equal(r.groups[0].items[0].name,'测试物料\n另一个名称');assert.equal(r.warnings.length,1);
  assert.throws(()=>C.parse(book([row({物料编码:123.4})]),'源.xlsx'),/完整整数/);
 });
+test('各对账月份默认次月10日，支持跨年及闰年，不依赖今天',()=>{
+ for(const [month,expected]of [['2026-06','2026-07-10'],['2026-11','2026-12-10'],['2026-12','2027-01-10'],['2024-02','2024-03-10'],['2026-02','2026-03-10']])assert.equal(C.defaults(month).reconcileDate,expected);
+ assert.throws(()=>C.defaults('2026-13'),/日期无法识别/);
+});
 test('手填底部金额空白不当零，完整填写才计算合计，金额及日期异常报错',()=>{
- const g={amount:'10001'},f=C.defaults('2026-11-03');let d=C.footer(g,f);assert.equal(d.total,'');assert.equal(d.balance,'');assert.equal(d.invoices[0].amount,'');
+ const g={amount:'10001'},f=C.defaults('2026-11');let d=C.footer(g,f);assert.equal(d.total,'');assert.equal(d.balance,'');assert.equal(d.invoices[0].amount,'');
  Object.assign(f,{balance:'0',receipts:'20',afterSales:'0',returns:'10.01'});d=C.footer(g,f);assert.equal(d.total,'70.00');assert.equal(d.balance,'0.00');assert.equal(f.balance,'0');
  assert.throws(()=>C.footer(g,{...f,receipts:'金额不明'}),/有效数值/);assert.throws(()=>C.footer(g,{...f,reconcileDate:''}),/选择对账日期/);
 });

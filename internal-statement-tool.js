@@ -1,7 +1,6 @@
 (()=>{'use strict';
 const $=id=>document.getElementById(id),C=InternalStatement,D=InternalStatementDocument,fields=['reconcileDate','cutoff','terms','phone','balance','receipts','afterSales','returns','invoiced','uninvoiced','note'];
 let template,source=null,settings=new Map(),models=[],selected=0,page=0,busy=false;
-const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 for(let i=0;i<5;i++){const tr=$('invoiceTable').tBodies[0].insertRow();for(const kind of ['month','status','amount']){const td=tr.insertCell(),input=document.createElement(kind==='status'?'select':'input');input.dataset.field=kind;input.setAttribute('aria-label',`货款汇总第 ${i+1} 行${{month:'月份',status:'是否开票',amount:'开具金额'}[kind]}`);if(kind==='status')for(const v of ['','是','否']){const o=document.createElement('option');o.textContent=v;o.value=v;input.append(o);}else if(kind==='month')input.type='month';else input.inputMode='decimal';td.append(input);}}
 function current(){return source?.groups[selected];}
 function syncPreviewSelectors(){
@@ -42,7 +41,7 @@ function buyers(){
 $('sourceFile').onchange=async()=>{
  const file=$('sourceFile').files[0];if(!file)return;$('sourceFile').disabled=true;source=null;models=[];selected=0;page=0;clearPreview();settings.clear();$('buyers').replaceChildren();for(const id of ['formSection','downloadSection','previewSection'])$(id).hidden=true;$('warnings').textContent='';$('fileInfo').textContent='正在读取：'+file.name;
  try{if(file.size>30*1024*1024)throw Error('文件超过 30 MB');$('status').textContent='正在读取并整理…';await new Promise(r=>setTimeout(r,0));const book=XLSX.read(await file.arrayBuffer(),{type:'array',cellNF:true});source=C.parse(book,file.name);
-  for(const g of source.groups)settings.set(g.key,C.defaults(today()));$('statement').replaceChildren();source.groups.forEach((g,index)=>{const o=document.createElement('option');o.value=index;o.textContent=`${g.buyer} / ${g.supplier} / ${g.month}`;$('statement').append(o);});
+  for(const g of source.groups)settings.set(g.key,C.defaults(g.month));$('statement').replaceChildren();source.groups.forEach((g,index)=>{const o=document.createElement('option');o.value=index;o.textContent=`${g.buyer} / ${g.supplier} / ${g.month}`;$('statement').append(o);});
   syncPreviewSelectors();writeForm();buyers();for(const id of ['formSection','downloadSection','previewSection'])$(id).hidden=false;
   $('fileInfo').textContent=file.name+'｜引用时间：'+new Date().toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});$('warnings').textContent=source.warnings.join('\n');regenerate();
  }catch(e){source=null;models=[];$('status').textContent='读取失败：'+e.message;$('fileInfo').textContent=file.name+'（未成功引用）';}finally{$('sourceFile').disabled=false;$('sourceFile').value='';}
