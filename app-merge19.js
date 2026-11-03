@@ -1,4 +1,5 @@
 const tools = [
+  { id: 'internal-statement', icon: '对', title: '内部交易对账单', status: '可用', desc: '按采购组织整理内部交易，填充内置模板，分别下载 Excel 和 PDF。', href: 'internal-statement.html' },
   { id: 'funds', icon: '账', title: '资金整理', status: '可用', desc: '整理谈判付款、正常付款及申请核对记录，补充 OA 审批进度。', href: 'funds.html' },
   { id: 'receipt-sign', icon: '签', title: '采购入库单签字', status: '可用', desc: '上传采购入库单后自动签字，合并下载 A4 竖向 PDF。', href: 'receipt-sign.html' },
   { id: 'beihuo', icon: '备', title: '备货分配', status: '可用', desc: '上传备货需求和维度表，匹配采购分工、汇总数量并导出分配明细。', href: 'beihuo/index.html' },
