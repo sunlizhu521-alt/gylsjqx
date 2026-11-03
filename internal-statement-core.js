@@ -77,5 +77,18 @@ function footer(group,input){
  return data;
 }
 const fileName=(buyer,groups)=>'内部交易对账单-'+buyer+'-'+[...new Set(groups.map(g=>g.month))].join('、');
-return {HEADERS,parse,defaults,footer,decimal,decimalText,amountText,date,dateLabel,fileName};
+const shortNames=new Map([
+ ['迈德斯特',['浙江迈德斯特医疗器械科技有限公司','迈德斯特斯特医疗器械有限公司科技有限公司']],
+ ['瑞朗德',['河北瑞朗德医疗器械科技有限公司','河北瑞朗德医疗器械科技集团有限公司']],
+ ['迈德斯特（宁波）',['迈德斯特（宁波）医疗器械科技有限公司','迈德斯特（宁波）医疗科技有限公司']],
+ ['国源',['杭州国源养老科技有限公司']]
+].flatMap(([short,names])=>[short,...names].map(name=>[norm(name),short])));
+const shortName=name=>shortNames.get(norm(name))||String(name).trim();
+function statementFileNames(groups){
+ const used=new Set();return groups.map(g=>{
+  const base=`${shortName(g.buyer)}&${shortName(g.supplier)}-${g.month.slice(0,4)}年${Number(g.month.slice(5))}月`.replace(/[<>:"/\\|?*\x00-\x1f]/g,'_');
+  let name=base,n=1;while(used.has(name.toLowerCase()))name=base+'（'+(++n)+'）';used.add(name.toLowerCase());return name;
+ });
+}
+return {HEADERS,parse,defaults,footer,decimal,decimalText,amountText,date,dateLabel,fileName,statementFileNames};
 });

@@ -38,4 +38,19 @@ test('手填底部金额空白不当零，完整填写才计算合计，金额�
  Object.assign(f,{balance:'0',receipts:'20',afterSales:'0',returns:'10.01'});d=C.footer(g,f);assert.equal(d.total,'70.00');assert.equal(d.balance,'0.00');assert.equal(f.balance,'0');
  assert.throws(()=>C.footer(g,{...f,receipts:'金额不明'}),/有效数值/);assert.throws(()=>C.footer(g,{...f,reconcileDate:''}),/选择对账日期/);
 });
+test('分组文件名采用双方明确简称和对账年月，未知公司保留全称',()=>{
+ const groups=[
+  {buyer:'浙江迈德斯特医疗器械科技有限公司',supplier:'河北瑞朗德医疗器械科技集团有限公司',month:'2026-06'},
+  {buyer:'迈德斯特斯特医疗器械有限公司科技有限公司',supplier:'河北瑞朗德医疗器械科技有限公司',month:'2026-12'},
+  {buyer:'迈德斯特(宁波)医疗科技有限公司',supplier:'杭州国源养老科技有限公司',month:'2026-06'},
+  {buyer:'杭州国源养老科技有限公司',supplier:'迈德斯特（宁波）医疗器械科技有限公司',month:'2026-06'},
+  {buyer:'其他采购公司',supplier:'其他供应公司',month:'2027-06'}
+ ];const before=JSON.stringify(groups);
+ assert.deepEqual(C.statementFileNames(groups),['迈德斯特&瑞朗德-2026年6月','迈德斯特&瑞朗德-2026年12月','迈德斯特（宁波）&国源-2026年6月','国源&迈德斯特（宁波）-2026年6月','其他采购公司&其他供应公司-2027年6月']);assert.equal(JSON.stringify(groups),before);
+});
+test('简称或文件名清理后重名仍独立输出，不覆盖不同分组',()=>{
+ const group={buyer:'迈德斯特',supplier:'瑞朗德',month:'2026-06'};
+ assert.deepEqual(C.statementFileNames([group,{...group,buyer:'浙江迈德斯特医疗器械科技有限公司'},group]),['迈德斯特&瑞朗德-2026年6月','迈德斯特&瑞朗德-2026年6月（2）','迈德斯特&瑞朗德-2026年6月（3）']);
+ assert.deepEqual(C.statementFileNames([{...group,buyer:'测试/A'}, {...group,buyer:'测试:A'}]),['测试_A&瑞朗德-2026年6月','测试_A&瑞朗德-2026年6月（2）']);
+});
 module.exports={book,row,headers};

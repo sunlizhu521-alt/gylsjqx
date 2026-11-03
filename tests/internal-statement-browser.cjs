@@ -1,4 +1,5 @@
 const fs=require('node:fs/promises'),assert=require('node:assert/strict'),X=require('../vendor/xlsx.full.min.js'),C=require('../internal-statement-core.js');
+const JSZip=require('../vendor/jszip.min.js'),{PDFDocument}=require('../vendor/pdf-lib.min.js'),{createHash}=require('node:crypto');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const expectedDate=month=>new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5)),10)).toISOString().slice(0,10);
 const headers=['供应商','采购组织','单据编号','入库日期','物料编码','物料名称','实收数量','含税单价','价税合计','金额','备注'];
@@ -47,6 +48,7 @@ function synthetic(){const b=X.utils.book_new(),rows=[];for(let i=0;i<70;i++)row
   await frame.locator('#statement').selectOption('0');await checkDraw(0);
   await frame.locator('#receipts').fill('金额异常');await frame.locator('#update').click();
   assert(await frame.locator('#preview').isHidden());assert.equal(await frame.locator('#pageInfo').innerText(),'');assert(await frame.locator('#next').isDisabled());
+  assert(await frame.locator('#downloadAllPdf').isDisabled());
   assert((await frame.locator('#previewMessage').innerText()).includes('本期收款'));
   assert(await frame.locator('#preview').evaluate(c=>!c.getContext('2d').getImageData(0,0,c.width,c.height).data.some(v=>v!==0)),'失败时画布实际清空');
   await frame.locator('#statement').selectOption('1');await checkSelection(1);assert(await frame.locator('#preview').isHidden());
@@ -77,6 +79,26 @@ function synthetic(){const b=X.utils.book_new(),rows=[];for(let i=0;i<70;i++)row
   await frame.locator('#statement').selectOption('0');await frame.locator('#balance').fill('0');await frame.locator('#receipts').fill('20');await frame.locator('#afterSales').fill('0');await frame.locator('#returns').fill('1.23');await frame.locator('#note').fill('本次手动备注');await frame.locator('#reconcileDate').fill('2027-02-12');await frame.locator('#update').click();assert(!((await frame.locator('#status').innerText()).startsWith('请核实')));
   await page.locator('.tool-tab[data-tool="funds"]').click();await page.locator('.tool-tab[data-tool="internal-statement"]').click();assert.equal(await frame.locator('#note').inputValue(),'本次手动备注');await frame.locator('#statement').selectOption('1');await frame.locator('#statement').selectOption('0');assert.equal(await frame.locator('#reconcileDate').inputValue(),'2027-02-12');
   const event=page.waitForEvent('download');await frame.locator('#buyers .buyer').first().locator('button[data-format="xlsx"]').click();const written=X.read(await fs.readFile(await(await event).path()));const s=written.Sheets[written.SheetNames[0]],t=expected.groups[0].items.length+6;assert.equal(s.A3.v,'对账日期：2027年2月12日');assert.equal(s['C'+(t+1)].v,0);assert.equal(s['C'+(t+6)].v,Number(C.amountText(BigInt(expected.groups[0].amount)-2123n)));assert.equal(s['A'+(t+11)].v,'备注：本次手动备注');
+  // A failure after the first PDF must not trigger a partial ZIP download.
+  const batchDownloads=[],onBatchDownload=d=>batchDownloads.push(d);page.on('download',onBatchDownload);
+  await frame.locator('body').evaluate(()=>{window.__originalPdf=InternalStatementDocument.pdf;let calls=0;InternalStatementDocument.pdf=async(...args)=>{if(++calls===2)throw Error('合成 PDF 导出失败');return window.__originalPdf(...args);};});
+  await frame.locator('#downloadAllPdf').click();await frame.locator('#status').filter({hasText:'生成失败：合成 PDF 导出失败'}).waitFor({timeout:120000});
+  assert.equal(batchDownloads.length,0);assert(await frame.locator('#preview').isHidden());
+  await frame.locator('body').evaluate(()=>{
+   const original=window.__originalPdf;delete window.__originalPdf;window.__batchCalls=[];
+   InternalStatementDocument.pdf=async(models,...rest)=>{const bytes=await original(models,...rest);const digest=await crypto.subtle.digest('SHA-256',bytes);window.__batchCalls.push({groups:models.map(m=>({key:m.group.key,buyer:m.group.buyer,supplier:m.group.supplier,amount:m.group.amount,count:m.group.items.length,date:m.settings.reconcileDate,note:m.settings.note})),pages:models.reduce((n,m)=>n+m.pages.length,0),sha:[...new Uint8Array(digest)].map(v=>v.toString(16).padStart(2,'0')).join('')});return bytes;};
+  });
+  await frame.locator('#statement').selectOption(String(expected.groups.length-1));
+  const batchEvent=page.waitForEvent('download',{timeout:180000});await frame.locator('#downloadAllPdf').click();const batch=await batchEvent;
+  assert.equal(batch.suggestedFilename(),'内部交易对账单-PDF.zip');assert.equal(batchDownloads.length,1);page.off('download',onBatchDownload);
+  const archiveBytes=await fs.readFile(await batch.path()),archive=await JSZip.loadAsync(archiveBytes),names=C.statementFileNames(expected.groups),calls=await frame.locator('body').evaluate(()=>window.__batchCalls);
+  assert.deepEqual(Object.keys(archive.files),names.map(n=>n+'.pdf'));assert.equal(calls.length,expected.groups.length);
+  for(const [i,g]of expected.groups.entries()){
+   assert.deepEqual(calls[i].groups,[{key:g.key,buyer:g.buyer,supplier:g.supplier,amount:g.amount,count:g.items.length,date:i===0?'2027-02-12':expectedDate(g.month),note:i===0?'本次手动备注':''}]);
+   const bytes=await archive.file(names[i]+'.pdf').async('uint8array');assert.equal(createHash('sha256').update(bytes).digest('hex'),calls[i].sha);
+   const pdf=await PDFDocument.load(bytes);assert.equal(pdf.getPageCount(),calls[i].pages);assert(pdf.getPages().every(p=>Math.abs(p.getWidth()-595.28)<.01&&Math.abs(p.getHeight()-841.89)<.01));
+  }
+  if(out)await fs.writeFile(out+'/batch.zip',archiveBytes);
   if(out){await frame.locator('#preview').screenshot({path:out+'/preview.png'});await frame.locator('#previewSection').scrollIntoViewIfNeeded();await page.screenshot({path:out+'/ui.png'});}
   await frame.locator('#statement').selectOption(String(expected.groups.length-1));
   await frame.locator('#sourceFile').setInputFiles({name:'最新入库.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:synthetic()});await frame.locator('#buyers button:not([disabled])').first().waitFor();assert.equal(await frame.locator('#note').inputValue(),'');assert.equal(await frame.locator('#statement option').count(),4);await checkSelection(0,C.parse(X.read(synthetic()),'最新入库.xlsx').groups);
@@ -87,6 +109,6 @@ function synthetic(){const b=X.utils.book_new(),rows=[];for(let i=0;i<70;i++)row
   const invalid=X.utils.book_new();X.utils.book_append_sheet(invalid,X.utils.aoa_to_sheet([['无效表头']]),'Sheet1');
   await frame.locator('#sourceFile').setInputFiles({name:'错误文件.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(X.write(invalid,{type:'buffer',bookType:'xlsx'}))});
   await frame.locator('#sourceFile:not([disabled])').waitFor();assert((await frame.locator('#status').innerText()).startsWith('读取失败：'));assert(await frame.locator('#downloadSection').isHidden());
-  assert.deepEqual(errors,[]);console.log(JSON.stringify({base,count:expected.count,groups:expected.groups.length,result,exports:true,manualFields:true,defaultReconcileDate:true,switching:true,groupPreview:true,pagination:true,failedPreviewCleared:true,latestUpload:true,mobile:true,invalidUpload:true,errors}));
+  assert.deepEqual(errors,[]);console.log(JSON.stringify({base,count:expected.count,groups:expected.groups.length,result,exports:true,batchPdfZip:names,failedBatchNoDownload:true,manualFields:true,defaultReconcileDate:true,switching:true,groupPreview:true,pagination:true,failedPreviewCleared:true,latestUpload:true,mobile:true,invalidUpload:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
