@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs/promises'),X=require('../vendor/xlsx.full.min.js'),C=require('../funds-core.js');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
-const {fixture,append,set,ID}=require('./funds-progress-fixtures.cjs');
+const {fixture,append,set,ID,PAID40}=require('./funds-progress-fixtures.cjs');
 const MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
 (async()=>{
@@ -18,22 +18,22 @@ const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
   async function analyze(){await frame.locator('#analyze:not([disabled])').click();await frame.locator('#download:not([disabled])').waitFor();assert.equal(await frame.locator('#pendingCount').innerText(),'0');}
   async function download(version){const pending=page.waitForEvent('download');await frame.locator('#download').click();const d=await pending;assert.equal(d.suggestedFilename(),'资金整理-2026-11-01-V'+version+'.xlsx');return fs.readFile(await d.path());}
   async function preview(){return frame.locator('#progressPreview').evaluate(el=>({headers:[...el.querySelectorAll('th')].map(e=>e.textContent),rows:[...el.querySelectorAll('tbody tr')].map(tr=>[...tr.cells].map(td=>({text:td.textContent,red:td.classList.contains('funds-applied'),color:getComputedStyle(td).backgroundColor})))}));}
-  async function verify(bytes,expectedStates){
+  async function verify(bytes,expectedStates,expectedAmounts=[40,200,40,0,12,18,20]){
    const saved=X.read(bytes,{type:'buffer',cellNF:true,cellStyles:true}),core=C.build(input),sheet=saved.Sheets.付款进度整理;
    assert.deepEqual(saved.SheetNames,C.OUTPUT_SHEETS);assert.equal(core.stats.pending,0);
    const expectedReviews=core.reviewRows.map(row=>row.map((c,index)=>index===5?C.formatReviewText(c.v):c.v));
    assert.deepEqual(X.utils.sheet_to_json(saved.Sheets.付款申请核对,{header:1,defval:''}).slice(1),expectedReviews);
    assert.deepEqual(await frame.locator('#reviewPreview tbody tr').evaluateAll(rows=>rows.map(tr=>[...tr.cells].map(td=>td.textContent))),core.reviewRows.map(row=>row.map((c,index)=>index===5?C.formatReviewText(c.v):X.utils.format_cell(c))));
    for(const [index,state]of expectedStates.entries())if(state==='重新申请')assert(!core.reviewRows.some(row=>row[6].v===input.applications.name&&row[8].v===index+2),'重新申请的来源行不进入核对表');
-   assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1})[0],C.PROGRESS_HEADERS);assert.equal(X.utils.decode_range(sheet['!ref']).e.r,7);
-   const rows=X.utils.sheet_to_json(sheet,{header:1}).slice(1);assert.deepEqual(rows.map(row=>row[11]),expectedStates);assert.deepEqual(rows.map(row=>row[5]),[40,200,40,0,12,18,20]);
+   assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1})[0],C.PROGRESS_HEADERS);assert.equal(X.utils.decode_range(sheet['!ref']).e.r,expectedStates.length);
+   const rows=X.utils.sheet_to_json(sheet,{header:1}).slice(1);assert.deepEqual(rows.map(row=>row[11]),expectedStates);assert.deepEqual(rows.map(row=>row[5]),expectedAmounts);
    for(let r=0;r<core.progressRows.length;r++)for(let c=0;c<12;c++){
     const actual=sheet[X.utils.encode_cell({r:r+1,c})],expected=core.progressRows[r][c];assert.equal(actual.v,expected.v);assert.equal(actual.t,expected.t);if(expected.z)assert.equal(actual.z,expected.z);
    }
-   assert.equal(sheet.A2.t,'n');assert.equal(sheet.G2.t,'n');assert.equal(sheet.F2.t,'n');assert.equal(sheet.E2.t,'s');assert.equal(sheet.F5.v,0);assert.equal(sheet['!autofilter'].ref,'A1:L8');
+   assert.equal(sheet.A2.t,'n');assert.equal(sheet.G2.t,'n');assert.equal(sheet.F2.t,'n');assert.equal(sheet.E2.t,'s');assert.equal(sheet.F5.v,0);assert.equal(sheet['!autofilter'].ref,'A1:L'+(expectedStates.length+1));
    assert.equal(X.SSF.format(sheet.G2.z,sheet.G2.v),'2026年11月6日');assert.equal(X.SSF.format(sheet.G3.z,sheet.G3.v),'2026年11月9日');
-   const snap=await preview();assert.deepEqual(snap.headers,C.PROGRESS_HEADERS);assert.equal(snap.rows.length,7);
-   for(let r=0;r<7;r++)for(let c=0;c<12;c++){
+   const snap=await preview();assert.deepEqual(snap.headers,C.PROGRESS_HEADERS);assert.equal(snap.rows.length,expectedStates.length);
+   for(let r=0;r<expectedStates.length;r++)for(let c=0;c<12;c++){
     const cell=sheet[X.utils.encode_cell({r:r+1,c})];assert.equal(snap.rows[r][c].text,X.utils.format_cell(cell));
     const red=c===11&&expectedStates[r]==='已付款';assert.equal(snap.rows[r][c].red,red);if(red)assert.equal(snap.rows[r][c].color,'rgb(255, 0, 0)');
     assert.equal(cell.s?.fgColor?.rgb==='FF0000',red,'仅已付款状态格使用普通红色填充');
@@ -54,17 +54,25 @@ const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
   await analyze();const bytes=await download(1),snap=await verify(bytes,['已付款','未付款','已付款','未付款','待核对','待核对','待核对']);
   await page.locator('.tool-tab[data-tool="payment"]').click();await page.locator('.tool-tab[data-tool="funds"]').click();assert.deepEqual(await preview(),snap);
   if(process.env.QA_OUT){await fs.mkdir(process.env.QA_OUT,{recursive:true});await fs.writeFile(process.env.QA_OUT+'/progress.xlsx',bytes);await frame.locator('#progressPreviewSection').scrollIntoViewIfNeeded();await frame.locator('#progressPreviewSection').screenshot({path:process.env.QA_OUT+'/progress.png'});await frame.locator('#progressPreview tbody tr').first().locator('td').last().scrollIntoViewIfNeeded();await frame.locator('#progressPreviewSection').screenshot({path:process.env.QA_OUT+'/progress-status.png'});}
-  // A previous export may be reused as the negotiated source, but flow status must come from the latest OA upload.
-  await upload('negotiated',bytes);set(input,'oa','流程状态',2,'未归档');set(input,'oa','流程状态',6,'未归档');await upload('oa');await analyze();const second=await download(2);await verify(second,['未付款','未付款','未付款','未付款','待核对','待核对','待核对']);
+  // A previous export may be reused, but only evidence in the latest OA upload can confirm a batch.
+  await upload('negotiated',bytes);for(const row of [2,6]){set(input,'oa','流程状态',row,'未归档');set(input,'oa','签字意见',row,'');}await upload('oa');await analyze();const second=await download(2);await verify(second,['待核对','未付款','待核对','未付款','待核对','待核对','待核对']);
   // A per-application reapply note takes precedence over archived, unarchived and multi-flow states.
   X.utils.sheet_add_aoa(input.applications.book.Sheets.付款申请汇总,[['核对说明'],['需重新申请'],['重新申请'],[''],[''],[''],[''],['重新申请']],{origin:'G1'});
-  set(input,'oa','流程状态',2,'归档');set(input,'oa','流程状态',6,'归档');await upload('oa');await upload('applications');await analyze();await verify(await download(3),['重新申请','重新申请','已付款','未付款','待核对','待核对','重新申请']);
+  for(const row of [2,6]){set(input,'oa','流程状态',row,'归档');set(input,'oa','签字意见',row,PAID40);}await upload('oa');await upload('applications');await analyze();await verify(await download(3),['重新申请','重新申请','已付款','未付款','待核对','待核对','重新申请']);
   for(const row of [2,3,8])set(input,'applications','核对说明',row,'');await upload('applications');await analyze();await verify(await download(4),['已付款','未付款','已付款','未付款','待核对','待核对','待核对']);
   for(const row of [2,3,6]){set(input,'oa','当前节点',row,'办理人执行');set(input,'oa','流程状态',row,'未归档');}
   await upload('oa');await analyze();await verify(await download(5),['已付款','已付款','已付款','未付款','待核对','待核对','待核对']);
   assert.equal(await frame.locator('#progressPreview tbody tr').nth(1).locator('td').nth(11).getAttribute('title'),'OA当前节点：办理人执行');
   for(const row of [2,3,6])set(input,'oa','当前节点',row,'财务审批');
-  await upload('oa');await analyze();await verify(await download(6),['未付款','未付款','未付款','未付款','待核对','待核对','待核对']);
-  assert.deepEqual(errors,[]);console.log(JSON.stringify({base,rows:7,sheets:C.OUTPUT_SHEETS,preview:true,export:true,latestUpload:true,reapply:true,errors}));
+  await upload('oa');await analyze();await verify(await download(6),['已付款','未付款','已付款','未付款','待核对','待核对','待核对']);
+  assert.match(await frame.locator('#progressPreview tbody tr').first().locator('td').nth(11).getAttribute('title'),/出纳.*40/s);
+  // Later applications sharing an archived OA are not paid without their own cash-disbursement evidence.
+  append(input,'applications',['2026-11-08','合成供应商1','迈德斯特',ID(1),60,'谈判付款','分批付款第2批']);
+  for(const row of [2,6])set(input,'oa','流程状态',row,'归档');await upload('applications');await upload('oa');await analyze();
+  await verify(await download(7),['已付款','未付款','已付款','未付款','待核对','待核对','待核对','待核对'],[40,200,40,0,12,18,20,60]);
+  const paid60='[出纳执行]\n部分支付：60元\n合成出纳 2026-11-09 15:30:00';
+  for(const row of [2,6])set(input,'oa','签字意见',row,PAID40+'\n'+paid60);await upload('oa');await analyze();
+  await verify(await download(8),['已付款','未付款','已付款','未付款','待核对','待核对','待核对','已付款'],[40,200,40,0,12,18,20,60]);
+  assert.deepEqual(errors,[]);console.log(JSON.stringify({base,rows:8,batchEvidence:true,sheets:C.OUTPUT_SHEETS,preview:true,export:true,latestUpload:true,reapply:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -104,7 +104,7 @@ test('原三表金额、提交标红及公式与上一版一致，进度核对�
  assert.deepEqual(first.normalRows.map(row=>row[C.NORMAL_HEADERS.indexOf('供应商名称')].v),['合成供应商2','合成供应商3']);
  assert.equal(first.normalRows[0][C.NORMAL_HEADERS.indexOf('申请付款的日期')].v,'2026/11/02周');
  assert.equal(first.applicationComments.M2,'申请日期（资金整理）：2026年11月1日；2026年11月3日');
- set(i,'oa','流程状态',2,'未归档');set(i,'oa','流程状态',6,'未归档');assert.equal(records(C.build(i))[0]['是否已付款'].v,'未付款');
+ set(i,'oa','流程状态',2,'未归档');set(i,'oa','流程状态',6,'未归档');assert.equal(records(C.build(i))[0]['是否已付款'].v,'已付款','明确出纳支付记录不由流程状态替代');
  assert.deepEqual(C.build(i).highlights,first.highlights);
 });
 test('没有申请时仍输出固定12列表头与空进度表',()=>{

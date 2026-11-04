@@ -10,6 +10,7 @@ const PROGRESS_HEADERS=['申请日期','跟单员','供应商名称','付款主�
 const OUTPUT_SHEETS=['谈判付款','正常付款','付款申请核对','付款进度整理'];
 const FLOW_FIELDS=['当前节点','未操作者','流程状态','申请人'];
 const OA_FIELDS=['流程编号','收款单位','付款金额',...FLOW_FIELDS];
+const OA_PROGRESS_FIELDS=['签字意见','业务所属公司'];
 const DATE_FORMAT='yyyy"年"m"月"d"日"';
 const norm=v=>String(v??'').normalize('NFKC').replace(/\s+/g,'').trim();
 const str=v=>String(v??'').trim();
@@ -102,6 +103,37 @@ function submissionSummary(matched){
   return {sort:valid?label:'\uffff',i,text:label+'-'+amountText(r.values['申请付款金额'])};
  }).sort((a,b)=>a.sort.localeCompare(b.sort)||a.i-b.i).map(r=>r.text).join('\n'));
 }
+function applicationBatch(text){
+ const match=norm(text).match(/第([0-9零〇一二两三四五六七八九十百]+)批/);
+ if(!match)return '';
+ if(/^\d+$/.test(match[1]))return String(Number(match[1]));
+ let total=0,digit=0;const digits='零一二三四五六七八九';
+ for(const char of match[1].replace(/两/g,'二').replace(/〇/g,'零')){
+  if(char==='十'||char==='百'){total+=(digit||1)*(char==='十'?10:100);digit=0;}
+  else digit=digits.indexOf(char);
+ }
+ return String(total+digit);
+}
+function cashierPayments(record){
+ const source=record.values['签字意见'];
+ if(source?.t==='e'||source?.f&&(source.v==null||source.v===''))return [];
+ const text=str(source?.v).normalize('NFKC').replace(/\r\n?/g,'\n'),events=[];
+ for(const match of text.matchAll(/\[([^\]\n]+)\]([\s\S]*?)(?=\[[^\]\n]+\]|$)/g)){
+  if(norm(match[1])!=='出纳执行')continue;
+  const block=match[2].trim(),stamp=block.match(/(?:^|\n)([^\n]+?)\s+(\d{4}[-/]\d{1,2}[-/]\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s*$/);
+  if(!stamp||date(cell(stamp[2])).invalid||+stamp[3]>23||+stamp[4]>59||+stamp[5]>59){
+   if(block)events.push({key:JSON.stringify(['unparsed',norm(block)]),time:'时间待核对',operator:'出纳',opinion:block,cents:undefined,source:record.source});
+   continue;
+  }
+  const opinion=block.slice(0,stamp.index).trim();if(!opinion)continue;
+  // Only a cashier's single explicit payment is evidence; plans and cumulative totals are not.
+  const amount=opinion.match(/^(?:(?:本次)?(?:已|实际)?(?:部分)?(?:支付|付款)|(?:本次)?实付)(?:金额)?\s*[:：]?\s*(?:人民币|RMB|CNY|[￥¥])?\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)\s*(?:元(?:人民币)?|人民币)?\s*[。.!！]?$/i);
+  const cents=amount?money(cell(amount[1])).cents:undefined;
+  const time=stamp[2].replace(/\//g,'-')+' '+stamp.slice(3,6).map(s=>s.padStart(2,'0')).join(':'),operator=str(stamp[1]);
+  events.push({key:JSON.stringify([time,operator,norm(opinion)]),time,operator,opinion,cents:cents>0n?cents:undefined,source:record.source});
+ }
+ return events;
+}
 function table(input,sheetName,required){
  const sheet=input.book.Sheets[sheetName];if(!sheet)throw Error(input.name+'：缺少工作表 '+sheetName);
  // WPS can extend !ref to XFD solely because of formatting. Keep all real values/formulas.
@@ -110,7 +142,7 @@ function table(input,sheetName,required){
  if((range.e.r-range.s.r+1)*(range.e.c-range.s.c+1)>2000000)throw Error(sheetName+'：数据范围过大');
  let headerRow=-1,map,headers;
  for(let r=range.s.r;r<=Math.min(range.e.r,range.s.r+29);r++){
-  const h={},hs=[];for(let c=0;c<=range.e.c;c++){const cc=sheet[X.utils.encode_cell({r,c})],key=canonical(cc?.v);hs.push(str(cc?.w??cc?.v));if((required.includes('流程编号')?OA_FIELDS.includes(key):relevant.has(key)))(h[key]??=[]).push(c);}
+  const h={},hs=[];for(let c=0;c<=range.e.c;c++){const cc=sheet[X.utils.encode_cell({r,c})],key=canonical(cc?.v);hs.push(str(cc?.w??cc?.v));if((required.includes('流程编号')?OA_FIELDS.includes(key)||OA_PROGRESS_FIELDS.includes(key):relevant.has(key)))(h[key]??=[]).push(c);}
   if(required.every(k=>h[k])){headerRow=r;map=h;headers=hs;break;}
  }
  if(headerRow<0)throw Error(input.name+' / '+sheetName+'：找不到表头，必须包含 '+required.join('、'));
@@ -650,7 +682,41 @@ function build(inputs,decisions={}){
  for(const r of flow.records)if(r.values['流程编号']?.t!=='e'){const id=flowId(r);if(!progressFlows.has(id))progressFlows.set(id,[]);progressFlows.get(id).push(r);}
  const sourcePosition=r=>r.source.file+' / '+r.source.sheet+' 第 '+r.source.row+' 行';
  const sourceText=c=>c?.t==='e'?c.w||'Excel错误':c?.f&&(c.v==null||c.v==='')?'公式结果不可用':str(c?.v);
+ const progressEvidence=[],progressApplications=new Map(),paymentContexts=new Map();
+ const batchText=r=>['核对说明','备注'].map(h=>usable(r.values[h])?str(value(r,h)):'').join('\n');
+ const batchKey=r=>JSON.stringify([classification(r).name,entity(value(r,'付款主体')),classification(r).cents?.toString()??r.id,applicationTypes.get(r)||'',applicationBatch(batchText(r))]);
+ for(const r of applications.records){
+  const ids=applicationIds(r);if(ids.length!==1||isReapplication(r))continue;
+  if(!progressApplications.has(ids[0]))progressApplications.set(ids[0],[]);
+  progressApplications.get(ids[0]).push(r);
+ }
+ for(const [id,records] of progressFlows){
+  const apps=progressApplications.get(id)||[],events=[...new Map(records.flatMap(cashierPayments).map(e=>[e.key,e])).values()];
+  const text=records.map(r=>sourceText(r.values['签字意见'])).join('\n');
+  paymentContexts.set(id,{records,apps,events,batch:/分批|部分支付|部分付款/.test(text)||apps.some(r=>/分批|第[0-9零〇一二两三四五六七八九十百]+批/.test(norm(batchText(r))))||new Set(apps.map(batchKey)).size>1});
+ }
+ function batchPayment(application,id){
+  const context=paymentContexts.get(id),info=classification(application);
+  if(!context)return null;
+  const smaller=info.cents>0n&&context.records.some(r=>money(r.values['付款金额']).cents>info.cents);
+  if(!context.batch&&!smaller)return null;
+  const {events,records,apps}=context,amount=info.cents;
+  const exact=events.filter(e=>e.cents===amount&&amount>0n);
+  const candidateApps=apps.filter(r=>classification(r).name===info.name&&compatible(application,r,'付款主体')&&classification(r).cents===amount);
+  const groups=new Set(candidateApps.map(batchKey));
+  const identityConflict=!info.name||records.some(r=>payee(r)!==info.name||!compatible(application,{values:{付款主体:r.values['业务所属公司']}},'付款主体'));
+  const oaAmounts=records.map(r=>money(r.values['付款金额']).cents);
+  const amountConflict=oaAmounts.some(n=>n===undefined||n<=0n)||new Set(oaAmounts).size!==1;
+  const excessAmount=amount>oaAmounts[0]||events.some(e=>e.cents>oaAmounts[0]);
+  const conflictingEvent=events.some(e=>e.cents===undefined&&/撤销|撤回|退款|退回|退汇|冲正|作废|失败|未支付|未付款|未付|未完成|取消|未成功|不成功|未到账/.test(e.opinion));
+  const reason=identityConflict?'OA收款单位与申请供应商不一致，或付款主体冲突':amountConflict?'同一OA付款金额为空、异常或存在冲突':amount===undefined||amount<=0n?'申请金额为空、异常或非正数':excessAmount?'申请或出纳支付金额超过OA付款金额':groups.size!==1?'同一金额对应多个申请批次，无法唯一归属':conflictingEvent?'出纳意见含未付、撤回或退汇等信息，需要确认支付是否有效':exact.length>1?'存在多条同额出纳支付记录，无法唯一对应':!exact.length?'未找到与本笔申请金额相等的明确出纳支付记录':'';
+  const eventLabel=e=>e.time+'｜'+e.operator+'｜'+e.opinion+'｜'+sourcePosition({source:e.source});
+  if(!reason)return {paid:true,evidence:'出纳支付依据：'+eventLabel(exact[0])};
+  const evidence=events.length?events.map(eventLabel).join('\n'):'无可明确识别金额和时间的出纳支付记录；OA来源：'+sourcePosition(records[0]);
+  return {paid:false,evidence:'分批付款待核对：'+reason,review:'分批付款核对：申请金额 '+amountText(application.values['申请付款金额'])+(applicationBatch(batchText(application))?'；第'+applicationBatch(batchText(application))+'批':'')+'。\n'+reason+'。\n出纳记录：'+evidence+'。\n需要处理：核实本批是否实际支付，并核对对应出纳付款金额、时间及批次；记录不完整时重新导出OA签字意见。'};
+ }
  const progressRows=applications.records.map(application=>{
+  let paymentEvidence='';
   const notes=[],ids=applicationIds(application),info=classification(application),reference=application.values[applicationOAField];
   const values=Object.fromEntries(PROGRESS_HEADERS.map(h=>[h,empty()]));
   for(const h of ['供应商名称','付款主体']){values[h]=cell(sourceText(application.values[h]));if(!usable(application.values[h]))notes.push(h+'为空或异常，请核实申请汇总');}
@@ -702,15 +768,21 @@ function build(inputs,decisions={}){
    const matched=versions[0],invalid=FLOW_FIELDS.filter(h=>matched.values[h]?.t==='e'||(matched.values[h]?.f&&(matched.values[h].v==null||matched.values[h].v==='')));
    for(const h of FLOW_FIELDS)flowValues[h].push(prefix+sourceText(matched.values[h]));
    const status=norm(value(matched,'流程状态')),executing=norm(value(matched,'当前节点'))==='办理人执行';
-   if(invalid.length||(!executing&&!['归档','未归档'].includes(status)))notes.push('流程 '+id+' 的'+(invalid.length?invalid.join('、'):'流程状态')+'为空或异常，请核实 '+sourcePosition(matched));
+   const payment=ids.length===1&&!isReapplication(application)?batchPayment(application,id):null;
+   if(invalid.length)notes.push('流程 '+id+' 的'+invalid.join('、')+'为空或异常，请核实 '+sourcePosition(matched));
+   else if(payment){
+    paymentStatus=payment.paid?'已付款':'待核对';paymentEvidence=payment.evidence;
+    if(payment.review)notes.push(payment.review);
+   }else if(!executing&&!['归档','未归档'].includes(status))notes.push('流程 '+id+' 的流程状态为空或异常，请核实 '+sourcePosition(matched));
    else if(ids.length===1)paymentStatus=executing||status==='归档'?'已付款':'未付款';
   }
   for(const h of FLOW_FIELDS)values[h]=cell(flowValues[h].join('\n'));
   values['是否已付款']=cell(isReapplication(application)?'重新申请':paymentStatus);
+  progressEvidence.push(isReapplication(application)?'核对说明：重新申请':paymentEvidence);
   if(notes.length&&!isReapplication(application)){const source=application.source;reviewRows.push([cell(type||'待核对'),values['供应商名称'],values['付款主体'],values['申请付款金额'],cell('已提交'),cell('付款进度核对：'+(sourceText(reference)||'OA号空白')+'。\n需要处理：'+[...new Set(notes)].join('。\n')+'。'),cell(source.file),cell(source.sheet),cell(source.row),values['跟单员']]);}
   return PROGRESS_HEADERS.map(h=>values[h]);
  });
- return {progressHeaders:[...PROGRESS_HEADERS],progressRows,normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,highlights:{negotiatedCells:[...highlightedNegotiated],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
+ return {progressHeaders:[...PROGRESS_HEADERS],progressRows,progressEvidence,normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,highlights:{negotiatedCells:[...highlightedNegotiated],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
 }
 return {PEOPLE,PROGRESS_HEADERS,OUTPUT_SHEETS,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText};
 });
