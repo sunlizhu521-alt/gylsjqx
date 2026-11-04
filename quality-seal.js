@@ -111,4 +111,6 @@
   $('generate').addEventListener('click', () => generate(false));
   $('download').addEventListener('click', () => generate(true));
   controls();
+  $('reportFile').disabled = false;
+  $('status').textContent = '请上传检验报告单图片。';
 })();

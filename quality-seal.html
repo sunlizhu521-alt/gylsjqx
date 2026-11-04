@@ -12,13 +12,13 @@ main{margin:24px auto;padding:20px;min-width:0}section{background:var(--surface,
 <a href="index.html">← 返回工具箱</a><h1>检验报告单-电子章</h1><p>旋正检验报告图片，加盖内置质检合格章，下载 JPG。</p>
 <section>
 <h2>上传检验报告单</h2>
-<label id="dropZone">选择或拖入图片<input id="reportFile" type="file" accept=".png,.jpg,.jpeg,.webp,.bmp"></label>
+<label id="dropZone">选择或拖入图片<input id="reportFile" type="file" accept=".png,.jpg,.jpeg,.webp,.bmp" disabled></label>
 <p id="fileInfo">未选择图片</p>
 <div class="actions"><button id="rotateLeft" disabled>左转 90°</button><button id="rotateRight" disabled>右转 90°</button><button id="resetRotation" disabled>重置旋转</button><button id="clearImage" disabled>清空图片</button></div>
 <div class="actions"><button id="generate" class="primary" disabled>旋正并加章</button><button id="download" disabled>一键下载盖章图片</button></div>
-<p id="status" role="status" aria-live="polite">请上传检验报告单图片。</p>
+<p id="status" role="status" aria-live="polite">正在加载盖章工具…</p>
 <details><summary>查看使用说明</summary><p>支持 PNG、JPG、WebP、BMP。电子章已内置，按报告宽度约 18% 放在右下角。先检查方向和盖章位置，再下载图片。文件名为“原文件名_旋正已盖章.jpg”，保留旋转后的原始像素尺寸。</p><p>文件仅在当前浏览器处理，原图不修改。切换工具会保留本次图片；刷新页面后需重新上传。下载位置由浏览器设置决定。</p></details>
 </section>
 <section id="previewSection" hidden><h2>图片预览</h2><canvas id="preview" width="1" height="1" aria-label="检验报告单及电子章预览"></canvas></section>
-</main><script src="quality-seal.js?v=restore-quality-seal-20261104"></script></body>
+</main><script src="quality-seal.js?v=restore-quality-seal-20261104-2" onerror="document.getElementById('status').textContent='工具加载失败，请刷新页面重试。'"></script></body>
 </html>
