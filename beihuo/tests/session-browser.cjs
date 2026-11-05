@@ -14,7 +14,7 @@ function fileForSlot(slot, value) {
     1: [['物料编码', '', 'SKU', '物料名称', '销售系列'], ...items.map(([code, , series]) => [code, '', `SKU-${code}`, code, series])],
     2: [['物料编码', '采购下单人', '供应商简称', '供应商名称'], ...items.map(([code, supplier, , buyer]) => [code, buyer, supplier, supplier])],
     3: [['姓名', '一级部门'], ['测试采购', '测试事业部']],
-    4: [['物料编码', '数量', '申请人'], ...items.map(([code], index) => [code, index ? index + 2 : value, '测试采购'])],
+    4: [['备货OA物料编码', '正确物料编码', '数量', '申请人'], ...items.map(([code], index) => [`000${index + 1}`, code, index ? index + 2 : value, '测试采购'])],
     5: value === 444 ? [['供应商名称'], ['供应商甲']] : [['供应商名称', '系列'], ['供应商甲', value === 111 ? '系列甲' : '系列乙'], ['供应商乙', value === 111 ? '系列乙' : '系列甲']],
   }[slot];
   const workbook = X.utils.book_new();
@@ -118,6 +118,12 @@ function fileForSlot(slot, value) {
     assert.deepEqual([sheet.B2.v, sheet.B3.v], ['是', '否']);
     assert.equal(sheet.K2.v, '手填采购主体');
     assert.equal(sheet.M2.v, 9);
+    assert.equal(sheet.O1.v, '采购单订单号');
+    assert.equal(sheet.P1.v, '备货OA的物料编码');
+    assert.deepEqual([sheet.P2.v, sheet.P3.v], ['0001', '0002']);
+    assert.equal(sheet.P2.t, 's');
+    assert.deepEqual([sheet.F2.v, sheet.F3.v], ['TEST-001', 'TEST-002']);
+    assert.equal(await page.locator('#materialCodeWarnings').isHidden(), true);
 
     await page.locator('[data-upload="file-5"]').setInputFiles(fileForSlot(5, 444));
     await page.waitForFunction(() => document.querySelector('#libraryState').textContent.includes('新加坡公司明细未更新，原文件保留'));
@@ -175,6 +181,38 @@ function fileForSlot(slot, value) {
     await upload(5, 111, 4);
     assert.equal(await page.locator('#appliedCount').innerText(), '4');
     assert.equal(await page.locator('#downloadDetailButton').isDisabled(), true, 'Singapore file does not replace the required demand file');
+
+    function blankCodesFile(withCorrectColumn = true) {
+      const rows = [[], ['备货OA物料编码', '正确物料编码', '数量', '申请人'], [],
+        ['0001', 'TEST-001', 2, '测试采购'], ['0002', '', 0, '测试采购'], ['0002', '', 1.5, '测试采购']];
+      const w = X.utils.book_new();
+      X.utils.book_append_sheet(w, X.utils.aoa_to_sheet(withCorrectColumn ? rows : rows.map(row => row.filter((_, index) => index !== 1))), '待补充');
+      return { name: '待补充编码.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(X.write(w, { type: 'buffer', bookType: 'xlsx' })) };
+    }
+    await page.locator('[data-upload="file-4"]').setInputFiles(blankCodesFile());
+    await page.waitForFunction(() => state.demandRows.length === 3 && state.demandRows[2].materialCodeIssue);
+    await page.locator('#materialCodeWarnings summary').click();
+    assert.match(await page.locator('#materialCodeWarnings').innerText(), /待补充编码.xlsx \/ 待补充 第 5 行.*请补充正确物料编码/);
+    assert.match(await page.locator('#materialCodeWarnings').innerText(), /第 6 行/);
+    assert.equal(await page.locator('#downloadBuyerWorkbookButton').isDisabled(), false);
+    await page.reload();
+    await ready();
+    await page.waitForFunction(() => state.demandRows.length === 3);
+    assert.equal(await page.locator('#materialCodeWarnings').isHidden(), false);
+    const blankDownloadEvent = page.waitForEvent('download');
+    await page.locator('#downloadBuyerWorkbookButton').click();
+    const blankDownload = await blankDownloadEvent;
+    const blankWorkbook = X.read(await fs.readFile(await blankDownload.path()), { type: 'buffer' });
+    const blanks = X.utils.sheet_to_json(blankWorkbook.Sheets.未填写下单人, { header: 1, defval: '' });
+    assert.deepEqual(blanks.slice(1).map(row => [row[5], row[8], row[15]]), [['', 0, '0002'], ['', 1.5, '0002']]);
+    assert.equal(blankWorkbook.Sheets.采购甲.F2.v, 'TEST-001');
+    await page.locator('[data-upload="file-4"]').setInputFiles(blankCodesFile(false));
+    await page.waitForFunction(() => state.demandRows.length === 3 && state.demandRows.every(row => !row.materialCode && row.materialCodeIssue.includes('缺少')));
+    assert.match(await page.locator('#materialCodeWarnings').textContent(), /缺少“正确物料编码”列/);
+    await upload(4, 25, 5);
+    await page.waitForFunction(() => state.demandRows.length === 4 && state.demandRows.every(row => !row.materialCodeIssue));
+    assert.equal(await page.locator('#materialCodeWarnings').isHidden(), true);
+
     page.once('dialog', dialog => dialog.accept());
     await page.locator('#clearCacheButton').click();
     await page.waitForFunction(() => document.querySelector('#uploadedCount').textContent === '0');
@@ -183,7 +221,7 @@ function fileForSlot(slot, value) {
     assert.equal(await page.locator('#uploadedCount').innerText(), '0');
     assert.equal(await page.locator('#appliedCount').innerText(), '0');
     assert.deepEqual(errors, []);
-    console.log('PASS optional Singapore upload, exact supplier+series pairs, preview/export, latest replacement, reload, failed-save rollback, deletion, clear cache and unchanged quantities/manual entity/days/filters');
+    console.log('PASS corrected-code allocation, combined original-code column, blank/missing code warnings with source rows, cache restore/replacement, optional Singapore matching, rollback and unchanged quantities/manual entity/days/filters');
   } finally {
     await browser.close();
   }

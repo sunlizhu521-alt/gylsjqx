@@ -55,6 +55,8 @@ const DETAIL_COLUMNS = [
   { key: "stockReason", label: "备货原因" },
 ];
 const EXPORT_COLUMNS = DETAIL_COLUMNS.filter(column => column.key !== "materialCodeValid");
+const COMBINED_EXPORT_COLUMNS = EXPORT_COLUMNS.flatMap(column => column.key === "purchaseOrderNo"
+  ? [column, { key: "oaMaterialCode", label: "备货OA的物料编码" }] : [column]);
 const TABLE_FIELD_ALIASES = {
   productLine: ["销售产品线", "产品线", "一级产品线", "销售线"],
   salesSeries: ["销售系列", "系列", "产品系列", "销售产品系列"],
@@ -90,6 +92,7 @@ const els = {
   downloadDetailButton: document.querySelector("#downloadDetailButton"),
   downloadBuyerWorkbookButton: document.querySelector("#downloadBuyerWorkbookButton"),
   detailState: document.querySelector("#detailState"),
+  materialCodeWarnings: document.querySelector("#materialCodeWarnings"),
   detailTableBody: document.querySelector("#detailTableBody"),
   detailEmpty: document.querySelector("#detailEmpty"),
   paginationControls: document.querySelector("#paginationControls"),
@@ -398,7 +401,7 @@ async function buildDemandAllocationRows(records) {
     readTableRows(records.category, "Dim-YL医疗器械商品分类"),
     readTableRows(records.purchaseDivision, "产品线明细", true),
     readTableRows(records.roster),
-    readTableRows(records.demand),
+    readTableRows(records.demand, "", false, true),
     readTableRows(records.singapore, "Dim-新加坡公司下单"),
   ]);
   const categoryIndex = buildCategoryIndex(categoryRows);
@@ -411,6 +414,7 @@ async function buildDemandAllocationRows(records) {
     const headerIndex = findHeaderRowIndex(rows, [
       ...TABLE_FIELD_ALIASES.demandApplicant,
       ...TABLE_FIELD_ALIASES.demandMaterialCode,
+      "正确物料编码", "备货OA物料编码",
       ...TABLE_FIELD_ALIASES.demandProcessNo,
       ...TABLE_FIELD_ALIASES.demandQuantity,
     ]);
@@ -423,19 +427,29 @@ async function buildDemandAllocationRows(records) {
       purchaseEntity: TABLE_FIELD_ALIASES.demandPurchaseEntity,
       requiredReadyDate: TABLE_FIELD_ALIASES.demandRequiredReadyDate,
     });
+    const correctCodeColumn = findExactHeaderColumnIndex(rows[headerIndex], "正确物料编码");
+    const oaCodeColumn = findExactHeaderColumnIndex(rows[headerIndex], "备货OA物料编码");
+    const correctedFormat = correctCodeColumn !== undefined || oaCodeColumn !== undefined;
+    // 新格式必须使用正确编码，不能被前面的 OA 原编码或旧编码抢先匹配。
+    columnMap.oaMaterialCode = correctedFormat ? oaCodeColumn : columnMap.materialCode;
+    if (correctedFormat) columnMap.materialCode = correctCodeColumn;
     columnMap.quantity = findDemandQuantityColumnIndex(rows[headerIndex], columnMap);
-    if (columnMap.materialCode === undefined) return [];
+    if (columnMap.materialCode === undefined && !correctedFormat) return [];
 
     return rows.slice(headerIndex + 1).map((row, rowOffset) => {
       const applicant = getCellValue(row, columnMap.applicant);
       const materialCode = getCellValue(row, columnMap.materialCode);
+      const oaMaterialCode = getCellValue(row, columnMap.oaMaterialCode);
       const quantityNumber = getDemandRowQuantity(row, columnMap);
       const quantity = Number.isFinite(quantityNumber) ? formatPlainNumber(quantityNumber) : "";
       const oaProcessNo = getCellValue(row, columnMap.oaProcessNo);
       const stockReason = getCellValue(row, columnMap.stockReason);
       const purchaseEntity = getCellValue(row, columnMap.purchaseEntity);
       const requiredReadyDate = getCellValue(row, columnMap.requiredReadyDate);
-      if (!materialCode && !applicant && !quantity && !oaProcessNo) return null;
+      if (!materialCode && !oaMaterialCode && !applicant && !quantity && !oaProcessNo) return null;
+      const materialCodeIssue = correctedFormat && !materialCode
+        ? correctCodeColumn === undefined ? "缺少“正确物料编码”列，请补列并填写正确编码" : "正确物料编码为空，请补充正确物料编码"
+        : "";
 
       const materialKey = normalizeLookupKey(materialCode);
       const category = categoryIndex.byMaterial.get(materialKey) || {};
@@ -463,8 +477,10 @@ async function buildDemandAllocationRows(records) {
         stockReason,
         purchaseEntity,
         materialCode,
+        oaMaterialCode,
+        materialCodeIssue,
         sku: category.sku || "",
-        materialCodeValid: divisionIndex.materialCodes.has(materialKey) ? "是" : "否",
+        materialCodeValid: materialCodeIssue ? "待核对" : divisionIndex.materialCodes.has(materialKey) ? "是" : "否",
         materialName: category.materialName || "",
         quantity,
         requiredReadyDate,
@@ -496,6 +512,7 @@ function mergeDemandRowsByMaterial(rows) {
     const fields = new Set([
       ...DETAIL_COLUMNS.map((column) => column.key),
       ...FILTER_DEFINITIONS.map((filter) => filter.key),
+      "oaMaterialCode",
     ]);
     fields.forEach((key) => {
       if (["materialCode", "quantity", "minimumOrderStatus"].includes(key)) return;
@@ -516,13 +533,14 @@ function mergeDemandRowsByMaterial(rows) {
       sourceSlotId: row.sourceSlotId,
       sourceRowNumber: row.sourceRowNumber,
       oaProcessNo: row.oaProcessNo,
+      oaMaterialCode: row.oaMaterialCode,
       quantityNumber: row.quantityNumber,
     }));
     return merged;
   });
 }
 
-async function readTableRows(record, preferredSheetName = "", onlyExactSheet = false) {
+async function readTableRows(record, preferredSheetName = "", onlyExactSheet = false, preserveSourceRows = false) {
   if (!record) return [];
   const workbook = await readWorkbook(record.file);
   if (onlyExactSheet && !workbook.SheetNames.includes(preferredSheetName)) {
@@ -530,7 +548,7 @@ async function readTableRows(record, preferredSheetName = "", onlyExactSheet = f
   }
   const sheetNames = onlyExactSheet ? [preferredSheetName] : getOrderedSheetNames(workbook, preferredSheetName);
   return sheetNames.map((sheetName) => ({
-    rows: sheetToRows(workbook.Sheets[sheetName]),
+    rows: sheetToRows(workbook.Sheets[sheetName], preserveSourceRows),
     source: {
       fileName: record.name,
       slotId: record.id,
@@ -564,12 +582,13 @@ async function readWorkbook(file) {
   });
 }
 
-function sheetToRows(sheet) {
+function sheetToRows(sheet, preserveSourceRows = false) {
   if (!sheet) return [];
   return window.XLSX.utils.sheet_to_json(sheet, {
     header: 1,
     defval: "",
-    blankrows: false,
+    blankrows: preserveSourceRows,
+    ...(preserveSourceRows ? { range: 0 } : {}),
     raw: false,
   });
 }
@@ -933,7 +952,17 @@ function renderDemandDashboard(emptyMessage = "暂无匹配数据") {
   updateDemandMetrics();
   renderFilterControls();
   renderDemandTable(emptyMessage);
+  renderMaterialCodeWarnings();
   renderPagination();
+}
+
+function renderMaterialCodeWarnings() {
+  if (!els.materialCodeWarnings) return;
+  const rows = state.demandRows.filter(row => row.materialCodeIssue);
+  els.materialCodeWarnings.hidden = rows.length === 0;
+  els.materialCodeWarnings.innerHTML = rows.length ? `<summary>${rows.length} 条正确物料编码待补充（展开查看）</summary><ul>${rows.map(row =>
+    `<li>${escapeHtml(`${row.sourceFile} / ${row.sourceSheet} 第 ${row.sourceRowNumber} 行：${row.materialCodeIssue}。记录已保留，未使用备货OA原编码分配。`)}</li>`
+  ).join("")}</ul>` : "";
 }
 
 function deliveryFields(days, now = new Date()) {
@@ -1191,6 +1220,7 @@ async function downloadDetailWorkbook(splitIntoSheets = false) {
 
 function buildDetailWorkbook(rows, splitIntoSheets = false) {
   const workbook = window.XLSX.utils.book_new();
+  const columns = splitIntoSheets ? COMBINED_EXPORT_COLUMNS : EXPORT_COLUMNS;
   // WPS saves its native row/column reading highlight in this boolean custom property.
   workbook.Custprops = { KSOReadingLayout: true };
   workbook.Workbook = { CalcPr: { calcMode: "auto", fullCalcOnLoad: true, forceFullCalc: true } };
@@ -1199,8 +1229,8 @@ function buildDetailWorkbook(rows, splitIntoSheets = false) {
   const sheetShapes = [];
   for (const [name, buyerRows] of groups) {
     const sheetRows = [
-      EXPORT_COLUMNS.map((column) => column.label),
-      ...buyerRows.map((row) => EXPORT_COLUMNS.map((column) => {
+      columns.map((column) => column.label),
+      ...buyerRows.map((row) => columns.map((column) => {
         if (column.key !== "quantity") {
           const value = row[column.key] ?? "";
           return typeof value === "string" ? value.replace(/[\r\n\u2028\u2029]+/g, " ") : value;
@@ -1211,23 +1241,23 @@ function buildDetailWorkbook(rows, splitIntoSheets = false) {
       })),
     ];
     const worksheet = window.XLSX.utils.aoa_to_sheet(sheetRows);
-    const quantityColumn = EXPORT_COLUMNS.findIndex((column) => column.key === "quantity");
+    const quantityColumn = columns.findIndex((column) => column.key === "quantity");
     for (let rowIndex = 1; rowIndex < sheetRows.length; rowIndex += 1) {
       const cell = worksheet[window.XLSX.utils.encode_cell({ r: rowIndex, c: quantityColumn })];
       if (cell?.t === "n") cell.z = "0";
     }
-    addDeliveryFormulas(worksheet, buyerRows);
-    worksheet["!cols"] = getAutoExportColumns(sheetRows);
+    addDeliveryFormulas(worksheet, buyerRows, columns);
+    worksheet["!cols"] = getAutoExportColumns(sheetRows, columns);
     window.XLSX.utils.book_append_sheet(workbook, worksheet, makeUniqueSheetName(name, usedSheetNames));
-    sheetShapes.push({ rowCount: sheetRows.length, columnCount: EXPORT_COLUMNS.length });
+    sheetShapes.push({ rowCount: sheetRows.length, columnCount: columns.length, columns });
   }
 
   return { workbook, sheetShapes };
 }
 
-function addDeliveryFormulas(sheet, rows) {
+function addDeliveryFormulas(sheet, rows, columns = EXPORT_COLUMNS) {
   const X = window.XLSX;
-  const col = key => EXPORT_COLUMNS.findIndex(c => c.key === key);
+  const col = key => columns.findIndex(c => c.key === key);
   const serial = value => {
     const [y,m,d] = value.split('-').map(Number);
     return (Date.UTC(y,m-1,d)-Date.UTC(1899,11,30))/86400000;
@@ -1315,13 +1345,14 @@ function styleDetailWorksheetXml(xml, shape) {
   const sheetData = documentXml.querySelector("sheetData");
   if (!sheetData) return xml;
 
-  const wrapColumnIndex = EXPORT_COLUMNS.findIndex((column) => column.key === "stockReason") + 1;
-  const quantityColumnIndex = EXPORT_COLUMNS.findIndex((column) => column.key === "quantity") + 1;
+  const columns = shape.columns || EXPORT_COLUMNS;
+  const wrapColumnIndex = columns.findIndex((column) => column.key === "stockReason") + 1;
+  const quantityColumnIndex = columns.findIndex((column) => column.key === "quantity") + 1;
   for (let rowIndex = 1; rowIndex <= shape.rowCount; rowIndex += 1) {
     const row = ensureWorksheetRow(documentXml, sheetData, rowIndex);
     for (let columnIndex = 1; columnIndex <= shape.columnCount; columnIndex += 1) {
       const cell = ensureWorksheetCell(documentXml, row, rowIndex, columnIndex);
-      const styleId = rowIndex === 1 ? "1" : columnIndex === quantityColumnIndex ? "4" : ["todayDate", "supplierDeliveryDate"].includes(EXPORT_COLUMNS[columnIndex-1]?.key) ? "5" : columnIndex === wrapColumnIndex ? "3" : "2";
+      const styleId = rowIndex === 1 ? "1" : columnIndex === quantityColumnIndex ? "4" : ["todayDate", "supplierDeliveryDate"].includes(columns[columnIndex-1]?.key) ? "5" : columnIndex === wrapColumnIndex ? "3" : "2";
       cell.setAttribute("s", styleId);
     }
   }
@@ -1433,8 +1464,8 @@ function getExportColumnWidth(key) {
   }[key] || 14;
 }
 
-function getAutoExportColumns(sheetRows) {
-  return EXPORT_COLUMNS.map((column, columnIndex) => {
+function getAutoExportColumns(sheetRows, columns = EXPORT_COLUMNS) {
+  return columns.map((column, columnIndex) => {
     const contentWidth = sheetRows.reduce((width, row) => {
       const cellWidth = getTextDisplayWidth(row?.[columnIndex]);
       return Math.max(width, cellWidth);

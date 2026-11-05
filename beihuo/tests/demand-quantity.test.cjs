@@ -20,6 +20,115 @@ function loadApp() {
   return { context, elements, run: (code) => vm.runInContext(code, context) };
 }
 
+function allocationRecord(rows, sheetName = '需求') {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(rows), sheetName);
+  const bytes = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+  return { name: `${sheetName}.xlsx`, file: { name: `${sheetName}.xlsx`, arrayBuffer: async () => bytes } };
+}
+
+test('correct material code overrides OA/legacy codes in any column order for allocation, merging and both exports', async () => {
+  const { context, run } = loadApp();
+  context.records = {
+    category: allocationRecord([
+      ['物料编码', '', 'SKU', '物料名称', '销售系列', '采购组'],
+      ['0001', '', 'SKU-1', '正确物料一', '系列一', '组一'],
+      ['0002', '', 'SKU-2', '正确物料二', '系列二', '组二'],
+      ['0099', '', '错误SKU', 'OA旧物料', '旧系列', '旧组'],
+    ], '商品'),
+    purchaseDivision: allocationRecord([
+      ['物料编码', '采购下单人', '供应商简称', '供应商名称', '采购组', '起订量'],
+      ['0001', '李奇', '供应商甲', '供应商甲', '组一', 5],
+      ['0002', '徐英', '供应商乙', '供应商乙', '组二', 6],
+      ['0099', '旧采购人', '旧供应商', '旧供应商', '旧组', 99],
+    ], '产品线明细'),
+    singapore: allocationRecord([['供应商名称', '系列'], ['供应商甲', '系列一']], '新加坡'),
+  };
+  const sourceRows = [
+    ['0099', '0001', '0099', 2, 'OA-1'],
+    ['0088', '0001', '0099', 3.5, 'OA-2'],
+    ['0099', '0001', '0099', 0, 'OA-3'],
+    ['0099', '0002', '0099', 1, 'OA-4'],
+  ];
+  const headers = ['备货OA物料编码', ' 正确物料编码 ', '物料编码', '数量', '流程号'];
+  for (const reverse of [false, true]) {
+    const table = [headers, ...sourceRows].map(row => reverse ? [...row].reverse() : row);
+    context.records.demand = allocationRecord(table);
+    const rows = await run('buildDemandAllocationRows(records)');
+    assert.deepEqual(Array.from(rows, r => [r.materialCode, r.oaMaterialCode, r.quantityNumber, r.buyer, r.sku, r.supplierShortName, r.minimumOrderStatus, r.singaporeOrder]), [
+      ['0001', '0099、0088', 5.5, '李奇', 'SKU-1', '供应商甲', '满足', '是'],
+      ['0002', '0099', 1, '徐英', 'SKU-2', '供应商乙', '不满足', '否'],
+    ]);
+    assert.deepEqual(Array.from(rows[0].sourceRows, r => r.oaMaterialCode), ['0099', '0088', '0099']);
+    context.rows = rows;
+    for (const combined of [false, true]) {
+      const { workbook } = run(`buildDetailWorkbook(rows, ${combined})`);
+      const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
+      const output = reopened.SheetNames.flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1 }).slice(1));
+      assert.deepEqual(output.map(row => [row[5], row[8]]), [['0001', 5.5], ['0002', 1]]);
+      for (const sheet of Object.values(reopened.Sheets)) {
+        assert.equal(sheet.F2.t, 's');
+        const labels = XLSX.utils.sheet_to_json(sheet, { header: 1 })[0];
+        assert.equal(labels.includes('备货OA的物料编码'), combined);
+        if (combined) {
+          assert.equal(labels[labels.indexOf('采购单订单号') + 1], '备货OA的物料编码');
+          assert.equal(sheet.P2.t, 's');
+        }
+      }
+      if (combined) assert.deepEqual(output.map(row => row[15]), ['0099、0088', '0099']);
+    }
+  }
+});
+
+test('blank or missing corrected codes retain each row without OA fallback and report exact source positions', async () => {
+  const { context, elements, run } = loadApp();
+  context.records = {
+    category: allocationRecord([['物料编码', 'SKU'], ['0099', '旧SKU']], '商品'),
+    purchaseDivision: allocationRecord([['物料编码', '采购下单人'], ['0099', '旧采购人']], '产品线明细'),
+    demand: allocationRecord([[], ['备货OA物料编码', '正确物料编码', '数量', '申请人'], [], ['0099', '', 0, '采购甲'], ['0099', ' ', 1.5, '采购甲'], ['0088', '', '', '']]),
+  };
+  let rows = await run('buildDemandAllocationRows(records)');
+  assert.equal(rows.length, 3);
+  assert.deepEqual(Array.from(rows, r => [r.materialCode, r.oaMaterialCode, r.buyer, r.sku, r.sourceRowNumber, r.materialCodeValid]), [
+    ['', '0099', '', '', 4, '待核对'], ['', '0099', '', '', 5, '待核对'], ['', '0088', '', '', 6, '待核对'],
+  ]);
+  assert.equal(rows[0].quantityNumber, 0);
+  assert.equal(rows[1].quantityNumber, 1.5);
+  assert(Number.isNaN(rows[2].quantityNumber));
+  context.rows = rows;
+  run('state.demandRows = rows; renderMaterialCodeWarnings()');
+  const warnings = elements.get('#materialCodeWarnings');
+  assert.equal(warnings.hidden, false);
+  assert.match(warnings.innerHTML, /需求.xlsx \/ 需求 第 4 行.*请补充正确物料编码/);
+  assert.match(warnings.innerHTML, /3 条正确物料编码待补充/);
+  const { workbook } = run('buildDetailWorkbook(rows, true)');
+  assert.equal(XLSX.utils.decode_range(workbook.Sheets.未填写下单人['!ref']).e.r, 3);
+  context.records.demand = allocationRecord([['备货OA物料编码', '数量'], ['0099', 2]]);
+  rows = await run('buildDemandAllocationRows(records)');
+  assert.equal(rows[0].materialCode, '');
+  assert.equal(rows[0].oaMaterialCode, '0099');
+  assert.match(rows[0].materialCodeIssue, /缺少“正确物料编码”列/);
+  context.records.demand = allocationRecord([['正确物料编码', '数量'], ['0001', 2]]);
+  rows = await run('buildDemandAllocationRows(records)');
+  assert.equal(rows[0].materialCode, '0001');
+  assert.equal(rows[0].oaMaterialCode, '', 'no invented original code');
+  assert.equal(rows[0].materialCodeIssue, '');
+  context.rows = rows;
+  run('state.demandRows = rows; renderMaterialCodeWarnings()');
+  assert.equal(warnings.hidden, true);
+  assert.equal(warnings.innerHTML, '');
+});
+
+test('legacy material headers retain original codes for combined download', async () => {
+  const { context, run } = loadApp();
+  context.records = {};
+  for (const header of ['物料编码', '识别码', '物料编号']) {
+    context.records.demand = allocationRecord([[header, '数量'], ['00001', 0]]);
+    const rows = await run('buildDemandAllocationRows(records)');
+    assert.deepEqual(Array.from(rows, r => [r.materialCode, r.oaMaterialCode, r.quantityNumber, r.materialCodeIssue]), [['00001', '00001', 0, '']]);
+  }
+});
+
 test('新加坡下单按供应商与系列成对匹配，空白及多供应商不猜测', () => {
   const { context, run } = loadApp();
   context.tables = [{ rows: [['系列', '供应商名称'], ['Z12', '供应商甲'], ['AY03', '供应商乙'], ['Z12', '供应商甲'], ['', '']] }];
@@ -139,10 +248,10 @@ test('all exported sheets use single-line text, full-text widths and no-wrap cen
   ];
   for (const split of [false, true]) {
     const { workbook } = run(`buildDetailWorkbook(rows, ${split})`);
-    assert.equal(workbook.Sheets[workbook.SheetNames[0]]['!cols'][18].wch, 223);
+    assert.equal(workbook.Sheets[workbook.SheetNames[0]]['!cols'][split ? 19 : 18].wch, 223);
     const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer', cellStyles: true });
     const data = reopened.SheetNames.flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1 }).slice(1));
-    assert.deepEqual(data.map(row => [row[5], row[6], row[7], row[8], row[18]]), [
+    assert.deepEqual(data.map(row => [row[5], row[6], row[7], row[8], row[split ? 19 : 18]]), [
       ['0001', 'SKU 型号', '第一段 第二段', 0, reason.replace(/\r\n/, ' ')],
       ['0002', '', '一 二 三', 1.5, ''],
     ]);
@@ -178,7 +287,7 @@ test('one workbook splits buyers into sheets with complete rows and sheet-local 
   assert.deepEqual([li.F2.v, li.F3.v, xu.F2.v, reopened.Sheets.未填写下单人.F2.v], ['0001', '0003', '0002', '0004']);
   assert.equal(li.G2.v, '001');
   assert.deepEqual([li.I2.t, li.I2.v, li.I2.z, xu.I2.v, li.I3.v], ['n', 0, '0', 1.5, '']);
-  assert.equal(li.S3.v, '原因三');
+  assert.equal(li.T3.v, '原因三');
   assert.equal(li.L2.f, 'TODAY()');
   assert.equal(li.N2.f, 'IF(M2="","",L2+M2)');
   assert.equal(li.N3.f, 'IF(M3="","",L3+M3)');
@@ -186,9 +295,9 @@ test('one workbook splits buyers into sheets with complete rows and sheet-local 
   assert.equal(xu.N2.z, 'yyyy-mm-dd');
   reopened.SheetNames.forEach((name, index) => {
     const sheet = reopened.Sheets[name];
-    assert.equal(sheet['!cols'].length, 19);
+    assert.equal(sheet['!cols'].length, 20);
     assert.equal(sheetShapes[index].rowCount, XLSX.utils.decode_range(sheet['!ref']).e.r + 1);
-    assert.equal(sheetShapes[index].columnCount, 19);
+    assert.equal(sheetShapes[index].columnCount, 20);
   });
 });
 

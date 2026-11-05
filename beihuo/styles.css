@@ -180,6 +180,10 @@ h2 {
   font-size: 13px;
 }
 
+#materialCodeWarnings[hidden] {
+  display: none;
+}
+
 .panel,
 .metric,
 .nav-card,

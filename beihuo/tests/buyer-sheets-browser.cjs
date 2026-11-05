@@ -76,10 +76,12 @@ function uploadFile(rows, sheetName, name) {
     for (const name of workbook.SheetNames) {
       const sheet = workbook.Sheets[name];
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-      assert.equal(rows[0].length, 19);
+      assert.equal(rows[0].length, 20);
       assert.equal(rows[0][1], '是否新加坡公司下单');
       assert.equal(rows[0][0], '采购单订单下单人');
-      assert.equal(rows[0][18], '备货原因');
+      assert.equal(rows[0][19], '备货原因');
+      assert.equal(rows[0][14], '采购单订单号');
+      assert.equal(rows[0][15], '备货OA的物料编码');
       assert(!rows[0].includes('采购分工明细是否存在'));
       assert.equal(new Set(rows.slice(1).map(row => row[0])).size, 1, `one buyer per sheet: ${name}`);
       assert(sheet['!cols'].every(column => column.width > 0));
@@ -89,8 +91,10 @@ function uploadFile(rows, sheetName, name) {
         assert.equal(row[0], source.buyer);
         assert.equal(row[8], source.quantity);
         assert.equal(row[10], '手填采购主体');
-        assert.equal(row[16], '10');
-        assert.equal(row[18], source.reason.replace(/\n/g, ' '));
+        assert.equal(row[15], source.code, 'legacy source code is retained');
+        assert.equal(sheet[`P${index + 2}`].t, 's');
+        assert.equal(row[17], '10');
+        assert.equal(row[19], source.reason.replace(/\n/g, ' '));
         assert(row.every(value => typeof value !== 'string' || !/[\r\n\u2028\u2029]/.test(value)));
         assert.equal(row[1], '', 'optional Singapore source is not uploaded');
         const r = index + 2;
@@ -108,7 +112,8 @@ function uploadFile(rows, sheetName, name) {
     assert.equal(xmls.length, 7);
     for (const { text } of xmls) {
       assert.match(text, /<c[^>]*r="A1"[^>]*s="1"/);
-      assert.match(text, /<c[^>]*r="S2"[^>]*s="3"/);
+      assert.match(text, /<c[^>]*r="T2"[^>]*s="3"/);
+      assert.match(text, /<c[^>]*r="P2"[^>]*s="2"/);
       assert.match(text, /<c[^>]*r="I2"[^>]*s="4"/);
     }
 
