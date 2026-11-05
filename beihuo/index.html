@@ -39,7 +39,7 @@
         <section class="summary-grid" aria-label="文件库概览">
           <article class="metric">
             <span>文件槽位</span>
-            <strong id="slotCount">4</strong>
+            <strong id="slotCount">5</strong>
             <small>分配文件</small>
           </article>
           <article class="metric">
@@ -127,6 +127,7 @@
                   <th>要求货好时间</th>
                   <th>起订量</th>
                   <th>起订量是否满足</th>
+                  <th>是否新加坡公司下单</th>
                 </tr>
               </thead>
               <tbody id="detailTableBody"></tbody>
@@ -182,6 +183,7 @@
                 <tr><td>起订量</td><td>Dim-采购部分工明细</td><td>“产品线明细”工作表的“起订量”列</td><td>仅从名称为“产品线明细”的工作表读取，按物料编码匹配。</td></tr>
                 <tr><td>起订量是否满足</td><td>系统计算</td><td>数量、起订量</td><td>同一物料合计数量大于或等于起订量时显示“满足”，否则显示“不满足”；缺少任一数值时留空。</td></tr>
                 <tr><td>备货原因</td><td>备货需求表</td><td>备货原因 / 申请原因 / 需求原因等</td><td>直接读取原因类字段。</td></tr>
+                <tr><td>是否新加坡公司下单</td><td>新加坡公司明细</td><td>供应商名称＋系列</td><td>供应商名称及销售系列同时匹配显示“是”，未匹配显示“否”；未上传明细时留空，缺少字段或多个供应商结果不一致时显示“待核对”。不改变采购主体。</td></tr>
               </tbody>
             </table>
           </div>
@@ -192,6 +194,6 @@
     <script src="./vendor/xlsx.full.min.js?v=20260601-1"></script>
     <script src="./vendor/jszip.min.js?v=20260609-1"></script>
 
-    <script src="./file-library.js?v=20261105-buyer-sheets"></script>
+    <script src="./file-library.js?v=20261105-singapore-slot"></script>
   </body>
 </html>

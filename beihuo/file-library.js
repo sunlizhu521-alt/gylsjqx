@@ -7,6 +7,7 @@ const slots = [
   { id: "file-2", label: "Dim-采购部分工明细" },
   { id: "file-3", label: "Dim-花名册（姓名&一级部门）" },
   { id: "file-4", label: "备货需求表" },
+  { id: "file-5", label: "新加坡公司明细" },
 ];
 
 const TABLE_FILE_ACCEPT = ".xlsx,.xls,.xlsm,.csv";
@@ -16,6 +17,7 @@ const SLOT_IDS = {
   purchaseDivision: "file-2",
   roster: "file-3",
   demand: "file-4",
+  singapore: "file-5",
 };
 const FILTER_DEFINITIONS = [
   { key: "businessUnit", label: "事业部" },
@@ -50,6 +52,7 @@ const DETAIL_COLUMNS = [
   { key: "minimumOrderQuantity", label: "起订量" },
   { key: "minimumOrderStatus", label: "起订量是否满足" },
   { key: "stockReason", label: "备货原因" },
+  { key: "singaporeOrder", label: "是否新加坡公司下单" },
 ];
 const EXPORT_COLUMNS = DETAIL_COLUMNS.filter(column => column.key !== "materialCodeValid");
 const TABLE_FIELD_ALIASES = {
@@ -180,13 +183,13 @@ function bindEvents() {
   });
 }
 
-async function refresh() {
+async function refresh({ preserveEdits = false } = {}) {
   const db = await openDb();
   const entries = await Promise.all(slots.map(async (slot) => [slot.id, await getRecord(db, slot.id)]));
   db.close();
   state.records = new Map(entries);
   renderShell();
-  await refreshDemandDashboard();
+  await refreshDemandDashboard({ preserveEdits });
 }
 
 async function savePendingFile(slotId, file) {
@@ -219,6 +222,15 @@ async function savePendingFile(slotId, file) {
     pendingSavedAt: now,
   };
 
+  if (slotId === SLOT_IDS.singapore) {
+    try {
+      buildSingaporeIndex(await readTableRows(record, "Dim-新加坡公司下单"));
+    } catch (error) {
+      setLibraryState("新加坡公司明细未更新，原文件保留：" + error.message);
+      return;
+    }
+  }
+
   const db = await openDb();
   try {
     await putRecord(db, clearPendingFields(record));
@@ -226,7 +238,7 @@ async function savePendingFile(slotId, file) {
     setLibraryState("文件保存失败，原文件保留：" + error.message);
     return;
   } finally { db.close(); }
-  await refresh();
+  await refresh({ preserveEdits: slotId === SLOT_IDS.singapore });
 }
 
 function getInvalidFileMessage(file) {
@@ -267,7 +279,7 @@ async function applySlot(slotId, options = {}) {
   const db = await openDb();
   await putRecord(db, updatedRecord);
   db.close();
-  if (!options.skipRefresh) await refresh();
+  if (!options.skipRefresh) await refresh({ preserveEdits: slotId === SLOT_IDS.singapore });
   return true;
 }
 
@@ -300,7 +312,7 @@ async function deleteSlot(slotId) {
   const db = await openDb();
   await deleteRecord(db, slotId);
   db.close();
-  await refresh();
+  await refresh({ preserveEdits: slotId === SLOT_IDS.singapore });
 }
 
 async function clearLibraryCache() {
@@ -327,8 +339,10 @@ async function clearLibraryCache() {
 }
 
 let dashboardRevision = 0;
-async function refreshDemandDashboard() {
+async function refreshDemandDashboard({ preserveEdits = false } = {}) {
   const revision = ++dashboardRevision;
+  const previousRows = preserveEdits ? state.demandRows : [];
+  const previousPage = state.currentPage;
   state.demandRows = [];
   state.filteredRows = [];
   renderDemandDashboard("正在读取本次文件…");
@@ -347,17 +361,23 @@ async function refreshDemandDashboard() {
     })
   );
 
-  if (Object.values(records).some(record => !record)) {
+  if (Object.entries(records).some(([key, record]) => key !== "singapore" && !record)) {
     state.demandRows = [];
     state.filteredRows = [];
     resetAllFilterState();
-    renderDemandDashboard("请上传全部 4 份文件后生成明细");
+    renderDemandDashboard("请上传前 4 份分配文件后生成明细；新加坡公司明细为选填");
     return;
   }
 
   try {
     const rows = await buildDemandAllocationRows(records);
     if (revision !== dashboardRevision) return;
+    if (preserveEdits) {
+      rows.forEach((row, index) => {
+        if (previousRows[index]?.materialCode === row.materialCode) row.deliveryDays = previousRows[index].deliveryDays;
+      });
+      state.currentPage = previousPage;
+    }
     state.demandRows = rows;
   } catch (error) {
     if (revision !== dashboardRevision) return;
@@ -374,16 +394,18 @@ async function refreshDemandDashboard() {
 }
 
 async function buildDemandAllocationRows(records) {
-  const [categoryRows, divisionRows, rosterRows, demandRows] = await Promise.all([
+  const [categoryRows, divisionRows, rosterRows, demandRows, singaporeRows] = await Promise.all([
     readTableRows(records.category, "Dim-YL医疗器械商品分类"),
     readTableRows(records.purchaseDivision, "产品线明细", true),
     readTableRows(records.roster),
     readTableRows(records.demand),
+    readTableRows(records.singapore, "Dim-新加坡公司下单"),
   ]);
   const categoryIndex = buildCategoryIndex(categoryRows);
   const divisionIndex = buildPurchaseDivisionIndex(divisionRows);
   const minimumOrderIndex = buildMinimumOrderIndex(divisionRows);
   const rosterIndex = buildRosterIndex(rosterRows);
+  const singaporeIndex = records.singapore ? buildSingaporeIndex(singaporeRows) : null;
 
   const detailRows = demandRows.flatMap(({ rows, source }) => {
     const headerIndex = findHeaderRowIndex(rows, [
@@ -436,6 +458,7 @@ async function buildDemandAllocationRows(records) {
         buyer,
         applicant,
         supplierShortName,
+        supplierNames: uniqueSortedValues(materialDivisionRows.map(item => item.supplierName || item.supplierShortName)),
         oaProcessNo,
         stockReason,
         purchaseEntity,
@@ -455,7 +478,9 @@ async function buildDemandAllocationRows(records) {
       };
     }).filter(Boolean);
   });
-  return mergeDemandRowsByMaterial(detailRows);
+  return mergeDemandRowsByMaterial(detailRows).map(row => ({
+    ...row, singaporeOrder: getSingaporeOrderStatus(row, singaporeIndex),
+  }));
 }
 
 function mergeDemandRowsByMaterial(rows) {
@@ -599,6 +624,9 @@ function buildPurchaseDivisionIndex(tables) {
       supplierShortName: TABLE_FIELD_ALIASES.divisionSupplier,
     });
     if (columnMap.materialCode === undefined) return;
+    columnMap.supplierName = rows[headerIndex].findIndex(header =>
+      ["供应商全称", "供应商名称", "供应商"].includes(normalizeDemandHeader(header))
+    );
 
     rows.slice(headerIndex + 1).forEach((row) => {
       const materialCode = getCellValue(row, columnMap.materialCode);
@@ -609,6 +637,7 @@ function buildPurchaseDivisionIndex(tables) {
         materialCode,
         buyer: getCellValue(row, columnMap.buyer),
         supplierShortName: getCellValue(row, columnMap.supplierShortName),
+        supplierName: getCellValue(row, columnMap.supplierName),
       };
       materialCodes.add(materialKey);
       pushMapArray(byMaterial, materialKey, item);
@@ -616,6 +645,41 @@ function buildPurchaseDivisionIndex(tables) {
     });
   });
   return { byMaterial, byGroupMaterial, materialCodes };
+}
+
+function buildSingaporeIndex(tables) {
+  const pairs = new Map();
+  let foundHeader = false;
+  for (const { rows, source } of tables) {
+    const headerIndex = rows.findIndex(row =>
+      row.some(header => ["供应商名称", "供应商全称", "供应商"].includes(normalizeDemandHeader(header))) &&
+      row.some(header => ["系列", "销售系列", "产品系列"].includes(normalizeDemandHeader(header)))
+    );
+    if (headerIndex < 0) continue;
+    foundHeader = true;
+    const supplierColumn = rows[headerIndex].findIndex(header => ["供应商名称", "供应商全称", "供应商"].includes(normalizeDemandHeader(header)));
+    const seriesColumn = rows[headerIndex].findIndex(header => ["系列", "销售系列", "产品系列"].includes(normalizeDemandHeader(header)));
+    rows.slice(headerIndex + 1).forEach((row, index) => {
+      const supplier = normalizeLookupKey(getCellValue(row, supplierColumn));
+      const series = normalizeLookupKey(getCellValue(row, seriesColumn));
+      if (!supplier && !series) return;
+      if (!supplier || !series) throw new Error(`${source?.fileName || "新加坡公司明细"} / ${source?.sheetName || ""} 第 ${headerIndex + index + 2} 行：供应商名称或系列为空，请补齐后重新上传`);
+      if (!pairs.has(supplier)) pairs.set(supplier, new Set());
+      pairs.get(supplier).add(series);
+    });
+  }
+  if (!foundHeader) throw new Error("新加坡公司明细：未找到“供应商名称”和“系列”表头，请检查后重新上传");
+  return pairs;
+}
+
+function getSingaporeOrderStatus(row, index) {
+  if (!index) return "";
+  const suppliers = row.supplierNames || [];
+  const series = normalizeLookupKey(row.salesSeries);
+  if (!suppliers.length || !series) return "待核对";
+  const matched = suppliers.map(name => Boolean(index.get(normalizeLookupKey(name))?.has(series)));
+  if (matched.every(Boolean)) return "是";
+  return matched.some(Boolean) ? "待核对" : "否";
 }
 
 function buildMinimumOrderIndex(tables) {
@@ -849,6 +913,7 @@ function renderSlot(slot) {
         <small>刷新月份：${escapeHtml(display?.refreshMonth || "--")}</small>
         <small>更新时间：${formatDateTime(display?.savedAt)}</small>
         <small>引用时间：${formatDateTime(record?.appliedAt)}</small>
+        ${slot.id === SLOT_IDS.singapore ? '<small>选填：按供应商＋系列匹配</small>' : ""}
       </div>
       <div class="slot-actions">
         <label class="upload-button">

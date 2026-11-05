@@ -16,7 +16,7 @@ function uploadFile(rows, sheetName, name) {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto((process.env.QA_URL || 'http://127.0.0.1:8940/') + 'beihuo/index.html');
-    await page.waitForFunction(() => document.querySelectorAll('[data-upload]').length === 4);
+    await page.waitForFunction(() => document.querySelectorAll('[data-upload]').length === 5);
     assert.equal(await page.locator('#downloadBuyerWorkbookButton').isDisabled(), true);
 
     const longPrefix = '非常长的采购下单人名称用于验证工作表名称截断后仍然不会发生重名';
@@ -71,7 +71,8 @@ function uploadFile(rows, sheetName, name) {
     for (const name of workbook.SheetNames) {
       const sheet = workbook.Sheets[name];
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-      assert.equal(rows[0].length, 18);
+      assert.equal(rows[0].length, 19);
+      assert.equal(rows[0][18], '是否新加坡公司下单');
       assert.equal(rows[0][0], '采购单订单下单人');
       assert.equal(rows[0][17], '备货原因');
       assert(!rows[0].includes('采购分工明细是否存在'));
@@ -85,6 +86,7 @@ function uploadFile(rows, sheetName, name) {
         assert.equal(row[9], '手填采购主体');
         assert.equal(row[15], '10');
         assert.equal(row[17], source.reason);
+        assert.equal(row[18], '', 'optional Singapore source is not uploaded');
         const r = index + 2;
         assert.equal(sheet[`K${r}`].f, 'TODAY()');
         assert.equal(sheet[`M${r}`].f, `IF(L${r}="","",K${r}+L${r})`);

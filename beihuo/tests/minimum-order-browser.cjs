@@ -5,7 +5,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),XLSX=r
  try{
   const page=await browser.newPage();
   await page.goto((process.env.QA_URL||'http://127.0.0.1:8940/')+'beihuo/index.html');
-  await page.waitForFunction(()=>document.querySelectorAll('[data-upload]').length===4);
+  await page.waitForFunction(()=>document.querySelectorAll('[data-upload]').length===5);
   await page.evaluate(async()=>{
    const record=(rows,sheetName)=>{
     const w=XLSX.utils.book_new();XLSX.utils.book_append_sheet(w,XLSX.utils.aoa_to_sheet(rows),sheetName);
