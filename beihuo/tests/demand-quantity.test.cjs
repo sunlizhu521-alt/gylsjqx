@@ -210,7 +210,7 @@ test('preview and export table headers, rendered values and exported cells follo
   const { context, run } = loadApp();
   const expected = [
     ['采购单订单下单人', 'buyer'], ['是否新加坡公司下单', 'singaporeOrder'], ['事业部', 'businessUnit'], ['申请人', 'applicant'],
-    ['供应商简称', 'supplierShortName'], ['物料编码', 'materialCode'], ['SKU', 'sku'],
+    ['供应商简称', 'supplierShortName'], ['正确物料编码', 'materialCode'], ['SKU', 'sku'],
     ['物料名称', 'materialName'], ['数量', 'quantity'], ['OA备货流程号', 'oaProcessNo'],
     ['采购主体', 'purchaseEntity'], ['采购分工明细是否存在', 'materialCodeValid'],
     ['今天日期', 'todayDate'], ['天数', 'deliveryDays'], ['供应商反馈交期', 'supplierDeliveryDate'], ['采购单订单号', 'purchaseOrderNo'], ['要求货好时间', 'requiredReadyDate'], ['起订量', 'minimumOrderQuantity'],

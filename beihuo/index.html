@@ -115,7 +115,7 @@
                   <th>事业部</th>
                   <th>申请人</th>
                   <th>供应商简称</th>
-                  <th>物料编码</th>
+                  <th>正确物料编码</th>
                   <th>SKU</th>
                   <th>物料名称</th>
                   <th>数量</th>
@@ -170,7 +170,7 @@
                 <tr><td>事业部</td><td>Dim-花名册（姓名&amp;一级部门）</td><td>姓名、一级部门（A、B列）</td><td>使用备货需求表的申请人匹配花名册姓名，返回一级部门。</td></tr>
                 <tr><td>申请人</td><td>备货需求表</td><td>创建人 / 申请人 / OA申请人 / 流程申请人</td><td>直接读取匹配到的申请人字段。</td></tr>
                 <tr><td>供应商简称</td><td>Dim-采购部分工明细</td><td>供应商简称</td><td>按物料编码匹配，多个供应商用“、”合并。</td></tr>
-                <tr><td>物料编码</td><td>备货需求表</td><td>正确物料编码；旧表兼容识别码 / 物料编码等</td><td>用于匹配商品分类、采购分工和起订量，以及合并数量。正确编码为空时留空并提示补充。</td></tr>
+                <tr><td>正确物料编码</td><td>备货需求表</td><td>正确物料编码；旧表兼容识别码 / 物料编码等</td><td>用于匹配商品分类、采购分工和起订量，以及合并数量。正确编码为空时留空并提示补充。</td></tr>
                 <tr><td>备货OA的物料编码（仅合并工作簿）</td><td>备货需求表</td><td>备货OA物料编码；旧表取原物料编码</td><td>放在采购单订单号后，仅用于对照。同一正确编码对应多个原编码时，去重后用“、”连接。</td></tr>
                 <tr><td>SKU</td><td>Dim-YL医疗器械商品分类</td><td>SKU（C列）</td><td>按物料编码匹配商品分类表后取得。</td></tr>
                 <tr><td>物料名称</td><td>Dim-YL医疗器械商品分类</td><td>金蝶名称 / 物料名称（D列）</td><td>按物料编码匹配商品分类表后取得。</td></tr>
@@ -196,6 +196,6 @@
     <script src="./vendor/xlsx.full.min.js?v=20260601-1"></script>
     <script src="./vendor/jszip.min.js?v=20260609-1"></script>
 
-    <script src="./file-library.js?v=20261106-correct-material"></script>
+    <script src="./file-library.js?v=20261106-correct-code-label"></script>
   </body>
 </html>

@@ -79,6 +79,7 @@ function uploadFile(rows, sheetName, name) {
       assert.equal(rows[0].length, 20);
       assert.equal(rows[0][1], '是否新加坡公司下单');
       assert.equal(rows[0][0], '采购单订单下单人');
+      assert.equal(rows[0][5], '正确物料编码');
       assert.equal(rows[0][19], '备货原因');
       assert.equal(rows[0][14], '采购单订单号');
       assert.equal(rows[0][15], '备货OA的物料编码');

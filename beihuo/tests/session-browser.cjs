@@ -122,6 +122,8 @@ function fileForSlot(slot, value) {
     assert.equal(sheet.P1.v, '备货OA的物料编码');
     assert.deepEqual([sheet.P2.v, sheet.P3.v], ['0001', '0002']);
     assert.equal(sheet.P2.t, 's');
+    assert.equal(sheet.F1.v, '正确物料编码');
+    assert.equal(await page.locator('.detail-table th').nth(5).innerText(), '正确物料编码');
     assert.deepEqual([sheet.F2.v, sheet.F3.v], ['TEST-001', 'TEST-002']);
     assert.equal(await page.locator('#materialCodeWarnings').isHidden(), true);
 

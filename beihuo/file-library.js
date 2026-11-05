@@ -38,7 +38,7 @@ const DETAIL_COLUMNS = [
   { key: "businessUnit", label: "事业部" },
   { key: "applicant", label: "申请人" },
   { key: "supplierShortName", label: "供应商简称" },
-  { key: "materialCode", label: "物料编码" },
+  { key: "materialCode", label: "正确物料编码" },
   { key: "sku", label: "SKU" },
   { key: "materialName", label: "物料名称" },
   { key: "quantity", label: "数量" },
