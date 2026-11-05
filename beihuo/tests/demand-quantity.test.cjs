@@ -131,6 +131,38 @@ test('per-buyer workbooks preserve rows, reasons, formulas and WPS highlight',()
  assert.equal(w.Custprops.KSOReadingLayout,true);assert.equal(w.Sheets.备货需求分配明细.R2.v,'需要保留');assert.equal(w.Sheets.备货需求分配明细.H2.v,0);assert.equal(w.Sheets.备货需求分配明细.M2.f,'IF(L2="","",K2+L2)');assert.equal(w.Sheets.备货需求分配明细['!ref'],'A1:S3');
 });
 
+test('all exported sheets use single-line text, full-text widths and no-wrap centered styles', () => {
+  const { context, run } = loadApp();
+  const reason = '甲'.repeat(60) + '\r\n' + '乙'.repeat(50);
+  context.rows = [
+    { buyer: '李奇', materialCode: '0001', materialName: '第一段\n第二段', sku: 'SKU\r型号', stockReason: reason, quantityNumber: 0 },
+    { buyer: '徐英', materialCode: '0002', materialName: '一\u2028二\u2029三', stockReason: '', quantityNumber: 1.5 },
+  ];
+  for (const split of [false, true]) {
+    const { workbook } = run(`buildDetailWorkbook(rows, ${split})`);
+    assert.equal(workbook.Sheets[workbook.SheetNames[0]]['!cols'][17].wch, 223);
+    const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer', cellStyles: true });
+    const data = reopened.SheetNames.flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1 }).slice(1));
+    assert.deepEqual(data.map(row => [row[4], row[5], row[6], row[7], row[17]]), [
+      ['0001', 'SKU 型号', '第一段 第二段', 0, reason.replace(/\r\n/, ' ')],
+      ['0002', '', '一 二 三', 1.5, ''],
+    ]);
+    for (const name of reopened.SheetNames) {
+      for (const cell of Object.values(reopened.Sheets[name])) {
+        if (cell?.t === 's') assert(!/[\r\n\u2028\u2029]/.test(cell.v));
+      }
+    }
+  }
+  assert.equal(context.rows[0].stockReason, reason, 'source values remain unchanged');
+  const alignments = [...run('buildDetailWorkbookStylesXml()').matchAll(/<alignment\b[^>]*\/>/g)].map(match => match[0]);
+  assert.equal(alignments.length, 5);
+  for (const alignment of alignments) {
+    assert.match(alignment, /wrapText="0"/);
+    assert.match(alignment, /horizontal="center"/);
+    assert.match(alignment, /vertical="center"/);
+  }
+});
+
 test('one workbook splits buyers into sheets with complete rows and sheet-local formulas', () => {
   const { context, run } = loadApp();
   context.rows = [

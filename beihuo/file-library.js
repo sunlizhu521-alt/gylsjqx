@@ -1201,7 +1201,10 @@ function buildDetailWorkbook(rows, splitIntoSheets = false) {
     const sheetRows = [
       EXPORT_COLUMNS.map((column) => column.label),
       ...buyerRows.map((row) => EXPORT_COLUMNS.map((column) => {
-        if (column.key !== "quantity") return row[column.key] ?? "";
+        if (column.key !== "quantity") {
+          const value = row[column.key] ?? "";
+          return typeof value === "string" ? value.replace(/[\r\n\u2028\u2029]+/g, " ") : value;
+        }
         const quantity = Number.isFinite(row.quantityNumber)
           ? row.quantityNumber : getDemandRowQuantity([row.quantity], { quantity: 0 });
         return Number.isFinite(quantity) ? quantity : "";
@@ -1291,9 +1294,9 @@ function buildDetailWorkbookStylesXml() {
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
   <cellXfs count="6">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
     <xf numFmtId="1" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
     <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
   </cellXfs>
@@ -1430,12 +1433,6 @@ function getExportColumnWidth(key) {
   }[key] || 14;
 }
 
-function getExportColumnMaxWidth(key) {
-  return {
-    stockReason: 120,
-  }[key] || 255;
-}
-
 function getAutoExportColumns(sheetRows) {
   return EXPORT_COLUMNS.map((column, columnIndex) => {
     const contentWidth = sheetRows.reduce((width, row) => {
@@ -1443,8 +1440,7 @@ function getAutoExportColumns(sheetRows) {
       return Math.max(width, cellWidth);
     }, 0);
     const minWidth = getExportColumnWidth(column.key);
-    const maxWidth = getExportColumnMaxWidth(column.key);
-    return { wch: Math.min(Math.max(contentWidth + 2, minWidth), maxWidth) };
+    return { wch: Math.min(Math.max(contentWidth + 2, minWidth), 255) };
   });
 }
 

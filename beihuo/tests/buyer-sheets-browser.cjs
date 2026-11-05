@@ -22,7 +22,7 @@ function uploadFile(rows, sheetName, name) {
 
     const longPrefix = '非常长的采购下单人名称用于验证工作表名称截断后仍然不会发生重名';
     const buyers = [...Array(23).fill('李奇'), '徐英', '', '甲/乙', '甲:乙', longPrefix + '甲', longPrefix + '乙'];
-    const records = buyers.map((buyer, index) => ({ buyer, code: `00${String(index + 1).padStart(4, '0')}`, quantity: index === 0 ? 0 : index === 1 ? 1.5 : index === 2 ? '' : index + 1, reason: `合成原因-${index + 1}` }));
+    const records = buyers.map((buyer, index) => ({ buyer, code: `00${String(index + 1).padStart(4, '0')}`, quantity: index === 0 ? 0 : index === 1 ? 1.5 : index === 2 ? '' : index + 1, reason: `合成原因-${index + 1}\n第二段` }));
     const categoryHeader = Array(22).fill('');
     for (const [index, label] of [[0, '物料编码'], [2, 'SKU'], [3, '物料名称'], [6, '销售产品线'], [7, '销售系列'], [21, '采购组']]) categoryHeader[index] = label;
     const categoryRows = records.map((record, index) => {
@@ -55,10 +55,14 @@ function uploadFile(rows, sheetName, name) {
       assert.equal(download.suggestedFilename(), '2026-11-06-备货分配分配.xlsx');
       const bytes = await fs.readFile(await download.path());
       const workbook = XLSX.read(bytes, { type: 'buffer', cellNF: true, cellStyles: true });
-      const xmls = await page.evaluate(async bytes => {
+      const { xmls, styles } = await page.evaluate(async bytes => {
         const zip = await JSZip.loadAsync(new Uint8Array(bytes));
-        return Promise.all(Object.keys(zip.files).filter(path => /^xl\/worksheets\/sheet\d+\.xml$/.test(path)).map(async path => ({ path, text: await zip.file(path).async('string') })));
+        const xmls = await Promise.all(Object.keys(zip.files).filter(path => /^xl\/worksheets\/sheet\d+\.xml$/.test(path)).map(async path => ({ path, text: await zip.file(path).async('string') })));
+        return { xmls, styles: await zip.file('xl/styles.xml').async('string') };
       }, [...bytes]);
+      const alignments = [...styles.matchAll(/<alignment\b[^>]*\/>/g)].map(match => match[0]);
+      assert.equal(alignments.length, 5);
+      assert(alignments.every(style => style.includes('wrapText="0"') && style.includes('horizontal="center"') && style.includes('vertical="center"')));
       return { workbook, xmls };
     }
 
@@ -86,7 +90,8 @@ function uploadFile(rows, sheetName, name) {
         assert.equal(row[7], source.quantity);
         assert.equal(row[9], '手填采购主体');
         assert.equal(row[15], '10');
-        assert.equal(row[17], source.reason);
+        assert.equal(row[17], source.reason.replace(/\n/g, ' '));
+        assert(row.every(value => typeof value !== 'string' || !/[\r\n\u2028\u2029]/.test(value)));
         assert.equal(row[18], '', 'optional Singapore source is not uploaded');
         const r = index + 2;
         assert.equal(sheet[`K${r}`].f, 'TODAY()');
