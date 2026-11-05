@@ -85,6 +85,7 @@ const els = {
   filterToolbar: document.querySelector("#filterToolbar"),
   clearFiltersButton: document.querySelector("#clearFiltersButton"),
   downloadDetailButton: document.querySelector("#downloadDetailButton"),
+  downloadBuyerWorkbookButton: document.querySelector("#downloadBuyerWorkbookButton"),
   detailState: document.querySelector("#detailState"),
   detailTableBody: document.querySelector("#detailTableBody"),
   detailEmpty: document.querySelector("#detailEmpty"),
@@ -170,7 +171,8 @@ function bindEvents() {
   els.filterToolbar?.addEventListener("click", handleFilterToolbarClick);
   els.filterToolbar?.addEventListener("change", handleFilterToolbarChange);
   els.clearFiltersButton?.addEventListener("click", clearAllFilters);
-  els.downloadDetailButton?.addEventListener("click", downloadDetailWorkbook);
+  els.downloadDetailButton?.addEventListener("click", () => downloadDetailWorkbook());
+  els.downloadBuyerWorkbookButton?.addEventListener("click", () => downloadDetailWorkbook(true));
   els.previousPageButton?.addEventListener("click", () => changeDetailPage(-1));
   els.nextPageButton?.addEventListener("click", () => changeDetailPage(1));
   document.addEventListener("click", (event) => {
@@ -909,6 +911,7 @@ function updateDemandMetrics() {
   if (els.quantityTotal) els.quantityTotal.textContent = `数量合计：${formatMetricNumber(total)}${quantityWarning}`;
   if (els.supplierCount) els.supplierCount.textContent = formatMetricNumber(supplierCount);
   if (els.downloadDetailButton) els.downloadDetailButton.disabled = !state.filteredRows.length || !window.XLSX;
+  if (els.downloadBuyerWorkbookButton) els.downloadBuyerWorkbookButton.disabled = !state.filteredRows.length || !window.XLSX;
 }
 
 function renderFilterControls() {
@@ -1065,7 +1068,7 @@ function renderDemandTableRow(row) {
   `;
 }
 
-async function downloadDetailWorkbook() {
+async function downloadDetailWorkbook(splitIntoSheets = false) {
   const invalidDays = document.querySelector('.delivery-days:invalid');
   if (invalidDays?.reportValidity) { invalidDays.reportValidity(); return; }
   if (state.filteredRows.some(row => row.deliveryRowIndex !== undefined)) {
@@ -1087,11 +1090,18 @@ async function downloadDetailWorkbook() {
     groups.get(buyer).push(row);
   }
   const stamp = formatFileTimestamp(new Date());
-  if (groups.size > 1 && !window.JSZip) {
+  if (!splitIntoSheets && groups.size > 1 && !window.JSZip) {
     window.alert('打包组件未加载，请刷新页面后重试。');
     return;
   }
   try {
+    if (splitIntoSheets) {
+      const { workbook, sheetShapes } = buildDetailWorkbook(state.filteredRows, true);
+      const fileName = `备货需求分配明细_按采购下单人分sheet_${stamp}.xlsx`;
+      if (window.JSZip) await writeStyledDetailWorkbook(workbook, sheetShapes, fileName);
+      else window.XLSX.writeFile(workbook, fileName);
+      return;
+    }
     const archive = groups.size > 1 ? new window.JSZip() : null;
     let index = 0;
     for (const [buyer, rows] of groups) {
@@ -1114,30 +1124,35 @@ async function downloadDetailWorkbook() {
   }
 }
 
-function buildDetailWorkbook(rows) {
+function buildDetailWorkbook(rows, splitIntoSheets = false) {
   const workbook = window.XLSX.utils.book_new();
   // WPS saves its native row/column reading highlight in this boolean custom property.
   workbook.Custprops = { KSOReadingLayout: true };
-  const sheetRows = [
-    EXPORT_COLUMNS.map((column) => column.label),
-    ...rows.map((row) => EXPORT_COLUMNS.map((column) => {
-      if (column.key !== "quantity") return row[column.key] ?? "";
-      const quantity = Number.isFinite(row.quantityNumber)
-        ? row.quantityNumber : getDemandRowQuantity([row.quantity], { quantity: 0 });
-      return Number.isFinite(quantity) ? quantity : "";
-    })),
-  ];
-  const worksheet = window.XLSX.utils.aoa_to_sheet(sheetRows);
-  const quantityColumn = EXPORT_COLUMNS.findIndex((column) => column.key === "quantity");
-  for (let rowIndex = 1; rowIndex < sheetRows.length; rowIndex += 1) {
-    const cell = worksheet[window.XLSX.utils.encode_cell({ r: rowIndex, c: quantityColumn })];
-    if (cell?.t === "n") cell.z = "0";
-  }
-  addDeliveryFormulas(worksheet, rows);
   workbook.Workbook = { CalcPr: { calcMode: "auto", fullCalcOnLoad: true, forceFullCalc: true } };
-  worksheet["!cols"] = getAutoExportColumns(sheetRows);
-  window.XLSX.utils.book_append_sheet(workbook, worksheet, "备货需求分配明细");
-  const sheetShapes = [{ rowCount: sheetRows.length, columnCount: EXPORT_COLUMNS.length }];
+  const groups = splitIntoSheets ? groupRowsByBuyer(rows) : [["备货需求分配明细", rows]];
+  const usedSheetNames = new Set();
+  const sheetShapes = [];
+  for (const [name, buyerRows] of groups) {
+    const sheetRows = [
+      EXPORT_COLUMNS.map((column) => column.label),
+      ...buyerRows.map((row) => EXPORT_COLUMNS.map((column) => {
+        if (column.key !== "quantity") return row[column.key] ?? "";
+        const quantity = Number.isFinite(row.quantityNumber)
+          ? row.quantityNumber : getDemandRowQuantity([row.quantity], { quantity: 0 });
+        return Number.isFinite(quantity) ? quantity : "";
+      })),
+    ];
+    const worksheet = window.XLSX.utils.aoa_to_sheet(sheetRows);
+    const quantityColumn = EXPORT_COLUMNS.findIndex((column) => column.key === "quantity");
+    for (let rowIndex = 1; rowIndex < sheetRows.length; rowIndex += 1) {
+      const cell = worksheet[window.XLSX.utils.encode_cell({ r: rowIndex, c: quantityColumn })];
+      if (cell?.t === "n") cell.z = "0";
+    }
+    addDeliveryFormulas(worksheet, buyerRows);
+    worksheet["!cols"] = getAutoExportColumns(sheetRows);
+    window.XLSX.utils.book_append_sheet(workbook, worksheet, makeUniqueSheetName(name, usedSheetNames));
+    sheetShapes.push({ rowCount: sheetRows.length, columnCount: EXPORT_COLUMNS.length });
+  }
 
   return { workbook, sheetShapes };
 }
@@ -1299,7 +1314,7 @@ function downloadBlob(blob, fileName) {
 function groupRowsByBuyer(rows) {
   const groups = new Map();
   rows.forEach((row) => {
-    const buyer = String(row.buyer || "").trim() || "未填写下单人";
+    const buyer = String(row.buyer ?? "").trim();
     if (!groups.has(buyer)) groups.set(buyer, []);
     groups.get(buyer).push(row);
   });
@@ -1310,18 +1325,18 @@ function makeUniqueSheetName(rawName, usedSheetNames) {
   const baseName = sanitizeSheetName(rawName) || "未填写下单人";
   let sheetName = baseName.slice(0, 31);
   let index = 2;
-  while (usedSheetNames.has(sheetName)) {
+  while (usedSheetNames.has(sheetName.toLowerCase())) {
     const suffix = `_${index}`;
     sheetName = `${baseName.slice(0, 31 - suffix.length)}${suffix}`;
     index += 1;
   }
-  usedSheetNames.add(sheetName);
+  usedSheetNames.add(sheetName.toLowerCase());
   return sheetName;
 }
 
 function sanitizeSheetName(value) {
   return String(value || "")
-    .replace(/[\[\]:*?/\\]/g, " ")
+    .replace(/[\[\]:*?/\\\x00-\x1f']/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

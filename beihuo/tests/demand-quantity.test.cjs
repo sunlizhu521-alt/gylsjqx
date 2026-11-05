@@ -53,6 +53,66 @@ test('per-buyer workbooks preserve rows, reasons, formulas and WPS highlight',()
  assert.equal(w.Custprops.KSOReadingLayout,true);assert.equal(w.Sheets.备货需求分配明细.R2.v,'需要保留');assert.equal(w.Sheets.备货需求分配明细.H2.v,0);assert.equal(w.Sheets.备货需求分配明细.M2.f,'IF(L2="","",K2+L2)');assert.equal(w.Sheets.备货需求分配明细['!ref'],'A1:R3');
 });
 
+test('one workbook splits buyers into sheets with complete rows and sheet-local formulas', () => {
+  const { context, run } = loadApp();
+  context.rows = [
+    { buyer: '李奇', materialCode: '0001', sku: '001', quantityNumber: 0, stockReason: '原因一', todayDate: '2026-11-05', deliveryDays: 2, supplierDeliveryDate: '2026-11-07' },
+    { buyer: '徐英', materialCode: '0002', quantityNumber: 1.5, stockReason: '原因二', todayDate: '2026-11-05', deliveryDays: 0, supplierDeliveryDate: '2026-11-05' },
+    { buyer: '李奇', materialCode: '0003', quantity: '', stockReason: '原因三', todayDate: '2026-11-05' },
+    { buyer: '', materialCode: '0004', quantityNumber: 4 },
+  ];
+  const { workbook, sheetShapes } = run('buildDetailWorkbook(rows, true)');
+  const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer', cellNF: true, cellStyles: true });
+  assert.equal(reopened.SheetNames.length, 3);
+  const li = reopened.Sheets.李奇, xu = reopened.Sheets.徐英;
+  assert.equal(reopened.Custprops.KSOReadingLayout, true);
+  assert.deepEqual([li.E2.v, li.E3.v, xu.E2.v, reopened.Sheets.未填写下单人.E2.v], ['0001', '0003', '0002', '0004']);
+  assert.equal(li.F2.v, '001');
+  assert.deepEqual([li.H2.t, li.H2.v, li.H2.z, xu.H2.v, li.H3.v], ['n', 0, '0', 1.5, '']);
+  assert.equal(li.R3.v, '原因三');
+  assert.equal(li.K2.f, 'TODAY()');
+  assert.equal(li.M2.f, 'IF(L2="","",K2+L2)');
+  assert.equal(li.M3.f, 'IF(L3="","",K3+L3)');
+  assert.equal(xu.M2.f, 'IF(L2="","",K2+L2)');
+  assert.equal(xu.M2.z, 'yyyy-mm-dd');
+  reopened.SheetNames.forEach((name, index) => {
+    const sheet = reopened.Sheets[name];
+    assert.equal(sheet['!cols'].length, 18);
+    assert.equal(sheetShapes[index].rowCount, XLSX.utils.decode_range(sheet['!ref']).e.r + 1);
+    assert.equal(sheetShapes[index].columnCount, 18);
+  });
+});
+
+test('buyer sheet names stay valid and unique without merging distinct buyers', () => {
+  const { context, run } = loadApp();
+  context.rows = ['', '未填写下单人', '甲/乙', '甲:乙', 'Buyer', 'buyer', '长'.repeat(40) + '甲', '长'.repeat(40) + '乙', "'名字'", '[]:?*\\/'].map((buyer, index) => ({ buyer, materialCode: String(index) }));
+  const output = run('buildDetailWorkbook(rows, true)');
+  const reopened = XLSX.read(XLSX.write(output.workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
+  assert.equal(reopened.SheetNames.length, context.rows.length);
+  assert.equal(new Set(reopened.SheetNames.map(name => name.toLowerCase())).size, context.rows.length);
+  for (const name of reopened.SheetNames) {
+    assert(name.length <= 31);
+    assert(!/[\[\]:*?/\\\x00-\x1f']/.test(name));
+  }
+  assert.deepEqual(reopened.SheetNames.map(name => reopened.Sheets[name].E2.v).sort(), context.rows.map(row => row.materialCode).sort());
+});
+
+test('combined download exports only filtered rows and guards empty selection', async () => {
+  const { context, run } = loadApp();
+  let exported, fileName, alert;
+  context.window.XLSX.writeFile = (workbook, name) => { exported = workbook; fileName = name; };
+  context.window.alert = message => { alert = message; };
+  await run('downloadDetailWorkbook(true)');
+  assert.equal(alert, '暂无可下载的明细数据。');
+  assert.equal(exported, undefined);
+  context.rows = [{ buyer: '李奇', materialCode: '保留' }, { buyer: '徐英', materialCode: '排除' }];
+  run('state.demandRows = rows; state.filteredRows = rows.slice(0, 1)');
+  await run('downloadDetailWorkbook(true)');
+  assert.deepEqual(exported.SheetNames, ['李奇']);
+  assert.equal(exported.Sheets.李奇.E2.v, '保留');
+  assert.match(fileName, /^备货需求分配明细_按采购下单人分sheet_\d+\.xlsx$/);
+});
+
 test('quantity exports as numeric cells with zero-decimal formatting and preserves missing values', async () => {
   const { context, run } = loadApp();
   context.rows = [7, 0, -2, 1.5, Number.MAX_SAFE_INTEGER].map(quantityNumber => ({ quantityNumber, quantity: String(quantityNumber) }));
