@@ -1162,7 +1162,7 @@ async function downloadDetailWorkbook(splitIntoSheets = false) {
   try {
     if (splitIntoSheets) {
       const { workbook, sheetShapes } = buildDetailWorkbook(state.filteredRows, true);
-      const fileName = `备货需求分配明细_按采购下单人分sheet_${stamp}.xlsx`;
+      const fileName = `${deliveryFields("").todayDate}-备货分配分配.xlsx`;
       if (window.JSZip) await writeStyledDetailWorkbook(workbook, sheetShapes, fileName);
       else window.XLSX.writeFile(workbook, fileName);
       return;

@@ -12,7 +12,8 @@ function uploadFile(rows, sheetName, name) {
 (async () => {
   const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' });
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, timezoneId: 'America/Los_Angeles' });
+    await page.clock.install({ time: new Date('2026-11-05T16:30:00Z') });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto((process.env.QA_URL || 'http://127.0.0.1:8940/') + 'beihuo/index.html');
@@ -51,7 +52,7 @@ function uploadFile(rows, sheetName, name) {
       const event = page.waitForEvent('download');
       await page.locator('#downloadBuyerWorkbookButton').click();
       const download = await event;
-      assert(download.suggestedFilename().endsWith('.xlsx'));
+      assert.equal(download.suggestedFilename(), '2026-11-06-备货分配分配.xlsx');
       const bytes = await fs.readFile(await download.path());
       const workbook = XLSX.read(bytes, { type: 'buffer', cellNF: true, cellStyles: true });
       const xmls = await page.evaluate(async bytes => {

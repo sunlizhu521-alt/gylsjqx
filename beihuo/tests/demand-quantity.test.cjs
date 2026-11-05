@@ -188,7 +188,7 @@ test('combined download exports only filtered rows and guards empty selection', 
   await run('downloadDetailWorkbook(true)');
   assert.deepEqual(exported.SheetNames, ['李奇']);
   assert.equal(exported.Sheets.李奇.E2.v, '保留');
-  assert.match(fileName, /^备货需求分配明细_按采购下单人分sheet_\d+\.xlsx$/);
+  assert.match(fileName, /^\d{4}-\d{2}-\d{2}-备货分配分配\.xlsx$/);
 });
 
 test('quantity exports as numeric cells with zero-decimal formatting and preserves missing values', async () => {
