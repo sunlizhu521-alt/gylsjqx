@@ -77,39 +77,39 @@ function uploadFile(rows, sheetName, name) {
       const sheet = workbook.Sheets[name];
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
       assert.equal(rows[0].length, 19);
-      assert.equal(rows[0][18], '是否新加坡公司下单');
+      assert.equal(rows[0][1], '是否新加坡公司下单');
       assert.equal(rows[0][0], '采购单订单下单人');
-      assert.equal(rows[0][17], '备货原因');
+      assert.equal(rows[0][18], '备货原因');
       assert(!rows[0].includes('采购分工明细是否存在'));
       assert.equal(new Set(rows.slice(1).map(row => row[0])).size, 1, `one buyer per sheet: ${name}`);
       assert(sheet['!cols'].every(column => column.width > 0));
       for (const [index, row] of rows.slice(1).entries()) {
-        const source = records.find(record => record.code === row[4]);
-        assert(source, `known material ${row[4]}`);
+        const source = records.find(record => record.code === row[5]);
+        assert(source, `known material ${row[5]}`);
         assert.equal(row[0], source.buyer);
-        assert.equal(row[7], source.quantity);
-        assert.equal(row[9], '手填采购主体');
-        assert.equal(row[15], '10');
-        assert.equal(row[17], source.reason.replace(/\n/g, ' '));
+        assert.equal(row[8], source.quantity);
+        assert.equal(row[10], '手填采购主体');
+        assert.equal(row[16], '10');
+        assert.equal(row[18], source.reason.replace(/\n/g, ' '));
         assert(row.every(value => typeof value !== 'string' || !/[\r\n\u2028\u2029]/.test(value)));
-        assert.equal(row[18], '', 'optional Singapore source is not uploaded');
+        assert.equal(row[1], '', 'optional Singapore source is not uploaded');
         const r = index + 2;
-        assert.equal(sheet[`K${r}`].f, 'TODAY()');
-        assert.equal(sheet[`M${r}`].f, `IF(L${r}="","",K${r}+L${r})`);
-        assert.equal(sheet[`M${r}`].z, 'yyyy-mm-dd');
-        assert.equal(sheet[`H${r}`].z, '0');
-        if (source.quantity !== '') assert.equal(sheet[`H${r}`].t, 'n');
-        seen.push(row[4]);
+        assert.equal(sheet[`L${r}`].f, 'TODAY()');
+        assert.equal(sheet[`N${r}`].f, `IF(M${r}="","",L${r}+M${r})`);
+        assert.equal(sheet[`N${r}`].z, 'yyyy-mm-dd');
+        assert.equal(sheet[`I${r}`].z, '0');
+        if (source.quantity !== '') assert.equal(sheet[`I${r}`].t, 'n');
+        seen.push(row[5]);
       }
     }
     assert.deepEqual([...seen].sort(), records.map(record => record.code).sort());
     assert.equal(XLSX.utils.decode_range(workbook.Sheets['李奇']['!ref']).e.r, 23, 'include rows beyond the first preview page');
-    assert.equal(workbook.Sheets['李奇'].L2.v, 2);
+    assert.equal(workbook.Sheets['李奇'].M2.v, 2);
     assert.equal(xmls.length, 7);
     for (const { text } of xmls) {
       assert.match(text, /<c[^>]*r="A1"[^>]*s="1"/);
-      assert.match(text, /<c[^>]*r="R2"[^>]*s="3"/);
-      assert.match(text, /<c[^>]*r="H2"[^>]*s="4"/);
+      assert.match(text, /<c[^>]*r="S2"[^>]*s="3"/);
+      assert.match(text, /<c[^>]*r="I2"[^>]*s="4"/);
     }
 
     await page.locator('[data-filter-button="buyer"]').click();
@@ -117,7 +117,7 @@ function uploadFile(rows, sheetName, name) {
     await page.waitForFunction(() => state.filteredRows.length === 1);
     const filtered = await downloadCombined();
     assert.deepEqual(filtered.workbook.SheetNames, ['徐英']);
-    assert.equal(filtered.workbook.Sheets['徐英'].E2.v, records[23].code);
+    assert.equal(filtered.workbook.Sheets['徐英'].F2.v, records[23].code);
     await page.locator('#clearFiltersButton').click();
     await page.reload();
     await page.waitForFunction(count => state.filteredRows.length === count, records.length);

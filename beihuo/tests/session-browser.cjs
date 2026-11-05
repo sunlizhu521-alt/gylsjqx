@@ -99,14 +99,14 @@ function fileForSlot(slot, value) {
     assert.equal(await page.locator('[data-apply="file-5"]').count(), 1);
     assert.equal(await page.locator('#appliedCount').innerText(), '5');
     assert.deepEqual(await statuses(), ['是', '否', '否', '是'], 'supplier and series must match the same source row, not a cross product');
-    assert.equal(await page.locator('.detail-table th').last().innerText(), '是否新加坡公司下单');
-    assert.deepEqual(await page.locator('#detailTableBody tr td:last-child').allTextContents(), ['是', '否']);
+    assert.equal(await page.locator('.detail-table th').nth(1).innerText(), '是否新加坡公司下单');
+    assert.deepEqual(await page.locator('#detailTableBody tr td:nth-child(2)').allTextContents(), ['是', '否']);
     assert.deepEqual(await snapshot(), beforeSingapore, 'Singapore upload preserves quantities, manual entity, days and filters');
     if (process.env.QA_ARTIFACT_DIR) {
       await fs.mkdir(process.env.QA_ARTIFACT_DIR, { recursive: true });
       await page.locator('.detail-panel h2').click();
       await page.locator('[data-drop="file-5"]').screenshot({ path: `${process.env.QA_ARTIFACT_DIR}/singapore-slot.png` });
-      await page.locator('.detail-panel .table-wrap').evaluate(element => { element.scrollLeft = element.scrollWidth; });
+      await page.locator('.detail-panel .table-wrap').evaluate(element => { element.scrollLeft = 0; });
       await page.locator('.detail-panel .table-wrap').screenshot({ path: `${process.env.QA_ARTIFACT_DIR}/singapore-status.png` });
     }
     const downloadEvent = page.waitForEvent('download');
@@ -114,10 +114,10 @@ function fileForSlot(slot, value) {
     const download = await downloadEvent;
     const exported = X.read(await fs.readFile(await download.path()), { type: 'buffer' });
     const sheet = exported.Sheets['采购甲'];
-    assert.equal(sheet.S1.v, '是否新加坡公司下单');
-    assert.deepEqual([sheet.S2.v, sheet.S3.v], ['是', '否']);
-    assert.equal(sheet.J2.v, '手填采购主体');
-    assert.equal(sheet.L2.v, 9);
+    assert.equal(sheet.B1.v, '是否新加坡公司下单');
+    assert.deepEqual([sheet.B2.v, sheet.B3.v], ['是', '否']);
+    assert.equal(sheet.K2.v, '手填采购主体');
+    assert.equal(sheet.M2.v, 9);
 
     await page.locator('[data-upload="file-5"]').setInputFiles(fileForSlot(5, 444));
     await page.waitForFunction(() => document.querySelector('#libraryState').textContent.includes('新加坡公司明细未更新，原文件保留'));

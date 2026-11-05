@@ -34,6 +34,7 @@ const LINKED_FILTER_GROUPS = [
 ];
 const DETAIL_COLUMNS = [
   { key: "buyer", label: "采购单订单下单人" },
+  { key: "singaporeOrder", label: "是否新加坡公司下单" },
   { key: "businessUnit", label: "事业部" },
   { key: "applicant", label: "申请人" },
   { key: "supplierShortName", label: "供应商简称" },
@@ -52,7 +53,6 @@ const DETAIL_COLUMNS = [
   { key: "minimumOrderQuantity", label: "起订量" },
   { key: "minimumOrderStatus", label: "起订量是否满足" },
   { key: "stockReason", label: "备货原因" },
-  { key: "singaporeOrder", label: "是否新加坡公司下单" },
 ];
 const EXPORT_COLUMNS = DETAIL_COLUMNS.filter(column => column.key !== "materialCodeValid");
 const TABLE_FIELD_ALIASES = {

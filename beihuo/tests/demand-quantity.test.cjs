@@ -91,7 +91,7 @@ test('新加坡判定读取分工全称和商品系列，合并及两种导出�
     const { workbook } = run(`buildDetailWorkbook(getFilteredDemandRows(), ${split})`);
     const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
     const data = reopened.SheetNames.flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1 }).slice(1));
-    assert.deepEqual(data.map(row => [row[4], row[9], row[18]]), [['001', '手填主体', '是'], ['002', '手填主体', '否']]);
+    assert.deepEqual(data.map(row => [row[5], row[10], row[1]]), [['001', '手填主体', '是'], ['002', '手填主体', '否']]);
   }
   context.records.singapore = null;
   assert.deepEqual(Array.from(await run('buildDemandAllocationRows(records)'), row => row.singaporeOrder), ['', '']);
@@ -100,13 +100,12 @@ test('新加坡判定读取分工全称和商品系列，合并及两种导出�
 test('preview and export table headers, rendered values and exported cells follow the requested order', async () => {
   const { context, run } = loadApp();
   const expected = [
-    ['采购单订单下单人', 'buyer'], ['事业部', 'businessUnit'], ['申请人', 'applicant'],
+    ['采购单订单下单人', 'buyer'], ['是否新加坡公司下单', 'singaporeOrder'], ['事业部', 'businessUnit'], ['申请人', 'applicant'],
     ['供应商简称', 'supplierShortName'], ['物料编码', 'materialCode'], ['SKU', 'sku'],
     ['物料名称', 'materialName'], ['数量', 'quantity'], ['OA备货流程号', 'oaProcessNo'],
     ['采购主体', 'purchaseEntity'], ['采购分工明细是否存在', 'materialCodeValid'],
     ['今天日期', 'todayDate'], ['天数', 'deliveryDays'], ['供应商反馈交期', 'supplierDeliveryDate'], ['采购单订单号', 'purchaseOrderNo'], ['要求货好时间', 'requiredReadyDate'], ['起订量', 'minimumOrderQuantity'],
     ['起订量是否满足', 'minimumOrderStatus'], ['备货原因', 'stockReason'],
-    ['是否新加坡公司下单', 'singaporeOrder'],
   ];
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const header = html.match(/<table class="detail-table">([\s\S]*?)<\/thead>/)[1];
@@ -120,7 +119,7 @@ test('preview and export table headers, rendered values and exported cells follo
   await run('downloadDetailWorkbook()');
   const output = XLSX.utils.sheet_to_json(exported.Sheets[exported.SheetNames[0]], { header: 1 });
   assert.deepEqual(output[0], expected.filter(item => item[1] !== "materialCodeValid").map(item => item[0]));
-  assert.deepEqual(output[1], expected.map(([,key],i) => key === 'quantity' ? '' : `value-${i+1}`).filter((_,i) => i !== 10));
+  assert.deepEqual(output[1], expected.map(([,key],i) => key === 'quantity' ? '' : `value-${i+1}`).filter((_,i) => i !== 11));
 });
 
 test('per-buyer workbooks preserve rows, reasons, formulas and WPS highlight',()=>{
@@ -128,7 +127,7 @@ test('per-buyer workbooks preserve rows, reasons, formulas and WPS highlight',()
  context.rows=[{buyer:'甲',quantity:0,stockReason:'需要保留',todayDate:'2026-10-21',deliveryDays:2,supplierDeliveryDate:'2026-10-23'},{buyer:'甲',quantity:3,stockReason:'另一个原因'}];
  const output=run('buildDetailWorkbook(rows)');
  const w=XLSX.read(XLSX.write(output.workbook,{type:'buffer',bookType:'xlsx'}),{type:'buffer'});
- assert.equal(w.Custprops.KSOReadingLayout,true);assert.equal(w.Sheets.备货需求分配明细.R2.v,'需要保留');assert.equal(w.Sheets.备货需求分配明细.H2.v,0);assert.equal(w.Sheets.备货需求分配明细.M2.f,'IF(L2="","",K2+L2)');assert.equal(w.Sheets.备货需求分配明细['!ref'],'A1:S3');
+ assert.equal(w.Custprops.KSOReadingLayout,true);assert.equal(w.Sheets.备货需求分配明细.S2.v,'需要保留');assert.equal(w.Sheets.备货需求分配明细.I2.v,0);assert.equal(w.Sheets.备货需求分配明细.N2.f,'IF(M2="","",L2+M2)');assert.equal(w.Sheets.备货需求分配明细['!ref'],'A1:S3');
 });
 
 test('all exported sheets use single-line text, full-text widths and no-wrap centered styles', () => {
@@ -140,10 +139,10 @@ test('all exported sheets use single-line text, full-text widths and no-wrap cen
   ];
   for (const split of [false, true]) {
     const { workbook } = run(`buildDetailWorkbook(rows, ${split})`);
-    assert.equal(workbook.Sheets[workbook.SheetNames[0]]['!cols'][17].wch, 223);
+    assert.equal(workbook.Sheets[workbook.SheetNames[0]]['!cols'][18].wch, 223);
     const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer', cellStyles: true });
     const data = reopened.SheetNames.flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1 }).slice(1));
-    assert.deepEqual(data.map(row => [row[4], row[5], row[6], row[7], row[17]]), [
+    assert.deepEqual(data.map(row => [row[5], row[6], row[7], row[8], row[18]]), [
       ['0001', 'SKU 型号', '第一段 第二段', 0, reason.replace(/\r\n/, ' ')],
       ['0002', '', '一 二 三', 1.5, ''],
     ]);
@@ -176,15 +175,15 @@ test('one workbook splits buyers into sheets with complete rows and sheet-local 
   assert.equal(reopened.SheetNames.length, 3);
   const li = reopened.Sheets.李奇, xu = reopened.Sheets.徐英;
   assert.equal(reopened.Custprops.KSOReadingLayout, true);
-  assert.deepEqual([li.E2.v, li.E3.v, xu.E2.v, reopened.Sheets.未填写下单人.E2.v], ['0001', '0003', '0002', '0004']);
-  assert.equal(li.F2.v, '001');
-  assert.deepEqual([li.H2.t, li.H2.v, li.H2.z, xu.H2.v, li.H3.v], ['n', 0, '0', 1.5, '']);
-  assert.equal(li.R3.v, '原因三');
-  assert.equal(li.K2.f, 'TODAY()');
-  assert.equal(li.M2.f, 'IF(L2="","",K2+L2)');
-  assert.equal(li.M3.f, 'IF(L3="","",K3+L3)');
-  assert.equal(xu.M2.f, 'IF(L2="","",K2+L2)');
-  assert.equal(xu.M2.z, 'yyyy-mm-dd');
+  assert.deepEqual([li.F2.v, li.F3.v, xu.F2.v, reopened.Sheets.未填写下单人.F2.v], ['0001', '0003', '0002', '0004']);
+  assert.equal(li.G2.v, '001');
+  assert.deepEqual([li.I2.t, li.I2.v, li.I2.z, xu.I2.v, li.I3.v], ['n', 0, '0', 1.5, '']);
+  assert.equal(li.S3.v, '原因三');
+  assert.equal(li.L2.f, 'TODAY()');
+  assert.equal(li.N2.f, 'IF(M2="","",L2+M2)');
+  assert.equal(li.N3.f, 'IF(M3="","",L3+M3)');
+  assert.equal(xu.N2.f, 'IF(M2="","",L2+M2)');
+  assert.equal(xu.N2.z, 'yyyy-mm-dd');
   reopened.SheetNames.forEach((name, index) => {
     const sheet = reopened.Sheets[name];
     assert.equal(sheet['!cols'].length, 19);
@@ -204,7 +203,7 @@ test('buyer sheet names stay valid and unique without merging distinct buyers', 
     assert(name.length <= 31);
     assert(!/[\[\]:*?/\\\x00-\x1f']/.test(name));
   }
-  assert.deepEqual(reopened.SheetNames.map(name => reopened.Sheets[name].E2.v).sort(), context.rows.map(row => row.materialCode).sort());
+  assert.deepEqual(reopened.SheetNames.map(name => reopened.Sheets[name].F2.v).sort(), context.rows.map(row => row.materialCode).sort());
 });
 
 test('combined download exports only filtered rows and guards empty selection', async () => {
@@ -219,7 +218,7 @@ test('combined download exports only filtered rows and guards empty selection', 
   run('state.demandRows = rows; state.filteredRows = rows.slice(0, 1)');
   await run('downloadDetailWorkbook(true)');
   assert.deepEqual(exported.SheetNames, ['李奇']);
-  assert.equal(exported.Sheets.李奇.E2.v, '保留');
+  assert.equal(exported.Sheets.李奇.F2.v, '保留');
   assert.match(fileName, /^\d{4}-\d{2}-\d{2}-备货分配分配\.xlsx$/);
 });
 
@@ -234,14 +233,14 @@ test('quantity exports as numeric cells with zero-decimal formatting and preserv
   const reopened = XLSX.read(XLSX.write(exported, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer', cellNF: true });
   const sheet = reopened.Sheets[reopened.SheetNames[0]];
   for (const [i, value] of [7, 0, -2, 1.5, Number.MAX_SAFE_INTEGER].entries()) {
-    assert.equal(sheet[`H${i + 2}`].t, 'n');
-    assert.equal(sheet[`H${i + 2}`].v, value);
-    assert.equal(sheet[`H${i + 2}`].z, '0');
-    assert(!sheet[`H${i + 2}`].w.includes('.'));
+    assert.equal(sheet[`I${i + 2}`].t, 'n');
+    assert.equal(sheet[`I${i + 2}`].v, value);
+    assert.equal(sheet[`I${i + 2}`].z, '0');
+    assert(!sheet[`I${i + 2}`].w.includes('.'));
   }
-  assert.equal(sheet.H7.v, '');
-  assert.equal(sheet.H8.v, '');
-  assert.equal(sheet.H9.v, 1234);
+  assert.equal(sheet.I7.v, '');
+  assert.equal(sheet.I8.v, '');
+  assert.equal(sheet.I9.v, 1234);
   assert.match(run('buildDetailWorkbookStylesXml()'), /numFmtId="1"[^>]+applyNumberFormat="1"/);
 });
 
@@ -408,7 +407,7 @@ test('供应商按中文名称排序，空值最后，同名稳定，导出与�
  assert.equal(context.rows[0].supplierShortName,'中山');
  let book;context.window.XLSX.writeFile=w=>{book=w;};await run('downloadDetailWorkbook()');
  const data=XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]],{header:1});
- assert.deepEqual(data.slice(1).map(r=>r[3]),Array.from(sorted,r=>r.supplierShortName));
+ assert.deepEqual(data.slice(1).map(r=>r[4]),Array.from(sorted,r=>r.supplierShortName));
  run('state.filters.get("supplierShortName").add("鸿诚")');assert.deepEqual(Array.from(run('getFilteredDemandRows()'),r=>r.materialCode),['1','3']);
 });
 
@@ -433,9 +432,9 @@ test('交期按北京时间加自然日，覆盖零、空值、跨月跨年闰�
 
 test('下载日期保留TODAY及加天数公式，空值和0均保留，重开不丢失',()=>{
  const {context,run}=loadApp();context.sheet={};context.rows=[{todayDate:'2026-10-15',deliveryDays:20,supplierDeliveryDate:'2026-11-04'},{todayDate:'2026-10-15',deliveryDays:'',supplierDeliveryDate:''},{todayDate:'2026-10-15',deliveryDays:0,supplierDeliveryDate:'2026-10-15'}];
- run('addDeliveryFormulas(sheet,rows)');context.sheet['!ref']='A1:R4';
+ run('addDeliveryFormulas(sheet,rows)');context.sheet['!ref']='A1:S4';
  const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,context.sheet,'测试');const sheet=XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true}).Sheets.测试;
- assert.equal(sheet.K2.f,'TODAY()');assert.equal(sheet.M2.f,'IF(L2="","",K2+L2)');assert.equal(sheet.M3.f,'IF(L3="","",K3+L3)');assert.equal(sheet.M3.v,'');assert.equal(sheet.M4.v,sheet.K4.v);assert.equal(XLSX.SSF.format(sheet.M2.z,sheet.M2.v),'2026-11-04');
+ assert.equal(sheet.L2.f,'TODAY()');assert.equal(sheet.N2.f,'IF(M2="","",L2+M2)');assert.equal(sheet.N3.f,'IF(M3="","",L3+M3)');assert.equal(sheet.N3.v,'');assert.equal(sheet.N4.v,sheet.L4.v);assert.equal(XLSX.SSF.format(sheet.N2.z,sheet.N2.v),'2026-11-04');
 });
 
 
