@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>备货分配｜供应链数据清洗</title>
-    <link rel="stylesheet" href="./styles.css?v=20261106-correct-material" />
+    <link rel="stylesheet" href="./styles.css?v=20261106-single-row-slots" />
   </head>
   <body>
     <div class="app-shell">
@@ -72,7 +72,7 @@
             </div>
             <span class="upload-state" id="libraryState">读取中</span>
           </div>
-          <div class="slot-grid" id="slotGrid"></div>
+          <div class="slot-grid" id="slotGrid" role="region" aria-label="文件上传槽位，可左右滚动" tabindex="0"></div>
         </section>
 
         <section class="panel detail-panel">
