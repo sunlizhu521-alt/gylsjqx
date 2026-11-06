@@ -6,7 +6,7 @@ const tools = [
   { id: 'beihuo', icon: '备', title: '备货分配', status: '可用', desc: '上传备货需求和维度表，匹配采购分工、汇总数量并导出分配明细。', href: 'beihuo/index.html' },
   { id: 'fulfillment', icon: '履', title: '订单履约表整理', status: '可用', desc: '合并徐英、操思敏、邢芳芳、李奇的履约明细，校验六项数量并统一日期格式。', href: 'fulfillment.html' },
   { id: 'contract', icon: '合', title: '合同生成', status: '可用', desc: '上传订单与合同模板，确认字段映射后在浏览器本地生成合同。', href: 'contract.html' },
-  { id: 'payment', icon: '付', title: '付款申请单整理', status: '可用', desc: '按付款主体整理明细，每主体一页，导出 Word 和 PDF。' },
+  { id: 'payment', icon: '付', title: '付款申请单整理', status: '可用', desc: '按付款主体整理明细，优先一页 A4，明细较多时清晰分页，导出 Word 和 PDF。' },
 ];
 
 const LAST_TOOL_KEY = 'gylsjqx-last-tool';
@@ -71,7 +71,7 @@ function switchTool(id) {
   if (id === 'payment') {
     PaymentTool.mount($('toolPanel'));
     $('activeFileCount').textContent = '本地处理';
-    $('activeRowCount').textContent = '每主体一页';
+    $('activeRowCount').textContent = '优先一页 · 清晰排版';
     return;
   }
 }

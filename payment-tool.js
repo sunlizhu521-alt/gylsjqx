@@ -72,7 +72,7 @@
   }
   function render() {
     root.innerHTML = `<div class="payment-tool">
-      <p class="payment-intro">按付款主体整理，每个主体一页 A4 横向。文件仅在本机浏览器处理。</p>
+      <p class="payment-intro">按付款主体整理，优先排入一页 A4 横向；明细较多时自动分页，保证字体清晰。文件仅在本机浏览器处理。</p>
       <div class="payment-upload-grid">
         <label class="payment-upload">付款明细（Excel）<input id="paymentExcel" type="file" accept=".xlsx,.xls" /><span>${esc(state.fileName || '请选择付款明细文件')}</span><small data-reference="detail">引用时间：${esc(reference('detail'))}</small></label>
         <label class="payment-upload">付款申请模板（Word，可选）<input id="paymentTemplate" type="file" accept=".docx" /><span>${esc(state.templateName)}</span><small data-reference="template">引用时间：${esc(reference('template'))}</small></label>
@@ -324,17 +324,17 @@
       state.busy = true;
       const button = root.querySelector('#paymentGenerate'); button.disabled = true; button.textContent = '正在排版…';
       root.querySelector('#paymentDownloadWord').disabled = true;
-      status('正在测量内容并压缩到每主体一页…');
+      status('正在排版，优先一页并保持付款明细清晰…');
       const groups = a.groups.map(g => ({ ...g, info: { ...g.info } }));
       const template = state.template;
       const layouts = [];
       for (const g of groups) { layouts.push(await D.layout(template, g)); await new Promise(resolve => setTimeout(resolve, 0)); if (revision !== state.revision) return; }
       const files = [];
-      for (const layout of layouts) {
-        files.push({ docx: await D.docx(template, [layout]), pdf: await D.pdf([layout]) });
+      for (const pages of layouts) {
+        files.push({ docx: await D.docx(template, pages), pdf: await D.pdf(pages) });
         if (revision !== state.revision) return;
       }
-      const combinedWord = groups.length === 1 ? files[0].docx : await D.docx(template, layouts);
+      const combinedWord = groups.length === 1 ? files[0].docx : await D.docx(template, layouts.flat());
       if (revision !== state.revision) return;
       state.outputs = { files, layouts, groups, combinedWord };
       showOutputs();
@@ -352,18 +352,20 @@
       const outputs = state.outputs;
       if (!outputs) return;
       downloadBlob(outputs.combinedWord, C.printDownloadName(outputs.groups));
-      status(`已开始下载合并 Word，共 ${outputs.groups.length} 个付款主体，每个主体一页。`);
+      status(`已开始下载合并 Word，共 ${outputs.groups.length} 个付款主体、${outputs.layouts.flat().length} 页。`);
     } catch (e) { status(e.message, true); }
   }
   function showOutputs() {
     const { layouts, groups } = state.outputs;
     const pages = root.querySelector('#paymentPages'); pages.replaceChildren();
-    layouts.forEach((l, i) => {
+    layouts.forEach((subjectPages, i) => {
       const card = document.createElement('section'); card.className = 'payment-preview';
-      const label = document.createElement('p');
-      label.textContent = `${groups[i].subject} · 第 ${i + 1} 页 / 共 ${layouts.length} 页 · 正文 ${(Math.floor(l.body * 2) / 2).toFixed(1)} pt，其他表格 ${(Math.floor(l.table * 2) / 2).toFixed(1)} pt，付款明细 ${(Math.floor(Math.min(5.5,l.table) * 2) / 2).toFixed(1)} pt${l.table < 5.5 ? '（明细较多，已继续压缩，请放大核对）' : ''}`;
-      const canvas = D.canvas(l); canvas.setAttribute('aria-label', `${groups[i].subject}申请单预览`);
-      card.append(label, canvas);
+      subjectPages.forEach((l, j) => {
+        const label = document.createElement('p');
+        label.textContent = `${groups[i].subject} · 第 ${j + 1} 页 / 共 ${subjectPages.length} 页 · 付款明细 ${l.detail.toFixed(1)} pt${subjectPages.length > 1 ? '（明细较多，已自动分页）' : ''}`;
+        const canvas = D.canvas(l); canvas.setAttribute('aria-label', `${groups[i].subject}申请单第 ${j + 1} 页预览`);
+        card.append(label, canvas);
+      });
       if (groups.length > 1) {
         const actions = document.createElement('div'); actions.className = 'payment-actions';
         for (const kind of ['docx', 'pdf']) {
@@ -381,7 +383,7 @@
       b.hidden = combined && groups.length > 1;
       b.disabled = b.hidden;
     });
-    status(`已生成 ${layouts.length} 页，每个付款主体一页；可一键下载合并 Word，或按付款主体分别下载 Word 和 PDF。`);
+    status(`已生成 ${layouts.flat().length} 页，共 ${groups.length} 个付款主体；优先一页，超出时自动分页。可一键下载合并 Word，或按付款主体分别下载 Word 和 PDF。`);
   }
   window.PaymentTool = { mount };
 })();

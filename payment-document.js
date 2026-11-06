@@ -1,4 +1,4 @@
-/* Template-based DOCX editing and a shared, measured one-page layout. */
+/* Template-based DOCX editing and shared, measured A4 layouts. */
 (function () {
   'use strict';
   const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -94,7 +94,7 @@
     }
     return { bytes, xml };
   }
-  function fill(template, group) {
+  function fill(template, group, rowOffset = 0) {
     const doc = parseXml(template.xml), body = all(doc, 'body')[0];
     for (const p of children(body, 'p')) if (!paragraphText(p).trim()) p.remove();
     const ps = children(body, 'p'), ts = children(body, 'tbl');
@@ -112,7 +112,7 @@
     rows.slice(1, -1).forEach(r => r.remove());
     group.rows.forEach((r, i) => {
       const tr = proto.cloneNode(true);
-      const values = [String(i + 1), ...C.fields.map(f => f === '本次申请付款金额' ? C.money(r._cents) : f === '开户银行及账号' ? C.bankSummary(r._resolvedBank ?? r[f], r['供应商全称']).value : C.text(r[f]))];
+      const values = [String(rowOffset + i + 1), ...C.fields.map(f => f === '本次申请付款金额' ? C.money(r._cents) : f === '开户银行及账号' ? C.bankSummary(r._resolvedBank ?? r[f], r['供应商全称']).value : C.text(r[f]))];
       children(tr, 'tc').forEach((cell, j) => putText(cell, values[j]));
       ts[1].insertBefore(tr, total);
     });
@@ -166,15 +166,18 @@
     let height = 0, tableIndex = 0, paragraphIndex = 0;
     for (const el of filled.body.children) {
       if (el.localName === 'p') {
+        const footer = paragraphIndex >= 3;
         const title = paragraphIndex++ === 0;
-        const size = title ? Math.max(config.body, config.body * 1.5) : config.body;
-        const p = paragraphModel(el, size, title ? config.bodyLine * 1.5 : config.bodyLine, width, ctx, title);
-        const gap = config.bodyLine * .4;
+        const size = title ? config.body * 1.5 : footer ? config.footer + 1 : config.body;
+        const line = title ? config.bodyLine * 1.5 : footer ? config.footerLine + 1 : config.bodyLine;
+        const p = paragraphModel(el, size, line, width, ctx, title);
+        const gap = footer ? line * .2 : config.bodyLine * .4;
         blocks.push({ type: 'p', ...p, gap }); height += p.height + gap;
       } else if (el.localName === 'tbl') {
-        const tableConfig = tableIndex === 1 ? { ...config, table: Math.min(5.5, config.table), tableLine: Math.min(7, config.tableLine) } : config;
+        const tableConfig = tableIndex === 1 ? { ...config, table: config.detail, tableLine: config.detailLine }
+          : tableIndex >= 2 ? { ...config, table: config.footer, tableLine: config.footerLine } : config;
         const raw = children(children(el, 'tblGrid')[0], 'gridCol').map(e => Number(attr(e, 'w')));
-        const sum = raw.reduce((a, b) => a + b, 0), grid = tableIndex === 1 ? detailWidths(el, width, tableConfig, ctx) : raw.map(w => width * w / sum);
+        const sum = raw.reduce((a, b) => a + b, 0), grid = tableIndex === 1 ? config.detailGrid || detailWidths(el, width, tableConfig, ctx) : raw.map(w => width * w / sum);
         const rows = children(el, 'tr').map(row => {
           let col = 0;
           const cells = children(row, 'tc').map(cell => {
@@ -184,8 +187,7 @@
             const fill = attr(all(cell, 'shd')[0], 'fill');
             return { element: cell, span, width: cw, ps, height: ps.reduce((a, p) => a + p.height, 0), fill: fill && /^[0-9a-f]{6}$/i.test(fill) ? '#' + fill : '#ffffff' };
           });
-          // Space for handwriting remains even on a one-row application.
-          const minimum = tableIndex >= 2 ? tableConfig.tableLine * 1.7 : tableConfig.tableLine;
+          const minimum = tableIndex >= 2 ? tableConfig.tableLine * 1.1 : tableConfig.tableLine;
           const contentHeight = Math.max(minimum, ...cells.map(c => c.height)) + config.pad * 2 + tableConfig.tableLine * .15;
           // Word adds border geometry outside the minimum trHeight. Account for it
           // in the page budget, rather than applying the allowance twice to the row.
@@ -200,20 +202,51 @@
   }
   async function layout(template, group) {
     await document.fonts.ready;
-    const filled = fill(template, group);
-    let config = { body: 12, table: 11, bodyLine: 15, tableLine: 14, mx: 17.01, my: 14.17, pad: 1.4 };
-    for (let attempt = 0; attempt < 60; attempt++) {
-      const result = measureLayout(filled, config);
-      // Reserve Word's required terminal paragraph and rounding/font differences.
-      if (result.height <= PAGE.height - config.my * 2 - 24) return result;
-      if (attempt === 0) config = { ...config, mx: 11.34, my: 11.34, pad: 1 };
-      else {
-        const factor = Math.min(.94, (PAGE.height - config.my * 2 - 30) / result.height);
-        config = { ...config, body: config.body * factor, table: config.table * factor, bodyLine: config.bodyLine * factor, tableLine: config.tableLine * factor, pad: config.pad * factor };
+    let config = { body: 12, table: 11, bodyLine: 15, tableLine: 14, detail: 10.5, detailLine: 13,
+      footer: 7.5, footerLine: 9, mx: 17.01, my: 14.17, pad: 1.4 };
+    const fits = result => result.height <= PAGE.height - result.my * 2 - 24;
+    function page(start, end, final = true) {
+      const filled = fill(template, { ...group, rows: group.rows.slice(start, end) }, start);
+      if (!final) {
+        const tables = children(filled.body, 'tbl');
+        children(tables[1], 'tr').at(-1).remove();
+        tables.slice(2).forEach(t => t.remove());
+        children(filled.body, 'p').slice(3).forEach(p => p.remove());
       }
-      if (config.table < 1) throw new Error(`${group.subject}：内容过多，低于 Word 可表示的字号仍无法完整排入一页，生成失败`);
+      return measureLayout(filled, config);
     }
-    throw new Error(`${group.subject}：一页布局计算失败`);
+    let result = page(0, group.rows.length);
+    if (fits(result)) return [result];
+    // Compact supporting sections first; detail text never drops below 9 pt.
+    config = { ...config, footer: 6.5, footerLine: 8, mx: 11.34, my: 11.34, pad: 1 };
+    for (const detail of [10.5, 10, 9.5, 9]) {
+      config = { ...config, detail, detailLine: detail + 2.5 };
+      result = page(0, group.rows.length);
+      if (fits(result)) return [result];
+    }
+    // Fixed columns keep continuation pages aligned and page-height search monotonic.
+    config = { ...config, detailGrid: result.blocks.filter(b => b.type === 'table')[1].grid };
+    const pages = [];
+    for (let start = 0; start < group.rows.length;) {
+      result = page(start, group.rows.length);
+      if (fits(result)) { pages.push(result); break; }
+      // Keep at least one detail with the final total, approval and settlement sections.
+      let low = start + 1, high = group.rows.length - 1, end = start, best;
+      while (low <= high) {
+        const mid = Math.floor((low + high) / 2), candidate = page(start, mid, false);
+        if (fits(candidate)) { end = mid; best = candidate; low = mid + 1; }
+        else high = mid - 1;
+      }
+      if (!best) throw new Error(`${group.subject}：第 ${group.rows[start]._row || start + 1} 行明细或模板内容过长，无法以清晰字号排入 A4，请缩短单条内容或调整模板后重试`);
+      pages.push(best); start = end;
+    }
+    // The date line has ample room for a page marker without changing row heights.
+    pages.forEach((p, i) => {
+      const date = p.blocks.filter(b => b.type === 'p')[1];
+      date.value += `    （第 ${i + 1} / ${pages.length} 页）`;
+      date.lines = [date.value];
+    });
+    return pages;
   }
   function styleParagraph(p) {
     const el = p.element, doc = el.ownerDocument;
@@ -253,7 +286,8 @@
         for (const exception of children(row.element, 'tblPrEx')) remove(exception, ['tblCellMar']);
         const rp = prop(row.element, 'trPr'); remove(rp, ['trHeight']);
         prop(rp, 'cantSplit');
-        prop(rp, 'trHeight', { val: Math.ceil(row.contentHeight * 20), hRule: 'atLeast' });
+        // Word adds cell margins to the minimum row height; count padding only once.
+        prop(rp, 'trHeight', { val: Math.ceil((row.contentHeight - result.pad * 2) * 20), hRule: 'atLeast' });
         for (const cell of row.cells) {
           const cp = prop(cell.element, 'tcPr'); remove(cp, ['tcMar', 'noWrap', 'tcFitText']);
           prop(cp, 'tcW', { w: Math.floor(cell.width * 20), type: 'dxa' });

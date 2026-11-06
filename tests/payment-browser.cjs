@@ -85,7 +85,7 @@ const base = (extra = {}) => ({
     assert.equal(docStats.cells[8], '货款，11月2日前付款');
     assert.ok(docStats.text.includes('2026年11月06日'));
     assert.doesNotMatch(docStats.text, /未开票|原备注不输出/);
-    assert.ok(docStats.sizes.length > 0 && docStats.sizes.every(size => size === 11), 'payment detail text uses exactly 5.5pt');
+    assert.ok(docStats.sizes.length > 0 && docStats.sizes.every(size => size === 21), 'single-page payment details use clear 10.5pt text');
     assert.ok(docStats.text.includes('AP00027462（￥-89156.00）-张三'));
     assert.ok(docStats.widths[9] > docStats.widths[4], 'long remarks receive more width than empty amount columns');
     assert.ok(docStats.widths.every(v => v > 0));
@@ -220,14 +220,18 @@ const base = (extra = {}) => ({
     assert.equal(await page.locator('[data-payment-download="docx"]').isDisabled(),true);
     const stress = [base({ 付款主体: '单笔主体' }), ...Array.from({ length: 30 }, (_, i) => base({ 付款主体: '多笔主体', 对接人: `记录${i+1}`, 本次申请付款金额: '0.01' })), ...Array.from({ length: 45 }, (_, i) => base({ 付款主体: '短明细主体', 开户银行及账号: '测试银行 0012 3456', 本次申请付款金额: '1.10', 对接人: `记录${i+1}` }))];
     await upload(stress); await generate();
-    assert.match(await page.locator('#paymentStatus').innerText(), /已生成 3 页/);
-    assert.match(await page.locator('#paymentPages').innerText(), /继续压缩/);
+    const subjectPageCounts = await page.locator('#paymentPages .payment-preview').evaluateAll(cards => cards.map(card => card.querySelectorAll('canvas').length));
+    const totalPages = subjectPageCounts.reduce((sum, count) => sum + count, 0);
+    assert.equal(subjectPageCounts.length, 3); assert.equal(subjectPageCounts[0], 1);
+    assert.ok(subjectPageCounts[1] > 1 && subjectPageCounts[2] > 1, 'crowded subjects paginate without shrinking details below 9pt');
+    assert.match(await page.locator('#paymentStatus').innerText(), new RegExp(`已生成 ${totalPages} 页，共 3 个付款主体`));
+    assert.match(await page.locator('#paymentPages').innerText(), /已自动分页/);
     await save('docx', 'stress'); const pdfPath = await save('pdf', 'stress');
     assert.equal(await page.locator('[data-payment-download="pdf"]:visible').count(), 3);
     for (let i = 1; i < 3; i++) {
       await save('docx', `stress-${i}`, i);
       const file = await save('pdf', `stress-${i}`, i);
-      assert.equal(await page.evaluate(async bytes => (await PDFLib.PDFDocument.load(new Uint8Array(bytes))).getPageCount(), [...await fs.readFile(file)]), 1);
+      assert.equal(await page.evaluate(async bytes => (await PDFLib.PDFDocument.load(new Uint8Array(bytes))).getPageCount(), [...await fs.readFile(file)]), subjectPageCounts[i]);
     }
     const combined = await downloadPrint('9月25日付款申请单-打印.docx');
     const filesToCompare = [combined, ...['stress.docx','stress-1.docx','stress-2.docx'].map(f => path.join(out, f))];
@@ -240,7 +244,8 @@ const base = (extra = {}) => ({
         return {tables, sections:d.getElementsByTagNameNS(ns, 'sectPr').length, landscape:[...d.getElementsByTagNameNS(ns, 'pgSz')].every(p => p.getAttributeNS(ns,'orient') === 'landscape'), rowMarginOverrides:[...d.getElementsByTagNameNS(ns, 'tblPrEx')].reduce((n,p) => n + p.getElementsByTagNameNS(ns, 'tblCellMar').length, 0)};
       }));
     }, await Promise.all(filesToCompare.map(async file => [...await fs.readFile(file)])));
-    assert.equal(combinedStats[0].sections, 3); assert.equal(combinedStats[0].landscape, true);
+    assert.equal(combinedStats[0].sections, totalPages); assert.equal(combinedStats[0].landscape, true);
+    assert.deepEqual(combinedStats.slice(1).map(s => s.sections), subjectPageCounts);
     assert.ok(combinedStats.every(s => s.rowMarginOverrides === 0), 'template row padding cannot override the measured table padding');
     assert.deepEqual(combinedStats[0].tables, combinedStats.slice(1).flatMap(s => s.tables), 'merged Word preserves all details, bank data, approvals and widths in subject order');
     await page.locator('[data-field="计划付款日期"]').nth(2).fill('');

@@ -1,6 +1,6 @@
-"""After rendering browser-test stress.docx, verify real pagination and content.
+"""After rendering a browser-test DOCX, verify real pagination and content.
 
-Usage: python tests/payment-docx-verify.py assets/payment-template.docx /tmp/qa/stress.docx /tmp/render/stress.pdf
+Usage: python tests/payment-docx-verify.py assets/payment-template.docx /tmp/qa/combined-76-rows.docx /tmp/render/combined-76-rows.pdf
 Requires pypdf in the selected verification runtime; does not change any files.
 """
 import re
@@ -22,23 +22,40 @@ with ZipFile(reference) as source, ZipFile(result) as output:
     assert changed == ['word/document.xml'], changed
     original = E.fromstring(source.read('word/document.xml')).findall('w:body/w:tbl', ns)
     doc = E.fromstring(output.read('word/document.xml'))
-    tables = doc.findall('w:body/w:tbl', ns)
-    assert len(tables) == 12
-    assert [len(tables[i].findall('w:tr', ns)) - 2 for i in (1, 5, 9)] == [1, 30, 45]
-    for group in range(3):
-        assert text(tables[group * 4 + 2]) == text(original[2]), 'Approval text changed'
-        assert text(tables[group * 4 + 3]) == text(original[3]), 'Settlement text changed'
-    assert len(doc.findall('.//w:sectPr', ns)) == 3
+    expected_pages, blocks = [], []
+    for block in doc.find('w:body', ns):
+        if block.tag == '{%s}sectPr' % ns['w'] or block.find('w:pPr/w:sectPr', ns) is not None:
+            expected_pages.append(blocks)
+            blocks = []
+        else:
+            blocks.append(block)
+    assert not blocks and expected_pages, 'Missing final page section'
 
 pages = PdfReader(rendered_pdf).pages
-assert len(pages) == 3, f'Expected 3 actual Word pages, got {len(pages)}'
-for i, page in enumerate(pages):
+assert len(pages) == len(expected_pages), f'Expected {len(expected_pages)} actual Word pages, got {len(pages)}'
+subject, previous_number, detail_count = None, 0, 0
+for i, (page, blocks) in enumerate(zip(pages, expected_pages)):
+    tables = [block for block in blocks if block.tag == '{%s}tbl' % ns['w']]
+    assert len(tables) in (2, 4), f'Unexpected table structure on page {i + 1}'
+    current_subject = text(blocks[0])
+    if current_subject != subject:
+        subject, previous_number = current_subject, 0
+    final = i == len(pages) - 1 or text(expected_pages[i + 1][0]) != subject
+    assert len(tables) == (4 if final else 2), 'Approval and settlement belong on the last subject page only'
+    if final:
+        assert text(tables[2]) == text(original[2]), 'Approval text changed'
+        assert text(tables[3]) == text(original[3]), 'Settlement text changed'
     content = re.sub(r'\s+', '', page.extract_text())
-    assert '出纳签字' in content, f'Settlement missing on page {i + 1}'
-    assert '三、审批意见' in content and '四、财务办结记录' in content
-    if i in (1, 2):
-        for j in range(1, (30 if i == 1 else 45) + 1):
-            assert f'记录{j}' in content, f'Detail missing: page {i + 1}, row {j}'
-    if i == 1:
-        assert content.count('0012345678901234') == 30, 'Bank account content lost'
-print('PASS: 3 actual Word pages, all 76 details retained, bank data intact, original approval and settlement retained, only document.xml changed')
+    # PDF fallback-font runs can extract check marks after the surrounding text.
+    assert content.count('☑') == sum(text(block).count('☑') for block in blocks)
+    for block in blocks:
+        elements = block.findall('.//w:tc', ns) if block.tag == '{%s}tbl' % ns['w'] else [block]
+        for element in elements:
+            assert text(element).replace('☑', '') in content.replace('☑', ''), f'Content missing on actual page {i + 1}: {text(element)}'
+    for row in tables[1].findall('w:tr', ns)[1:]:
+        cells = row.findall('w:tc', ns)
+        if len(cells) == 10:
+            previous_number += 1
+            detail_count += 1
+            assert text(cells[0]) == str(previous_number), 'Detail numbering must continue across pages'
+print(f'PASS: {len(pages)} actual Word pages, {detail_count} complete details, original approval and settlement on each subject final page, only document.xml changed')
