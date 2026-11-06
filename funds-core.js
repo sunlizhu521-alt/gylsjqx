@@ -713,7 +713,7 @@ function build(inputs,decisions={}){
   const eventLabel=e=>e.time+'｜'+e.operator+'｜'+e.opinion+'｜'+sourcePosition({source:e.source});
   if(!reason)return {paid:true,evidence:'出纳支付依据：'+eventLabel(exact[0])};
   const evidence=events.length?events.map(eventLabel).join('\n'):'无可明确识别金额和时间的出纳支付记录；OA来源：'+sourcePosition(records[0]);
-  return {paid:false,evidence:'分批付款待核对：'+reason,review:'分批付款核对：申请金额 '+amountText(application.values['申请付款金额'])+(applicationBatch(batchText(application))?'；第'+applicationBatch(batchText(application))+'批':'')+'。\n'+reason+'。\n出纳记录：'+evidence+'。\n需要处理：核实本批是否实际支付，并核对对应出纳付款金额、时间及批次；记录不完整时重新导出OA签字意见。'};
+  return {paid:false,evidence:'分批付款待核对：'+reason,review:'分批付款核对：申请金额 '+amountText(application.values['申请付款金额'])+(applicationBatch(batchText(application))?'；第'+applicationBatch(batchText(application))+'批':'')+'。\n'+reason+'。\n出纳记录：'+evidence+'。\n需要处理：请先确认是否为分批付款，再确认本次申请对应的批次及是否实际支付；核对该批出纳付款金额、时间，记录不完整时重新导出OA签字意见。'};
  }
  const progressRows=applications.records.map(application=>{
   let paymentEvidence='';
@@ -730,16 +730,17 @@ function build(inputs,decisions={}){
    return parsed;
   }
   values['申请日期']=readDate(application,'申请日期','申请日期');
-  function locate(records,label){
+  function locate(records,label,reportMissing=true){
    let matches=info.name?records.filter(r=>classification(r).name===info.name&&compatible(application,r,'付款主体')&&r.values['对公付款0A流程号']?.t!=='e'):[];
    if(ids.length)matches=matches.filter(r=>ids.length===1&&oas(r).length===1&&oas(r)[0]===ids[0]);
    else matches=matches.filter(r=>info.key&&classification(r).key===info.key);
    if(matches.length>1&&info.cents!==undefined){const exact=matches.filter(r=>classification(r).cents===info.cents);if(exact.length)matches=exact;}
    if(matches.length===1)return matches[0];
-   notes.push(label+(matches.length?'对应多笔记录（'+matches.slice(0,4).map(sourcePosition).join('；')+(matches.length>4?'；共 '+matches.length+' 笔':'')+'），请确认唯一来源':'未找到唯一对应记录，请核对 OA号、供应商、付款主体及金额'));
+   if(matches.length||reportMissing)notes.push(label+(matches.length?'对应多笔记录（'+matches.slice(0,4).map(sourcePosition).join('；')+(matches.length>4?'；共 '+matches.length+' 笔':'')+'），请确认唯一来源':'未找到唯一对应记录，请核对 OA号、供应商、付款主体及金额'));
    return null;
   }
-  const ledgerMatch=locate(ledger,'跟单员/资金台账');
+  // Missing ledger metadata stays blank; actual ambiguity and payment-evidence problems still need review.
+  const ledgerMatch=locate(ledger,'跟单员/资金台账',false);
   if(ledgerMatch)values['跟单员']=cell(ledgerMatch.owner);
   let type=applicationTypes.get(application),dueRecord;
   if(applications.map['付款分类']===undefined){
@@ -753,7 +754,6 @@ function build(inputs,decisions={}){
   else if(type==='正常付款')dueRecord=ledgerMatch;
   else notes.push('付款分类未确认，无法确定应付时间来源，请核实申请汇总付款分类');
   if(dueRecord)values['应付时间']=readDate(dueRecord,'应付款时间','应付时间');
-  else if(type==='正常付款')notes.push('应付时间未填充，请核实资金台账对应记录');
   const flowValues=Object.fromEntries(FLOW_FIELDS.map(h=>[h,[]]));let paymentStatus='待核对';
   if(!ids.length)notes.push('对公付款OA号为空或无法识别，请补充申请汇总流程编码');
   if(ids.length>1)notes.push('一笔申请含多个 OA号，请核实各流程付款进度及金额归属');
@@ -779,7 +779,7 @@ function build(inputs,decisions={}){
   for(const h of FLOW_FIELDS)values[h]=cell(flowValues[h].join('\n'));
   values['是否已付款']=cell(isReapplication(application)?'重新申请':paymentStatus);
   progressEvidence.push(isReapplication(application)?'核对说明：重新申请':paymentEvidence);
-  if(notes.length&&!isReapplication(application)){const source=application.source;reviewRows.push([cell(type||'待核对'),values['供应商名称'],values['付款主体'],values['申请付款金额'],cell('已提交'),cell('付款进度核对：'+(sourceText(reference)||'OA号空白')+'。\n需要处理：'+[...new Set(notes)].join('。\n')+'。'),cell(source.file),cell(source.sheet),cell(source.row),values['跟单员']]);}
+  if(notes.length&&!isReapplication(application)){const source=application.source;reviewRows.push([cell(type||'待核对'),values['供应商名称'],values['付款主体'],values['申请付款金额'],cell('已提交'),cell('付款进度核对：'+(sourceText(reference)||'OA号空白')+'。\n'+[...new Set(notes.map(note=>note.replace(/[。；\s]+$/u,'')))].join('。\n')+'。'),cell(source.file),cell(source.sheet),cell(source.row),values['跟单员']]);}
   return PROGRESS_HEADERS.map(h=>values[h]);
  });
  return {progressHeaders:[...PROGRESS_HEADERS],progressRows,progressEvidence,normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,highlights:{negotiatedCells:[...highlightedNegotiated],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};

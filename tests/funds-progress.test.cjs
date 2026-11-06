@@ -15,11 +15,11 @@ test('重新申请不进入付款申请核对，仍保留进度、提交状态�
 });
 test('重复核对仅统计未标重新申请的记录；普通记录及异常说明不误排除',()=>{
  const i=fixture();X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['核对说明'],['重新申请']],{origin:'G1'});
- let r=C.build(i);assert(!r.reviewRows.some(row=>row[5].v.startsWith('重复提交')));assert.equal(review(r).length,1);
+ let r=C.build(i);assert(!r.reviewRows.some(row=>row[5].v.startsWith('重复提交')));assert.equal(review(r).length,0);
  append(i,'applications',['2026-11-05','合成供应商1','迈德斯特',ID(1),40,'谈判付款']);
  r=C.build(i);const duplicates=r.reviewRows.filter(row=>row[5].v.startsWith('重复提交'));assert.equal(duplicates.length,1);assert.match(duplicates[0][5].v,/共 2 次/);assert.equal(duplicates[0][8].v,4);
  for(const note of ['', '需核实', {t:'e',v:23,w:'重新申请'}, {t:'s',f:'A99'}]){
-  const j=fixture();X.utils.sheet_add_aoa(j.applications.book.Sheets.付款申请汇总,[['核对说明']],{origin:'G1'});set(j,'applications','核对说明',5,note);
+  const j=fixture();set(j,'applications','流程编码',5,ID(99));X.utils.sheet_add_aoa(j.applications.book.Sheets.付款申请汇总,[['核对说明']],{origin:'G1'});set(j,'applications','核对说明',5,note);
   assert(review(C.build(j)).some(row=>row[8].v===5));
  }
 });
@@ -36,8 +36,30 @@ test('每笔申请一行、重复及未进入付款表申请保留，来源日�
  assert.equal(display(p[0]['应付时间']),'2026年11月6日');assert.equal(display(p[1]['应付时间']),'2026年11月9日');
  assert.equal(display(p[0]['申请日期']),'2026年11月1日');assert.equal(p[0]['申请日期'].t,'n');assert.equal(p[3]['申请付款金额'].t,'n');assert.equal(p[0]['对公付款OA号'].t,'s');
  assert.equal(p[0]['付款主体'].v,'浙江迈德斯特医疗器械科技有限公司');assert.equal(p[0]['申请人'].v,'OA申请人');
- assert.equal(r.stats.pending,0);assert.equal(review(r).length,1);assert.match(review(r)[0][5].v,/跟单员.*资金台账/);assert.equal(review(r)[0][8].v,5);
+ assert.equal(r.stats.pending,0);assert.equal(review(r).length,0);
  assert.deepEqual(r.highlights.negotiatedCells,['M2']);assert.equal(r.negotiated.rows[0][4].v,0);assert.equal(r.negotiated.rows[0][5].f,'D2-E2');assert.equal(JSON.stringify(i),before);
+});
+test('付款进度仅缺资金台账来源时不生成核对，跟单员应付时间留空并保留金额状态',()=>{
+ for(const amount of [0,123.45]){
+  const i=fixture(),id='MDST-DGFK20260509004';
+  set(i,'applications','流程编码',5,id);set(i,'applications','本次申请付款金额',5,amount);
+  set(i,'oa','流程编号',5,id);set(i,'oa','付款金额',5,amount);
+  const before=JSON.stringify(i),r=C.build(i),p=records(r)[3];
+  assert.equal(p['跟单员'].v,'');assert.equal(p['应付时间'].v,'');assert.equal(p['申请付款金额'].v,amount);
+  assert.equal(p['对公付款OA号'].v,id);assert.equal(p['是否已付款'].v,'未付款');
+  assert(!r.reviewRows.some(row=>row[6].v===i.applications.name&&row[8].v===5));
+  assert.equal(r.stats.pending,0);assert.equal(JSON.stringify(i),before);
+ }
+});
+test('付款进度仍提示真实的多笔来源冲突、来源日期异常和缺少OA流程',()=>{
+ const i=fixture(),source=X.utils.sheet_to_json(i.ledger.book.Sheets['对账明细-徐英'],{header:1})[1];
+ append(i,'ledger',source,'对账明细-操思敏');
+ const r=C.build(i);assert.match(review(r).find(row=>row[8].v===3)[5].v,/对应多笔记录/);assert.equal(records(r)[1]['跟单员'].v,'');
+ const j=fixture();set(j,'ledger','应付款时间',2,'日期未知','对账明细-徐英');
+ assert.match(review(C.build(j)).find(row=>row[8].v===3)[5].v,/应付时间为空或无法识别/);
+ const k=fixture();set(k,'applications','流程编码',5,ID(99));
+ const note=review(C.build(k)).find(row=>row[8].v===5)[5].v;
+ assert.match(note,/OA流程表未找到/);assert.doesNotMatch(note,/跟单员\/资金台账|应付时间未填充/);
 });
 test('分批申请优先编号名称主体、候选多笔才用金额区分，不按同名猜测',()=>{
  const i=fixture(),source=i.ledger.book.Sheets['对账明细-李奇'],original=X.utils.sheet_to_json(source,{header:1})[1];

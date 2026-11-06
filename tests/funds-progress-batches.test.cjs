@@ -24,6 +24,16 @@ test('归档分批OA只凭唯一出纳实付金额确认对应申请，其他批
  assert.equal(JSON.stringify(i),before,'不改动申请、OA和台账源值');
 });
 
+test('申请1090000但出纳仅支付211820时提醒确认分批，台账未匹配不附加缺失字段提示',()=>{
+ const i=batches([row(1090000,'分批付款第2批')],'[出纳执行]\n部分支付 211820\n姚懿玲 2026-10-08 15:43:37');
+ const id='MDST-DGFK20260924004';set(i,'applications','流程编码',2,id);set(i,'oa','流程编号',2,id);set(i,'negotiated','对公付款0A流程号',2,id);
+ const r=C.build(i),note=reviewText(r);
+ assert.deepEqual(states(r),['待核对']);assert.match(note,/请先确认是否为分批付款/);assert.match(note,/1090000\.00/);assert.match(note,/211820/);
+ assert.match(note,/2026-10-08 15:43:37/);assert.match(note,/Sheet0 第 2 行/);assert.match(note,/本次申请对应的批次及是否实际支付/);
+ assert.doesNotMatch(note,/跟单员\/资金台账|应付时间未填充|需要处理：分批付款核对/);
+ assert.doesNotMatch(C.formatReviewText(note),/^\d+、[。；]+$/m);
+});
+
 test('同额不同批次不能按出纳事件时间排序分配，即使事件数量足够也待核对',()=>{
  const opinions=[CASHIER,'[出纳执行]\n部分支付：615833\n姚懿玲 2026-10-29 16:08:44'].join('\n');
  const r=C.build(batches([row(615833,'分批付款第1批'),row(615833,'分批付款第2批')],opinions));
