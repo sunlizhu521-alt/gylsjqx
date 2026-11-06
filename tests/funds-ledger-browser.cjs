@@ -76,7 +76,7 @@ function fixture(replacement=false){
   const frame=page.frameLocator('iframe[data-tool="funds-ledger"]');
   await frame.locator('#file').waitFor();assert(await frame.locator('#download').isDisabled());
   assert.match(await page.locator('iframe[data-tool="funds-ledger"]').getAttribute('src'),/funds-ledger\.html/);
-  async function upload(bytes,name){await frame.locator('#file').setInputFiles({name,mimeType:MIME,buffer:bytes});}
+  async function upload(bytes,name){await frame.locator('#file:not([disabled])').waitFor();await frame.locator('#file').setInputFiles({name,mimeType:MIME,buffer:bytes});}
   async function ready(name){
    await frame.locator('#download:not([disabled])').waitFor();
    assert((await frame.locator('#reference').innerText()).includes(name),'来源文件名必须可见');
@@ -191,6 +191,7 @@ function fixture(replacement=false){
   await verify(await download('empty-formula-cache'),emptyExpected);
   const standalone=await browser.newPage({viewport:{width:1440,height:1000}});standalone.on('pageerror',e=>errors.push(e.message));
   await standalone.goto(new URL('funds-ledger.html',base).href,{waitUntil:'networkidle'});
+  await standalone.locator('#file:not([disabled])').waitFor();
   await standalone.locator('#file').setInputFiles({name:'合成独立页面.xlsx',mimeType:MIME,buffer:replacement.bytes});
   await standalone.locator('#download:not([disabled])').waitFor();assert((await standalone.locator('#result').innerText()).includes('合成替换唯一记录'));
   await standalone.screenshot({path:path.join(out,'funds-ledger-standalone.png')});await standalone.close();
