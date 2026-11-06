@@ -506,8 +506,9 @@ async function buildDemandAllocationRows(records) {
 function mergeDemandRowsByMaterial(rows) {
   const groups = new Map();
   rows.forEach((row) => {
-    // 无物料编码的记录不能视为同一物料。
-    const key = normalizeLookupKey(row.materialCode) || Symbol();
+    // 不跨事业部合并；无物料编码的记录仍逐行保留。
+    const materialKey = normalizeLookupKey(row.materialCode);
+    const key = materialKey ? JSON.stringify([normalizeLookupKey(row.businessUnit), materialKey]) : Symbol();
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);
   });
@@ -519,7 +520,7 @@ function mergeDemandRowsByMaterial(rows) {
       "oaMaterialCode",
     ]);
     fields.forEach((key) => {
-      if (["materialCode", "quantity", "minimumOrderStatus"].includes(key)) return;
+      if (["businessUnit", "materialCode", "quantity", "minimumOrderStatus"].includes(key)) return;
       const values = [...new Set(items.map((row) => String(row[key] ?? "").trim()).filter(Boolean))];
       merged[key] = values.join(key === "oaProcessNo" ? "/" : "、");
     });

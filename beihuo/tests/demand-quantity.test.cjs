@@ -438,6 +438,41 @@ test('same material merges across sheets with unique OA numbers, summed quantity
   assert.equal(output[1][output[0].indexOf('采购单订单号')], '');
 });
 
+test('business unit and corrected code jointly determine rows, quantities, MOQ and both exports', async () => {
+  const { context, run } = loadApp();
+  context.records = {
+    purchaseDivision: allocationRecord([
+      ['备货OA物料编码', '正确物料编码', '采购下单人', '供应商简称', '起订量'],
+      ['OA-A', '0001', '李奇', '供应商甲', 10],
+      ['OA-B', '0001', '李奇', '供应商甲', 10],
+      ['OA-C', '0002', '李奇', '供应商甲', 10],
+    ], '产品线明细'),
+    roster: allocationRecord([['姓名', '一级部门'], ['甲', '海外事业一部'], ['乙', '国内事业部'], ['丙', '海外事业一部']], '花名册'),
+    demand: allocationRecord([
+      ['物料编码', '数量', '申请人', '流程号'],
+      ['OA-A', 3, '甲', '流程一'], ['OA-B', 4, '丙', '流程二'],
+      ['OA-A', 8, '乙', '流程三'], ['OA-A', 0, '乙', '流程四'],
+      ['OA-A', 1.5, '未知人员', '流程五'], ['OA-C', 10, '甲', '流程六'],
+    ]),
+  };
+  const rows = await run('buildDemandAllocationRows(records)');
+  const expected = [['海外事业一部', '0001', 7], ['国内事业部', '0001', 8], ['', '0001', 1.5], ['海外事业一部', '0002', 10]];
+  assert.deepEqual(Array.from(rows, r => [r.businessUnit, r.materialCode, r.quantityNumber]), expected);
+  assert.deepEqual(Array.from(rows, r => r.oaProcessNo), ['流程一/流程二', '流程三/流程四', '流程五', '流程六']);
+  assert.deepEqual(Array.from(rows, r => r.minimumOrderStatus), ['不满足', '不满足', '不满足', '满足']);
+  assert.deepEqual(Array.from(rows, r => r.sourceRows.length), [2, 2, 1, 1]);
+  assert.deepEqual(Array.from(rows, r => r.oaMaterialCode), ['OA-A、OA-B', 'OA-A', 'OA-A', 'OA-C']);
+  context.rows = rows;
+  for (const combined of [false, true]) {
+    const { workbook } = run(`buildDetailWorkbook(rows, ${combined})`);
+    const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
+    const data = reopened.SheetNames.flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1, defval: '' }).slice(1));
+    assert.deepEqual(data.map(r => [r[2], r[5], r[8]]), expected);
+  }
+  run('state.demandRows = rows; state.filters.set("businessUnit", new Set(["国内事业部"]))');
+  assert.deepEqual(Array.from(run('getFilteredDemandRows()'), r => [r.businessUnit, r.quantityNumber]), [['国内事业部', 8]]);
+});
+
 test('merge preserves blank codes and handles unknown, zero, signed decimal and overflowing quantities', () => {
   const { context, elements, run } = loadApp();
   const row = (materialCode, quantityNumber, oaProcessNo = '') => ({ materialCode, quantityNumber, oaProcessNo, minimumOrderQuantity: '1' });

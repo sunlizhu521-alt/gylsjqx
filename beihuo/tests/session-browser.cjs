@@ -222,6 +222,43 @@ function fileForSlot(slot, value) {
     await page.waitForFunction(() => state.demandRows.length === 4 && state.demandRows.every(row => !row.materialCodeIssue));
     assert.equal(await page.locator('#materialCodeWarnings').isHidden(), true);
 
+    for (const [slot, rows] of [
+      [3, [['姓名', '一级部门'], ['测试采购', '测试事业部'], ['另一申请人', '其他事业部']]],
+      [4, [['物料编码', '数量', '申请人'], ['0001', 2, '测试采购'], ['0001', 4, '另一申请人'], ['0001', 3, '测试采购']]],
+    ]) {
+      const w = X.utils.book_new();
+      X.utils.book_append_sheet(w, X.utils.aoa_to_sheet(rows), '数据');
+      await page.locator(`[data-upload="file-${slot}"]`).setInputFiles({name: `跨事业部-${slot}.xlsx`, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(X.write(w, {type: 'buffer', bookType: 'xlsx'}))});
+      await page.waitForFunction(slot => state.records.get(`file-${slot}`)?.name === `跨事业部-${slot}.xlsx`, slot);
+    }
+    const expectedGroups = [['测试事业部', 'TEST-001', 5], ['其他事业部', 'TEST-001', 4]];
+    await page.waitForFunction(() => state.demandRows.length === 2 && state.demandRows[0].quantityNumber === 5);
+    assert.deepEqual(await page.evaluate(() => state.demandRows.map(r => [r.businessUnit, r.materialCode, r.quantityNumber])), expectedGroups);
+    assert.deepEqual(await page.locator('#detailTableBody tr td:nth-child(3)').allTextContents(), ['测试事业部', '其他事业部']);
+    await page.locator('[data-delivery-days="0"]').fill('2');
+    await page.locator('[data-delivery-days="0"]').press('Tab');
+    await page.locator('[data-delivery-days="1"]').fill('5');
+    await page.locator('[data-delivery-days="1"]').press('Tab');
+    for (const button of ['#downloadDetailButton', '#downloadBuyerWorkbookButton']) {
+      const event = page.waitForEvent('download');
+      await page.locator(button).click();
+      const file = await event;
+      const w = X.read(await fs.readFile(await file.path()), {type: 'buffer'});
+      const sheet = w.Sheets[w.SheetNames[0]], data = X.utils.sheet_to_json(sheet, {header: 1});
+      assert.deepEqual(data.slice(1).map(r => [r[2], r[5], r[8]]), expectedGroups);
+      assert.deepEqual([sheet.M2.v, sheet.M3.v], [2, 5]);
+      assert.equal(sheet.N3.f, 'IF(M3="","",L3+M3)');
+    }
+    await page.locator('[data-filter-button="businessUnit"]').click();
+    await page.locator('[data-filter-key="businessUnit"][value="其他事业部"]').check();
+    await page.waitForFunction(() => state.filteredRows.length === 1);
+    assert.equal(await page.locator('#beihuoTotal').innerText(), '4');
+    await page.locator('#clearFiltersButton').click();
+    await page.reload();
+    await ready();
+    await page.waitForFunction(() => state.demandRows.length === 2);
+    assert.deepEqual(await page.evaluate(() => state.demandRows.map(r => [r.businessUnit, r.materialCode, r.quantityNumber])), expectedGroups);
+
     page.once('dialog', dialog => dialog.accept());
     await page.locator('#clearCacheButton').click();
     await page.waitForFunction(() => document.querySelector('#uploadedCount').textContent === '0');
@@ -230,7 +267,7 @@ function fileForSlot(slot, value) {
     assert.equal(await page.locator('#uploadedCount').innerText(), '0');
     assert.equal(await page.locator('#appliedCount').innerText(), '0');
     assert.deepEqual(errors, []);
-    console.log('PASS division-only corrected-code mapping, ignored demand corrected codes, combined original-code column, blank/missing division mappings with source rows, cache restore/replacement, optional Singapore matching, rollback and unchanged quantities/manual entity/days/filters');
+    console.log('PASS separate business units for same corrected code in preview/both exports/cache, same-unit sums and filters, division-only corrected mapping, original-code column, mapping warnings, Singapore matching and rollback');
   } finally {
     await browser.close();
   }
