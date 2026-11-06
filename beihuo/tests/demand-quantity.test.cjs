@@ -27,45 +27,45 @@ function allocationRecord(rows, sheetName = '需求') {
   return { name: `${sheetName}.xlsx`, file: { name: `${sheetName}.xlsx`, arrayBuffer: async () => bytes } };
 }
 
-test('correct material code overrides OA/legacy codes in any column order for allocation, merging and both exports', async () => {
+test('division OA-to-correct mapping drives allocation and exports without mixing suppliers of the corrected code', async () => {
   const { context, run } = loadApp();
   context.records = {
     category: allocationRecord([
       ['物料编码', '', 'SKU', '物料名称', '销售系列', '采购组'],
-      ['0001', '', 'SKU-1', '正确物料一', '系列一', '组一'],
+      ['1935010018', '', 'SKU-1', '正确物料一', '系列一', '组一'],
       ['0002', '', 'SKU-2', '正确物料二', '系列二', '组二'],
-      ['0099', '', '错误SKU', 'OA旧物料', '旧系列', '旧组'],
     ], '商品'),
-    purchaseDivision: allocationRecord([
-      ['物料编码', '采购下单人', '供应商简称', '供应商名称', '采购组', '起订量'],
-      ['0001', '李奇', '供应商甲', '供应商甲', '组一', 5],
-      ['0002', '徐英', '供应商乙', '供应商乙', '组二', 6],
-      ['0099', '旧采购人', '旧供应商', '旧供应商', '旧组', 99],
-    ], '产品线明细'),
     singapore: allocationRecord([['供应商名称', '系列'], ['供应商甲', '系列一']], '新加坡'),
   };
-  const sourceRows = [
-    ['0099', '0001', '0099', 2, 'OA-1'],
-    ['0088', '0001', '0099', 3.5, 'OA-2'],
-    ['0099', '0001', '0099', 0, 'OA-3'],
-    ['0099', '0002', '0099', 1, 'OA-4'],
+  const division = [
+    ['采购组', '备货OA物料编码', ' 正确物料编码 ', '采购下单人', '供应商简称', '供应商名称', '起订量', '物料编码'],
+    ['组一', '1935010017', '1935010018', '徐英', '供应商甲', '供应商甲', 5, '错误旧编码'],
+    ['组一', '1935010007', '1935010018', '徐英', '供应商甲', '供应商甲', 5, '错误旧编码'],
+    ['组二', '0088', '0002', '李奇', '供应商乙', '供应商乙', 6, '错误旧编码'],
+    ['其他组', '1935010018', '1935010018', '孙立柱', '其他供应商', '其他供应商', 99, '错误旧编码'],
   ];
-  const headers = ['备货OA物料编码', ' 正确物料编码 ', '物料编码', '数量', '流程号'];
+  const demand = [
+    ['备货OA物料编码', '正确物料编码', '物料编码', '数量', '流程号'],
+    ['1935010017', '需求表错误编码', '错误旧编码', 2, 'OA-1'],
+    ['1935010007', '需求表错误编码', '错误旧编码', 3.5, 'OA-2'],
+    ['1935010017', '需求表错误编码', '错误旧编码', 0, 'OA-3'],
+    ['0088', '需求表错误编码', '错误旧编码', 1, 'OA-4'],
+  ];
   for (const reverse of [false, true]) {
-    const table = [headers, ...sourceRows].map(row => reverse ? [...row].reverse() : row);
-    context.records.demand = allocationRecord(table);
+    context.records.purchaseDivision = allocationRecord(division.map(row => reverse ? [...row].reverse() : row), '产品线明细');
+    context.records.demand = allocationRecord(demand.map(row => reverse ? [...row].reverse() : row));
     const rows = await run('buildDemandAllocationRows(records)');
-    assert.deepEqual(Array.from(rows, r => [r.materialCode, r.oaMaterialCode, r.quantityNumber, r.buyer, r.sku, r.supplierShortName, r.minimumOrderStatus, r.singaporeOrder]), [
-      ['0001', '0099、0088', 5.5, '李奇', 'SKU-1', '供应商甲', '满足', '是'],
-      ['0002', '0099', 1, '徐英', 'SKU-2', '供应商乙', '不满足', '否'],
+    assert.deepEqual(Array.from(rows, r => [r.materialCode, r.oaMaterialCode, r.quantityNumber, r.buyer, r.sku, r.supplierShortName, r.minimumOrderQuantity, r.minimumOrderStatus, r.singaporeOrder]), [
+      ['1935010018', '1935010017、1935010007', 5.5, '徐英', 'SKU-1', '供应商甲', '5', '满足', '是'],
+      ['0002', '0088', 1, '李奇', 'SKU-2', '供应商乙', '6', '不满足', '否'],
     ]);
-    assert.deepEqual(Array.from(rows[0].sourceRows, r => r.oaMaterialCode), ['0099', '0088', '0099']);
+    assert.deepEqual(Array.from(rows[0].sourceRows, r => r.oaMaterialCode), ['1935010017', '1935010007', '1935010017']);
     context.rows = rows;
     for (const combined of [false, true]) {
       const { workbook } = run(`buildDetailWorkbook(rows, ${combined})`);
       const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
       const output = reopened.SheetNames.flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1 }).slice(1));
-      assert.deepEqual(output.map(row => [row[5], row[8]]), [['0001', 5.5], ['0002', 1]]);
+      assert.deepEqual(output.map(row => [row[5], row[8]]).sort(), [['0002', 1], ['1935010018', 5.5]]);
       for (const sheet of Object.values(reopened.Sheets)) {
         assert.equal(sheet.F2.t, 's');
         const labels = XLSX.utils.sheet_to_json(sheet, { header: 1 })[0];
@@ -75,48 +75,78 @@ test('correct material code overrides OA/legacy codes in any column order for al
           assert.equal(sheet.P2.t, 's');
         }
       }
-      if (combined) assert.deepEqual(output.map(row => row[15]), ['0099、0088', '0099']);
+      if (combined) assert.deepEqual(output.map(row => [row[5], row[15]]).sort(), [['0002', '0088'], ['1935010018', '1935010017、1935010007']]);
     }
   }
 });
 
-test('blank or missing corrected codes retain each row without OA fallback and report exact source positions', async () => {
+test('missing, blank, conflicting division mappings retain rows and report demand and division locations', async () => {
   const { context, elements, run } = loadApp();
   context.records = {
-    category: allocationRecord([['物料编码', 'SKU'], ['0099', '旧SKU']], '商品'),
-    purchaseDivision: allocationRecord([['物料编码', '采购下单人'], ['0099', '旧采购人']], '产品线明细'),
-    demand: allocationRecord([[], ['备货OA物料编码', '正确物料编码', '数量', '申请人'], [], ['0099', '', 0, '采购甲'], ['0099', ' ', 1.5, '采购甲'], ['0088', '', '', '']]),
+    purchaseDivision: allocationRecord([[], ['备货OA物料编码', '正确物料编码', '采购下单人'], [], ['0099', '', '旧采购人']], '产品线明细'),
+    demand: allocationRecord([[], ['物料编码', '数量', '申请人'], [], ['0099', 0, '采购甲'], ['0099', 1.5, '采购甲'], ['0088', '', '']]),
   };
   let rows = await run('buildDemandAllocationRows(records)');
   assert.equal(rows.length, 3);
-  assert.deepEqual(Array.from(rows, r => [r.materialCode, r.oaMaterialCode, r.buyer, r.sku, r.sourceRowNumber, r.materialCodeValid]), [
-    ['', '0099', '', '', 4, '待核对'], ['', '0099', '', '', 5, '待核对'], ['', '0088', '', '', 6, '待核对'],
+  assert.deepEqual(Array.from(rows, r => [r.materialCode, r.oaMaterialCode, r.buyer, r.sourceRowNumber, r.materialCodeValid]), [
+    ['', '0099', '', 4, '待核对'], ['', '0099', '', 5, '待核对'], ['', '0088', '', 6, '待核对'],
   ]);
   assert.equal(rows[0].quantityNumber, 0);
   assert.equal(rows[1].quantityNumber, 1.5);
   assert(Number.isNaN(rows[2].quantityNumber));
+  assert.match(rows[2].materialCodeIssue, /未在.*找到.*0088/);
   context.rows = rows;
   run('state.demandRows = rows; renderMaterialCodeWarnings()');
   const warnings = elements.get('#materialCodeWarnings');
   assert.equal(warnings.hidden, false);
-  assert.match(warnings.innerHTML, /需求.xlsx \/ 需求 第 4 行.*请补充正确物料编码/);
-  assert.match(warnings.innerHTML, /3 条正确物料编码待补充/);
+  assert.match(warnings.innerHTML, /需求.xlsx \/ 需求 第 4 行.*分工表“正确物料编码”为空/);
+  assert.match(warnings.innerHTML, /产品线明细.xlsx \/ 产品线明细 第 4 行/);
+  assert.match(warnings.innerHTML, /3 条物料编码待核对/);
   const { workbook } = run('buildDetailWorkbook(rows, true)');
   assert.equal(XLSX.utils.decode_range(workbook.Sheets.未填写下单人['!ref']).e.r, 3);
-  context.records.demand = allocationRecord([['备货OA物料编码', '数量'], ['0099', 2]]);
+  context.records.purchaseDivision = allocationRecord([['备货OA物料编码', '采购下单人'], ['0099', '采购甲']], '产品线明细');
   rows = await run('buildDemandAllocationRows(records)');
   assert.equal(rows[0].materialCode, '');
-  assert.equal(rows[0].oaMaterialCode, '0099');
-  assert.match(rows[0].materialCodeIssue, /缺少“正确物料编码”列/);
+  assert.match(rows[0].materialCodeIssue, /分工表缺少“正确物料编码”列/);
+  context.records.purchaseDivision = allocationRecord([['备货OA物料编码', '正确物料编码'], ['0099', '0001'], ['0099', '0002']], '产品线明细');
+  rows = await run('buildDemandAllocationRows(records)');
+  assert.equal(rows[0].materialCode, '');
+  assert.match(rows[0].materialCodeIssue, /对应多个正确物料编码.*0001.*0002/);
   context.records.demand = allocationRecord([['正确物料编码', '数量'], ['0001', 2]]);
   rows = await run('buildDemandAllocationRows(records)');
-  assert.equal(rows[0].materialCode, '0001');
-  assert.equal(rows[0].oaMaterialCode, '', 'no invented original code');
-  assert.equal(rows[0].materialCodeIssue, '');
+  assert.equal(rows[0].materialCode, '');
+  assert.equal(rows[0].oaMaterialCode, '', 'demand corrected-code column must not become the original-code key');
+  assert.match(rows[0].materialCodeIssue, /缺少原编码列/);
+  context.records.demand = allocationRecord([['识别码', '数量'], ['0099', 2]]);
+  context.records.purchaseDivision = allocationRecord([['正确物料编码', '备货OA物料编码'], ['0001', '0099'], ['0001', '0099']], '产品线明细');
+  rows = await run('buildDemandAllocationRows(records)');
+  assert.equal(rows[0].materialCode, '0001', 'identical mapping duplicates do not create a conflict');
+  assert.equal(rows[0].quantityNumber, 2);
   context.rows = rows;
   run('state.demandRows = rows; renderMaterialCodeWarnings()');
   assert.equal(warnings.hidden, true);
-  assert.equal(warnings.innerHTML, '');
+});
+
+test('original purchase group resolves division candidates and merged codes retain all matched suppliers', async () => {
+  const { context, run } = loadApp();
+  context.records = {
+    category: allocationRecord([['物料编码', '采购组'], ['OA-X', '组二']], '商品'),
+    purchaseDivision: allocationRecord([
+      ['备货OA物料编码', '正确物料编码', '采购组', '采购下单人', '供应商'],
+      ['OA-X', '0001', '组一', '采购一', '供应商甲'],
+      ['OA-X', '0002', '组二', '采购二', '供应商乙'],
+      ['0002', '0002', '其他组', '无关采购', '无关供应商'],
+    ], '产品线明细'),
+    demand: allocationRecord([['物料编码', '数量'], ['OA-X', 2]]),
+  };
+  const rows = await run('buildDemandAllocationRows(records)');
+  assert.deepEqual(Array.from(rows, row => [row.materialCode, row.buyer, row.supplierShortName, row.quantityNumber]), [['0002', '采购二', '供应商乙', 2]]);
+  context.rows = [{ materialCode: '0002', quantityNumber: 2, supplierNames: ['供应商甲'], salesSeries: '系列甲' }, { materialCode: '0002', quantityNumber: 3, supplierNames: ['供应商乙'], salesSeries: '系列甲' }];
+  const merged = run('mergeDemandRowsByMaterial(rows)');
+  assert.deepEqual(Array.from(merged[0].supplierNames), ['供应商甲', '供应商乙']);
+  context.row = merged[0];
+  context.index = new Map([['供应商甲', new Set(['系列甲'])]]);
+  assert.equal(run('getSingaporeOrderStatus(row, index)'), '待核对');
 });
 
 test('legacy material headers retain original codes for combined download', async () => {

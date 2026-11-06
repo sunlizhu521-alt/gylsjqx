@@ -12,9 +12,9 @@ const items = [
 function fileForSlot(slot, value) {
   const rows = {
     1: [['物料编码', '', 'SKU', '物料名称', '销售系列'], ...items.map(([code, , series]) => [code, '', `SKU-${code}`, code, series])],
-    2: [['物料编码', '采购下单人', '供应商简称', '供应商名称'], ...items.map(([code, supplier, , buyer]) => [code, buyer, supplier, supplier])],
+    2: [['正确物料编码', '采购下单人', '备货OA物料编码', '供应商简称', '供应商名称'], ...items.map(([code, supplier, , buyer], index) => [code, buyer, `000${index + 1}`, supplier, supplier])],
     3: [['姓名', '一级部门'], ['测试采购', '测试事业部']],
-    4: [['备货OA物料编码', '正确物料编码', '数量', '申请人'], ...items.map(([code], index) => [`000${index + 1}`, code, index ? index + 2 : value, '测试采购'])],
+    4: [['物料编码', '数量', '申请人', '正确物料编码'], ...items.map((_, index) => [`000${index + 1}`, index ? index + 2 : value, '测试采购', '需求表错误编码'])],
     5: value === 444 ? [['供应商名称'], ['供应商甲']] : [['供应商名称', '系列'], ['供应商甲', value === 111 ? '系列甲' : '系列乙'], ['供应商乙', value === 111 ? '系列乙' : '系列甲']],
   }[slot];
   const workbook = X.utils.book_new();
@@ -184,17 +184,23 @@ function fileForSlot(slot, value) {
     assert.equal(await page.locator('#appliedCount').innerText(), '4');
     assert.equal(await page.locator('#downloadDetailButton').isDisabled(), true, 'Singapore file does not replace the required demand file');
 
-    function blankCodesFile(withCorrectColumn = true) {
-      const rows = [[], ['备货OA物料编码', '正确物料编码', '数量', '申请人'], [],
-        ['0001', 'TEST-001', 2, '测试采购'], ['0002', '', 0, '测试采购'], ['0002', '', 1.5, '测试采购']];
+    function missingMappingFile(withCorrectColumn = true) {
+      const rows = [['备货OA物料编码', '正确物料编码', '采购下单人', '供应商名称', '供应商简称'],
+        ['0001', 'TEST-001', '采购甲', '供应商甲', '供应商甲'], [], ['0002', '', '采购甲', '供应商甲', '供应商甲']];
       const w = X.utils.book_new();
-      X.utils.book_append_sheet(w, X.utils.aoa_to_sheet(withCorrectColumn ? rows : rows.map(row => row.filter((_, index) => index !== 1))), '待补充');
-      return { name: '待补充编码.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(X.write(w, { type: 'buffer', bookType: 'xlsx' })) };
+      X.utils.book_append_sheet(w, X.utils.aoa_to_sheet(withCorrectColumn ? rows : rows.map(row => row.filter((_, index) => index !== 1))), '产品线明细');
+      return { name: '分工编码待补充.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(X.write(w, { type: 'buffer', bookType: 'xlsx' })) };
     }
-    await page.locator('[data-upload="file-4"]').setInputFiles(blankCodesFile());
+    const blankDemand = X.utils.book_new();
+    X.utils.book_append_sheet(blankDemand, X.utils.aoa_to_sheet([[], ['物料编码', '数量', '申请人'], [],
+      ['0001', 2, '测试采购'], ['0002', 0, '测试采购'], ['0002', 1.5, '测试采购']]), '待补充');
+    await page.locator('[data-upload="file-2"]').setInputFiles(missingMappingFile());
+    await page.waitForFunction(() => state.records.get('file-2')?.name === '分工编码待补充.xlsx');
+    await page.locator('[data-upload="file-4"]').setInputFiles({name: '待补充编码.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(X.write(blankDemand, { type: 'buffer', bookType: 'xlsx' }))});
     await page.waitForFunction(() => state.demandRows.length === 3 && state.demandRows[2].materialCodeIssue);
     await page.locator('#materialCodeWarnings summary').click();
-    assert.match(await page.locator('#materialCodeWarnings').innerText(), /待补充编码.xlsx \/ 待补充 第 5 行.*请补充正确物料编码/);
+    assert.match(await page.locator('#materialCodeWarnings').innerText(), /待补充编码.xlsx \/ 待补充 第 5 行.*请在分工表补充正确物料编码/);
+    assert.match(await page.locator('#materialCodeWarnings').innerText(), /分工编码待补充.xlsx \/ 产品线明细 第 4 行/);
     assert.match(await page.locator('#materialCodeWarnings').innerText(), /第 6 行/);
     assert.equal(await page.locator('#downloadBuyerWorkbookButton').isDisabled(), false);
     await page.reload();
@@ -208,9 +214,10 @@ function fileForSlot(slot, value) {
     const blanks = X.utils.sheet_to_json(blankWorkbook.Sheets.未填写下单人, { header: 1, defval: '' });
     assert.deepEqual(blanks.slice(1).map(row => [row[5], row[8], row[15]]), [['', 0, '0002'], ['', 1.5, '0002']]);
     assert.equal(blankWorkbook.Sheets.采购甲.F2.v, 'TEST-001');
-    await page.locator('[data-upload="file-4"]').setInputFiles(blankCodesFile(false));
+    await page.locator('[data-upload="file-2"]').setInputFiles(missingMappingFile(false));
     await page.waitForFunction(() => state.demandRows.length === 3 && state.demandRows.every(row => !row.materialCode && row.materialCodeIssue.includes('缺少')));
-    assert.match(await page.locator('#materialCodeWarnings').textContent(), /缺少“正确物料编码”列/);
+    assert.match(await page.locator('#materialCodeWarnings').textContent(), /分工表缺少“正确物料编码”列/);
+    await upload(2, 25, 5);
     await upload(4, 25, 5);
     await page.waitForFunction(() => state.demandRows.length === 4 && state.demandRows.every(row => !row.materialCodeIssue));
     assert.equal(await page.locator('#materialCodeWarnings').isHidden(), true);
@@ -223,7 +230,7 @@ function fileForSlot(slot, value) {
     assert.equal(await page.locator('#uploadedCount').innerText(), '0');
     assert.equal(await page.locator('#appliedCount').innerText(), '0');
     assert.deepEqual(errors, []);
-    console.log('PASS corrected-code allocation, combined original-code column, blank/missing code warnings with source rows, cache restore/replacement, optional Singapore matching, rollback and unchanged quantities/manual entity/days/filters');
+    console.log('PASS division-only corrected-code mapping, ignored demand corrected codes, combined original-code column, blank/missing division mappings with source rows, cache restore/replacement, optional Singapore matching, rollback and unchanged quantities/manual entity/days/filters');
   } finally {
     await browser.close();
   }

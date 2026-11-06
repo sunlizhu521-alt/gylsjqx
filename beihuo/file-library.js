@@ -399,7 +399,7 @@ async function refreshDemandDashboard({ preserveEdits = false } = {}) {
 async function buildDemandAllocationRows(records) {
   const [categoryRows, divisionRows, rosterRows, demandRows, singaporeRows] = await Promise.all([
     readTableRows(records.category, "Dim-YL医疗器械商品分类"),
-    readTableRows(records.purchaseDivision, "产品线明细", true),
+    readTableRows(records.purchaseDivision, "产品线明细", true, true),
     readTableRows(records.roster),
     readTableRows(records.demand, "", false, true),
     readTableRows(records.singapore, "Dim-新加坡公司下单"),
@@ -421,24 +421,18 @@ async function buildDemandAllocationRows(records) {
     if (headerIndex < 0) return [];
     const columnMap = buildColumnMapByAliases(rows[headerIndex], {
       applicant: TABLE_FIELD_ALIASES.demandApplicant,
-      materialCode: TABLE_FIELD_ALIASES.demandMaterialCode,
       oaProcessNo: TABLE_FIELD_ALIASES.demandProcessNo,
       stockReason: TABLE_FIELD_ALIASES.demandStockReason,
       purchaseEntity: TABLE_FIELD_ALIASES.demandPurchaseEntity,
       requiredReadyDate: TABLE_FIELD_ALIASES.demandRequiredReadyDate,
     });
-    const correctCodeColumn = findExactHeaderColumnIndex(rows[headerIndex], "正确物料编码");
-    const oaCodeColumn = findExactHeaderColumnIndex(rows[headerIndex], "备货OA物料编码");
-    const correctedFormat = correctCodeColumn !== undefined || oaCodeColumn !== undefined;
-    // 新格式必须使用正确编码，不能被前面的 OA 原编码或旧编码抢先匹配。
-    columnMap.oaMaterialCode = correctedFormat ? oaCodeColumn : columnMap.materialCode;
-    if (correctedFormat) columnMap.materialCode = correctCodeColumn;
+    // 需求表只提供 OA 原编码；正确编码必须来自采购分工明细。
+    columnMap.oaMaterialCode = findOaMaterialCodeColumn(rows[headerIndex], TABLE_FIELD_ALIASES.demandMaterialCode);
     columnMap.quantity = findDemandQuantityColumnIndex(rows[headerIndex], columnMap);
-    if (columnMap.materialCode === undefined && !correctedFormat) return [];
+    if (columnMap.oaMaterialCode === undefined && findExactHeaderColumnIndex(rows[headerIndex], "正确物料编码") === undefined) return [];
 
     return rows.slice(headerIndex + 1).map((row, rowOffset) => {
       const applicant = getCellValue(row, columnMap.applicant);
-      const materialCode = getCellValue(row, columnMap.materialCode);
       const oaMaterialCode = getCellValue(row, columnMap.oaMaterialCode);
       const quantityNumber = getDemandRowQuantity(row, columnMap);
       const quantity = Number.isFinite(quantityNumber) ? formatPlainNumber(quantityNumber) : "";
@@ -446,23 +440,33 @@ async function buildDemandAllocationRows(records) {
       const stockReason = getCellValue(row, columnMap.stockReason);
       const purchaseEntity = getCellValue(row, columnMap.purchaseEntity);
       const requiredReadyDate = getCellValue(row, columnMap.requiredReadyDate);
-      if (!materialCode && !oaMaterialCode && !applicant && !quantity && !oaProcessNo) return null;
-      const materialCodeIssue = correctedFormat && !materialCode
-        ? correctCodeColumn === undefined ? "缺少“正确物料编码”列，请补列并填写正确编码" : "正确物料编码为空，请补充正确物料编码"
-        : "";
-
+      if (!oaMaterialCode && !applicant && !quantity && !oaProcessNo) return null;
+      const oaMaterialKey = normalizeLookupKey(oaMaterialCode);
+      const originalCategory = categoryIndex.byMaterial.get(oaMaterialKey) || {};
+      const materialDivisionRows = divisionIndex.byMaterial.get(oaMaterialKey) || [];
+      const groupDivisionRows = divisionIndex.byGroupMaterial.get(makeGroupMaterialKey(originalCategory.purchaseGroup, oaMaterialCode)) || [];
+      const matchedDivisionRows = groupDivisionRows.length ? groupDivisionRows : materialDivisionRows;
+      const correctedCodes = uniqueSortedValues(matchedDivisionRows.map(item => item.correctMaterialCode));
+      let materialCodeIssue = "";
+      if (!oaMaterialCode) materialCodeIssue = "备货需求表的物料编码为空或缺少原编码列，请补充备货OA物料编码";
+      else if (divisionIndex.usesCorrectedCodes) {
+        if (!matchedDivisionRows.length) materialCodeIssue = `未在 ${records.purchaseDivision.name} / 产品线明细 找到备货OA物料编码 ${oaMaterialCode}，请补充分工映射`;
+        else if (matchedDivisionRows.some(item => item.mappingIssue)) materialCodeIssue = `${matchedDivisionRows.find(item => item.mappingIssue).mappingIssue}，请在分工表补充正确物料编码`;
+        else if (correctedCodes.length !== 1) materialCodeIssue = `分工表同一备货OA物料编码对应多个正确物料编码（${correctedCodes.join("、")}），请核实映射`;
+        if (materialCodeIssue && matchedDivisionRows.length) materialCodeIssue += `；分工来源：${matchedDivisionRows.map(item => item.sourceLocation).join("；")}`;
+      }
+      const materialCode = materialCodeIssue ? "" : divisionIndex.usesCorrectedCodes ? correctedCodes[0] : oaMaterialCode;
       const materialKey = normalizeLookupKey(materialCode);
       const category = categoryIndex.byMaterial.get(materialKey) || {};
       const purchaseGroup = category.purchaseGroup || "";
-      const groupMaterialKey = makeGroupMaterialKey(purchaseGroup, materialCode);
-      const groupDivisionRows = divisionIndex.byGroupMaterial.get(groupMaterialKey) || [];
-      const materialDivisionRows = divisionIndex.byMaterial.get(materialKey) || [];
-      const minimumOrderQuantityNumber = minimumOrderIndex.byMaterial.get(materialKey);
+      // 采购分工按原编码定位，不能再次用正确编码混入其他供应商的分工。
+      const buyerRows = materialCodeIssue ? [] : matchedDivisionRows;
+      const supplierRows = materialCodeIssue ? [] : materialDivisionRows.filter(item => item.correctMaterialCode === materialCode);
+      const minimumOrderQuantityNumber = materialCodeIssue ? NaN : minimumOrderIndex.byMaterial.get(oaMaterialKey);
       const minimumOrderQuantity = Number.isFinite(minimumOrderQuantityNumber) ? formatPlainNumber(minimumOrderQuantityNumber) : "";
       const minimumOrderStatus = getMinimumOrderStatus(quantityNumber, minimumOrderQuantityNumber);
-      const buyerRows = groupDivisionRows.length ? groupDivisionRows : materialDivisionRows;
       const buyer = joinUnique(buyerRows.map((item) => item.buyer));
-      const supplierShortName = joinUnique(materialDivisionRows.map((item) => item.supplierShortName));
+      const supplierShortName = joinUnique(supplierRows.map((item) => item.supplierShortName));
 
       return {
         businessUnit: rosterIndex.byName.get(normalizeLookupKey(applicant)) || "",
@@ -472,7 +476,7 @@ async function buildDemandAllocationRows(records) {
         buyer,
         applicant,
         supplierShortName,
-        supplierNames: uniqueSortedValues(materialDivisionRows.map(item => item.supplierName || item.supplierShortName)),
+        supplierNames: uniqueSortedValues(supplierRows.map(item => item.supplierName || item.supplierShortName)),
         oaProcessNo,
         stockReason,
         purchaseEntity,
@@ -480,7 +484,7 @@ async function buildDemandAllocationRows(records) {
         oaMaterialCode,
         materialCodeIssue,
         sku: category.sku || "",
-        materialCodeValid: materialCodeIssue ? "待核对" : divisionIndex.materialCodes.has(materialKey) ? "是" : "否",
+        materialCodeValid: materialCodeIssue ? "待核对" : divisionIndex.materialCodes.has(oaMaterialKey) ? "是" : "否",
         materialName: category.materialName || "",
         quantity,
         requiredReadyDate,
@@ -527,6 +531,7 @@ function mergeDemandRowsByMaterial(rows) {
     merged.quantity = formatPlainNumber(merged.quantityNumber);
     const minimum = merged.minimumOrderQuantity === "" ? NaN : Number(merged.minimumOrderQuantity);
     merged.minimumOrderStatus = getMinimumOrderStatus(merged.quantityNumber, minimum);
+    merged.supplierNames = uniqueSortedValues(items.flatMap(row => row.supplierNames || []));
     merged.sourceRows = items.map((row) => ({
       sourceFile: row.sourceFile,
       sourceSheet: row.sourceSheet,
@@ -628,32 +633,41 @@ function buildPurchaseDivisionIndex(tables) {
   const byMaterial = new Map();
   const byGroupMaterial = new Map();
   const materialCodes = new Set();
-  tables.forEach(({ rows }) => {
+  let usesCorrectedCodes = false;
+  tables.forEach(({ rows, source }) => {
     const headerIndex = findHeaderRowIndex(rows, [
       ...TABLE_FIELD_ALIASES.divisionPurchaseGroup,
       ...TABLE_FIELD_ALIASES.divisionMaterialCode,
+      "备货OA物料编码", "正确物料编码",
       ...TABLE_FIELD_ALIASES.divisionBuyer,
       ...TABLE_FIELD_ALIASES.divisionSupplier,
     ]);
     if (headerIndex < 0) return;
     const columnMap = buildColumnMapByAliases(rows[headerIndex], {
       purchaseGroup: TABLE_FIELD_ALIASES.divisionPurchaseGroup,
-      materialCode: TABLE_FIELD_ALIASES.divisionMaterialCode,
       buyer: TABLE_FIELD_ALIASES.divisionBuyer,
       supplierShortName: TABLE_FIELD_ALIASES.divisionSupplier,
     });
+    columnMap.materialCode = findOaMaterialCodeColumn(rows[headerIndex], TABLE_FIELD_ALIASES.divisionMaterialCode);
+    const correctCodeColumn = findExactHeaderColumnIndex(rows[headerIndex], "正确物料编码");
+    const correctedFormat = correctCodeColumn !== undefined || findExactHeaderColumnIndex(rows[headerIndex], "备货OA物料编码") !== undefined;
+    usesCorrectedCodes ||= correctedFormat;
     if (columnMap.materialCode === undefined) return;
     columnMap.supplierName = rows[headerIndex].findIndex(header =>
       ["供应商全称", "供应商名称", "供应商"].includes(normalizeDemandHeader(header))
     );
 
-    rows.slice(headerIndex + 1).forEach((row) => {
+    rows.slice(headerIndex + 1).forEach((row, index) => {
       const materialCode = getCellValue(row, columnMap.materialCode);
       const materialKey = normalizeLookupKey(materialCode);
       if (!materialKey) return;
       const item = {
         purchaseGroup: getCellValue(row, columnMap.purchaseGroup),
         materialCode,
+        correctMaterialCode: correctedFormat ? getCellValue(row, correctCodeColumn) : materialCode,
+        mappingIssue: correctedFormat && correctCodeColumn === undefined ? "分工表缺少“正确物料编码”列"
+          : correctedFormat && !getCellValue(row, correctCodeColumn) ? "分工表“正确物料编码”为空" : "",
+        sourceLocation: `${source?.fileName || "Dim-采购部分工明细"} / ${source?.sheetName || "产品线明细"} 第 ${headerIndex + index + 2} 行`,
         buyer: getCellValue(row, columnMap.buyer),
         supplierShortName: getCellValue(row, columnMap.supplierShortName),
         supplierName: getCellValue(row, columnMap.supplierName),
@@ -663,7 +677,7 @@ function buildPurchaseDivisionIndex(tables) {
       pushMapArray(byGroupMaterial, makeGroupMaterialKey(item.purchaseGroup, materialCode), item);
     });
   });
-  return { byMaterial, byGroupMaterial, materialCodes };
+  return { byMaterial, byGroupMaterial, materialCodes, usesCorrectedCodes };
 }
 
 function buildSingaporeIndex(tables) {
@@ -709,9 +723,9 @@ function buildMinimumOrderIndex(tables) {
       const headerIndex = findHeaderRowIndex(rows, TABLE_FIELD_ALIASES.divisionMaterialCode, 1);
       if (headerIndex < 0) return;
       const columnMap = buildColumnMapByAliases(rows[headerIndex], {
-        materialCode: TABLE_FIELD_ALIASES.divisionMaterialCode,
         minimumOrderQuantity: ["起订量", "起订数量", "最小起订量", "最低起订量", "起订单量", "MOQ"],
       });
+      columnMap.materialCode = findOaMaterialCodeColumn(rows[headerIndex], TABLE_FIELD_ALIASES.divisionMaterialCode);
       if (columnMap.materialCode === undefined || columnMap.minimumOrderQuantity === undefined) return;
       rows.slice(headerIndex + 1).forEach((row) => {
         const materialKey = normalizeLookupKey(getCellValue(row, columnMap.materialCode));
@@ -782,6 +796,14 @@ function findExactHeaderColumnIndex(headerRow = [], headerName) {
   const normalizedHeaderName = normalizeDemandHeader(headerName);
   const index = headerRow.findIndex((header) => normalizeDemandHeader(header) === normalizedHeaderName);
   return index >= 0 ? index : undefined;
+}
+
+function findOaMaterialCodeColumn(headerRow, aliases) {
+  const explicitColumn = findExactHeaderColumnIndex(headerRow, "备货OA物料编码");
+  if (explicitColumn !== undefined) return explicitColumn;
+  // 排除正确编码列，避免旧别名的模糊匹配把它当成 OA 原编码。
+  const originalHeaders = headerRow.map(header => normalizeDemandHeader(header) === "正确物料编码" ? "" : header);
+  return buildColumnMapByAliases(originalHeaders, { materialCode: aliases }).materialCode;
 }
 
 function normalizeDemandHeader(value) {
@@ -960,8 +982,8 @@ function renderMaterialCodeWarnings() {
   if (!els.materialCodeWarnings) return;
   const rows = state.demandRows.filter(row => row.materialCodeIssue);
   els.materialCodeWarnings.hidden = rows.length === 0;
-  els.materialCodeWarnings.innerHTML = rows.length ? `<summary>${rows.length} 条正确物料编码待补充（展开查看）</summary><ul>${rows.map(row =>
-    `<li>${escapeHtml(`${row.sourceFile} / ${row.sourceSheet} 第 ${row.sourceRowNumber} 行：${row.materialCodeIssue}。记录已保留，未使用备货OA原编码分配。`)}</li>`
+  els.materialCodeWarnings.innerHTML = rows.length ? `<summary>${rows.length} 条物料编码待核对（展开查看）</summary><ul>${rows.map(row =>
+    `<li>${escapeHtml(`${row.sourceFile} / ${row.sourceSheet} 第 ${row.sourceRowNumber} 行（备货OA物料编码：${row.oaMaterialCode || "空白"}）：${row.materialCodeIssue}。记录和数量已保留，请核实后重新上传。`)}</li>`
   ).join("")}</ul>` : "";
 }
 
