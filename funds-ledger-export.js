@@ -19,20 +19,22 @@
     zip.file('xl/styles.xml', styles);
     for (let index = 0; index < book.SheetNames.length; index++) {
       const sheet = book.Sheets[book.SheetNames[index]], rows = result.sheets[index].rows;
+      const noWrap = new Set(['对公付款OA流程号','申请付款金额','应付款时间','预估付款时间']);
+      const wrapColumns = result.sheets[index].headers.map((name,c) => noWrap.has(name) ? -1 : c).filter(c => c >= 0);
       const path = `xl/worksheets/sheet${index + 1}.xml`;
       let xml = await zip.file(path).async('string');
       xml = xml.replace(/<c\b([^>]*?)(\/?)>/g, (tag, attrs, end) => {
         const address = attrs.match(/\br="([A-Z]+)(\d+)"/);
         if (!address) return tag;
         const old = Number(attrs.match(/\bs="(\d+)"/)?.[1] || 0);
-        const style = address[2] === '1' ? count * 2 : old + (['A','B','E','G'].includes(address[1]) ? count : 0);
+        const style = address[2] === '1' ? count * 2 : old + (wrapColumns.includes(X.utils.decode_col(address[1])) ? count : 0);
         return '<c' + attrs.replace(/\s+s="\d+"/, '') + ` s="${style}"${end}>`;
       });
       xml = xml.replace(/<row\b([^>]*)>/g, (tag, attrs) => {
         const row = Number(attrs.match(/\br="(\d+)"/)?.[1]);
         let height = 26;
         if (row > 1) {
-          const lines = Math.max(1, ...[0,1,4,6].map(c => Core.formatCell(rows[row - 2]?.[c]).split(/\r?\n/).reduce((n, line) => n + Math.max(1, Math.ceil(width(line) / Math.max(1, (sheet['!cols'][c].wch || 20) - 2))), 0)));
+          const lines = Math.max(1, ...wrapColumns.map(c => Core.formatCell(rows[row - 2]?.[c]).split(/\r?\n/).reduce((n, line) => n + Math.max(1, Math.ceil(width(line) / Math.max(1, (sheet['!cols'][c].wch || 20) - 2))), 0)));
           height = Math.min(409, Math.max(24, lines * 15 + 8));
         }
         return '<row' + attrs.replace(/\s+(?:ht|customHeight)="[^"]*"/g, '') + ` ht="${height}" customHeight="1">`;

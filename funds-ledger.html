@@ -11,14 +11,17 @@
     h2{font-size:1.15rem;margin:0 0 14px}p,small,li{line-height:1.7}
     label{display:block;font-weight:600;margin-bottom:10px}input,button{font:inherit;max-width:100%}
     input[type=file]{width:100%}input::file-selector-button{padding:9px 14px;border:1px solid var(--line-strong);border-radius:7px;cursor:pointer;background:var(--surface-solid);color:var(--text);margin-right:12px}
-    small{display:block;color:var(--muted)}#reference,#status{white-space:pre-wrap;overflow-wrap:anywhere}
-    #reference{margin:12px 0}#status{margin:0}.actions{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:18px}
+    small{display:block;color:var(--muted)}.file-reference,#status{white-space:pre-wrap;overflow-wrap:anywhere}
+    .file-reference{margin:12px 0}#status{margin:0}.actions{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:18px}
+    .uploads-scroll{overflow-x:auto}.uploads{display:grid;grid-template-columns:repeat(3,minmax(230px,1fr));gap:14px}.upload{padding:14px;border:1px solid var(--line);border-radius:10px;min-width:0}
+    .upload small{min-height:46px}.optional{font-size:.85rem;color:var(--muted);font-weight:400}.remove{padding:4px 0;border-radius:0;background:transparent;color:var(--muted);font-size:.9rem;text-decoration:underline}
     button{border:0;border-radius:8px;background:#315b9d;color:#fff;padding:11px 20px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}
     details{margin-top:14px;color:var(--muted)}summary{width:fit-content;cursor:pointer;color:var(--accent);font-weight:600}ul{padding-left:22px}
     .preview{max-height:500px;overflow:auto}table{border-collapse:collapse;min-width:100%;font-size:13px}
     th,td{border:1px solid #d6dee8;text-align:center;vertical-align:middle;padding:8px 12px;white-space:pre-wrap;min-width:120px}
     th{white-space:nowrap;position:sticky;top:0;background:#315b9d;color:#fff}td{background:#fff;color:#172033;max-width:430px;overflow-wrap:anywhere}
     td:nth-child(3),td:nth-child(4),td:nth-child(6){white-space:nowrap;max-width:none;overflow-wrap:normal}
+    td:nth-child(8),td:nth-child(9){white-space:pre;overflow-wrap:normal;min-width:150px;max-width:none}
     .count{color:var(--muted);font-size:.95rem;font-weight:400}.empty{color:var(--muted)}#warnings{color:var(--text)}
     [hidden]{display:none!important}@media(max-width:700px){main{padding:12px}section{padding:14px}.actions{align-items:stretch;flex-direction:column}}
   </style>
@@ -28,9 +31,11 @@
   <h1>资金台账整理</h1>
   <p>上传采购付款台账，分别整理已申请 OA 和未申请 OA 的未结清、非谈判付款明细。</p>
   <section>
-    <label for="file">采购付款台账</label>
-    <input id="file" type="file" accept=".xlsx,.xls" disabled>
-    <small id="reference">尚未引用文件</small>
+    <div class="uploads-scroll"><div class="uploads">
+      <div class="upload"><label for="file">采购付款台账</label><input id="file" type="file" accept=".xlsx,.xls" disabled><small class="file-reference" id="reference">尚未引用文件</small></div>
+      <div class="upload"><label for="applicationsFile">付款申请汇总 <span class="optional">可选</span></label><input id="applicationsFile" type="file" accept=".xlsx,.xls" disabled><small class="file-reference" id="applicationsReference">尚未引用（可选）</small><button class="remove" id="clear-applications" hidden>移除付款申请汇总</button></div>
+      <div class="upload"><label for="progressFile">资金整理 <span class="optional">可选</span></label><input id="progressFile" type="file" accept=".xlsx,.xls" disabled><small class="file-reference" id="progressReference">尚未引用（可选）</small><button class="remove" id="clear-progress" hidden>移除资金整理文件</button></div>
+    </div></div>
     <div class="actions"><button id="download" disabled>下载资金台账整理表</button><p id="status" role="status" aria-live="polite">正在加载工具…</p></div>
     <details><summary>查看整理规则</summary><ul>
       <li>读取李奇、徐英、邢芳芳、操思敏、孙立柱的对账明细，保留“是否结清＝否”且“是否谈判付款＝否”的记录；空白状态不纳入。</li>
@@ -38,6 +43,9 @@
       <li>已申请只显示应付款时间，未申请只显示预估付款时间，两列不互相补填。已有预估列中的空白保留。</li>
       <li>原表没有预估时间列时，按所属月份最后一天＋账期天数＋7天计算；月账期按每月30天，5个月为150天。无法明确识别时留空并提示。</li>
       <li>每条明细单独保留。公式采用文件保存的有效结果，导出为值；原文件不修改。</li>
+      <li>付款申请优先按 OA 号匹配并核对供应商；缺号时按供应商、付款主体和金额唯一匹配。多次申请按日期逐笔显示，签字状态保留原文。</li>
+      <li>资金整理文件读取“付款进度整理”。缺号时可借用已匹配申请的流程编码查询，原 OA 号、分表及提交审单状态保持不变。</li>
+      <li>“重新申请”“待核对”优先保留；其余按流程归档判已付款、未归档判未付款。分批归属不清或流程信息冲突时提示核对。</li>
       <li>仅在本机浏览器处理，切换工具保留本次内容；刷新后重新上传。</li>
     </ul></details>
     <details id="warning-panel" hidden><summary>需要留意（<span id="warning-count">0</span> 项）</summary><ul id="warnings"></ul></details>
@@ -49,8 +57,8 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-ledger-core.js?v=20261106-1"></script>
-<script src="funds-ledger-export.js?v=20261106-1"></script>
-<script src="funds-ledger-tool.js?v=20261106-1"></script>
+<script src="funds-ledger-core.js?v=20261107-enrichment"></script>
+<script src="funds-ledger-export.js?v=20261107-enrichment"></script>
+<script src="funds-ledger-tool.js?v=20261107-enrichment"></script>
 </body>
 </html>

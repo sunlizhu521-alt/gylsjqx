@@ -111,10 +111,10 @@ test('可选正文列缺失只提示，源空白与零不互相转换，格式�
  const s=b.Sheets['对账明细-李奇'];s.XFD1048576={t:'s',v:'',s:1};s['!ref']='A1:XFD1048576';
  const r=C.build(b);assert.deepEqual(r.sheets[0].rows[0].filter((_,i)=>[0,1,4,6].includes(i)).map(c=>c.v),['','','','']);assert.equal(r.sheets[0].rows[0][3].v,0);assert.equal(r.warnings.length,1);
 });
-test('导出仅两张七列表，空类别保留表头，原生数值日期可回读且带筛选列宽',()=>{
+test('导出仅两张十四列表，空类别保留表头，原生数值日期可回读且带筛选列宽',()=>{
  const r=C.build(book([row()])),before=JSON.stringify(r),out=C.workbook(r),roundtrip=X.read(X.write(out,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true});
  assert.deepEqual(out.SheetNames,C.SHEET_NAMES);assert.deepEqual(roundtrip.SheetNames,C.SHEET_NAMES);
- C.SHEET_NAMES.forEach((name,i)=>{assert.deepEqual(X.utils.sheet_to_json(roundtrip.Sheets[name],{header:1})[0],C.HEADERS[i]);assert.equal(out.Sheets[name]['!cols'].length,7);assert.match(out.Sheets[name]['!autofilter'].ref,/^A1:G[12]$/);});
+ C.SHEET_NAMES.forEach((name,i)=>{assert.deepEqual(X.utils.sheet_to_json(roundtrip.Sheets[name],{header:1})[0],C.HEADERS[i]);assert.equal(out.Sheets[name]['!cols'].length,14);assert.match(out.Sheets[name]['!autofilter'].ref,/^A1:N[12]$/);});
  assert.equal(roundtrip.Sheets[C.SHEET_NAMES[0]].D2.t,'n');assert.equal(roundtrip.Sheets[C.SHEET_NAMES[0]].F2.t,'n');assert.equal(JSON.stringify(r),before);
  assert.equal(C.exportFilename('/path/采购付款台账.v2.xlsx'),'采购付款台账.v2－资金台账整理.xlsx');assert.equal(C.formatCell({t:'n',v:0}),'0');
 });
