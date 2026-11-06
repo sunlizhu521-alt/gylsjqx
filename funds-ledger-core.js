@@ -128,7 +128,7 @@ function build(book,filename='资金台账.xlsx',options={}){
    if(Object.keys(map).every(key=>!at(key)?.f&&!text(at(key))))continue;
    if((options.applications||options.progress)&&['supplier','oa','amount'].some(key=>at(key)?.f||at(key)?.t==='e'||text(at(key))))identities.push(ledgerIdentity(at,{file:filename,sheet:name,row:r+1}));
    valid(at('settled'),label('settled'));valid(at('negotiated'),label('negotiated'));
-   if(text(at('settled'))!=='否'||text(at('negotiated'))!=='否'){count.excluded++;continue;}
+   if(!['否',''].includes(text(at('settled')))||text(at('negotiated'))!=='否'){count.excluded++;continue;}
    valid(at('oa'),label('oa'));const oa=text(at('oa')),index=!oa||norm(oa)==='未提交OA'?1:0,time=index?'estimate':'due';
    const read=key=>{if(map[key]===undefined)return blank();return copy(valid(at(key),label(key)));};
    const monthPrecision=index&&map[time]!==undefined&&norm(sheet[X.utils.encode_cell({r:header,c:map[time]})]?.v)==='预估付款月份';

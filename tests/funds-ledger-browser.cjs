@@ -33,9 +33,11 @@ function fixture(replacement=false){
   add(0,{'供应商名称':'合成空应付日期','对公付款0A流程号':'待补流程号','应付款时间':'','预估付款时间':46340});
   add(0,{'供应商名称':'合成零金额未申请','对公付款0A流程号':'','申请付款金额':0,'是否提交付款申请单':'未提交'},1);
   add(0,{'供应商名称':'合成空预估日期','对公付款0A流程号':'未提交OA','申请付款金额':'','预估付款时间':'','是否提交付款申请单':''},1);
+  add(0,{'供应商名称':'合成空结清已申请','是否结清':''});
+  add(0,{'供应商名称':'合成空结清未申请','是否结清':'  ','对公付款0A流程号':''},1);
   for(const [label,changes]of [
    ['已结清',{'是否结清':'是'}],['谈判付款',{'是否谈判付款':'是'}],
-   ['空结清',{'是否结清':''}],['空谈判',{'是否谈判付款':''}],
+   ['空谈判',{'是否谈判付款':''}],['已写结清',{'是否结清':'结清'}],
    ['非精确否',{'是否结清':'否待确认'}],['双空',{'是否结清':'','是否谈判付款':''}]
   ])add(0,{'供应商名称':'必须排除-'+label,...changes},null);
   for(let i=0;i<64;i++)add(0,{'供应商名称':'合成长预览-'+String(i).padStart(2,'0'),'申请付款金额':i,'摘要':i===0?'=1+1':'合成完整预览第 '+i+' 行'});
@@ -239,13 +241,13 @@ function enrichmentFixture(){
   }
   await upload(input.bytes,'合成资金台账.xlsx');await ready('合成资金台账.xlsx');
   const first=await download('initial'),snap=await verify(first,input.expected);
-  assert.equal(snap[0].rows.length,73);assert.equal(snap[1].rows.length,7);
+  assert.deepEqual(snap.map(s=>s.rows.length),input.expected.map(rows=>rows.length));
   assert(!JSON.stringify(snap).includes('必须排除-'));assert(!JSON.stringify(snap).includes('历史干扰记录'));
   const api=await frame.locator('body').evaluate(async(_,{bytes,name})=>{
    const result=FundsLedgerCore.build(XLSX.read(Uint8Array.from(bytes),{type:'array',cellNF:true}),name),output=await FundsLedgerExport(result);
    return {names:result.sheets.map(s=>s.name),counts:result.sheets.map(s=>s.rows.length),byteArray:output instanceof Uint8Array};
   },{bytes:[...input.bytes],name:'合成资金台账.xlsx'});
-  assert.deepEqual(api,{names:NAMES,counts:[73,7],byteArray:true});
+  assert.deepEqual(api,{names:NAMES,counts:input.expected.map(rows=>rows.length),byteArray:true});
   await page.screenshot({path:path.join(out,'funds-ledger-home.png')});
   await page.locator('button[data-tool="funds"]').click();
   await page.frameLocator('iframe[data-tool="funds"]').locator('#ledgerFile').waitFor();
@@ -354,6 +356,6 @@ function enrichmentFixture(){
   await verify(await download('enrichment-optional-first',standalone,standalone),enrichment.expected('full','full'),standalone);
   await standalone.screenshot({path:path.join(out,'funds-ledger-standalone.png')});await standalone.close();
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({base,out,sheets:NAMES,columns:14,rows:[73,7],enrichmentRows:[9,2],preview:true,export:true,styles:true,toolSwitch:true,latestUpload:true,invalidRecovery:true,missingEstimateFallback:true,existingBlankPreserved:true,formulaCacheGuard:true,emptyFormulaCache:true,enrichment:true,optionalFirst:true,simultaneous:true,staleReadGuard:true,standalone:true,errors}));
+  console.log(JSON.stringify({base,out,sheets:NAMES,columns:14,rows:input.expected.map(rows=>rows.length),enrichmentRows:[9,2],preview:true,export:true,styles:true,toolSwitch:true,latestUpload:true,invalidRecovery:true,missingEstimateFallback:true,existingBlankPreserved:true,formulaCacheGuard:true,emptyFormulaCache:true,enrichment:true,optionalFirst:true,simultaneous:true,staleReadGuard:true,standalone:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

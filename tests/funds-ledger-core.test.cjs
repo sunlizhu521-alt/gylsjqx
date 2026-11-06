@@ -6,15 +6,26 @@ function sheet(rows,headers=H,title=false){return X.utils.aoa_to_sheet([...(titl
 function book(rows=[]){const b=X.utils.book_new();PEOPLE.forEach((p,i)=>X.utils.book_append_sheet(b,sheet(i?[]:rows),'对账明细-'+p));return b;}
 function set(b,header,cell,r=2,name='对账明细-李奇'){b.Sheets[name][X.utils.encode_cell({r:r-1,c:H.indexOf(header)})]=cell;}
 const values=result=>result.sheets.map(s=>s.rows.map(r=>r.map(c=>c.v)));
-test('仅明确否否进入两类，OA空白/未提交OA未申请，其他非空已申请，提交状态不参与筛选',()=>{
+test('未结清含空白且谈判明确否进入两类，OA仅决定分类，提交状态不参与筛选',()=>{
  const b=book([
   row({'对公付款0A流程号':'000001','是否提交付款申请单':'是'}),row({'对公付款0A流程号':'  未提交OA  '}),row({'对公付款0A流程号':'  '}),
   row({'对公付款0A流程号':'待补OA','是否结清':' 否 ','是否谈判付款':'否 '}),
   row({'是否结清':''}),row({'是否谈判付款':''}),row({'是否结清':'是'}),row({'是否谈判付款':'是'}),row({'是否结清':'未结清'}),row({'是否谈判付款':'正常付款'})
  ]),before=JSON.stringify(b),r=C.build(b,'源.xlsx');
- assert.deepEqual(r.sheets.map(s=>s.rows.length),[2,2]);assert.deepEqual(r.counts[0],{sheet:'对账明细-李奇',applied:2,unapplied:2,excluded:6});
- assert.deepEqual(r.sheets[0].rows.map(row=>row[2].v),['000001','待补OA']);assert.equal(r.sheets[0].rows[0][6].v,'是');
+ assert.deepEqual(r.sheets.map(s=>s.rows.length),[3,2]);assert.deepEqual(r.counts[0],{sheet:'对账明细-李奇',applied:3,unapplied:2,excluded:5});
+ assert.deepEqual(r.sheets[0].rows.map(row=>row[2].v),['000001','待补OA','OA001']);assert.equal(r.sheets[0].rows[0][6].v,'是');
  assert.equal(r.sheets[1].rows[0][2].v,'  未提交OA  ');assert.equal(r.sheets[1].rows[1][2].v,'  ');assert.equal(JSON.stringify(b),before);
+});
+test('结清空白兼容缺单元格、空格和有效公式空缓存，保留原值；谈判空白及结清是仍排除',()=>{
+ for(const due of ['应付款时间','应付时间']){
+  const rows=['',null,'  ',{t:'s',f:'IF(1=1,"","否")',v:''}].map((status,i)=>row({'供应商名称':'空结清'+i,'是否结清':status,'对公付款0A流程号':i%2?'':'OA00'+i}));
+  rows.push(row({'是否结清':'','是否谈判付款':''}),row({'是否结清':'','是否谈判付款':'是'}),row({'是否结清':'是'}),row({'是否结清':'结清'}),row({'是否结清':0}));
+  const b=book();b.Sheets['对账明细-李奇']=sheet(rows,H);delete b.Sheets['对账明细-李奇'].I3;
+  b.Sheets['对账明细-李奇'].F1.v=due;const before=JSON.stringify(b),r=C.build(b,'源.xlsx');
+  assert.deepEqual(r.sheets.map(s=>s.rows.length),[2,2]);assert.equal(r.counts[0].excluded,5);
+  assert.deepEqual(r.sheets[0].rows.map(row=>C.formatCell(row[5])),['2026-11-06','2026-11-06']);
+  assert(r.sheets.flatMap(s=>s.rows).every(row=>row[6].v==='否'));assert.equal(JSON.stringify(b),before);
+ }
 });
 test('按工作簿及行顺序保留重复记录，不读取历史汇总和其他人的表',()=>{
  const b=book([row(),row()]);b.Sheets['对账明细-孙立柱']=sheet([row({'供应商名称':'孙表'})]);
