@@ -2,6 +2,27 @@
   'use strict';
   const $ = id => document.getElementById(id), C = window.FundsLedgerCore;
   let result = null, exporting = false;
+  const versionKey = 'funds-ledger-export-versions', memoryVersions = {};
+  function savedVersions() {
+    try {
+      const value = JSON.parse(localStorage.getItem(versionKey) || '{}');
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    } catch (_) { return {}; }
+  }
+  function nextDownload() {
+    const date = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+    const stored = Number(savedVersions()[date]);
+    const previous = Math.max(Number.isSafeInteger(stored) && stored >= 0 && stored < Number.MAX_SAFE_INTEGER ? stored : 0, memoryVersions[date] || 0);
+    const version = previous + 1;
+    return {date, version, name:C.exportFilename(date, version)};
+  }
+  function rememberDownload({date, version}) {
+    memoryVersions[date] = version;
+    try {
+      localStorage.setItem(versionKey, JSON.stringify({...savedVersions(), [date]:version}));
+      return true;
+    } catch (_) { return false; }
+  }
   const sources = {
     ledger: {input:'file', reference:'reference', label:'采购付款台账'},
     applications: {input:'applicationsFile', reference:'applicationsReference', label:'付款申请汇总'},
@@ -132,20 +153,22 @@
     if (!result || exporting) return;
     exporting = true;
     controls();
-    const status = $('status').textContent;
+    let url;
     $('status').textContent = '正在生成 Excel…';
     try {
       const bytes = await FundsLedgerExport(result);
-      const url = URL.createObjectURL(new Blob([bytes], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+      const download = nextDownload();
+      url = URL.createObjectURL(new Blob([bytes], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
       const link = document.createElement('a');
       link.href = url;
-      link.download = C.exportFilename(sources.ledger.filename);
+      link.download = download.name;
       link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      $('status').textContent = status;
+      const saved = rememberDownload(download);
+      $('status').textContent = '已生成：' + download.name + (saved ? '' : '。浏览器未能保存版本号，本次页面内仍会递增。');
     } catch (error) {
       $('status').textContent = '导出失败：' + error.message + '。可以重试下载。';
     } finally {
+      if (url) setTimeout(() => URL.revokeObjectURL(url), 1000);
       exporting = false;
       controls();
     }

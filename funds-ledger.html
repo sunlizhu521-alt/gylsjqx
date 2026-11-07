@@ -43,6 +43,7 @@
       <li>已申请只显示应付款时间，未申请只显示预估付款时间，两列不互相补填。已有预估列中的空白保留。</li>
       <li>原表没有预估时间列时，按所属月份最后一天＋账期天数＋7天计算；月账期按每月30天，5个月为150天。无法明确识别时留空并提示。</li>
       <li>每条明细单独保留。公式采用文件保存的有效结果，导出为值；原文件不修改。</li>
+      <li>下载命名为“资金台账整理-日期-V版本号.xlsx”；日期按北京时间，同一天在当前浏览器内依次递增，生成失败不递增。</li>
       <li>付款申请优先按 OA 号匹配并核对供应商；缺号时按供应商、付款主体和金额唯一匹配。多次申请按日期逐笔显示，签字状态保留原文。</li>
       <li>资金整理文件读取“付款进度整理”。缺号时可借用已匹配申请的流程编码查询，原 OA 号、分表及提交审单状态保持不变。</li>
       <li>“重新申请”“待核对”优先保留；其余按流程归档判已付款、未归档判未付款。分批归属不清或流程信息冲突时提示核对。</li>
@@ -57,8 +58,8 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-ledger-core.js?v=20261107-empty-settled"></script>
+<script src="funds-ledger-core.js?v=20261107-versioned-name"></script>
 <script src="funds-ledger-export.js?v=20261107-enrichment"></script>
-<script src="funds-ledger-tool.js?v=20261107-enrichment"></script>
+<script src="funds-ledger-tool.js?v=20261107-versioned-name"></script>
 </body>
 </html>

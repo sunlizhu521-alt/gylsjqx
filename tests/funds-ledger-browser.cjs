@@ -6,6 +6,7 @@ const NAMES=['已申请OA付款','未申请OA付款'];
 const HEADERS=['供应商名称','付款主体','对公付款0A流程号','申请付款金额','摘要','应付款时间','预估付款时间','是否提交付款申请单','是否结清','是否谈判付款','开票时间','所属月份','账期'];
 const OUTPUT_HEADERS=['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','是否提交付款审单','申请日期','是否已签字','当前节点','未操作者','流程状态','申请人','是否已付款'];
 const MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const VERSION_KEY='funds-ledger-export-versions',OTHER_VERSIONS='{"2026-11-06":37}';
 const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
 const value=cell=>cell&&typeof cell==='object'?cell.v??'':cell??'';
 
@@ -126,10 +127,11 @@ function enrichmentFixture(){
  await fs.mkdir(out,{recursive:true});
  const input=fixture(),replacement=fixture(true),browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
  try{
-  const page=await browser.newPage({viewport:{width:1600,height:1000},timezoneId:'Asia/Shanghai'}),errors=[];
+  const page=await browser.newPage({viewport:{width:1600,height:1000},timezoneId:'Asia/Shanghai'}),errors=[],downloadVersions=new WeakMap();
   page.on('pageerror',e=>errors.push(e.message));
   await page.clock.setFixedTime(new Date('2026-11-06T02:00:00Z'));
   await page.goto(base,{waitUntil:'networkidle'});
+  await page.evaluate(value=>localStorage.setItem('funds-export-versions',value),OTHER_VERSIONS);
   const homepage=page.url();await page.locator('button[data-tool="funds-ledger"]').click();assert.equal(page.url(),homepage);
   const frame=page.frameLocator('iframe[data-tool="funds-ledger"]');
   await frame.locator('#file').waitFor();assert(await frame.locator('#download').isDisabled());
@@ -173,9 +175,13 @@ function enrichmentFixture(){
     count:await surface.locator('#'+id+'-count').innerText()
    })));
   }
-  async function download(label,surface=frame,owner=page){
+  async function download(label,surface=frame,owner=page,date='2026-11-06'){
    const event=owner.waitForEvent('download');await surface.locator('#download').click();const d=await event;
-   assert.match(d.suggestedFilename(),/\.xlsx$/);const bytes=await fs.readFile(await d.path());
+   let versions=downloadVersions.get(owner.context());if(!versions){versions=new Map();downloadVersions.set(owner.context(),versions);}
+   const version=(versions.get(date)||0)+1,name='资金台账整理-'+date+'-V'+version+'.xlsx';
+   assert.equal(d.suggestedFilename(),name,'按北京时间日期和成功下载次数命名');versions.set(date,version);
+   await surface.locator('#status').filter({hasText:name}).waitFor();
+   const bytes=await fs.readFile(await d.path());
    await fs.writeFile(path.join(out,label+'.xlsx'),bytes);return bytes;
   }
   async function verify(bytes,expected,surface=frame){
@@ -342,9 +348,11 @@ function enrichmentFixture(){
   await frame.locator('#clear-applications').click();await ready('延迟-基础台账.xlsx');
   await verify(await download('enrichment-progress-only'),enrichment.expected('','full'));
 
-  const standalone=await browser.newPage({viewport:{width:1440,height:1000}});standalone.on('pageerror',e=>errors.push(e.message));
+  assert.equal(await page.evaluate(()=>localStorage.getItem('funds-export-versions')),OTHER_VERSIONS,'不得改变资金整理工具的版本号');
+  const standalone=await browser.newPage({viewport:{width:1440,height:1000},timezoneId:'America/Los_Angeles'});standalone.on('pageerror',e=>errors.push(e.message));
   await standalone.clock.setFixedTime(new Date('2026-11-06T02:00:00Z'));
   await standalone.goto(new URL('funds-ledger.html',base).href,{waitUntil:'networkidle'});
+  await standalone.evaluate(value=>localStorage.setItem('funds-export-versions',value),OTHER_VERSIONS);
   await Promise.all([
    uploadSupplement('applications',enrichment.applications.bytes,'合成先选申请.xlsx',standalone),
    uploadSupplement('progress',enrichment.progress.bytes,'合成先选进度.xlsx',standalone)
@@ -354,8 +362,49 @@ function enrichmentFixture(){
   await standalone.locator('#file').setInputFiles({name:'合成独立页面.xlsx',mimeType:MIME,buffer:enrichment.ledger.bytes});
   await standalone.locator('#download:not([disabled])').waitFor();
   await verify(await download('enrichment-optional-first',standalone,standalone),enrichment.expected('full','full'),standalone);
-  await standalone.screenshot({path:path.join(out,'funds-ledger-standalone.png')});await standalone.close();
+  await standalone.screenshot({path:path.join(out,'funds-ledger-standalone.png')});
+
+  await standalone.reload({waitUntil:'networkidle'});
+  await standalone.locator('#file:not([disabled])').setInputFiles({name:'合成命名验收.xlsx',mimeType:MIME,buffer:replacement.bytes});
+  await standalone.locator('#download:not([disabled])').waitFor();
+  await verify(await download('version-after-refresh',standalone,standalone),replacement.expected,standalone);
+  const beforeFailure=await standalone.evaluate(key=>localStorage.getItem(key),VERSION_KEY),failedDownloads=[];
+  const recordFailedDownload=d=>failedDownloads.push(d.suggestedFilename());standalone.on('download',recordFailedDownload);
+  for(const stage of ['export','click']){
+   await standalone.evaluate(stage=>{
+    if(stage==='export'){window.__qaOriginalExport=FundsLedgerExport;window.FundsLedgerExport=async()=>{throw Error('合成导出失败');};}
+    else{window.__qaOriginalAnchorClick=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download)throw Error('合成下载发起失败');return window.__qaOriginalAnchorClick.call(this);};}
+   },stage);
+   await standalone.locator('#download').click();await standalone.locator('#status').filter({hasText:stage==='export'?'合成导出失败':'合成下载发起失败'}).waitFor();
+   assert.deepEqual(failedDownloads,[],'生成或发起下载失败不能产生文件');
+   assert.equal(await standalone.evaluate(key=>localStorage.getItem(key),VERSION_KEY),beforeFailure,'失败不能递增保存的版本号');
+   await standalone.evaluate(stage=>{
+    if(stage==='export'){window.FundsLedgerExport=window.__qaOriginalExport;delete window.__qaOriginalExport;}
+    else{HTMLAnchorElement.prototype.click=window.__qaOriginalAnchorClick;delete window.__qaOriginalAnchorClick;}
+   },stage);
+  }
+  standalone.off('download',recordFailedDownload);
+  await download('version-after-failures',standalone,standalone);
+  await standalone.clock.setFixedTime(new Date('2026-11-06T15:59:59Z'));
+  await download('version-before-beijing-midnight',standalone,standalone);
+  await standalone.clock.setFixedTime(new Date('2026-11-06T16:00:00Z'));
+  await download('version-after-beijing-midnight',standalone,standalone,'2026-11-07');
+  await download('version-new-day-second',standalone,standalone,'2026-11-07');
+  const persisted=await standalone.evaluate(key=>JSON.parse(localStorage.getItem(key)),VERSION_KEY);
+  assert.equal(persisted['2026-11-06'],4);assert.equal(persisted['2026-11-07'],2);
+  await standalone.evaluate(key=>localStorage.setItem(key,'{broken-json'),VERSION_KEY);
+  await download('version-corrupt-storage',standalone,standalone,'2026-11-07');
+  await download('version-corrupt-storage-second',standalone,standalone,'2026-11-07');
+  await standalone.evaluate(()=>{
+   window.__qaStorageDescriptor=Object.getOwnPropertyDescriptor(window,'localStorage');
+   Object.defineProperty(window,'localStorage',{configurable:true,get(){throw new DOMException('合成存储禁用','SecurityError');}});
+  });
+  await download('version-disabled-storage',standalone,standalone,'2026-11-07');
+  await verify(await download('version-disabled-storage-second',standalone,standalone,'2026-11-07'),replacement.expected,standalone);
+  await standalone.evaluate(()=>{Object.defineProperty(window,'localStorage',window.__qaStorageDescriptor);delete window.__qaStorageDescriptor;});
+  assert.equal(await standalone.evaluate(()=>localStorage.getItem('funds-export-versions')),OTHER_VERSIONS,'内存回退也不能改动其他工具的版本号');
+  await standalone.close();
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({base,out,sheets:NAMES,columns:14,rows:input.expected.map(rows=>rows.length),enrichmentRows:[9,2],preview:true,export:true,styles:true,toolSwitch:true,latestUpload:true,invalidRecovery:true,missingEstimateFallback:true,existingBlankPreserved:true,formulaCacheGuard:true,emptyFormulaCache:true,enrichment:true,optionalFirst:true,simultaneous:true,staleReadGuard:true,standalone:true,errors}));
+  console.log(JSON.stringify({base,out,sheets:NAMES,columns:14,rows:input.expected.map(rows=>rows.length),enrichmentRows:[9,2],preview:true,export:true,styles:true,toolSwitch:true,latestUpload:true,invalidRecovery:true,missingEstimateFallback:true,existingBlankPreserved:true,formulaCacheGuard:true,emptyFormulaCache:true,enrichment:true,optionalFirst:true,simultaneous:true,staleReadGuard:true,standalone:true,downloadNames:true,versionRefresh:true,versionFailureGuard:true,beijingDateRollover:true,versionMemoryFallback:true,versionIsolation:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

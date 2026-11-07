@@ -261,6 +261,6 @@ function workbook(result){
  });return book;
 }
 function formatCell(cell){return !cell||cell.v==null?'':X.utils.format_cell(copy(cell));}
-function exportFilename(filename){return String(filename||'资金台账').replace(/^.*[\\/]/,'').replace(/\.[^.]+$/,'')+'－资金台账整理.xlsx';}
+function exportFilename(date,version=1){return `资金台账整理-${date}-V${version}.xlsx`;}
 return {SHEET_NAMES,HEADERS,build,workbook,formatCell,exportFilename,validateSupplement};
 });

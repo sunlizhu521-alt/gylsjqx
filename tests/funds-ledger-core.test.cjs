@@ -127,7 +127,7 @@ test('导出仅两张十四列表，空类别保留表头，原生数值日期�
  assert.deepEqual(out.SheetNames,C.SHEET_NAMES);assert.deepEqual(roundtrip.SheetNames,C.SHEET_NAMES);
  C.SHEET_NAMES.forEach((name,i)=>{assert.deepEqual(X.utils.sheet_to_json(roundtrip.Sheets[name],{header:1})[0],C.HEADERS[i]);assert.equal(out.Sheets[name]['!cols'].length,14);assert.match(out.Sheets[name]['!autofilter'].ref,/^A1:N[12]$/);});
  assert.equal(roundtrip.Sheets[C.SHEET_NAMES[0]].D2.t,'n');assert.equal(roundtrip.Sheets[C.SHEET_NAMES[0]].F2.t,'n');assert.equal(JSON.stringify(r),before);
- assert.equal(C.exportFilename('/path/采购付款台账.v2.xlsx'),'采购付款台账.v2－资金台账整理.xlsx');assert.equal(C.formatCell({t:'n',v:0}),'0');
+ assert.equal(C.exportFilename('2026-11-07'),'资金台账整理-2026-11-07-V1.xlsx');assert.equal(C.exportFilename('2026-11-07',2),'资金台账整理-2026-11-07-V2.xlsx');assert.equal(C.formatCell({t:'n',v:0}),'0');
 });
 test('列宽按内容及表头留筛选余量，超长摘要限宽并换行',()=>{
  const r=C.build(book([row({'供应商名称':'这是用于核验列宽的较长供应商名称','摘要':'摘要'.repeat(100)})])),out=C.workbook(r).Sheets[C.SHEET_NAMES[0]],empty=C.workbook(C.build(book())).Sheets[C.SHEET_NAMES[0]];
