@@ -28,17 +28,32 @@ test('年月精度保留，不转换成虚构日期；月精度在当月具体�
   const n=book();n.Sheets['对账明细-李奇']=sheet([row({'应付款时间':'','预估付款月份':value})],H.map(h=>h==='预估付款时间'?'预估付款月份':h));assert.equal(C.formatCell(rows(build(n))[0][5]),'2026年11月');
  }
 });
-test('仅缺预估列且应付为空时按月末加账期加7，现有预估空白不推算',()=>{
+test('应付与预估均空时按月末加账期加7归月，但仅显示未对账待定；有无预估列规则一致',()=>{
  const headers=[...H.filter(h=>h!=='预估付款时间'),'所属月份','账期'],b=book();b.Sheets['对账明细-李奇']=sheet([row({'应付款时间':'','所属月份':'2026-10','账期':'60天'}),row({'应付款时间':'','所属月份':'2026-10','账期':'5个月账期'}),row({'应付款时间':'','所属月份':'2024-02','账期':0})],headers);
- assert.equal(C.formatCell(rows(build(b,'2027-01'))[0][5]),'2027年01月06日');assert.equal(C.formatCell(rows(build(b,'2027-04'))[0][5]),'2027年04月06日');assert.equal(C.formatCell(rows(build(b,'2024-03'))[0][5]),'2024年03月07日');
- const existing=book();existing.Sheets['对账明细-李奇']=sheet([row({'应付款时间':'','预估付款时间':'','所属月份':'2026-10','账期':'60天'})],[...H,'所属月份','账期']);const r=build(existing,'2027-01');assert.equal(rows(r).length,0);assert.equal(r.counts[0].undated,1);assert.match(r.warnings.join('\n'),/为空.*未归入/);
+ for(const [month,sourceRow]of [['2027-01',2],['2027-04',3],['2024-03',4]]){const r=build(b,month);assert.equal(rows(r).length,1);assert.equal(C.formatCell(rows(r)[0][5]),'未对账待定');assert.equal(r.sheets[0].sources[0].row,sourceRow);}
+ const existing=book();existing.Sheets['对账明细-李奇']=sheet([row({'应付款时间':'','预估付款时间':'','所属月份':'2026-10','账期':'60天'})],[...H,'所属月份','账期']);const r=build(existing,'2027-01');assert.equal(rows(r).length,1);assert.equal(rows(r)[0][5].v,'未对账待定');assert.equal(r.counts[0].undated,0);assert.deepEqual(r.warnings,[]);
+ const out=C.workbook(r),read=X.read(X.write(out,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true});assert.equal(read.Sheets[out.SheetNames[0]].F2.t,'s');assert.equal(read.Sheets[out.SheetNames[0]].F2.v,'未对账待定');assert.equal(rows(build(existing,'2026-12')).length,0);
+});
+test('推算日期与真实日期一起升序，推算同日仍保留来源顺序，源数据不变',()=>{
+ const b=book();b.Sheets['对账明细-李奇']=sheet([
+  row({'摘要':'晚','应付款时间':'2026-11-07'}),
+  row({'摘要':'推算一','应付款时间':'','预估付款时间':'','所属月份':'2026-09','账期':'票到30天'}),
+  row({'摘要':'明确预估','应付款时间':'','预估付款时间':'2026-11-06'}),
+  row({'摘要':'推算二','应付款时间':'','预估付款时间':'','所属月份':'2026-09','账期':'票到30天'}),
+  row({'摘要':'早','应付款时间':'2026-11-05'})
+ ],[...H,'所属月份','账期']);const before=JSON.stringify(b),r=build(b);
+ assert.deepEqual(rows(r).map(row=>row[4].v),['早','推算一','明确预估','推算二','晚']);
+ assert.deepEqual(rows(r).map(row=>C.formatCell(row[5])),['2026年11月05日','未对账待定','2026年11月06日','未对账待定','2026年11月07日']);assert.equal(JSON.stringify(b),before);
+ for(const bad of [{t:'n',f:'DATE(2026,11,6)'},{t:'e',v:23}]){set(b,'预估付款时间',bad,3);assert.throws(()=>build(b),/李奇!G3/);}
+ set(b,'预估付款时间',{t:'s',f:'IF(TRUE,"",1)',v:''},3);assert.equal(rows(build(b))[1][5].v,'未对账待定');
 });
 test('账期范围/百分数/负数不误推日期，缺年月等异常按来源提示且不进任何月',()=>{
  for(const terms of ['50%承兑','-30天','30/60天','30或60天','约60天','30天+30天']){const b=book();b.Sheets['对账明细-李奇']=sheet([row({'应付款时间':'','所属月份':'2026-10','账期':terms})],[...H.filter(h=>h!=='预估付款时间'),'所属月份','账期']);const r=build(b,'2027-01');assert.equal(rows(r).length,0,terms);assert.equal(r.counts[0].undated,1);assert.match(r.warnings.join('\n'),/台账.xlsx.*李奇.*账期/);}
  const b=book();b.Sheets['对账明细-李奇']=sheet([row({'应付款时间':'','所属月份':'2026-10','账期':'60天，50%承兑'})],[...H.filter(h=>h!=='预估付款时间'),'所属月份','账期']);assert.equal(rows(build(b,'2027-01')).length,1);
 });
-test('非空非法应付不能改用预估；所有无法定位月份记录单独undated并给来源',()=>{
- const r=build(book([row({'应付款时间':'预计月底','预估付款时间':'2026-11-01'}),row({'应付款时间':'2026-02-30'}),row({'应付款时间':'','预估付款时间':''})]));assert.equal(rows(r).length,0);assert.equal(r.counts[0].undated,3);assert.equal(r.warnings.length,3);assert(r.warnings.every(w=>/台账.xlsx.*李奇/.test(w)));assert.match(r.warnings[0],/预计月底.*未归入任何月份/);
+test('非空非法应付或预估不推算；无法定位月份记录单独undated并给来源',()=>{
+ const b=book();b.Sheets['对账明细-李奇']=sheet([row({'应付款时间':'预计月底','预估付款时间':'2026-11-01'}),row({'应付款时间':'2026-02-30'}),row({'应付款时间':'','预估付款时间':''}),row({'应付款时间':'','预估付款时间':'待定','所属月份':'2026-09','账期':'30天'})],[...H,'所属月份','账期']);
+ const r=build(b);assert.equal(rows(r).length,0);assert.equal(r.counts[0].undated,4);assert.equal(r.warnings.length,4);assert(r.warnings.every(w=>/台账.xlsx.*李奇/.test(w)));assert.match(r.warnings[0],/预计月底.*未归入任何月份/);assert.match(r.warnings[3],/待定.*未归入任何月份/);
 });
 test('1904与typed Date正确归月和回读，金额0/空白/合法币种保留，不把非法金额变0',()=>{
  const b=book([row({'应付款时间':{t:'n',v:44870,z:'yyyy-mm-dd'},'申请付款金额':0}),row({'应付款时间':{t:'d',v:new Date('2026-11-06T00:00:00Z')},'申请付款金额':''}),row({'应付款时间':'2026-11-07','申请付款金额':'￥1,234.56'})]);b.Workbook={WBProps:{date1904:true}};const r=build(b);assert.deepEqual(rows(r).map(row=>row[3].v),[0,'',1234.56]);assert.equal(rows(r)[0][5].v,46332);assert.equal(C.formatCell(rows(r)[1][5]),'2026年11月06日');

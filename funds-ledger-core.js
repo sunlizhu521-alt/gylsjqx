@@ -64,13 +64,13 @@ function date(cell,date1904,label,warnings,monthPrecision=false){
 function estimatedDate(monthCell,termsCell,date1904,monthLabel,termsLabel,warnings){
  valid(monthCell,monthLabel);valid(termsCell,termsLabel);
  const parsed=date(monthCell,date1904,monthLabel,[]),month=parsed.t==='n'?X.SSF.parse_date_code(parsed.v):null;
- if(!month||month.y<1900||month.y>9999){warnings.push(monthLabel+'：无预估付款时间列，所属月份为空或无法识别，未推算预估付款时间');return blank();}
+ if(!month||month.y<1900||month.y>9999){warnings.push(monthLabel+'：应付及预估时间为空，所属月份为空或无法识别，未推算付款月份');return blank();}
  const terms=text(termsCell).normalize('NFKC'),durations=[];
  if(/^\d+$/.test(terms))durations.push(Number(terms));
  else for(const match of terms.matchAll(/(\d+(?:\.\d+)?)\s*(个月|天|日)/g))durations.push(Number(match[1])*(match[2]==='个月'?30:1));
  const days=[...new Set(durations)];
  if(days.length!==1||!Number.isSafeInteger(days[0])||days[0]<0||/[+＋~～至]|[-—−]\s*\d|\d\s*(?:\/|或者?)\s*\d|约|左右|至少|最多|以上|以内/.test(terms)){
-  warnings.push(termsLabel+'：无预估付款时间列，账期为空、存在冲突或无法识别“'+terms+'”，未推算预估付款时间');return blank();
+  warnings.push(termsLabel+'：应付及预估时间为空，账期为空、存在冲突或无法识别“'+terms+'”，未推算付款月份');return blank();
  }
  const end=Date.UTC(month.y,month.m,0),stamp=end+(days[0]+7)*86400000;
  if(!Number.isFinite(stamp)||new Date(stamp).getUTCFullYear()>9999){warnings.push(termsLabel+'：推算日期超出有效范围，预估付款时间保留空白');return blank();}
@@ -123,13 +123,19 @@ function build(book,filename='资金台账.xlsx',options={}){
    if(Object.keys(map).every(key=>!at(key)?.f&&!text(at(key))))continue;
    valid(at('negotiated'),label('negotiated'));
    if(text(at('negotiated'))!=='否'){count.excluded++;continue;}
-   const warningCount=warnings.length;let timeCell;
+   const warningCount=warnings.length;let timeCell,inferred=false;
    valid(at('due'),label('due'));
    if(text(at('due')))timeCell=date(at('due'),date1904,label('due'),warnings);
-   else if(map.estimate!==undefined){
-    const monthPrecision=norm(sheet[X.utils.encode_cell({r:header,c:map.estimate})]?.v)==='预估付款月份';
-    timeCell=date(at('estimate'),date1904,label('estimate'),warnings,monthPrecision);
-   }else timeCell=estimatedDate(at('month'),at('terms'),date1904,label('month'),label('terms'),warnings);
+   else{
+    valid(at('estimate'),label('estimate'));
+    if(text(at('estimate'))){
+     const monthPrecision=norm(sheet[X.utils.encode_cell({r:header,c:map.estimate})]?.v)==='预估付款月份';
+     timeCell=date(at('estimate'),date1904,label('estimate'),warnings,monthPrecision);
+    }else{
+     inferred=true;
+     timeCell=estimatedDate(at('month'),at('terms'),date1904,label('month'),label('terms'),warnings);
+    }
+   }
    const parts=timeCell.t==='n'?X.SSF.parse_date_code(timeCell.v):null;
    if(!parts||parts.y<1900||parts.y>9999){
     count.undated++;if(warnings.length===warningCount)warnings.push(filename+' / '+name+' 第'+(r+1)+'行：应付款时间及可用预估付款时间为空，未归入任何月份');continue;
@@ -140,7 +146,7 @@ function build(book,filename='资金台账.xlsx',options={}){
    const oa={t:'s',v:typeof at('oa')?.v==='number'?formatCell(at('oa')):String(at('oa')?.v??''),z:'@'};
    const monthOnly=timeCell.z&&!/d/i.test(timeCell.z.replace(/"[^"]*"/g,''));
    timeCell.z=monthOnly?'yyyy"年"mm"月"':'yyyy"年"mm"月"dd"日"';
-   rows.push({row:[read('supplier'),read('entity'),oa,money(at('amount'),label('amount')),read('summary'),timeCell,...Array.from({length:4},blank)],source:{sheet:name,row:r+1},day:monthOnly?0:Math.floor(timeCell.v),order:rows.length});
+   rows.push({row:[read('supplier'),read('entity'),oa,money(at('amount'),label('amount')),read('summary'),inferred?{t:'s',v:'未对账待定',z:'@'}:timeCell,...Array.from({length:4},blank)],source:{sheet:name,row:r+1},day:monthOnly?0:Math.floor(timeCell.v),order:rows.length});
    count.included++;
   }
   counts.push(count);

@@ -62,9 +62,10 @@
   }
   function render() {
     const sheet = result.sheets[0];
+    const paidColumn = sheet.headers.indexOf('是否已付款');
     $('sheet-title').textContent = sheet.name;
     $('record-count').textContent = sheet.rows.length;
-    $('preview').innerHTML = '<table><thead><tr>' + sheet.headers.map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + sheet.rows.map(row => '<tr>' + row.map(cell => '<td>' + esc(C.formatCell(cell)) + '</td>').join('') + '</tr>').join('') + '</tbody></table>' + (sheet.rows.length ? '' : '<p class="empty">本月没有符合条件的记录，下载仍保留表头。</p>');
+    $('preview').innerHTML = '<table><thead><tr>' + sheet.headers.map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + sheet.rows.map(row => '<tr' + (row[paidColumn]?.v === '已付款' ? ' class="paid"' : '') + '>' + row.map(cell => '<td>' + esc(C.formatCell(cell)) + '</td>').join('') + '</tr>').join('') + '</tbody></table>' + (sheet.rows.length ? '' : '<p class="empty">本月没有符合条件的记录，下载仍保留表头。</p>');
     $('warnings').innerHTML = result.warnings.map(w => '<li>' + esc(w) + '</li>').join('');
     $('warning-count').textContent = result.warnings.length;
     $('warning-panel').hidden = !result.warnings.length;
