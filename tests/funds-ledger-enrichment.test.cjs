@@ -49,6 +49,20 @@ test('无效源OA提示来源不用于匹配，真实十二列表可回读并保
 const applications=(rows,headers=['流程编码'],name='付款申请汇总')=>{const book=X.utils.book_new();X.utils.book_append_sheet(book,sheet(headers,rows),name);return {book,filename:'申请单.xlsx'};};
 const paper=(rows,source,options={})=>C.build(ledger(rows),'台账.xlsx',{month:'2026-11',...options,...(source?{applications:source}:{})});
 const submitted=result=>result.sheets[0].rows.map(row=>row[11].v);
+test('纸质提交状态中文名称降序，同状态保持日期及同日来源顺序，行数据和来源整体移动',()=>{
+ const records=[
+  ledgerRow({'对公付款0A流程号':'','应付款时间':'2026-11-01','摘要':'待核对'}),
+  ledgerRow({'对公付款0A流程号':'OA002','应付款时间':'2026-11-01','摘要':'未提交'}),
+  ledgerRow({'应付款时间':'2026-11-25','摘要':'已提交晚'}),
+  ledgerRow({'应付款时间':'2026-11-06','摘要':'已提交早甲','申请付款金额':0}),
+  ledgerRow({'应付款时间':'2026-11-06','摘要':'已提交早乙'})
+ ];
+ const source=applications([{'流程编码':'OA001'}]),options={today:'2026-11-09',oa:oa([flow()])},base=paper(records,null,options),result=paper(records,source,options),out=result.sheets[0];
+ assert.deepEqual(submitted(result),['已提交','已提交','已提交','未提交','待核对']);assert.deepEqual(out.rows.map(r=>r[4].v),['已提交早甲','已提交早乙','已提交晚','未提交','待核对']);assert.deepEqual(out.sources.map(s=>s.row),[5,6,4,3,2]);
+ for(let i=0;i<out.rows.length;i++){const old=base.sheets[0].sources.findIndex(s=>s.row===out.sources[i].row);assert.deepEqual(out.rows[i].slice(0,11),base.sheets[0].rows[old].slice(0,11));}
+ const book=C.workbook(result),read=X.read(X.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer'}),s=read.Sheets[read.SheetNames[0]];assert.deepEqual([s.E2.v,s.E3.v,s.E4.v,s.E5.v,s.E6.v],out.rows.map(r=>r[4].v));assert.equal(s.D2.v,0);assert.equal(s.J2.v,'已付款');assert.equal(s.L2.v,'已提交');
+ assert.deepEqual(paper(records,null,options).sheets[0],base.sheets[0]);
+});
 test('已付款和已提交审单仍保留申请日期，流程和提交状态在新列之后不串位',()=>{
  const result=paper([ledgerRow({'应付款时间':'2026-11-25'})],applications([{'流程编码':'OA001'}]),{oa:oa([flow()]),today:'2026-11-09'});
  assert.equal(C.formatCell(result.sheets[0].rows[0][10]),'2026年11月16日');assert.deepEqual(extras(result),[['出纳执行付款','人员甲','归档','已付款']]);assert.deepEqual(submitted(result),['已提交']);
@@ -63,12 +77,12 @@ test('纸质审单只按OA出现判断，忽略供应商金额分类签字；重
 test('无申请上传留空，台账缺号占位多号待核对，不借供应商匹配',()=>{
  const records=['','未提交OA','未申请OA','OA001/OA002','OA001；OA002','OA001 OA002','OA001\nOA002','OA001','OA002'].map(code=>ledgerRow({'对公付款0A流程号':code}));
  assert.deepEqual(submitted(paper(records)),Array(records.length).fill(''));
- assert.deepEqual(submitted(paper(records,applications([{'流程编码':'OA001'}]))),[...Array(7).fill('待核对'),'已提交','未提交']);
+ assert.deepEqual(submitted(paper(records,applications([{'流程编码':'OA001'}]))),['已提交','未提交',...Array(7).fill('待核对')]);
 });
 test('申请编号列优先流程编码其次流程编号，只有旧表无新表头才读合同号；空新编号不回退',()=>{
  for(const headers of [['合同号'],['合同号','流程编号'],['合同号','流程编号','流程编码']]){
   const source=applications([{'合同号':'OA001','流程编号':'OA002','流程编码':'OA003'}],headers),records=['OA001','OA002','OA003'].map(code=>ledgerRow({'对公付款0A流程号':code}));
-  assert.deepEqual(submitted(paper(records,source)),records.map((_,i)=>i===headers.length-1?'已提交':'未提交'));
+  const result=paper(records,source);assert.deepEqual(submitted(result),['已提交','未提交','未提交']);for(const record of result.sheets[0].rows)assert.equal(record[11].v,record[2].v==='OA00'+headers.length?'已提交':'未提交');
  }
  const source=applications([{'流程编码':'','流程编号':'OA001','合同号':'OA001'}],['流程编码','流程编号','合同号']);
  const result=paper([ledgerRow()],source);assert.deepEqual(submitted(result),['未提交']);assert.match(result.warnings.join('\n'),/申请单.xlsx.*付款申请汇总!A2.*编号为空/);
@@ -85,7 +99,7 @@ test('申请表优先同名sheet，否则表头唯一候选；多候选或同名
 test('申请编号沿用标准化，数值格式及文本前导零保留，未格式化编号不误匹配',()=>{
  const records=['OA001','000123','123','000000'].map(code=>ledgerRow({'对公付款0A流程号':code}));
  const source=applications([{'流程编码':' ｏａ００１ '},{'流程编码':{t:'n',v:123,z:'000000'}},{'流程编码':{t:'n',v:0,z:'000000'}}]);
- assert.deepEqual(submitted(paper(records,source)),['已提交','已提交','未提交','已提交']);
+ const result=paper(records,source);assert.deepEqual(submitted(result),['已提交','已提交','已提交','未提交']);assert.deepEqual(result.sheets[0].rows.map(row=>row[2].v),['OA001','000123','000000','123']);
 });
 test('申请编号公式有效结果可用，空结果提示，缺缓存或错误阻断且定位，其他列公式不参与',()=>{
  for(const cell of [{t:'n',f:'A99'},{t:'str',f:'A99'},{t:'e',v:23,w:'#REF!'}]){

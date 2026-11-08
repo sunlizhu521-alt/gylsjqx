@@ -188,6 +188,7 @@ function build(book,filename='资金台账.xlsx',options={}){
    record.row[11]={t:'s',v:key?(parsed.codes.has(key)?'已提交':'未提交'):'待核对'};
   }
  }
+ rows.sort((a,b)=>b.row[11].v.localeCompare(a.row[11].v,'zh-CN-u-co-pinyin'));
  const name=month.slice(0,4)+'年'+Number(month.slice(5))+'月正常付款';
  return {month,sheets:[{name,headers:[...HEADERS],rows:rows.map(record=>record.row),sources:rows.map(record=>record.source)}],counts,warnings};
 }

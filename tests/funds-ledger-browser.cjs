@@ -27,7 +27,7 @@ function applications(codes){
  X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([['合同号','流程编码','供应商','金额','是否已签字'],...codes.map(code=>[flow(2),code,'无关供应商',999,'']),[flow(2),'','空流程不得回退',0,'签完字']]),'付款申请汇总');
  X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([['流程编码'],[flow(2)]]),'忽略其他申请');return {book,bytes:write(book)};
 }
-const withPaper=(rows,codes)=>rows.map(row=>[...row.slice(0,11),row[2]?(codes.includes(row[2])?'已提交':'未提交'):'待核对']);
+const withPaper=(rows,codes)=>rows.map(row=>[...row.slice(0,11),row[2]?(codes.includes(row[2])?'已提交':'未提交'):'待核对']).sort((a,b)=>['已提交','未提交','待核对',''].indexOf(a[11])-['已提交','未提交','待核对',''].indexOf(b[11]));
 function fixture(replacement=false){
  const book=X.utils.book_new(),rows=PEOPLE.map(()=>[]),entries=[];
  function add(person,supplier,changes={},expectedDate='2026-11-20',inferred=false){
