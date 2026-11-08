@@ -20,7 +20,7 @@
     for (let index = 0; index < book.SheetNames.length; index++) {
       const sheet = book.Sheets[book.SheetNames[index]], rows = result.sheets[index].rows;
       const paidColumn = result.sheets[index].headers.indexOf('是否已付款');
-      const noWrap = new Set(['对公付款OA流程号','申请付款金额','应付款时间','需要提交付款审单的日期']);
+      const noWrap = new Set(['对公付款OA流程号','申请付款金额','应付款时间','申请付款月份','需要提交付款审单的日期']);
       const wrapColumns = result.sheets[index].headers.map((name,c) => noWrap.has(name) ? -1 : c).filter(c => c >= 0);
       const path = `xl/worksheets/sheet${index + 1}.xml`;
       let xml = await zip.file(path).async('string');

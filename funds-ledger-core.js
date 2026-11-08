@@ -1,7 +1,7 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FundsLedgerCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const HEADERS=['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款','需要提交付款审单的日期','是否提交纸质付款审单'];
+const HEADERS=['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款','申请付款月份','需要提交付款审单的日期','是否提交纸质付款审单'];
 const FIELDS={
  supplier:['供应商名称','供应商'],entity:['付款主体'],oa:['对公付款0A流程号','对公付款OA流程号','OA'],
  amount:['申请付款金额','本次申请付款金额'],summary:['摘要'],due:['应付款时间','应付时间'],estimate:['预估付款时间','预估付款月份'],
@@ -59,7 +59,7 @@ function date(cell,date1904,label,warnings,monthPrecision=false){
   let serial=(stamp-Date.UTC(1899,11,30))/86400000;if(serial<61)serial--;
   return {t:'n',v:serial+time,z:monthPrecision||monthOnly?monthFormat:sourceFormat||'yyyy-mm-dd'};
  }
- warnings.push(label+'：日期无法识别“'+String(value)+'”，未归入任何月份');return copy(cell);
+ warnings.push(label+'：日期无法识别“'+String(value)+'”，保留原文');return copy(cell);
 }
 function estimatedDate(monthCell,termsCell,date1904,monthLabel,termsLabel,warnings){
  valid(monthCell,monthLabel);valid(termsCell,termsLabel);
@@ -108,8 +108,6 @@ function build(book,filename='资金台账.xlsx',options={}){
  const baseline=date({t:'s',v:today},false,'申请日期基准',[]);
  if(baseline.t!=='n')throw Error('申请日期基准必须是有效日期（YYYY-MM-DD）');
  const thisMonday=mondayStamp(X.SSF.parse_date_code(baseline.v));
- const month=options.month===undefined?today.slice(0,7):options.month;
- if(!/^(?:19\d{2}|[2-9]\d{3})-(?:0[1-9]|1[0-2])$/.test(month))throw Error('请选择有效月份（YYYY-MM）');
  const selected=new Set();
  for(const person of PEOPLE){
   const pattern=new RegExp('^对账明细[-－—]?'+person+'(?:[-_（(]?(?:\\d{4}|\\d{8}|\\d{4}[-./]\\d{1,2}[-./]\\d{1,2})[）)]?)?$');
@@ -128,7 +126,7 @@ function build(book,filename='资金台账.xlsx',options={}){
    if(Object.keys(map).every(key=>!at(key)?.f&&!text(at(key))))continue;
    valid(at('negotiated'),label('negotiated'));
    if(text(at('negotiated'))!=='否'){count.excluded++;continue;}
-   const warningCount=warnings.length;let timeCell,inferred=false;
+   let timeCell,inferred=false;
    valid(at('due'),label('due'));
    if(text(at('due')))timeCell=date(at('due'),date1904,label('due'),warnings);
    else{
@@ -142,23 +140,24 @@ function build(book,filename='资金台账.xlsx',options={}){
     }
    }
    const parts=timeCell.t==='n'?X.SSF.parse_date_code(timeCell.v):null;
-   if(!parts||parts.y<1900||parts.y>9999){
-    count.undated++;if(warnings.length===warningCount)warnings.push(filename+' / '+name+' 第'+(r+1)+'行：应付款时间及可用预估付款时间为空，未归入任何月份');continue;
-   }
-   const paymentMonth=String(parts.y).padStart(4,'0')+'-'+String(parts.m).padStart(2,'0');
-   if(paymentMonth!==month){count.excluded++;continue;}
+   const hasDate=parts&&parts.y>=1900&&parts.y<=9999;
+   if(!hasDate)count.undated++;
    const read=key=>copy(valid(at(key),label(key)));valid(at('oa'),label('oa'));
    const oa={t:'s',v:typeof at('oa')?.v==='number'?formatCell(at('oa')):String(at('oa')?.v??''),z:'@'};
-   const monthOnly=timeCell.z&&!/d/i.test(timeCell.z.replace(/"[^"]*"/g,''));
-   timeCell.z=monthOnly?'yyyy"年"mm"月"':'yyyy"年"mm"月"dd"日"';
-   let submissionDate=blank();
-   if(inferred||monthOnly)warnings.push(filename+' / '+name+' 第'+(r+1)+'行：应付款时间'+(inferred?'为“未对账待定”':'只有年月')+'，需要提交付款审单的日期留空；请补充具体付款日期');
+   const monthOnly=hasDate&&timeCell.z&&!/d/i.test(timeCell.z.replace(/"[^"]*"/g,''));
+   if(hasDate)timeCell.z=monthOnly?'yyyy"年"mm"月"':'yyyy"年"mm"月"dd"日"';
+   let submissionDate=blank(),submissionMonth=blank();
+   if(!hasDate||inferred||monthOnly)warnings.push(filename+' / '+name+' 第'+(r+1)+'行：应付款时间'+(inferred?'为“未对账待定”':monthOnly?'只有年月':'为空或无法识别')+'，保留记录，申请付款月份和需要提交付款审单的日期留空；请补充具体付款日期');
    else{
     const stamp=Math.max(thisMonday,mondayStamp(parts)-7*86400000);
     submissionDate=date({t:'d',v:new Date(stamp)},false,'需要提交付款审单的日期',[]);
     submissionDate.z='yyyy"年"mm"月"dd"日"';
+    const submitted=new Date(stamp);
+    submissionMonth=date({t:'d',v:new Date(Date.UTC(submitted.getUTCFullYear(),submitted.getUTCMonth(),1))},false,'申请付款月份',[]);
+    submissionMonth.z='yyyy"年"mm"月"';
    }
-   rows.push({row:[read('supplier'),read('entity'),oa,money(at('amount'),label('amount')),read('summary'),inferred?{t:'s',v:'未对账待定',z:'@'}:timeCell,...Array.from({length:4},blank),submissionDate,blank()],source:{sheet:name,row:r+1},day:monthOnly?0:Math.floor(timeCell.v),order:rows.length});
+   const day=hasDate?Date.UTC(parts.y,parts.m-1,monthOnly?1:parts.d):Infinity;
+   rows.push({row:[read('supplier'),read('entity'),oa,money(at('amount'),label('amount')),read('summary'),inferred?{t:'s',v:'未对账待定',z:'@'}:timeCell,...Array.from({length:4},blank),submissionMonth,submissionDate,blank()],source:{sheet:name,row:r+1},day,order:rows.length});
    count.included++;
   }
   counts.push(count);
@@ -185,12 +184,11 @@ function build(book,filename='资金台账.xlsx',options={}){
   const parsed=parseApplications(options.applications.book,options.applications.filename);warnings.push(...parsed.warnings);
   for(const record of rows){
    const key=oaKey(record.row[2]);
-   record.row[11]={t:'s',v:key?(parsed.codes.has(key)?'已提交':'未提交'):'待核对'};
+   record.row[12]={t:'s',v:key?(parsed.codes.has(key)?'已提交':'未提交'):'待核对'};
   }
  }
- rows.sort((a,b)=>b.row[11].v.localeCompare(a.row[11].v,'zh-CN-u-co-pinyin'));
- const name=month.slice(0,4)+'年'+Number(month.slice(5))+'月正常付款';
- return {month,sheets:[{name,headers:[...HEADERS],rows:rows.map(record=>record.row),sources:rows.map(record=>record.source)}],counts,warnings};
+ rows.sort((a,b)=>b.row[12].v.localeCompare(a.row[12].v,'zh-CN-u-co-pinyin'));
+ return {sheets:[{name:'正常付款',headers:[...HEADERS],rows:rows.map(record=>record.row),sources:rows.map(record=>record.source)}],counts,warnings};
 }
 function mondayStamp(parts){
  const stamp=Date.UTC(parts.y,parts.m-1,parts.d);
@@ -250,7 +248,7 @@ function workbook(result){
  for(const source of result.sheets){
   const sheet=X.utils.aoa_to_sheet([source.headers,...source.rows.map(row=>row.map(copy))]);
   const width=value=>String(value).split(/\r?\n/).reduce((max,line)=>Math.max(max,Array.from(line).reduce((n,ch)=>n+(ch.charCodeAt(0)>255?2:1),0)),0);
-  const limits=[50,40,52,28,72,34,42,42,32,32,34,32];
+  const limits=[50,40,52,28,72,34,42,42,32,32,24,34,32];
   sheet['!cols']=source.headers.map((header,c)=>{
    const contentWidth=source.rows.reduce((max,row)=>Math.max(max,width(formatCell(row[c]))),0);
    return {wch:Math.max(12,width(header)+4,Math.min(limits[c],contentWidth+2))};

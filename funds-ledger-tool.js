@@ -66,7 +66,7 @@
     const paidColumn = sheet.headers.indexOf('是否已付款');
     $('sheet-title').textContent = sheet.name;
     $('record-count').textContent = sheet.rows.length;
-    $('preview').innerHTML = '<table><thead><tr>' + sheet.headers.map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + sheet.rows.map(row => '<tr' + (row[paidColumn]?.v === '已付款' ? ' class="paid"' : '') + '>' + row.map(cell => '<td>' + esc(C.formatCell(cell)) + '</td>').join('') + '</tr>').join('') + '</tbody></table>' + (sheet.rows.length ? '' : '<p class="empty">本月没有符合条件的记录，下载仍保留表头。</p>');
+    $('preview').innerHTML = '<table><thead><tr>' + sheet.headers.map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + sheet.rows.map(row => '<tr' + (row[paidColumn]?.v === '已付款' ? ' class="paid"' : '') + '>' + row.map(cell => '<td>' + esc(C.formatCell(cell)) + '</td>').join('') + '</tr>').join('') + '</tbody></table>' + (sheet.rows.length ? '' : '<p class="empty">没有符合条件的记录，下载仍保留表头。</p>');
     $('warnings').innerHTML = result.warnings.map(w => '<li>' + esc(w) + '</li>').join('');
     $('warning-count').textContent = result.warnings.length;
     $('warning-panel').hidden = !result.warnings.length;
@@ -81,7 +81,6 @@
       if (button) { button.hidden = source.state === 'empty'; button.disabled = exporting; }
     }
     $('download').disabled = exporting || !result;
-    $('month').disabled = exporting;
   }
   function refresh() {
     clear();
@@ -90,10 +89,9 @@
     if (reading.length) $('status').textContent = '正在读取：' + reading.map(source => source.label).join('、') + '…';
     else if (failed.length) $('status').textContent = failed.map(source => source.label + '读取失败：' + source.error).join('\n');
     else if (!sources.ledger.book) $('status').textContent = '请选择采购付款台账；OA流程表和付款申请单汇总可选。';
-    else if (!$('month').value) $('status').textContent = '请选择汇总月份。';
     else {
       try {
-        const options = {month:$('month').value};
+        const options = {};
         if (sources.oa.book) options.oa = {book:sources.oa.book, filename:sources.oa.filename};
         if (sources.applications.book) options.applications = {book:sources.applications.book, filename:sources.applications.filename};
         result = C.build(sources.ledger.book, sources.ledger.filename, options);
@@ -106,8 +104,6 @@
     $('status').textContent = '工具加载失败，请刷新页面后重试。';
     return;
   }
-  $('month').value = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit'}).format(new Date());
-  $('month').addEventListener('change', refresh);
   for (const [role, source] of Object.entries(sources)) {
     $(source.input).addEventListener('change', async () => {
       const file = $(source.input).files[0];
@@ -126,7 +122,7 @@
         if (current !== source.version) return;
         const book = await readBook(bytes);
         if (current !== source.version) return;
-        if (role === 'ledger') C.build(book, file.name, {month:$('month').value || undefined});
+        if (role === 'ledger') C.build(book, file.name);
         else if (role === 'oa') C.validateOA(book, file.name);
         else C.validateApplications(book, file.name);
         source.book = book;
