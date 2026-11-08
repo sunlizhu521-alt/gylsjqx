@@ -155,6 +155,9 @@
   refresh();
   $('download').addEventListener('click', async () => {
     if (!result || exporting) return;
+    // A tab may stay open across Monday; refresh both preview and export before downloading.
+    refresh();
+    if (!result) return;
     exporting = true;
     controls();
     let url;

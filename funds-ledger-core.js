@@ -1,7 +1,7 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FundsLedgerCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const HEADERS=['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款','是否提交纸质付款审单'];
+const HEADERS=['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','需要提交付款审单的日期','当前节点','未操作者','流程状态','是否已付款','是否提交纸质付款审单'];
 const FIELDS={
  supplier:['供应商名称','供应商'],entity:['付款主体'],oa:['对公付款0A流程号','对公付款OA流程号','OA'],
  amount:['申请付款金额','本次申请付款金额'],summary:['摘要'],due:['应付款时间','应付时间'],estimate:['预估付款时间','预估付款月份'],
@@ -103,7 +103,12 @@ function table(sheet,sheetName,filename,fields=FIELDS,required=REQUIRED,probe=fa
 }
 function build(book,filename='资金台账.xlsx',options={}){
  if(!book?.SheetNames||!book?.Sheets)throw Error('请先上传可读取的资金台账');
- const month=options.month===undefined?new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit'}).format(new Date()):options.month;
+ const today=options.today===undefined?new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()):options.today;
+ if(typeof today!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(today))throw Error('申请日期基准必须是有效日期（YYYY-MM-DD）');
+ const baseline=date({t:'s',v:today},false,'申请日期基准',[]);
+ if(baseline.t!=='n')throw Error('申请日期基准必须是有效日期（YYYY-MM-DD）');
+ const thisMonday=mondayStamp(X.SSF.parse_date_code(baseline.v));
+ const month=options.month===undefined?today.slice(0,7):options.month;
  if(!/^(?:19\d{2}|[2-9]\d{3})-(?:0[1-9]|1[0-2])$/.test(month))throw Error('请选择有效月份（YYYY-MM）');
  const selected=new Set();
  for(const person of PEOPLE){
@@ -146,7 +151,14 @@ function build(book,filename='资金台账.xlsx',options={}){
    const oa={t:'s',v:typeof at('oa')?.v==='number'?formatCell(at('oa')):String(at('oa')?.v??''),z:'@'};
    const monthOnly=timeCell.z&&!/d/i.test(timeCell.z.replace(/"[^"]*"/g,''));
    timeCell.z=monthOnly?'yyyy"年"mm"月"':'yyyy"年"mm"月"dd"日"';
-   rows.push({row:[read('supplier'),read('entity'),oa,money(at('amount'),label('amount')),read('summary'),inferred?{t:'s',v:'未对账待定',z:'@'}:timeCell,...Array.from({length:5},blank)],source:{sheet:name,row:r+1},day:monthOnly?0:Math.floor(timeCell.v),order:rows.length});
+   let submissionDate=blank();
+   if(inferred||monthOnly)warnings.push(filename+' / '+name+' 第'+(r+1)+'行：应付款时间'+(inferred?'为“未对账待定”':'只有年月')+'，需要提交付款审单的日期留空；请补充具体付款日期');
+   else{
+    const stamp=Math.max(thisMonday,mondayStamp(parts)-7*86400000);
+    submissionDate=date({t:'d',v:new Date(stamp)},false,'需要提交付款审单的日期',[]);
+    submissionDate.z='yyyy"年"mm"月"dd"日"';
+   }
+   rows.push({row:[read('supplier'),read('entity'),oa,money(at('amount'),label('amount')),read('summary'),inferred?{t:'s',v:'未对账待定',z:'@'}:timeCell,submissionDate,...Array.from({length:5},blank)],source:{sheet:name,row:r+1},day:monthOnly?0:Math.floor(timeCell.v),order:rows.length});
    count.included++;
   }
   counts.push(count);
@@ -156,16 +168,16 @@ function build(book,filename='资金台账.xlsx',options={}){
   const parsed=parseOA(options.oa.book,options.oa.filename);warnings.push(...parsed.warnings);
   for(const record of rows){
    const label=filename+' / '+record.source.sheet+' 第'+record.source.row+'行',key=oaKey(record.row[2]),matches=parsed.byOA.get(key)||[];
-   record.row[9]={t:'s',v:'待核对'};
+   record.row[10]={t:'s',v:'待核对'};
    if(!key){warnings.push(label+'：没有可唯一匹配的 OA 编号，是否已付款待核对');continue;}
    if(!matches.length){warnings.push(label+'：OA“'+key+'”在 '+parsed.filename+' / '+parsed.sheetName+' 未匹配，是否已付款待核对');continue;}
    const unique=new Set(matches.map(match=>JSON.stringify(['node','pending','state'].map(field=>String(match.values[field].v??'').normalize('NFKC').trim()))));
    const sources=matches.map(match=>parsed.filename+' / '+parsed.sheetName+' 第'+match.row+'行').join('、');
    if(unique.size!==1){warnings.push(label+'：OA“'+key+'”的流程信息冲突，未任选记录；来源：'+sources);continue;}
-   const values=matches[0].values;for(const [column,field]of [[6,'node'],[7,'pending'],[8,'state']])record.row[column]=copy(values[field]);
+   const values=matches[0].values;for(const [column,field]of [[7,'node'],[8,'pending'],[9,'state']])record.row[column]=copy(values[field]);
    const state=norm(values.state.v);
-   if(['归档','已归档'].includes(state))record.row[9]={t:'s',v:'已付款'};
-   else if(state==='未归档')record.row[9]={t:'s',v:'未付款'};
+   if(['归档','已归档'].includes(state))record.row[10]={t:'s',v:'已付款'};
+   else if(state==='未归档')record.row[10]={t:'s',v:'未付款'};
    else warnings.push(label+'：OA“'+key+'”流程状态为空或无法识别，是否已付款待核对；来源：'+sources);
   }
  }
@@ -173,11 +185,15 @@ function build(book,filename='资金台账.xlsx',options={}){
   const parsed=parseApplications(options.applications.book,options.applications.filename);warnings.push(...parsed.warnings);
   for(const record of rows){
    const key=oaKey(record.row[2]);
-   record.row[10]={t:'s',v:key?(parsed.codes.has(key)?'已提交':'未提交'):'待核对'};
+   record.row[11]={t:'s',v:key?(parsed.codes.has(key)?'已提交':'未提交'):'待核对'};
   }
  }
  const name=month.slice(0,4)+'年'+Number(month.slice(5))+'月正常付款';
  return {month,sheets:[{name,headers:[...HEADERS],rows:rows.map(record=>record.row),sources:rows.map(record=>record.source)}],counts,warnings};
+}
+function mondayStamp(parts){
+ const stamp=Date.UTC(parts.y,parts.m-1,parts.d);
+ return stamp-((new Date(stamp).getUTCDay()+6)%7)*86400000;
 }
 function oaKey(cell){
  const raw=String(typeof cell?.v==='number'?formatCell(cell):cell?.v??'').normalize('NFKC').trim();
@@ -233,12 +249,12 @@ function workbook(result){
  for(const source of result.sheets){
   const sheet=X.utils.aoa_to_sheet([source.headers,...source.rows.map(row=>row.map(copy))]);
   const width=value=>String(value).split(/\r?\n/).reduce((max,line)=>Math.max(max,Array.from(line).reduce((n,ch)=>n+(ch.charCodeAt(0)>255?2:1),0)),0);
-  const limits=[50,40,52,28,72,34,42,42,32,32,32];
+  const limits=[50,40,52,28,72,34,34,42,42,32,32,32];
   sheet['!cols']=source.headers.map((header,c)=>{
    const contentWidth=source.rows.reduce((max,row)=>Math.max(max,width(formatCell(row[c]))),0);
    return {wch:Math.max(12,width(header)+4,Math.min(limits[c],contentWidth+2))};
   });
-  for(let r=0;r<=source.rows.length;r++)for(const c of [4,6,7,8,9]){const cell=sheet[X.utils.encode_cell({r,c})];if(cell)cell.s={alignment:{wrapText:true,vertical:'top'}};}
+  for(let r=0;r<=source.rows.length;r++)for(const c of [4,7,8,9,10]){const cell=sheet[X.utils.encode_cell({r,c})];if(cell)cell.s={alignment:{wrapText:true,vertical:'top'}};}
   sheet['!autofilter']={ref:'A1:'+X.utils.encode_col(source.headers.length-1)+(source.rows.length+1)};
   X.utils.book_append_sheet(book,sheet,source.name);
  }

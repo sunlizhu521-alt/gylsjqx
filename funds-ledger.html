@@ -21,7 +21,7 @@
     .preview{max-height:500px;overflow:auto}table{border-collapse:collapse;min-width:100%;font-size:13px}
     th,td{border:1px solid #d6dee8;text-align:center;vertical-align:middle;padding:8px 12px;white-space:pre-wrap;min-width:120px}
     th{white-space:nowrap;position:sticky;top:0;background:#315b9d;color:#fff}td{background:#fff;color:#172033;max-width:430px;overflow-wrap:anywhere}
-    td:nth-child(3),td:nth-child(4),td:nth-child(6){white-space:nowrap;max-width:none;overflow-wrap:normal}
+    td:nth-child(3),td:nth-child(4),td:nth-child(6),td:nth-child(7){white-space:nowrap;max-width:none;overflow-wrap:normal}
     tr.paid td{background:#ff0000}
     .count{color:var(--muted);font-size:.95rem;font-weight:400}.empty{color:var(--muted)}#warnings{color:var(--text)}
     [hidden]{display:none!important}@media(max-width:700px){main{padding:12px}section{padding:14px}.actions{align-items:stretch;flex-direction:column}}
@@ -43,6 +43,7 @@
       <li>读取李奇、徐英、邢芳芳、操思敏、孙立柱的对账明细，只保留“是否谈判付款＝否”的记录；已结清、有无OA号均保留。</li>
       <li>应付款时间优先取“应付款时间／应付时间”，为空再取预估时间；按最终日期选择月份并升序排列。同日保持原顺序。</li>
       <li>应付时间和预估时间都为空时，按所属月份最后一天＋账期天数＋7天推算，仅用于月份筛选和排序；应付款时间显示“未对账待定”。月账期按每月30天，5个月为150天。</li>
+      <li>需要提交付款审单的日期：下周及以后的款项取应付日期上一周的周一；本周及逾期款取本周周一。按北京时间判断，已提交和已付款记录仍显示日期。应付时间只有年月或为“未对账待定”时留空并提示；下载时重新计算并同步预览。</li>
       <li>每条明细单独保留。公式采用文件保存的有效结果，导出为值；原文件不修改。</li>
       <li>下载命名为“资金台账整理-日期-V版本号.xlsx”；日期按北京时间，同一天在当前浏览器内依次递增，生成失败不递增。</li>
       <li>日期无法识别，或缺少有效月份、账期而无法推算时，列出来源提示，不归入任何月份；必要公式结果异常时需修正源表后再下载。</li>
@@ -60,8 +61,8 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-ledger-core.js?v=20261109-paper-submission"></script>
-<script src="funds-ledger-export.js?v=20261109-paper-submission"></script>
-<script src="funds-ledger-tool.js?v=20261109-paper-submission"></script>
+<script src="funds-ledger-core.js?v=20261109-submission-date"></script>
+<script src="funds-ledger-export.js?v=20261109-submission-date"></script>
+<script src="funds-ledger-tool.js?v=20261109-submission-date"></script>
 </body>
 </html>
