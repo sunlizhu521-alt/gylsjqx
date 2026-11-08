@@ -1,7 +1,7 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FundsLedgerCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const HEADERS=['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','需要提交付款审单的日期','当前节点','未操作者','流程状态','是否已付款','是否提交纸质付款审单'];
+const HEADERS=['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款','需要提交付款审单的日期','是否提交纸质付款审单'];
 const FIELDS={
  supplier:['供应商名称','供应商'],entity:['付款主体'],oa:['对公付款0A流程号','对公付款OA流程号','OA'],
  amount:['申请付款金额','本次申请付款金额'],summary:['摘要'],due:['应付款时间','应付时间'],estimate:['预估付款时间','预估付款月份'],
@@ -158,7 +158,7 @@ function build(book,filename='资金台账.xlsx',options={}){
     submissionDate=date({t:'d',v:new Date(stamp)},false,'需要提交付款审单的日期',[]);
     submissionDate.z='yyyy"年"mm"月"dd"日"';
    }
-   rows.push({row:[read('supplier'),read('entity'),oa,money(at('amount'),label('amount')),read('summary'),inferred?{t:'s',v:'未对账待定',z:'@'}:timeCell,submissionDate,...Array.from({length:5},blank)],source:{sheet:name,row:r+1},day:monthOnly?0:Math.floor(timeCell.v),order:rows.length});
+   rows.push({row:[read('supplier'),read('entity'),oa,money(at('amount'),label('amount')),read('summary'),inferred?{t:'s',v:'未对账待定',z:'@'}:timeCell,...Array.from({length:4},blank),submissionDate,blank()],source:{sheet:name,row:r+1},day:monthOnly?0:Math.floor(timeCell.v),order:rows.length});
    count.included++;
   }
   counts.push(count);
@@ -168,16 +168,16 @@ function build(book,filename='资金台账.xlsx',options={}){
   const parsed=parseOA(options.oa.book,options.oa.filename);warnings.push(...parsed.warnings);
   for(const record of rows){
    const label=filename+' / '+record.source.sheet+' 第'+record.source.row+'行',key=oaKey(record.row[2]),matches=parsed.byOA.get(key)||[];
-   record.row[10]={t:'s',v:'待核对'};
+   record.row[9]={t:'s',v:'待核对'};
    if(!key){warnings.push(label+'：没有可唯一匹配的 OA 编号，是否已付款待核对');continue;}
    if(!matches.length){warnings.push(label+'：OA“'+key+'”在 '+parsed.filename+' / '+parsed.sheetName+' 未匹配，是否已付款待核对');continue;}
    const unique=new Set(matches.map(match=>JSON.stringify(['node','pending','state'].map(field=>String(match.values[field].v??'').normalize('NFKC').trim()))));
    const sources=matches.map(match=>parsed.filename+' / '+parsed.sheetName+' 第'+match.row+'行').join('、');
    if(unique.size!==1){warnings.push(label+'：OA“'+key+'”的流程信息冲突，未任选记录；来源：'+sources);continue;}
-   const values=matches[0].values;for(const [column,field]of [[7,'node'],[8,'pending'],[9,'state']])record.row[column]=copy(values[field]);
+   const values=matches[0].values;for(const [column,field]of [[6,'node'],[7,'pending'],[8,'state']])record.row[column]=copy(values[field]);
    const state=norm(values.state.v);
-   if(['归档','已归档'].includes(state))record.row[10]={t:'s',v:'已付款'};
-   else if(state==='未归档')record.row[10]={t:'s',v:'未付款'};
+   if(['归档','已归档'].includes(state))record.row[9]={t:'s',v:'已付款'};
+   else if(state==='未归档')record.row[9]={t:'s',v:'未付款'};
    else warnings.push(label+'：OA“'+key+'”流程状态为空或无法识别，是否已付款待核对；来源：'+sources);
   }
  }
@@ -249,12 +249,12 @@ function workbook(result){
  for(const source of result.sheets){
   const sheet=X.utils.aoa_to_sheet([source.headers,...source.rows.map(row=>row.map(copy))]);
   const width=value=>String(value).split(/\r?\n/).reduce((max,line)=>Math.max(max,Array.from(line).reduce((n,ch)=>n+(ch.charCodeAt(0)>255?2:1),0)),0);
-  const limits=[50,40,52,28,72,34,34,42,42,32,32,32];
+  const limits=[50,40,52,28,72,34,42,42,32,32,34,32];
   sheet['!cols']=source.headers.map((header,c)=>{
    const contentWidth=source.rows.reduce((max,row)=>Math.max(max,width(formatCell(row[c]))),0);
    return {wch:Math.max(12,width(header)+4,Math.min(limits[c],contentWidth+2))};
   });
-  for(let r=0;r<=source.rows.length;r++)for(const c of [4,7,8,9,10]){const cell=sheet[X.utils.encode_cell({r,c})];if(cell)cell.s={alignment:{wrapText:true,vertical:'top'}};}
+  for(let r=0;r<=source.rows.length;r++)for(const c of [4,6,7,8,9]){const cell=sheet[X.utils.encode_cell({r,c})];if(cell)cell.s={alignment:{wrapText:true,vertical:'top'}};}
   sheet['!autofilter']={ref:'A1:'+X.utils.encode_col(source.headers.length-1)+(source.rows.length+1)};
   X.utils.book_append_sheet(book,sheet,source.name);
  }

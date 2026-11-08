@@ -10,7 +10,7 @@ function set(b,h,cell,r=2){b.Sheets['对账明细-李奇'][X.utils.encode_cell({
 test('单月单表12列，仅谈判否筛选，已结清仍保留且结清列无需存在或可含错误',()=>{
  const records=[row({'是否结清':'是'}),row({'是否结清':'否'}),row({'是否结清':{t:'e',v:23}}),row({'是否谈判付款':' 否 '}),row({'是否谈判付款':'是'}),row({'是否谈判付款':''}),row({'是否谈判付款':'正常付款'})],b=book();b.Sheets['对账明细-李奇']=sheet(records,[...H,'是否结清']);
  const before=JSON.stringify(b),r=build(b);assert.equal(r.sheets.length,1);assert.equal(r.sheets[0].name,'2026年11月正常付款');assert.equal(rows(r).length,4);assert(rows(r).every(row=>row.length===12));assert.deepEqual(r.counts[0],{sheet:'对账明细-李奇',included:4,excluded:3,undated:0});assert.equal(JSON.stringify(b),before);assert.equal(rows(build(book([row()]))).length,1);
- assert.deepEqual(C.HEADERS,['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','需要提交付款审单的日期','当前节点','未操作者','流程状态','是否已付款','是否提交纸质付款审单']);assert(rows(r).every(row=>row.slice(7).every(c=>c.v==='')));
+ assert.deepEqual(C.HEADERS,['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款','需要提交付款审单的日期','是否提交纸质付款审单']);assert(rows(r).every(row=>row.filter((_,c)=>c>=6&&c!==10).every(c=>c.v==='')));
 });
 test('应付款时间优先，空才用预估日期；不依OA分表，无OA与未提交OA仍可入当月',()=>{
  const r=build(book([row(),row({'对公付款0A流程号':'','应付款时间':'','预估付款时间':'2026-11-02'}),row({'对公付款0A流程号':'未提交OA','应付款时间':'2026-11-03','预估付款时间':'2026-12-01'}),row({'应付款时间':'2026-12-01','预估付款时间':'2026-11-01'})]));
@@ -83,16 +83,16 @@ test('北京时间当前月份默认，空值及不合法年月阻断，表头�
 test('审单日期：本周及逾期取本周一，未来取前一周周一，周日和周一边界正确',()=>{
  const cases=[['01','09'],['06','09'],['09','09'],['12','09'],['15','09'],['16','09'],['18','09'],['22','09'],['23','16'],['25','16'],['30','23']];
  const b=book(cases.map(([due])=>row({'应付款时间':'2026-11-'+due}))),before=JSON.stringify(b),result=build(b);
- assert.deepEqual(rows(result).map(r=>C.formatCell(r[6])),cases.map(([,day])=>'2026年11月'+day+'日'));assert.equal(JSON.stringify(b),before);
- assert(rows(result).every(r=>r[6].t==='n'&&Number.isInteger(r[6].v)&&r[6].z==='yyyy"年"mm"月"dd"日"'&&!r[6].f));
+ assert.deepEqual(rows(result).map(r=>C.formatCell(r[10])),cases.map(([,day])=>'2026年11月'+day+'日'));assert.equal(JSON.stringify(b),before);
+ assert(rows(result).every(r=>r[10].t==='n'&&Number.isInteger(r[10].v)&&r[10].z==='yyyy"年"mm"月"dd"日"'&&!r[10].f));
  const out=C.workbook(result),read=X.read(X.write(out,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true}),s=read.Sheets[read.SheetNames[0]];
- assert.equal(s.G1.v,'需要提交付款审单的日期');assert.equal(s.G2.t,'n');assert.equal(s.G2.w,'2026年11月09日');assert.equal(s.G2.z,'yyyy"年"mm"月"dd"日"');assert.equal(s['!autofilter'].ref,'A1:L12');assert(out.Sheets[out.SheetNames[0]]['!cols'][6].wch>=26);
+ assert.equal(s.K1.v,'需要提交付款审单的日期');assert.equal(s.K2.t,'n');assert.equal(s.K2.w,'2026年11月09日');assert.equal(s.K2.z,'yyyy"年"mm"月"dd"日"');assert.equal(s['!autofilter'].ref,'A1:L12');assert(out.Sheets[out.SheetNames[0]]['!cols'][10].wch>=26);
 });
 test('审单日期跨月跨年，不以选中月份代替当前周；同一文件基准日期变化后重算',()=>{
  for(const [today,due,expected]of [['2026-12-31','2027-01-01','2026年12月28日'],['2026-12-31','2027-01-11','2027年01月04日'],['2026-03-01','2026-03-02','2026年02月23日'],['2026-03-01','2026-03-09','2026年03月02日'],['2026-11-09','2026-10-01','2026年11月09日']]){
-  const result=C.build(book([row({'应付款时间':due})]),'跨月台账.xlsx',{month:due.slice(0,7),today});assert.equal(C.formatCell(rows(result)[0][6]),expected);
+  const result=C.build(book([row({'应付款时间':due})]),'跨月台账.xlsx',{month:due.slice(0,7),today});assert.equal(C.formatCell(rows(result)[0][10]),expected);
  }
- const b=book([row({'应付款时间':'2026-11-06'})]);for(const [today,expected]of [['2026-11-08','2026年11月02日'],['2026-11-09','2026年11月09日'],['2026-11-16','2026年11月16日']])assert.equal(C.formatCell(rows(C.build(b,'台账.xlsx',{month:'2026-11',today}))[0][6]),expected);
+ const b=book([row({'应付款时间':'2026-11-06'})]);for(const [today,expected]of [['2026-11-08','2026年11月02日'],['2026-11-09','2026年11月09日'],['2026-11-16','2026年11月16日']])assert.equal(C.formatCell(rows(C.build(b,'台账.xlsx',{month:'2026-11',today}))[0][10]),expected);
  for(const today of ['',null,'2026-11','2026-11-9','2026-02-30','2026-13-01','2026-00-01','0000-01-01'])assert.throws(()=>C.build(b,'台账.xlsx',{month:'2026-11',today}),/基准.*有效日期/);
 });
 test('缺日或内部推算不生成审单日期，明确预估可计算，提示来源但仍可导出',()=>{
@@ -103,19 +103,19 @@ test('缺日或内部推算不生成审单日期，明确预估可计算，提�
   row({'应付款时间':'','预估付款时间':'','所属月份':'2026-08','账期':'60天'}),
   row({'应付款时间':'','预估付款时间':'2026-11-25'})
  ],[...H,'所属月份','账期']);const result=build(b);
- assert.deepEqual(rows(result).map(r=>C.formatCell(r[6])),['','','','','2026年11月16日']);assert.equal(result.warnings.length,4);
+ assert.deepEqual(rows(result).map(r=>C.formatCell(r[10])),['','','','','2026年11月16日']);assert.equal(result.warnings.length,4);
  for(const sourceRow of [2,3,4,5])assert(result.warnings.some(w=>w.includes('台账.xlsx / 对账明细-李奇 第'+sourceRow+'行')&&w.includes('补充具体付款日期')));
- const out=C.workbook(result);assert.equal(out.Sheets[out.SheetNames[0]].G2.v,'');assert.equal(out.Sheets[out.SheetNames[0]].G6.t,'n');
- const formatted=book();formatted.Sheets['对账明细-李奇']=sheet([row({'应付款时间':'','预估付款月份':'2026-11-25'})],H.map(h=>h==='预估付款时间'?'预估付款月份':h));assert.equal(rows(build(formatted))[0][6].v,'');
+ const out=C.workbook(result);assert.equal(out.Sheets[out.SheetNames[0]].K2.v,'');assert.equal(out.Sheets[out.SheetNames[0]].K6.t,'n');
+ const formatted=book();formatted.Sheets['对账明细-李奇']=sheet([row({'应付款时间':'','预估付款月份':'2026-11-25'})],H.map(h=>h==='预估付款时间'?'预估付款月份':h));assert.equal(rows(build(formatted))[0][10].v,'');
 });
 test('审单日期用有效公式及1904日期的日历日期，不带时分秒',()=>{
  const b=book([row({'应付款时间':{t:'n',f:'DATE(2026,11,25)',v:44889.75,z:'yyyy-mm-dd hh:mm'}})]);b.Workbook={WBProps:{date1904:true}};
- const result=build(b);assert.equal(C.formatCell(rows(result)[0][5]),'2026年11月25日');assert.equal(C.formatCell(rows(result)[0][6]),'2026年11月16日');assert(!rows(result)[0][6].f);
+ const result=build(b);assert.equal(C.formatCell(rows(result)[0][5]),'2026年11月25日');assert.equal(C.formatCell(rows(result)[0][10]),'2026年11月16日');assert(!rows(result)[0][10].f);
 });
 test('默认基准按北京时间，跨周午夜立即变更，不依机器时区',t=>{
  t.mock.timers.enable({apis:['Date'],now:new Date('2026-11-08T15:59:59Z')});const b=book([row()]);
- assert.equal(C.formatCell(rows(C.build(b,'台账.xlsx',{month:'2026-11'}))[0][6]),'2026年11月02日');
+ assert.equal(C.formatCell(rows(C.build(b,'台账.xlsx',{month:'2026-11'}))[0][10]),'2026年11月02日');
  t.mock.timers.setTime(Date.parse('2026-11-08T16:00:00Z'));
- assert.equal(C.formatCell(rows(C.build(b,'台账.xlsx',{month:'2026-11'}))[0][6]),'2026年11月09日');
+ assert.equal(C.formatCell(rows(C.build(b,'台账.xlsx',{month:'2026-11'}))[0][10]),'2026年11月09日');
  assert.equal(C.build(book(),'台账.xlsx',{today:'2027-01-01'}).month,'2027-01');
 });
