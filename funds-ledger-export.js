@@ -13,14 +13,14 @@
     const xf = (format, wrap, header = false, paid = false) => `<xf numFmtId="${format}" fontId="${header ? 1 : 0}" fillId="${header ? 3 : paid ? 4 : 2}" borderId="1" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="${wrap ? 1 : 0}" shrinkToFit="0"/></xf>`;
     const formats = original.map(s => s.match(/\bnumFmtId="(\d+)"/)?.[1] || '0');
     const fonts = '<fonts count="2"><font><sz val="11"/><color rgb="FF172033"/><name val="等线"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="等线"/></font></fonts>';
-    const fills = '<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFFFF"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF315B9D"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"/><bgColor indexed="64"/></patternFill></fill></fills>';
+    const fills = '<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFFFF"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF315B9D"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFF9999"/><bgColor indexed="64"/></patternFill></fill></fills>';
     const borders = '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border>' + ['left', 'right', 'top', 'bottom'].map(side => `<${side} style="thin"><color rgb="FFD6DEE8"/></${side}>`).join('') + '<diagonal/></border></borders>';
     styles = styles.replace(/<fonts\b[^>]*>[\s\S]*?<\/fonts>/, fonts).replace(/<fills\b[^>]*>[\s\S]*?<\/fills>/, fills).replace(/<borders\b[^>]*>[\s\S]*?<\/borders>/, borders).replace(/<cellXfs\b[^>]*>[\s\S]*?<\/cellXfs>/, `<cellXfs count="${count * 4 + 1}">${formats.map(f => xf(f, false)).join('')}${formats.map(f => xf(f, true)).join('')}${formats.map(f => xf(f, false, false, true)).join('')}${formats.map(f => xf(f, true, false, true)).join('')}${xf(0, false, true)}</cellXfs>`);
     zip.file('xl/styles.xml', styles);
     for (let index = 0; index < book.SheetNames.length; index++) {
       const sheet = book.Sheets[book.SheetNames[index]], rows = result.sheets[index].rows;
       const paidColumn = result.sheets[index].headers.indexOf('是否已付款');
-      const noWrap = new Set(['对公付款OA流程号','申请付款金额','应付款时间','申请付款月份','需要提交付款审单的日期']);
+      const noWrap = new Set(['采购跟单员','对公付款OA流程号','申请付款金额','应付款时间','申请付款月份','需要提交付款审单的日期']);
       const wrapColumns = result.sheets[index].headers.map((name,c) => noWrap.has(name) ? -1 : c).filter(c => c >= 0);
       const path = `xl/worksheets/sheet${index + 1}.xml`;
       let xml = await zip.file(path).async('string');

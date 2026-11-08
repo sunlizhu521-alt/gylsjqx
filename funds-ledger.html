@@ -20,8 +20,8 @@
     .preview{max-height:500px;overflow:auto}table{border-collapse:collapse;min-width:100%;font-size:13px}
     th,td{border:1px solid #d6dee8;text-align:center;vertical-align:middle;padding:8px 12px;white-space:pre-wrap;min-width:120px}
     th{white-space:nowrap;position:sticky;top:0;background:#315b9d;color:#fff}td{background:#fff;color:#172033;max-width:430px;overflow-wrap:anywhere}
-    td:nth-child(3),td:nth-child(4),td:nth-child(6),td:nth-child(11),td:nth-child(12){white-space:nowrap;max-width:none;overflow-wrap:normal}
-    tr.paid td{background:#ff0000}
+    td:nth-child(1),td:nth-child(4),td:nth-child(5),td:nth-child(7),td:nth-child(12),td:nth-child(13){white-space:nowrap;max-width:none;overflow-wrap:normal}
+    tr.paid td{background:#ff9999}
     .count{color:var(--muted);font-size:.95rem;font-weight:400}.empty{color:var(--muted)}#warnings{color:var(--text)}
     [hidden]{display:none!important}@media(max-width:700px){main{padding:12px}section{padding:14px}.actions{align-items:stretch;flex-direction:column}}
   </style>
@@ -38,7 +38,7 @@
     </div></div>
     <div class="actions"><button id="download" disabled>下载资金台账整理表</button><p id="status" role="status" aria-live="polite">正在加载工具…</p></div>
     <details><summary>查看整理规则</summary><ul>
-      <li>读取李奇、徐英、邢芳芳、操思敏、孙立柱的对账明细，只保留“是否谈判付款＝否”的记录；已结清、有无OA号均保留。</li>
+      <li>读取李奇、徐英、邢芳芳、操思敏、孙立柱的对账明细，只保留“是否谈判付款＝否”的记录；已结清、有无OA号均保留。首列采购跟单员取来源工作表对应的人员姓名。</li>
       <li>应付款时间优先取“应付款时间／应付时间”，为空再取预估时间；不按月份排除记录。按“是否提交纸质付款审单”名称降序排列（已提交、未提交、待核对、空白）；同状态内按应付款时间升序，同日保持原顺序，无有效日期的记录排在同状态的末尾。</li>
       <li>应付时间和预估时间都为空时，按所属月份最后一天＋账期天数＋7天推算，仅用于排序；应付款时间显示“未对账待定”。月账期按每月30天，5个月为150天。</li>
       <li>需要提交付款审单的日期：下周及以后的款项取应付日期上一周的周一；本周及逾期款取本周周一。按北京时间判断，已提交和已付款记录仍显示日期。应付时间只有年月或为“未对账待定”时留空并提示；下载时重新计算并同步预览。</li>
@@ -48,7 +48,7 @@
       <li>日期无法识别，或缺少有效月份、账期而无法推算时，列出来源提示，保留记录，申请付款月份和提交日期留空；必要公式结果异常时需修正源表后再下载。</li>
       <li>OA表按“流程编号／流程编码”精确匹配台账付款OA号。同号流程信息一致只读取一次，冲突时显示待核对。</li>
       <li>“归档／已归档”为已付款，“未归档”为未付款；编号缺失、未找到或状态异常为待核对。不根据当前节点推断已付款。未上传OA表时流程字段留空。</li>
-      <li>“已付款”的记录整行标红；导出为普通填充色，下载后可手动改色。</li>
+      <li>“已付款”的记录整行标浅红；导出为普通填充色，下载后可手动改色。</li>
       <li>纸质付款审单仅按OA号匹配申请汇总：找到为“已提交”，未找到为“未提交”，台账缺号或多号为“待核对”；未上传申请汇总时留空。优先读取流程编码，其次流程编号，旧文件兼容合同号。</li>
       <li>仅在本机浏览器处理，切换工具保留本次内容；刷新后重新上传。</li>
     </ul></details>
@@ -60,8 +60,8 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-ledger-core.js?v=20261109-application-month"></script>
-<script src="funds-ledger-export.js?v=20261109-application-month"></script>
-<script src="funds-ledger-tool.js?v=20261109-application-month"></script>
+<script src="funds-ledger-core.js?v=20261109-follower-light-red"></script>
+<script src="funds-ledger-export.js?v=20261109-follower-light-red"></script>
+<script src="funds-ledger-tool.js?v=20261109-follower-light-red"></script>
 </body>
 </html>
