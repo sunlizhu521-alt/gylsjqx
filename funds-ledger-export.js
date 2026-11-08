@@ -19,7 +19,7 @@
     zip.file('xl/styles.xml', styles);
     for (let index = 0; index < book.SheetNames.length; index++) {
       const sheet = book.Sheets[book.SheetNames[index]], rows = result.sheets[index].rows;
-      const noWrap = new Set(['对公付款OA流程号','申请付款金额','应付款时间','预估付款时间']);
+      const noWrap = new Set(['对公付款OA流程号','申请付款金额','应付款时间']);
       const wrapColumns = result.sheets[index].headers.map((name,c) => noWrap.has(name) ? -1 : c).filter(c => c >= 0);
       const path = `xl/worksheets/sheet${index + 1}.xml`;
       let xml = await zip.file(path).async('string');

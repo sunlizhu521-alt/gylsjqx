@@ -25,8 +25,7 @@
   }
   const sources = {
     ledger: {input:'file', reference:'reference', label:'采购付款台账'},
-    applications: {input:'applicationsFile', reference:'applicationsReference', label:'付款申请汇总'},
-    progress: {input:'progressFile', reference:'progressReference', label:'资金整理'}
+    oa: {input:'oaFile', reference:'oaReference', label:'OA流程表'}
   };
   for (const source of Object.values(sources)) Object.assign(source, {book:null, filename:'', state:'empty', version:0, error:''});
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -58,23 +57,20 @@
     $('download').disabled = true;
     $('warning-panel').hidden = true;
     $('warnings').replaceChildren();
-    for (const id of ['applied', 'unapplied']) {
-      $(id + '-count').textContent = '0';
-      $(id + '-preview').replaceChildren();
-    }
+    $('record-count').textContent = '0';
+    $('preview').replaceChildren();
   }
   function render() {
-    result.sheets.forEach((sheet, index) => {
-      const id = index === 0 ? 'applied' : 'unapplied';
-      $(id + '-count').textContent = sheet.rows.length;
-      $(id + '-preview').innerHTML = '<table><thead><tr>' + sheet.headers.map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + sheet.rows.map(row => '<tr>' + row.map(cell => '<td>' + esc(C.formatCell(cell)) + '</td>').join('') + '</tr>').join('') + '</tbody></table>' + (sheet.rows.length ? '' : '<p class="empty">没有符合条件的记录，下载仍保留本表表头。</p>');
-    });
+    const sheet = result.sheets[0];
+    $('sheet-title').textContent = sheet.name;
+    $('record-count').textContent = sheet.rows.length;
+    $('preview').innerHTML = '<table><thead><tr>' + sheet.headers.map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + sheet.rows.map(row => '<tr>' + row.map(cell => '<td>' + esc(C.formatCell(cell)) + '</td>').join('') + '</tr>').join('') + '</tbody></table>' + (sheet.rows.length ? '' : '<p class="empty">本月没有符合条件的记录，下载仍保留表头。</p>');
     $('warnings').innerHTML = result.warnings.map(w => '<li>' + esc(w) + '</li>').join('');
     $('warning-count').textContent = result.warnings.length;
     $('warning-panel').hidden = !result.warnings.length;
     $('result').hidden = false;
     $('download').disabled = false;
-    $('status').textContent = `整理完成：已申请 OA ${result.sheets[0].rows.length} 条，未申请 OA ${result.sheets[1].rows.length} 条。`;
+    $('status').textContent = `整理完成：${sheet.name}，${sheet.rows.length} 条。` + (result.warnings.length ? `需要留意 ${result.warnings.length} 项，详见下方提示。` : '');
   }
   function controls() {
     for (const [role, source] of Object.entries(sources)) {
@@ -83,6 +79,7 @@
       if (button) { button.hidden = source.state === 'empty'; button.disabled = exporting; }
     }
     $('download').disabled = exporting || !result;
+    $('month').disabled = exporting;
   }
   function refresh() {
     clear();
@@ -90,12 +87,13 @@
     const failed = Object.values(sources).filter(source => source.state === 'error');
     if (reading.length) $('status').textContent = '正在读取：' + reading.map(source => source.label).join('、') + '…';
     else if (failed.length) $('status').textContent = failed.map(source => source.label + '读取失败：' + source.error).join('\n');
-    else if (!sources.ledger.book) $('status').textContent = '请选择采购付款台账；两个补充文件可选。';
+    else if (!sources.ledger.book) $('status').textContent = '请选择采购付款台账；OA流程表可选。';
+    else if (!$('month').value) $('status').textContent = '请选择汇总月份。';
     else {
       try {
-        const optional = {};
-        for (const role of ['applications', 'progress']) if (sources[role].book) optional[role] = {book:sources[role].book, filename:sources[role].filename};
-        result = C.build(sources.ledger.book, sources.ledger.filename, optional);
+        const options = {month:$('month').value};
+        if (sources.oa.book) options.oa = {book:sources.oa.book, filename:sources.oa.filename};
+        result = C.build(sources.ledger.book, sources.ledger.filename, options);
         render();
       } catch (error) { clear(); $('status').textContent = '整理失败：' + error.message; }
     }
@@ -105,6 +103,8 @@
     $('status').textContent = '工具加载失败，请刷新页面后重试。';
     return;
   }
+  $('month').value = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit'}).format(new Date());
+  $('month').addEventListener('change', refresh);
   for (const [role, source] of Object.entries(sources)) {
     $(source.input).addEventListener('change', async () => {
       const file = $(source.input).files[0];
@@ -123,8 +123,8 @@
         if (current !== source.version) return;
         const book = await readBook(bytes);
         if (current !== source.version) return;
-        if (role === 'ledger') C.build(book, file.name);
-        else C.validateSupplement(book, role, file.name);
+        if (role === 'ledger') C.build(book, file.name, {month:$('month').value || undefined});
+        else C.validateOA(book, file.name);
         source.book = book;
         source.state = 'ready';
       } catch (error) {
