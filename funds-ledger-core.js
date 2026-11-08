@@ -139,6 +139,7 @@ function build(book,filename='资金台账.xlsx',options={}){
    const read=key=>copy(valid(at(key),label(key)));valid(at('oa'),label('oa'));
    const oa={t:'s',v:typeof at('oa')?.v==='number'?formatCell(at('oa')):String(at('oa')?.v??''),z:'@'};
    const monthOnly=timeCell.z&&!/d/i.test(timeCell.z.replace(/"[^"]*"/g,''));
+   timeCell.z=monthOnly?'yyyy"年"mm"月"':'yyyy"年"mm"月"dd"日"';
    rows.push({row:[read('supplier'),read('entity'),oa,money(at('amount'),label('amount')),read('summary'),timeCell,...Array.from({length:4},blank)],source:{sheet:name,row:r+1},day:monthOnly?0:Math.floor(timeCell.v),order:rows.length});
    count.included++;
   }

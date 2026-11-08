@@ -106,7 +106,7 @@ function fixture(replacement=false){
    for(let r=0;r<expected.length;r++)for(let c=0;c<10;c++){
     const cell=sheet[X.utils.encode_cell({r:r+1,c})],v=expected[r][c];assert.equal(cell?.v??'',v);assert(!cell?.f);
     if(v!=='')assert.equal(cell.t,typeof v==='number'?'n':'s');if(c===3&&v!=='')assert.match(cell.z,/0\.00/);
-    if(c===5){assert(X.SSF.is_date(cell.z));if(r)assert(expected[r-1][5]<=v);}
+    if(c===5){assert.equal(cell.z,'yyyy"年"mm"月"dd"日"');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月\d{2}日$/);if(r)assert(expected[r-1][5]<=v);}
     assert.equal(snap.rows[r][c],cell?X.utils.format_cell(cell):'');
    }
    const meta=await surface.locator('body').evaluate(async(_,data)=>{
