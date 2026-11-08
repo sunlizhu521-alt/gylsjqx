@@ -25,7 +25,8 @@
   }
   const sources = {
     ledger: {input:'file', reference:'reference', label:'采购付款台账'},
-    oa: {input:'oaFile', reference:'oaReference', label:'OA流程表'}
+    oa: {input:'oaFile', reference:'oaReference', label:'OA流程表'},
+    applications: {input:'applicationsFile', reference:'applicationsReference', label:'付款申请单汇总'}
   };
   for (const source of Object.values(sources)) Object.assign(source, {book:null, filename:'', state:'empty', version:0, error:''});
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -88,12 +89,13 @@
     const failed = Object.values(sources).filter(source => source.state === 'error');
     if (reading.length) $('status').textContent = '正在读取：' + reading.map(source => source.label).join('、') + '…';
     else if (failed.length) $('status').textContent = failed.map(source => source.label + '读取失败：' + source.error).join('\n');
-    else if (!sources.ledger.book) $('status').textContent = '请选择采购付款台账；OA流程表可选。';
+    else if (!sources.ledger.book) $('status').textContent = '请选择采购付款台账；OA流程表和付款申请单汇总可选。';
     else if (!$('month').value) $('status').textContent = '请选择汇总月份。';
     else {
       try {
         const options = {month:$('month').value};
         if (sources.oa.book) options.oa = {book:sources.oa.book, filename:sources.oa.filename};
+        if (sources.applications.book) options.applications = {book:sources.applications.book, filename:sources.applications.filename};
         result = C.build(sources.ledger.book, sources.ledger.filename, options);
         render();
       } catch (error) { clear(); $('status').textContent = '整理失败：' + error.message; }
@@ -125,7 +127,8 @@
         const book = await readBook(bytes);
         if (current !== source.version) return;
         if (role === 'ledger') C.build(book, file.name, {month:$('month').value || undefined});
-        else C.validateOA(book, file.name);
+        else if (role === 'oa') C.validateOA(book, file.name);
+        else C.validateApplications(book, file.name);
         source.book = book;
         source.state = 'ready';
       } catch (error) {

@@ -7,10 +7,10 @@ function book(rows=[]){const b=X.utils.book_new();PEOPLE.forEach((p,i)=>X.utils.
 const build=(b,month='2026-11')=>C.build(b,'台账.xlsx',{month});
 const rows=r=>r.sheets[0].rows;
 function set(b,h,cell,r=2){b.Sheets['对账明细-李奇'][X.utils.encode_cell({r:r-1,c:H.indexOf(h)})]=cell;}
-test('单月单表10列，仅谈判否筛选，已结清仍保留且结清列无需存在或可含错误',()=>{
+test('单月单表11列，仅谈判否筛选，已结清仍保留且结清列无需存在或可含错误',()=>{
  const records=[row({'是否结清':'是'}),row({'是否结清':'否'}),row({'是否结清':{t:'e',v:23}}),row({'是否谈判付款':' 否 '}),row({'是否谈判付款':'是'}),row({'是否谈判付款':''}),row({'是否谈判付款':'正常付款'})],b=book();b.Sheets['对账明细-李奇']=sheet(records,[...H,'是否结清']);
- const before=JSON.stringify(b),r=build(b);assert.equal(r.sheets.length,1);assert.equal(r.sheets[0].name,'2026年11月正常付款');assert.equal(rows(r).length,4);assert(rows(r).every(row=>row.length===10));assert.deepEqual(r.counts[0],{sheet:'对账明细-李奇',included:4,excluded:3,undated:0});assert.equal(JSON.stringify(b),before);assert.equal(rows(build(book([row()]))).length,1);
- assert.deepEqual(C.HEADERS,['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款']);assert(rows(r).every(row=>row.slice(6).every(c=>c.v==='')));
+ const before=JSON.stringify(b),r=build(b);assert.equal(r.sheets.length,1);assert.equal(r.sheets[0].name,'2026年11月正常付款');assert.equal(rows(r).length,4);assert(rows(r).every(row=>row.length===11));assert.deepEqual(r.counts[0],{sheet:'对账明细-李奇',included:4,excluded:3,undated:0});assert.equal(JSON.stringify(b),before);assert.equal(rows(build(book([row()]))).length,1);
+ assert.deepEqual(C.HEADERS,['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款','是否提交纸质付款审单']);assert(rows(r).every(row=>row.slice(6).every(c=>c.v==='')));
 });
 test('应付款时间优先，空才用预估日期；不依OA分表，无OA与未提交OA仍可入当月',()=>{
  const r=build(book([row(),row({'对公付款0A流程号':'','应付款时间':'','预估付款时间':'2026-11-02'}),row({'对公付款0A流程号':'未提交OA','应付款时间':'2026-11-03','预估付款时间':'2026-12-01'}),row({'应付款时间':'2026-12-01','预估付款时间':'2026-11-01'})]));
@@ -71,9 +71,9 @@ test('五人唯一表、日期后缀、标题行及字段别名，历史表不�
  for(const h of ['供应商名称','申请付款金额','对公付款0A流程号','是否谈判付款']){const n=book();n.Sheets['对账明细-李奇']=sheet([],H.filter(v=>v!==h));assert.throws(()=>build(n),/缺少必要表头/);}
  const n=book();n.Sheets['对账明细-李奇']=sheet([row({'供应商':'另一家'})],[...H,'供应商']);assert.throws(()=>build(n),/字段.*重复/);
 });
-test('OA按文本保留前导零，原始金额与重复行保留，空类别导出仍为单表10列',()=>{
- const b=book([row(),row()]);set(b,'对公付款0A流程号',{t:'n',v:123,z:'000000'});const r=build(b),out=C.workbook(r),read=X.read(X.write(out,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true});assert.deepEqual(out.SheetNames,['2026年11月正常付款']);assert.equal(read.Sheets[out.SheetNames[0]].C2.v,'000123');assert.equal(read.Sheets[out.SheetNames[0]].C2.t,'s');assert.equal(read.Sheets[out.SheetNames[0]].D2.t,'n');assert.equal(read.Sheets[out.SheetNames[0]].F2.t,'n');assert.equal(read.Sheets[out.SheetNames[0]].F2.z,'yyyy"年"mm"月"dd"日"');assert.equal(read.Sheets[out.SheetNames[0]].F2.w,'2026年11月06日');assert.equal(out.Sheets[out.SheetNames[0]]['!autofilter'].ref,'A1:J3');assert.equal(out.Sheets[out.SheetNames[0]]['!cols'].length,10);
- const empty=C.workbook(build(book(),'2027-01'));assert.deepEqual(empty.SheetNames,['2027年1月正常付款']);assert.equal(empty.Sheets[empty.SheetNames[0]]['!ref'],'A1:J1');assert.equal(C.exportFilename('2026-11-08',3),'资金台账整理-2026-11-08-V3.xlsx');
+test('OA按文本保留前导零，原始金额与重复行保留，空类别导出仍为单表11列',()=>{
+ const b=book([row(),row()]);set(b,'对公付款0A流程号',{t:'n',v:123,z:'000000'});const r=build(b),out=C.workbook(r),read=X.read(X.write(out,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true});assert.deepEqual(out.SheetNames,['2026年11月正常付款']);assert.equal(read.Sheets[out.SheetNames[0]].C2.v,'000123');assert.equal(read.Sheets[out.SheetNames[0]].C2.t,'s');assert.equal(read.Sheets[out.SheetNames[0]].D2.t,'n');assert.equal(read.Sheets[out.SheetNames[0]].F2.t,'n');assert.equal(read.Sheets[out.SheetNames[0]].F2.z,'yyyy"年"mm"月"dd"日"');assert.equal(read.Sheets[out.SheetNames[0]].F2.w,'2026年11月06日');assert.equal(out.Sheets[out.SheetNames[0]]['!autofilter'].ref,'A1:K3');assert.equal(out.Sheets[out.SheetNames[0]]['!cols'].length,11);
+ const empty=C.workbook(build(book(),'2027-01'));assert.deepEqual(empty.SheetNames,['2027年1月正常付款']);assert.equal(empty.Sheets[empty.SheetNames[0]]['!ref'],'A1:K1');assert.equal(C.exportFilename('2026-11-08',3),'资金台账整理-2026-11-08-V3.xlsx');
 });
 test('北京时间当前月份默认，空值及不合法年月阻断，表头列宽可见且长摘要换行',()=>{
  const now=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit'}).format(new Date());assert.equal(C.build(book(),'台账.xlsx').month,now);

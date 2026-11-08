@@ -1,7 +1,7 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FundsLedgerCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const HEADERS=['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款'];
+const HEADERS=['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款','是否提交纸质付款审单'];
 const FIELDS={
  supplier:['供应商名称','供应商'],entity:['付款主体'],oa:['对公付款0A流程号','对公付款OA流程号','OA'],
  amount:['申请付款金额','本次申请付款金额'],summary:['摘要'],due:['应付款时间','应付时间'],estimate:['预估付款时间','预估付款月份'],
@@ -146,7 +146,7 @@ function build(book,filename='资金台账.xlsx',options={}){
    const oa={t:'s',v:typeof at('oa')?.v==='number'?formatCell(at('oa')):String(at('oa')?.v??''),z:'@'};
    const monthOnly=timeCell.z&&!/d/i.test(timeCell.z.replace(/"[^"]*"/g,''));
    timeCell.z=monthOnly?'yyyy"年"mm"月"':'yyyy"年"mm"月"dd"日"';
-   rows.push({row:[read('supplier'),read('entity'),oa,money(at('amount'),label('amount')),read('summary'),inferred?{t:'s',v:'未对账待定',z:'@'}:timeCell,...Array.from({length:4},blank)],source:{sheet:name,row:r+1},day:monthOnly?0:Math.floor(timeCell.v),order:rows.length});
+   rows.push({row:[read('supplier'),read('entity'),oa,money(at('amount'),label('amount')),read('summary'),inferred?{t:'s',v:'未对账待定',z:'@'}:timeCell,...Array.from({length:5},blank)],source:{sheet:name,row:r+1},day:monthOnly?0:Math.floor(timeCell.v),order:rows.length});
    count.included++;
   }
   counts.push(count);
@@ -167,6 +167,13 @@ function build(book,filename='资金台账.xlsx',options={}){
    if(['归档','已归档'].includes(state))record.row[9]={t:'s',v:'已付款'};
    else if(state==='未归档')record.row[9]={t:'s',v:'未付款'};
    else warnings.push(label+'：OA“'+key+'”流程状态为空或无法识别，是否已付款待核对；来源：'+sources);
+  }
+ }
+ if(options.applications){
+  const parsed=parseApplications(options.applications.book,options.applications.filename);warnings.push(...parsed.warnings);
+  for(const record of rows){
+   const key=oaKey(record.row[2]);
+   record.row[10]={t:'s',v:key?(parsed.codes.has(key)?'已提交':'未提交'):'待核对'};
   }
  }
  const name=month.slice(0,4)+'年'+Number(month.slice(5))+'月正常付款';
@@ -195,12 +202,38 @@ function parseOA(book,filename='对公付款OA.xlsx'){
  return {filename,sheetName,count,warnings,byOA};
 }
 function validateOA(book,filename){const parsed=parseOA(book,filename);return {sheetName:parsed.sheetName,count:parsed.count,warnings:parsed.warnings};}
+function parseApplications(book,filename='付款申请单汇总.xlsx'){
+ if(!book?.SheetNames||!book?.Sheets)throw Error(filename+'：付款申请单汇总不可读取');
+ const names=book.SheetNames.includes('付款申请汇总')?['付款申请汇总']:book.SheetNames,candidates=[];
+ for(const name of names){
+  // Choose a column for the whole sheet. A blank newer field never falls back to 合同号.
+  for(const heading of ['流程编码','流程编号','合同号']){
+   const found=table(book.Sheets[name],name,filename,{oa:[heading]},['oa'],true);
+   if(found){candidates.push({name,heading,...found});break;}
+  }
+ }
+ if(candidates.length!==1)throw Error(filename+'：'+(candidates.length?'付款申请来源不明确，找到多个候选工作表（'+candidates.map(candidate=>candidate.name).join('、')+'）':'未在'+(names.length===1?'“'+names[0]+'”':'工作表中')+'找到流程编码／流程编号／合同号表头'));
+ const {name:sheetName,heading,header,map}=candidates[0],sheet=book.Sheets[sheetName],activeRows=new Set(),codes=new Set(),warnings=[];
+ for(const address of Object.keys(sheet)){
+  if(!/^[A-Z]+\d+$/.test(address))continue;
+  const cell=sheet[address],r=X.utils.decode_cell(address).r;
+  if(r>header&&(cell?.f||cell?.t!=='z'&&text(cell)))activeRows.add(r);
+ }
+ for(const r of [...activeRows].sort((a,b)=>a-b)){
+  const address=X.utils.encode_cell({r,c:map.oa}),label=filename+' / '+sheetName+'!'+address+'（'+heading+'）';
+  const key=oaKey(valid(sheet[address],label));
+  if(key)codes.add(key);
+  else warnings.push(label+'：编号为空或不是单一有效编号，未用于纸质付款审单匹配，请核实该行编号');
+ }
+ return {sheetName,count:activeRows.size,warnings,codes};
+}
+function validateApplications(book,filename){const parsed=parseApplications(book,filename);return {sheetName:parsed.sheetName,count:parsed.count,warnings:parsed.warnings};}
 function workbook(result){
  const book=X.utils.book_new();
  for(const source of result.sheets){
   const sheet=X.utils.aoa_to_sheet([source.headers,...source.rows.map(row=>row.map(copy))]);
   const width=value=>String(value).split(/\r?\n/).reduce((max,line)=>Math.max(max,Array.from(line).reduce((n,ch)=>n+(ch.charCodeAt(0)>255?2:1),0)),0);
-  const limits=[50,40,52,28,72,34,42,42,32,32];
+  const limits=[50,40,52,28,72,34,42,42,32,32,32];
   sheet['!cols']=source.headers.map((header,c)=>{
    const contentWidth=source.rows.reduce((max,row)=>Math.max(max,width(formatCell(row[c]))),0);
    return {wch:Math.max(12,width(header)+4,Math.min(limits[c],contentWidth+2))};
@@ -213,5 +246,5 @@ function workbook(result){
 }
 function formatCell(cell){return !cell||cell.v==null?'':X.utils.format_cell(copy(cell));}
 function exportFilename(date,version=1){return `资金台账整理-${date}-V${version}.xlsx`;}
-return {HEADERS,build,workbook,formatCell,exportFilename,validateOA};
+return {HEADERS,build,workbook,formatCell,exportFilename,validateOA,validateApplications};
 });

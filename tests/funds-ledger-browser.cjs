@@ -3,7 +3,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const X=require('../vendor/xlsx.full.min.js'),Zip=require('../vendor/jszip.min.js');
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
 const HEADERS=['供应商名称','付款主体','对公付款0A流程号','申请付款金额','摘要','应付款时间','预估付款时间','是否提交付款申请单','是否结清','是否谈判付款','开票时间','所属月份','账期'];
-const OUTPUT_HEADERS=['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款'];
+const OUTPUT_HEADERS=['供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款','是否提交纸质付款审单'];
 const MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const VERSION_KEY='funds-ledger-export-versions',OTHER_VERSIONS='{"2026-11-08":37}';
 const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
@@ -17,6 +17,12 @@ async function replaceSourceCell(bytes,address,cellXml){
  assert.match(xml,pattern,'公式用例必须修改实际单元格');zip.file(file,xml.replace(pattern,cellXml));return zip.generateAsync({type:'nodebuffer'});
 }
 function source(headers,rows){const book=X.utils.book_new();X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([headers,...rows]),'原始OA导出');return {book,bytes:write(book)};}
+function applications(codes){
+ const book=X.utils.book_new();
+ X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([['合同号','流程编码','供应商','金额','是否已签字'],...codes.map(code=>[flow(2),code,'无关供应商',999,'']),[flow(2),'','空流程不得回退',0,'签完字']]),'付款申请汇总');
+ X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([['流程编码'],[flow(2)]]),'忽略其他申请');return {book,bytes:write(book)};
+}
+const withPaper=(rows,codes)=>rows.map(row=>[...row.slice(0,10),row[2]?(codes.includes(row[2])?'已提交':'未提交'):'待核对']);
 function fixture(replacement=false){
  const book=X.utils.book_new(),rows=PEOPLE.map(()=>[]),entries=[];
  function add(person,supplier,changes={},expectedDate='2026-11-20',inferred=false){
@@ -65,13 +71,13 @@ function fixture(replacement=false){
  const fullInfo={[flow(1)]:['归档节点','归档人员','归档','已付款'],[flow(2)]:['审批节点','审批人员','未归档','未付款'],[flow(4)]:['一致节点','一致人员','归档','已付款'],[flow(5)]:['完成节点','','已归档','已付款']};
  function expected(month='2026-11',mode=''){
   const info=mode==='full'?fullInfo:mode==='new'?{[flow(1)]:['最新节点','最新人员','未归档','未付款']}:{};
-  return entries.filter(e=>e.date.startsWith(month)).sort((a,b)=>a.date.localeCompare(b.date)||a.index-b.index).map(({row,date,inferred})=>[...row.slice(0,5).map(value),inferred?'未对账待定':serial(date),...(mode?(info[value(row[2])]||['','','','待核对']):['','','',''])]);
+  return entries.filter(e=>e.date.startsWith(month)).sort((a,b)=>a.date.localeCompare(b.date)||a.index-b.index).map(({row,date,inferred})=>[...row.slice(0,5).map(value),inferred?'未对账待定':serial(date),...(mode?(info[value(row[2])]||['','','','待核对']):['','','','']),'']);
  }
  return {book,bytes:write(book),oa,newOA,expected};
 }
 (async()=>{
  const base=process.env.BASE_URL||process.env.QA_URL||'http://127.0.0.1:8899/',out=process.env.OUT_DIR||process.env.QA_OUT||'/private/tmp/funds-ledger-browser';
- await fs.mkdir(out,{recursive:true});const input=fixture(),replacement=fixture(true);
+ await fs.mkdir(out,{recursive:true});const input=fixture(),replacement=fixture(true),paperCodes=[flow(1),'000123456789012345'],paper=applications([...paperCodes,flow(1)]),newPaper=applications([flow(2)]);
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
  try{
   const page=await browser.newPage({viewport:{width:1600,height:1000},timezoneId:'America/Los_Angeles'}),errors=[],versions=new WeakMap();
@@ -80,15 +86,17 @@ function fixture(replacement=false){
   const homepage=page.url();await page.locator('button[data-tool="funds-ledger"]').click();assert.equal(page.url(),homepage);
   const frame=page.frameLocator('iframe[data-tool="funds-ledger"]');await frame.locator('#file:not([disabled])').waitFor();
   assert.equal(await frame.locator('#month').inputValue(),'2026-11');assert(await frame.locator('#download').isDisabled());
-  assert.equal(await frame.locator('#applicationsFile,#progressFile,#applied-preview,#unapplied-preview').count(),0);
+  assert.equal(await frame.locator('#progressFile,#applied-preview,#unapplied-preview').count(),0);
+  assert.equal(await frame.locator('#applicationsFile').count(),1);
+  const slots=await frame.locator('.upload').evaluateAll(els=>els.map(el=>el.getBoundingClientRect().top));assert.equal(slots.length,3);assert(slots.every(y=>y===slots[0]));
   async function upload(bytes,name,role='ledger',surface=frame){
-   const id=role==='oa'?'oaFile':'file',reference=role==='oa'?'oaReference':'reference';
+   const [id,reference]={ledger:['file','reference'],oa:['oaFile','oaReference'],applications:['applicationsFile','applicationsReference']}[role];
    await surface.locator('#'+id+':not([disabled])').waitFor();await surface.locator('#'+id).setInputFiles({name,mimeType:MIME,buffer:bytes});
    await surface.locator('#'+reference).filter({hasText:name}).waitFor();assert.match(await surface.locator('#'+reference).innerText(),/2026.*11.*0?8/);
   }
   async function ready(surface=frame){await surface.locator('#download:not([disabled])').waitFor();}
   async function chooseMonth(month){await frame.locator('#month').fill(month);await frame.locator('#month').dispatchEvent('change');await ready();}
-  async function preview(surface=frame){return surface.locator('#preview').evaluate(el=>({headers:[...el.querySelectorAll('th')].map(c=>c.textContent),rows:[...el.querySelectorAll('tbody tr')].filter(tr=>tr.cells.length===10).map(tr=>[...tr.cells].map(c=>c.textContent))}));}
+  async function preview(surface=frame){return surface.locator('#preview').evaluate(el=>({headers:[...el.querySelectorAll('th')].map(c=>c.textContent),rows:[...el.querySelectorAll('tbody tr')].filter(tr=>tr.cells.length===11).map(tr=>[...tr.cells].map(c=>c.textContent))}));}
   async function blocked(pattern){await frame.locator('#status').filter({hasText:pattern}).waitFor();assert(await frame.locator('#download').isDisabled());assert.equal((await preview()).rows.length,0);}
   async function download(label,surface=frame,owner=page,date='2026-11-08'){
    const event=owner.waitForEvent('download');await surface.locator('#download').click();const d=await event;
@@ -103,14 +111,14 @@ function fixture(replacement=false){
    const matrix=Array.from({length:range.e.r+1},(_,r)=>Array.from({length:range.e.c+1},(_,c)=>sheet[X.utils.encode_cell({r,c})]?.v??''));
    assert.deepEqual(matrix,[OUTPUT_HEADERS,...expected]);assert.deepEqual(snap.headers,OUTPUT_HEADERS);assert.equal(snap.rows.length,expected.length);
    assert.equal(Number((await surface.locator('#record-count').innerText()).replace(/[^\d]/g,'')),expected.length);
-   assert.equal(sheet['!autofilter'].ref,'A1:J'+(expected.length+1));assert(!book.Workbook?.Sheets?.[0]?.Hidden);
+   assert.equal(sheet['!autofilter'].ref,'A1:K'+(expected.length+1));assert(!book.Workbook?.Sheets?.[0]?.Hidden);
    const previewFills=await surface.locator('#preview').evaluate(el=>({
     headers:[...el.querySelectorAll('th')].map(cell=>getComputedStyle(cell).backgroundColor),
-    rows:[...el.querySelectorAll('tbody tr')].filter(row=>row.cells.length===10).map(row=>[...row.cells].map(cell=>getComputedStyle(cell).backgroundColor))
+    rows:[...el.querySelectorAll('tbody tr')].filter(row=>row.cells.length===11).map(row=>[...row.cells].map(cell=>getComputedStyle(cell).backgroundColor))
    }));
-   assert.deepEqual(previewFills.headers,Array(10).fill('rgb(49, 91, 157)'));
-   assert.deepEqual(previewFills.rows,expected.map(row=>Array(10).fill(row[9]==='已付款'?'rgb(255, 0, 0)':'rgb(255, 255, 255)')),'预览整行颜色须与是否已付款一致，包含空白格');
-   for(let r=0;r<expected.length;r++)for(let c=0;c<10;c++){
+   assert.deepEqual(previewFills.headers,Array(11).fill('rgb(49, 91, 157)'));
+   assert.deepEqual(previewFills.rows,expected.map(row=>Array(11).fill(row[9]==='已付款'?'rgb(255, 0, 0)':'rgb(255, 255, 255)')),'预览整行颜色须与是否已付款一致，包含空白格');
+   for(let r=0;r<expected.length;r++)for(let c=0;c<11;c++){
     const cell=sheet[X.utils.encode_cell({r:r+1,c})],v=expected[r][c];assert.equal(cell?.v??'',v);assert(!cell?.f);
     if(v!=='')assert.equal(cell.t,typeof v==='number'?'n':'s');if(c===3&&v!=='')assert.match(cell.z,/0\.00/);
     if(c===5){
@@ -125,7 +133,7 @@ function fixture(replacement=false){
     const doc=parse(await zip.file('xl/worksheets/sheet1.xml').async('string')),problems=[],names=new Set(),sizes=new Set(),widths=[];
     const pane=all(doc,'pane')[0];if(pane?.getAttribute('state')!=='frozen'||pane?.getAttribute('ySplit')!=='1')problems.push('首行未冻结');
     if(all(doc,'f').length||all(doc,'filterColumn').length||all(doc,'conditionalFormatting').length)problems.push('存在公式、旧筛选条件或条件格式');
-    if(all(doc,'row').some(r=>r.getAttribute('hidden')==='1'||all(r,'c').length!==10))problems.push('隐藏行或缺少矩形单元格');
+    if(all(doc,'row').some(r=>r.getAttribute('hidden')==='1'||all(r,'c').length!==11))problems.push('隐藏行或缺少矩形单元格');
     for(const col of all(doc,'col')){if(col.getAttribute('hidden')==='1')problems.push('隐藏列');for(let c=+col.getAttribute('min');c<=+col.getAttribute('max');c++)widths[c-1]=+col.getAttribute('width');}
     for(const cell of all(doc,'c')){
      const xf=xfs[+(cell.getAttribute('s')||0)],font=fonts[+(xf.getAttribute('fontId')||0)],border=borders[+(xf.getAttribute('borderId')||0)];
@@ -137,7 +145,7 @@ function fixture(replacement=false){
     }
     return {problems,names:[...names],sizes:[...sizes],widths};
    },{bytes:[...bytes],paid:expected.map(row=>row[9]==='已付款')});
-   assert.deepEqual(meta.problems,[]);assert.equal(meta.names.length,1);assert.equal(meta.sizes.length,1);assert.equal(meta.widths.length,10);assert(meta.widths.every(w=>w>=12&&w<=255));return snap;
+   assert.deepEqual(meta.problems,[]);assert.equal(meta.names.length,1);assert.equal(meta.sizes.length,1);assert.equal(meta.widths.length,11);assert(meta.widths.every(w=>w>=12&&w<=255));return snap;
   }
   await upload(input.bytes,'合成月度台账.xlsx');await ready();
   const baseSnap=await verify(await download('monthly-base'),input.expected());
@@ -155,6 +163,28 @@ function fixture(replacement=false){
   await page.locator('button[data-tool="funds"]').click();await page.frameLocator('iframe[data-tool="funds"]').locator('#ledgerFile').waitFor();
   await page.locator('button[data-tool="funds-ledger"]').click();assert.equal(await frame.locator('#month').inputValue(),'2026-11');assert.deepEqual(await preview(),fullSnap);
   assert((await frame.locator('#oaReference').innerText()).includes('合成原始OA.xlsx'));await page.screenshot({path:path.join(out,'monthly-home.png'),fullPage:true});
+  await upload(paper.bytes,'合成申请单汇总.xlsx','applications');await ready();
+  const paperSnap=await verify(await download('paper-submission'),withPaper(input.expected('2026-11','full'),paperCodes));
+  assert.match(await frame.locator('#warnings').innerText(),/合成申请单汇总.xlsx.*付款申请汇总!B5/);
+  await page.locator('button[data-tool="funds"]').click();await page.locator('button[data-tool="funds-ledger"]').click();assert.deepEqual(await preview(),paperSnap);
+  assert.match(await frame.locator('#applicationsReference').innerText(),/合成申请单汇总.xlsx.*\n引用时间/);
+  await chooseMonth('2026-12');await verify(await download('paper-month-change'),withPaper(input.expected('2026-12','full'),paperCodes),'2026-12');await chooseMonth('2026-11');
+  await upload(newPaper.bytes,'合成替换申请单.xlsx','applications');await ready();await verify(await download('paper-replaced'),withPaper(input.expected('2026-11','full'),[flow(2)]));
+  await frame.locator('#clear-applications').click();await ready();assert.deepEqual(await preview(),fullSnap);
+  await verify(await download('paper-removed'),input.expected('2026-11','full'));
+  const ambiguous=source(['流程编码'],[[flow(1)]]);X.utils.book_append_sheet(ambiguous.book,X.utils.aoa_to_sheet([['合同号'],[flow(2)]]),'另一申请');
+  for(const [bytes,name,pattern]of [
+   [write(ambiguous.book),'合成多候选申请.xlsx',/来源不明确/],
+   [source(['摘要'],[['无编号表头']]).bytes,'合成错误申请.xlsx',/未.*找到/],
+   [await replaceSourceCell(paper.bytes,'B2','<c r="B2" t="str"><f>"OA001"</f></c>'),'合成缺缓存申请.xlsx',/公式缺少.*缓存/],
+   [await replaceSourceCell(paper.bytes,'B2','<c r="B2" t="e"><f>1\/0</f><v>#DIV\/0!</v></c>'),'合成公式错误申请.xlsx',/Excel.*错误/]
+  ]){
+   await upload(bytes,name,'applications');await blocked(pattern);
+   await upload(input.bytes,'合成失败后换台账.xlsx');await blocked(pattern);
+   await upload(paper.bytes,'合成恢复申请.xlsx','applications');await ready();assert.deepEqual(await preview(),paperSnap);
+  }
+  await page.screenshot({path:path.join(out,'monthly-paper.png'),fullPage:true});
+  await frame.locator('#clear-applications').click();await ready();
   await frame.locator('#clear-oa').click();await ready();await verify(await download('remove-paid-oa'),input.expected());
   const badOA=X.read(input.oa.bytes,{type:'buffer'});badOA.Sheets.原始OA导出.D1.v='无效状态表头';
   await upload(write(badOA),'合成错误OA.xlsx','oa');await blocked(/缺少|缺失|找不到|未找到|失败|无法/);
@@ -182,10 +212,14 @@ function fixture(replacement=false){
   });
   async function release(names){await frame.locator('body').evaluate(async(_,names)=>{for(const name of names){await window.__qaGates[name]();delete window.__qaGates[name];}await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));},names);}
   await frame.locator('body').evaluate((_,uploads)=>{for(const u of uploads){const transfer=new DataTransfer();transfer.items.add(new File([Uint8Array.from(u.bytes)],u.name,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));const el=document.getElementById(u.id);el.files=transfer.files;el.dispatchEvent(new Event('change',{bubbles:true}));}},[
-   {id:'file',name:'延迟-台账.xlsx',bytes:[...input.bytes]},{id:'oaFile',name:'延迟-OA.xlsx',bytes:[...input.oa.bytes]}
+   {id:'file',name:'延迟-台账.xlsx',bytes:[...input.bytes]},{id:'oaFile',name:'延迟-OA.xlsx',bytes:[...input.oa.bytes]},{id:'applicationsFile',name:'延迟-申请.xlsx',bytes:[...paper.bytes]}
   ]);
   assert(await frame.locator('#download').isDisabled());assert.equal((await preview()).rows.length,0);
-  await release(['延迟-OA.xlsx']);assert(await frame.locator('#download').isDisabled());await release(['延迟-台账.xlsx']);await ready();await verify(await download('simultaneous-inputs'),input.expected('2026-11','full'));
+  await release(['延迟-OA.xlsx']);assert(await frame.locator('#download').isDisabled());await release(['延迟-台账.xlsx']);assert(await frame.locator('#download').isDisabled());await release(['延迟-申请.xlsx']);await ready();await verify(await download('simultaneous-inputs'),withPaper(input.expected('2026-11','full'),paperCodes));
+  await upload(paper.bytes,'延迟-旧申请.xlsx','applications');assert(await frame.locator('#download').isDisabled());
+  await upload(newPaper.bytes,'合成最新申请.xlsx','applications');await ready();const newestPaper=await preview();await release(['延迟-旧申请.xlsx']);assert.deepEqual(await preview(),newestPaper);
+  await verify(await download('latest-paper-wins'),withPaper(input.expected('2026-11','full'),[flow(2)]));
+  await upload(paper.bytes,'延迟-移除申请.xlsx','applications');await frame.locator('#clear-applications').click();await ready();await release(['延迟-移除申请.xlsx']);assert.deepEqual(await preview(),fullSnap);
   await upload(input.oa.bytes,'延迟-旧OA.xlsx','oa');assert(await frame.locator('#download').isDisabled());
   await upload(input.newOA.bytes,'合成最新OA.xlsx','oa');await ready();const newest=await preview();await release(['延迟-旧OA.xlsx']);assert.deepEqual(await preview(),newest);
   await verify(await download('latest-oa-wins'),input.expected('2026-11','new'));
@@ -197,14 +231,18 @@ function fixture(replacement=false){
   await mobile.clock.setFixedTime(new Date('2026-11-08T02:00:00Z'));await mobile.goto(base,{waitUntil:'networkidle'});await mobile.locator('button[data-tool="funds-ledger"]').click();
   const mobileFrame=mobile.frameLocator('iframe[data-tool="funds-ledger"]');await upload(replacement.bytes,'合成手机台账.xlsx','ledger',mobileFrame);await ready(mobileFrame);
   assert.equal((await preview(mobileFrame)).rows.length,1);
+  assert(await mobileFrame.locator('.uploads-scroll').evaluate(el=>el.scrollWidth>el.clientWidth),'窄屏上传区应独立横向滚动');
+  const mobileSlots=await mobileFrame.locator('.upload').evaluateAll(els=>els.map(el=>el.getBoundingClientRect().top));assert.equal(mobileSlots.length,3);assert(mobileSlots.every(y=>y===mobileSlots[0]));
+  assert(await mobileFrame.locator('body').evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'窄屏工具主体不得横向溢出');
   assert(await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'手机外层页面不得横向溢出');
   await mobile.screenshot({path:path.join(out,'monthly-mobile.png'),fullPage:true});await mobile.close();
   const standalone=await browser.newPage({viewport:{width:1440,height:1000},timezoneId:'America/Los_Angeles'});standalone.on('pageerror',e=>errors.push(e.message));
   await standalone.clock.setFixedTime(new Date('2026-11-08T02:00:00Z'));await standalone.goto(new URL('funds-ledger.html',base).href,{waitUntil:'networkidle'});
   await standalone.evaluate(v=>localStorage.setItem('funds-export-versions',v),OTHER_VERSIONS);
   await upload(input.oa.bytes,'合成先选OA.xlsx','oa',standalone);assert(await standalone.locator('#download').isDisabled());
+  await upload(paper.bytes,'合成先选申请.xlsx','applications',standalone);assert(await standalone.locator('#download').isDisabled());
   await upload(replacement.bytes,'合成独立页面.xlsx','ledger',standalone);await ready(standalone);
-  await verify(await download('oa-first',standalone,standalone),replacement.expected('2026-11','full'),'2026-11',standalone);
+  await verify(await download('oa-first',standalone,standalone),withPaper(replacement.expected('2026-11','full'),paperCodes),'2026-11',standalone);
   await standalone.screenshot({path:path.join(out,'monthly-standalone.png')});
   await standalone.reload({waitUntil:'networkidle'});await upload(replacement.bytes,'合成版本验收.xlsx','ledger',standalone);await ready(standalone);
   await verify(await download('version-after-refresh',standalone,standalone),replacement.expected(),'2026-11',standalone);
@@ -244,6 +282,6 @@ function fixture(replacement=false){
   await standalone.evaluate(()=>{Object.defineProperty(window,'localStorage',window.__qaStorageDescriptor);delete window.__qaStorageDescriptor;});
   assert.equal(await standalone.evaluate(()=>localStorage.getItem('funds-export-versions')),OTHER_VERSIONS,'内存回退也不能改动其他工具的版本号');
   await standalone.close();assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({base,out,columns:10,novemberRows:input.expected().length,monthlySheets:true,datePriority:true,negotiatedOnly:true,oaMatching:true,fullPreview:true,styles:true,toolSwitch:true,invalidRecovery:true,formulaCacheGuard:true,oaFirst:true,simultaneous:true,latestWins:true,mobile:true,downloadNames:true,versionRefresh:true,versionFailureGuard:true,beijingRollover:true,memoryFallback:true,errors}));
+  console.log(JSON.stringify({base,out,columns:11,novemberRows:input.expected().length,paperSubmission:true,paperReplacementRemoval:true,monthlySheets:true,datePriority:true,negotiatedOnly:true,oaMatching:true,fullPreview:true,styles:true,toolSwitch:true,invalidRecovery:true,formulaCacheGuard:true,oaFirst:true,simultaneous:true,latestWins:true,mobile:true,downloadNames:true,versionRefresh:true,versionFailureGuard:true,beijingRollover:true,memoryFallback:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

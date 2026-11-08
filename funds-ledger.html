@@ -13,7 +13,7 @@
     input[type=file]{width:100%}input::file-selector-button{padding:9px 14px;border:1px solid var(--line-strong);border-radius:7px;cursor:pointer;background:var(--surface-solid);color:var(--text);margin-right:12px}
     small{display:block;color:var(--muted)}.file-reference,#status{white-space:pre-wrap;overflow-wrap:anywhere}
     .file-reference{margin:12px 0}#status{margin:0}.actions{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:18px}
-    .uploads-scroll{overflow-x:auto}.uploads{display:grid;grid-template-columns:repeat(2,minmax(230px,1fr));gap:14px}.upload{padding:14px;border:1px solid var(--line);border-radius:10px;min-width:0}
+    .uploads-scroll{overflow-x:auto}.uploads{display:grid;grid-template-columns:repeat(3,minmax(230px,1fr));gap:14px}.upload{padding:14px;border:1px solid var(--line);border-radius:10px;min-width:0}
     .month-select{display:flex;align-items:center;gap:12px;margin-top:18px}.month-select label{margin:0}.month-select input{padding:8px 12px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface-solid);color:var(--text)}
     .upload small{min-height:46px}.optional{font-size:.85rem;color:var(--muted);font-weight:400}.remove{padding:4px 0;border-radius:0;background:transparent;color:var(--muted);font-size:.9rem;text-decoration:underline}
     button{border:0;border-radius:8px;background:#315b9d;color:#fff;padding:11px 20px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}
@@ -35,6 +35,7 @@
     <div class="uploads-scroll"><div class="uploads">
       <div class="upload"><label for="file">采购付款台账</label><input id="file" type="file" accept=".xlsx,.xls" disabled><small class="file-reference" id="reference">尚未引用文件</small></div>
       <div class="upload"><label for="oaFile">OA流程表 <span class="optional">可选</span></label><input id="oaFile" type="file" accept=".xlsx,.xls" disabled><small class="file-reference" id="oaReference">尚未引用（可选）</small><button class="remove" id="clear-oa" hidden>移除OA流程表</button></div>
+      <div class="upload"><label for="applicationsFile">付款申请单汇总 <span class="optional">可选</span></label><input id="applicationsFile" type="file" accept=".xlsx,.xls" disabled><small class="file-reference" id="applicationsReference">尚未引用（可选）</small><button class="remove" id="clear-applications" hidden>移除付款申请单汇总</button></div>
     </div></div>
     <div class="month-select"><label for="month">汇总月份</label><input id="month" type="month" min="1900-01" max="9999-12" required disabled></div>
     <div class="actions"><button id="download" disabled>下载资金台账整理表</button><p id="status" role="status" aria-live="polite">正在加载工具…</p></div>
@@ -48,6 +49,7 @@
       <li>OA表按“流程编号／流程编码”精确匹配台账付款OA号。同号流程信息一致只读取一次，冲突时显示待核对。</li>
       <li>“归档／已归档”为已付款，“未归档”为未付款；编号缺失、未找到或状态异常为待核对。不根据当前节点推断已付款。未上传OA表时流程字段留空。</li>
       <li>“已付款”的记录整行标红；导出为普通填充色，下载后可手动改色。</li>
+      <li>纸质付款审单仅按OA号匹配申请汇总：找到为“已提交”，未找到为“未提交”，台账缺号或多号为“待核对”；未上传申请汇总时留空。优先读取流程编码，其次流程编号，旧文件兼容合同号。</li>
       <li>仅在本机浏览器处理，切换工具保留本次内容；刷新后重新上传。</li>
     </ul></details>
     <details id="warning-panel" hidden><summary>需要留意（<span id="warning-count">0</span> 项）</summary><ul id="warnings"></ul></details>
@@ -58,8 +60,8 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-ledger-core.js?v=20261109-pending-date"></script>
-<script src="funds-ledger-export.js?v=20261109-paid-row"></script>
-<script src="funds-ledger-tool.js?v=20261109-paid-row"></script>
+<script src="funds-ledger-core.js?v=20261109-paper-submission"></script>
+<script src="funds-ledger-export.js?v=20261109-paper-submission"></script>
+<script src="funds-ledger-tool.js?v=20261109-paper-submission"></script>
 </body>
 </html>
