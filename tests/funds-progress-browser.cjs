@@ -16,7 +16,7 @@ const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
   async function upload(role,bytes=write(input[role].book)){await frame.locator('#'+role+'File:not([disabled])').waitFor();await frame.locator('#'+role+'File').setInputFiles({name:input[role].name,mimeType:MIME,buffer:bytes});}
   for(const role of ['ledger','applications','oa','negotiated'])await upload(role);
   async function analyze(){await frame.locator('#analyze:not([disabled])').click();await frame.locator('#download:not([disabled])').waitFor();assert.equal(await frame.locator('#pendingCount').innerText(),'0');}
-  async function download(version){const pending=page.waitForEvent('download');await frame.locator('#download').click();const d=await pending;assert.equal(d.suggestedFilename(),'资金整理-2026-11-01-V'+version+'.xlsx');return fs.readFile(await d.path());}
+  async function download(version){const pending=page.waitForEvent('download');await frame.locator('#download').click();const d=await pending;assert.equal(d.suggestedFilename(),'付款节奏跟进-2026-11-01-V'+version+'.xlsx');return fs.readFile(await d.path());}
   async function preview(){return frame.locator('#progressPreview').evaluate(el=>({headers:[...el.querySelectorAll('th')].map(e=>e.textContent),rows:[...el.querySelectorAll('tbody tr')].map(tr=>[...tr.cells].map(td=>({text:td.textContent,red:td.classList.contains('funds-applied'),color:getComputedStyle(td).backgroundColor})))}));}
   async function verify(bytes,expectedStates,expectedAmounts=[40,200,40,0,12,18,20]){
    const saved=X.read(bytes,{type:'buffer',cellNF:true,cellStyles:true}),core=C.build(input),sheet=saved.Sheets.付款进度整理;
@@ -39,7 +39,7 @@ const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
     const red=c===11&&expectedStates[r]==='已付款';assert.equal(snap.rows[r][c].red,red);if(red)assert.equal(snap.rows[r][c].color,'rgb(255, 0, 0)');
     assert.equal(cell.s?.fgColor?.rgb==='FF0000',red,'仅已付款状态格使用普通红色填充');
    }
-   const n=saved.Sheets.谈判付款;assert.equal(n.F2.f,'D2-E2');assert.equal(n.F2.v,100);assert.equal(n.E2.v,0);assert.equal(n.K2.f,'SUM(M2:N2)');assert.equal(n.I2.c[0].t,'保留原批注');assert.equal(n.M2.c[0].t,'申请日期（资金整理）：2026年11月1日；2026年11月3日');
+   const n=saved.Sheets.谈判付款;assert.equal(n.F2.f,'D2-E2');assert.equal(n.F2.v,100);assert.equal(n.E2.v,0);assert.equal(n.K2.f,'SUM(M2:N2)');assert.equal(n.I2.c[0].t,'保留原批注');assert.equal(n.M2.c[0].t,'申请日期（付款节奏跟进）：2026年11月1日；2026年11月3日');
    const normal=saved.Sheets.正常付款,normalRows=X.utils.sheet_to_json(normal);assert.deepEqual(normalRows.map(r=>r['供应商名称']),['合成供应商2','合成供应商3']);assert.deepEqual(normalRows.map(r=>r['申请付款的日期']),['2026/11/02周','2026/11/09周']);
    const normalHeaders=X.utils.sheet_to_json(normal,{header:1})[0];assert.deepEqual(normalHeaders.slice(1,8),['跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间']);assert.deepEqual(await frame.locator('#normalPreview th').allTextContents(),normalHeaders);
    for(let r=0;r<core.normalRows.length;r++)for(let c=0;c<normalHeaders.length;c++){const actual=normal[X.utils.encode_cell({r:r+1,c})],expected=core.normalRows[r][c];assert.equal(actual.v,expected.v);assert.equal(actual.t,expected.t);if(expected.f)assert.equal(actual.f,expected.f);}

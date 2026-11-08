@@ -112,7 +112,7 @@ test('付款归属不明的100个同额日期候选分条完整列出，不产�
 });
 test('申请日期只随本次匹配输出，重复申请日期去重排序并附于同一批次',()=>{
  const i=fixture([100,100],[100,100,100]),apps=sheet(i,'applications');apps.A2.v='2026-10-23';apps.A3.v='2026-10-20';apps.A4.v='2026-10-23';
- const before=JSON.stringify(i),r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,['L2']);assert.deepEqual(r.applicationComments,{L2:'申请日期（资金整理）：2026年10月20日；2026年10月23日'});
+ const before=JSON.stringify(i),r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,['L2']);assert.deepEqual(r.applicationComments,{L2:'申请日期（付款节奏跟进）：2026年10月20日；2026年10月23日'});
  const c=r.normalRows[0][r.normalHeaders.indexOf('申请日期')];assert.equal(c.t,'n');assert.equal(c.z,C.DATE_FORMAT);assert.equal(X.SSF.format(c.z,c.v),'2026年10月27日');assert.equal(JSON.stringify(i),before);
  apps.E5.v=79;sheet(i,'ledger')[X.utils.encode_cell({r:2,c:LEDGER_HEADERS.indexOf('申请日期')})]={t:'s',v:'历史日期不沿用'};const next=C.build(i);assert.equal(next.normalRows[0][next.normalHeaders.indexOf('申请日期')].v,'');
 });
@@ -121,11 +121,11 @@ test('多次正常申请日期合并，异常和空日期明确显示，日期�
  X.utils.sheet_add_aoa(apps,[[...normalRow],[...normalRow]],{origin:-1});apps.A3={t:'n',v:44860};apps.A4={t:'s',v:'2026-10-26'};apps.A5={t:'s',v:'2026-10-27'};
  i.applications.book.Workbook={WBProps:{date1904:true}};let r=C.build(i);assert.equal(r.normalRows[0][r.normalHeaders.indexOf('申请日期')].v,'2026年10月26日；2026年10月27日');
  apps.A2.v='';apps.A3={t:'e',v:23,w:'#REF!'};apps.A4.v='';apps.A5.v='日期待确认';r=C.build(i);
- assert.equal(r.applicationComments.L2,'申请日期（资金整理）：日期未填写');assert.equal(r.normalRows[0][r.normalHeaders.indexOf('申请日期')].v,'日期待核对：#REF!；日期未填写；日期待核对：日期待确认');
+ assert.equal(r.applicationComments.L2,'申请日期（付款节奏跟进）：日期未填写');assert.equal(r.normalRows[0][r.normalHeaders.indexOf('申请日期')].v,'日期待核对：#REF!；日期未填写；日期待核对：日期待确认');
 });
 test('独立同额申请依次分配的批注只包含各自日期，未标红批次无批注',()=>{
  const i=fixture([100,100,100],[100,100]),apps=sheet(i,'applications');apps.D2.v=apps.D3.v='';const r=C.build(i);
- assert.deepEqual(r.applicationComments,{L2:'申请日期（资金整理）：2026年10月20日',M2:'申请日期（资金整理）：2026年10月21日'});
+ assert.deepEqual(r.applicationComments,{L2:'申请日期（付款节奏跟进）：2026年10月20日',M2:'申请日期（付款节奏跟进）：2026年10月21日'});
  apps.F2.v=apps.F3.v='正常付款';const next=C.build(i);assert.deepEqual(next.applicationComments,{});
 });
 test('正常付款按申请付款的日期升序，同周稳定、无效日期置后，标红与公式跟随记录',()=>{
@@ -145,6 +145,6 @@ test('正常付款按申请付款的日期升序，同周稳定、无效日期�
   assert(r.normalRows.slice(validCount).every(row=>row[at('申请付款的日期')].v==='日期待确认'));
   const submitted=names.indexOf('正常供应商');assert.deepEqual(r.highlights.normalRows,[submitted+2]);assert.equal(r.normalRows[submitted][at('申请日期')].v,46322);assert.equal(r.normalRows[submitted][at('是否提交付款申请单')].v,'已提交');
   for(const [j,row]of r.normalRows.entries()){assert.equal(row[at('剩余金额')].f,'G'+(j+2)+'-N'+(j+2));assert.equal(row[at('剩余金额')].v,row[at('申请付款金额')].v-row[at('已付金额')].v);}
-  assert.equal(JSON.stringify(i),before);assert.deepEqual(C.build(i).normalRows,r.normalRows);assert.deepEqual(r.applicationComments,{L2:'申请日期（资金整理）：2026年10月20日'});
+  assert.equal(JSON.stringify(i),before);assert.deepEqual(C.build(i).normalRows,r.normalRows);assert.deepEqual(r.applicationComments,{L2:'申请日期（付款节奏跟进）：2026年10月20日'});
  }
 });

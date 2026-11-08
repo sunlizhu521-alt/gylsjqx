@@ -379,7 +379,7 @@ function build(inputs,decisions={}){
    if(first&&remaining.every(b=>b.valid)&&!first.merged&&(remaining.length===1||first.date<remaining[1].date)){
     highlightedNegotiated.add(first.address);
     const key=submissionKey(application),dates=applicationDateCell(key?matched.filter(r=>submissionKey(r)===key):[application]);
-    applicationComments[first.address]='申请日期（资金整理）：'+(dates.t==='n'?X.SSF.format(DATE_FORMAT,dates.v):dates.v);
+    applicationComments[first.address]='申请日期（付款节奏跟进）：'+(dates.t==='n'?X.SSF.format(DATE_FORMAT,dates.v):dates.v);
     continue;
    }
    const reason=amount===undefined||amount<=0n?'申请金额为空、异常或非正数':!exact.length?'未找到金额相等的分批':!remaining.length?'同额分批已全部对应其他申请':remaining.some(b=>!b.valid)?'分批日期无法识别，不能按日期排序':first.merged?'分批金额或日期表头位于合并单元格，归属不清':'最早日期存在多个同额批次，归属不清';

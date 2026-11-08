@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>资金整理｜供应链数据清洗</title>
+  <title>付款节奏跟进｜供应链数据清洗</title>
   <link rel="stylesheet" href="styles-merge14.css?v=tools-cleanup-20261027-38">
   <style>
     main{max-width:1480px;margin:28px auto;padding:20px;min-width:0}
@@ -43,7 +43,7 @@
 </head>
 <body><main>
   <a href="index.html">← 返回工具箱</a>
-  <h1>资金整理</h1>
+  <h1>付款节奏跟进</h1>
   <aside class="update-reminder" aria-labelledby="updateReminderTitle">
     <h2 id="updateReminderTitle">资料更新提醒</h2>
     <dl>
@@ -70,10 +70,10 @@
     <small id="classificationSummary"></small>
     <div id="issues">
       <div class="review-heading"><h2>需要核对：<span id="pendingCount">0</span> 项</h2><label><input id="onlyPending" type="checkbox" checked> 只显示待核对项</label></div>
-      <details class="help-details"><summary>查看核对操作说明</summary><ul><li>核对来源后选择处理方式；多选时按住 Command / Ctrl。</li><li>“保留原值”不能与其他选项同时选择。确认后的流程信息写入两张付款表。</li></ul></details>
+      <details class="help-details"><summary>查看核对操作说明</summary><ul><li>选项前显示对应文件名，核对来源后选择处理方式；多选时按住 Command / Ctrl。</li><li>“保留原值”不能与其他选项同时选择。确认后的流程信息写入两张付款表。</li></ul></details>
       <div class="issue-list" id="issueList"></div>
     </div>
-    <div class="actions"><button id="download" disabled>下载资金整理表</button><span id="filenameHint"></span></div>
+    <div class="actions"><button id="download" disabled>下载付款节奏跟进表</button><span id="filenameHint"></span></div>
     <details class="help-details"><summary>查看核对与下载说明</summary><ul><li>核对说明含“重新申请”的申请不再生成申请相关核对提示。其余重复申请每组只列一次；OA 编号补齐、更正、缺失及冲突均保留来源供核对。</li><li>未申请本身无需核对。重复、超额、归属不清及申请日期问题写入核对表，不阻止下载；其他待处理项需先确认。</li><li>当天在当前浏览器再次下载时，文件版本自动递增。</li></ul></details>
   </section>
   <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>预览最多 100 行，下载包含全部记录。</li><li>本次付款申请金额与分批金额相同时，按日期从早到晚依次标红；重复申请只计一次，无法确定归属时列入付款申请核对。导出保留原有人工颜色，下载后可手动修改底色。</li><li>谈判明细分行左对齐、行高自适应；统一表头、筛选器和边框，列宽随内容调整。</li></ul></details><div class="preview" id="negotiatedPreview"></div></section>
@@ -83,8 +83,8 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-core.js?v=funds-progress-review-20261106"></script>
-<script src="funds-export.js?v=normal-columns-20261102-58"></script>
-<script src="funds-tool.js?v=funds-batch-payment-20261104"></script>
+<script src="funds-core.js?v=payment-cadence-20261108"></script>
+<script src="funds-export.js?v=payment-cadence-20261108"></script>
+<script src="funds-tool.js?v=payment-cadence-20261108"></script>
 </body>
 </html>

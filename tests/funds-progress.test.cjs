@@ -125,7 +125,7 @@ test('原三表金额、提交标红及公式与上一版一致，进度核对�
  const i=fixture(),first=C.build(i),again=C.build(i);assert.deepEqual(again,first);
  assert.deepEqual(first.normalRows.map(row=>row[C.NORMAL_HEADERS.indexOf('供应商名称')].v),['合成供应商2','合成供应商3']);
  assert.equal(first.normalRows[0][C.NORMAL_HEADERS.indexOf('申请付款的日期')].v,'2026/11/02周');
- assert.equal(first.applicationComments.M2,'申请日期（资金整理）：2026年11月1日；2026年11月3日');
+ assert.equal(first.applicationComments.M2,'申请日期（付款节奏跟进）：2026年11月1日；2026年11月3日');
  set(i,'oa','流程状态',2,'未归档');set(i,'oa','流程状态',6,'未归档');assert.equal(records(C.build(i))[0]['是否已付款'].v,'已付款','明确出纳支付记录不由流程状态替代');
  assert.deepEqual(C.build(i).highlights,first.highlights);
 });

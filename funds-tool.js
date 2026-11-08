@@ -13,7 +13,7 @@
     try { versions = JSON.parse(localStorage.getItem('funds-export-versions') || '{}'); } catch (_) { versions = {}; }
     const previous = Math.max(Number(versions?.[date]) || 0, memoryVersions[date] || 0);
     const version = Number.isSafeInteger(previous) && previous >= 0 ? previous + 1 : 1;
-    return {date, version, name:`资金整理-${date}-V${version}.xlsx`};
+    return {date, version, name:`付款节奏跟进-${date}-V${version}.xlsx`};
   }
   function rememberDownload({date, version}) {
     memoryVersions[date] = version;
@@ -79,7 +79,10 @@
       if (!issue.multiple) select.add(new Option('请选择核对结果',''));
       else select.size = Math.min(6,Math.max(3,issue.choices.length));
       for (const choice of issue.choices) {
-        const option = new Option(choice.label,choice.value);
+        // Matched OA candidates already identify their own source file.
+        const label = issue.source?.file && !choice.value.startsWith('match:') ? issue.source.file + '：' + choice.label : choice.label;
+        const option = new Option(label,choice.value);
+        option.title = label;
         option.selected = (decisions[issue.id] || []).includes(choice.value);
         select.add(option);
       }

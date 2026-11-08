@@ -303,7 +303,8 @@ window.FundsExport = async function(sourceBytes, result) {
   }
   // Move the existing column XML, including styles and references, instead of rebuilding the source sheet.
   // Patch native notes before column relocation so notes and their VML anchors move together.
-  const commentPrefix='申请日期（资金整理）：',commentAuthor='资金整理';
+  const commentPrefix='申请日期（付款节奏跟进）：',commentAuthor='付款节奏跟进';
+  const isToolComment=line=>line.startsWith(commentPrefix)||line.startsWith('申请日期（资金整理）：');
   const commentEntries=Object.entries(result.applicationComments||{}).filter(([address])=>highlightedCells.includes(address));
   const sheetRelationsPath=relPath(sheetPath),sheetRelations=zip.file(sheetRelationsPath)?await parse(zip,sheetRelationsPath):parseText(`<Relationships xmlns="${P}"/>`);
   const findRelation=type=>elements(sheetRelations,'Relationship').find(r=>r.getAttribute('Type')===R+'/'+type);
@@ -315,9 +316,9 @@ window.FundsExport = async function(sourceBytes, result) {
     const textOf=node=>elements(node,'t').map(t=>t.textContent).join('');
     // A dedicated line identifies only our generated annotation; retain manual notes and rich text.
     for(const comment of elements(list,'comment')){
-      const text=first(comment,'text');if(!text||!textOf(text).split(/\r?\n/).some(line=>line.startsWith(commentPrefix)))continue;
+      const text=first(comment,'text');if(!text||!textOf(text).split(/\r?\n/).some(isToolComment))continue;
       for(const part of [...text.children]){
-        const original=part.localName==='t'?part.textContent:textOf(part),clean=original.split(/\r?\n/).filter(line=>!line.startsWith(commentPrefix)).join('\n');
+        const original=part.localName==='t'?part.textContent:textOf(part),clean=original.split(/\r?\n/).filter(line=>!isToolComment(line)).join('\n');
         if(clean===original)continue;
         if(!clean.trim()){part.remove();continue;}
         const t=create(comments,'t');t.setAttribute('xml:space','preserve');t.textContent=clean;

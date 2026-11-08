@@ -63,7 +63,7 @@ const X=require('../vendor/xlsx.full.min.js'),{fixtures}=require('./funds-fixtur
   await page.evaluate(()=>localStorage.setItem('funds-export-versions',JSON.stringify({'2026-10-27':9})));
   await page.reload({waitUntil:'networkidle'});await page.locator('.tool-tab[data-tool="funds"]').click();frame=page.frameLocator('iframe[data-tool="funds"]');await frame.locator('#ledgerFile:not([disabled])').waitFor();
   for(const kind of ['ledger','applications','oa','negotiated']){assert.equal(await frame.locator('#'+kind+'Info').textContent(),'尚未引用');assert.equal(await frame.locator('#'+kind+'File').evaluate(el=>el.files.length),0);}
-  assert(await frame.locator('#analyze').isDisabled());assert(await frame.locator('#download').isDisabled());assert.equal(await frame.locator('#filenameHint').textContent(),'资金整理-2026-10-27-V10.xlsx');
+  assert(await frame.locator('#analyze').isDisabled());assert(await frame.locator('#download').isDisabled());assert.equal(await frame.locator('#filenameHint').textContent(),'付款节奏跟进-2026-10-27-V10.xlsx');
   assert.deepEqual(errors,[]);
   console.log('PASS: funds files are not persisted or restored; versioned iframe, same-name latest bytes, per-role reference time, slow old upload discarded, old decisions cleared, failed upload blocks stale results, refresh requires all four files; only download version persists.');
  }finally{await browser.close();}
