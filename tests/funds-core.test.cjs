@@ -271,6 +271,16 @@ test('登记月份和应付款时间有效时仍导出真实Excel日期及相应
 test('开票时间无法识别仍保留原文并要求日期核对',()=>{
  const i=fixture();set(i,'ledger','月份',3,'10月登记');set(i,'ledger','应付款时间',3,'月末付款');set(i,'ledger','开票时间',3,'开票待确认');const r=C.build(i),issues=r.issues.filter(x=>x.kind==='date');assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('开票时间')].v,'开票待确认');assert.equal(issues.length,1);assert.equal(issues[0].id,'date:对账明细-李奇!3:开票时间');assert.equal(issues[0].resolved,false);assert.equal(r.stats.pending,1);
 });
+test('开票时间只有月日时明确提醒缺少年份，不补年份且保留核对选择',()=>{
+ for(const text of ['11月6日','11月6','11/6','11-6','11.6',' 11 月 6 日 ']){
+  const i=fixture();set(i,'ledger','开票时间',3,text);const before=JSON.stringify(i),r=C.build(i),q=r.issues.find(q=>q.id==='date:对账明细-李奇!3:开票时间');
+  assert(q);assert.match(q.message,/缺少年份/);assert.match(q.message,/源表补充完整年月日后重新上传/);assert(q.message.includes(text.trim()));assert.equal(q.resolved,false);
+  assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('开票时间')].v,text);assert.equal(JSON.stringify(i),before);
+  const kept=C.build(i,{[q.id]:['keep']});assert(kept.issues.find(x=>x.id===q.id).resolved);assert.equal(kept.normalRows[0][C.NORMAL_HEADERS.indexOf('开票时间')].v,text);
+ }
+ for(const text of ['2026-02-30','开票待确认']){const i=fixture();set(i,'ledger','开票时间',3,text);const q=C.build(i).issues.find(q=>q.kind==='date');assert.match(q.message,/日期无法识别/);assert.doesNotMatch(q.message,/缺少年份/);}
+ const i=fixture();set(i,'ledger','开票时间',3,'2026年11月6日');const r=C.build(i);assert(!r.issues.some(q=>q.kind==='date'));assert.equal(X.SSF.format('yyyy-mm-dd',r.normalRows[0][C.NORMAL_HEADERS.indexOf('开票时间')].v),'2026-11-06');
+});
 test('OA只读取指定字段，其他重复明细列不构成冲突',()=>{
  const i=fixture();i.oa.book=book('Sheet0',[...OH,'备注','备注'],[{'流程编号':'MDST-DGFK20261001001','当前节点':'财务审核','未操作者':'测试人员','流程状态':'未归档','申请人':'李奇'}]);assert.doesNotThrow(()=>C.build(i));
 });

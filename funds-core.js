@@ -664,7 +664,12 @@ function build(inputs,decisions={}){
   if(key==='剩余金额'&&original.f&&target.values['已付金额']!==target.record.values['已付金额'])return clone(original);
   if(original.t==='e'||(original.f&&(original.v==null||original.v===''))){issue('cell:'+target.record.id+':'+key,'formula','“'+key+'”公式结果不可用，输出保留错误提示，请在源表重算后上传或确认保留。',target.record);return cell(original.w||'公式结果不可用');}
   if(['登记月份','开票时间','应付款时间'].includes(key)){
-   const d=date(original,target.record.date1904,key==='登记月份');if(d.invalid&&key==='开票时间')issue('date:'+target.record.id+':'+key,'date','“'+key+'”日期无法识别，保留原文。',target.record);delete d.invalid;return d;
+   const d=date(original,target.record.date1904,key==='登记月份');
+   if(d.invalid&&key==='开票时间'){
+    const missingYear=/^\d{1,2}(?:月|[./-])\d{1,2}日?$/.test(norm(original.v));
+    issue('date:'+target.record.id+':'+key,'date',missingYear?'“开票时间”为“'+str(original.v)+'”，缺少年份。请在源表补充完整年月日后重新上传；当前保留原文。':'“'+key+'”日期无法识别，保留原文。',target.record);
+   }
+   delete d.invalid;return d;
   }
   if(['开票金额','申请付款金额','合同总金额','已付金额','剩余金额'].includes(key)){
    const amount=money(original);if(amount.cents!==undefined)return amountCell(amount.cents);if(amount.invalid)issue('cell:'+target.record.id+':'+key,'amount','“'+key+'”不是可用金额，保留原文。',target.record);
