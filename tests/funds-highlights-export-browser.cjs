@@ -24,7 +24,9 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
    const cf=make(doc,'conditionalFormatting',{sqref:'B2:B4'});for(const [priority,dxfId,formula]of [['8','0','B2>0'],['17','1','B2>=0']]){const rule=make(doc,'cfRule',{type:'expression',priority,dxfId}),f=make(doc,'formula');f.textContent=formula;rule.append(f);cf.append(rule);}doc.documentElement.insertBefore(cf,[...doc.documentElement.children].find(n=>['dataValidations','hyperlinks','pageMargins','ignoredErrors','extLst'].includes(n.localName))||null);
    // Prefix-only source namespaces exercise red-dxf reuse after XMLSerializer adds local xmlns declarations.
    const prefixed=s.serializeToString(styles).replace(/(<\/?)([A-Za-z][\w.-]*)(?=[\s/>])/g,'$1s:$2').replace('xmlns="'+ns+'"','xmlns:s="'+ns+'"');
-   zip.file('xl/styles.xml',prefixed);zip.file('xl/worksheets/sheet1.xml',s.serializeToString(doc));return [...await zip.generateAsync({type:'uint8array'})];
+   zip.file('xl/styles.xml',prefixed);zip.file('xl/worksheets/sheet1.xml',s.serializeToString(doc));
+   for(const path of Object.keys(zip.files))if(path.endsWith('.vml')){const vml=parse(await zip.file(path).async('string'));for(const data of all(vml,'ClientData'))if(all(data,'Column')[0]?.textContent==='1'){all(data,'Anchor')[0].textContent='38, 185, 1009, 8, 41, 18, 1014, 27';data.parentElement.setAttribute('style','position:absolute;margin-left:3276pt;margin-top:30909pt;width:302pt;height:169pt;visibility:hidden');}zip.file(path,s.serializeToString(vml));}
+   return [...await zip.generateAsync({type:'uint8array'})];
   },[...X.write(book,{type:'buffer',bookType:'xlsx'})]));
   const normalHeaders=['供应商名称','申请付款金额','单据号【财务应付单】','OA合同编号','合同总金额'],normalRows=[['甲',30,'AP001','HT001',30],['乙',40,'AP002','HT002',40]].map(row=>row.map(v=>({t:typeof v==='number'?'n':'s',v})));
   const result={applicationComments:{B2:'申请日期（付款节奏跟进）：2026年10月27日'},normalHeaders,normalRows,reviewHeaders:['核对说明'],reviewRows:[],negotiated:{sheetName:'本周谈判付款',headerRow:0,headers,rows:[1,2,3].map(r=>headers.map((_,c)=>source[X.utils.encode_cell({r,c})])),updates:[],columnOrder:[0,2,1,3,4]},highlights:{negotiatedCells:['B1','B2','B2'],normalRows:[1,2,2]}};
@@ -39,15 +41,18 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
     for(const c of all(doc,'c')){const xf=xfs.children[Number(c.getAttribute('s')||0)],fill=fills.children[Number(xf.getAttribute('fillId')||0)];cells[c.getAttribute('r')]={fill:all(fill,'fgColor')[0]?.getAttribute('rgb'),locked:all(xf,'protection')[0]?.getAttribute('locked')};}
     result.sheets[filename]={rules,own:rules.filter(r=>r.formula===marker),cells,tags:[...doc.documentElement.children].map(n=>n.localName),hidden:all(doc,'col').filter(c=>c.getAttribute('hidden')==='1').map(c=>Number(c.getAttribute('min')))};
    }
-   result.notes=[];result.noteShapes=[];
+   result.notes=[];result.noteShapes=[];result.notePositions={};
    for(const path of Object.keys(zip.files))if(path.endsWith('.xml')&&/comments/i.test(path)){const doc=parse(await zip.file(path).async('string')),authors=all(doc,'author').map(n=>n.textContent);for(const n of all(doc,'comment'))result.notes.push({ref:n.getAttribute('ref'),author:authors[Number(n.getAttribute('authorId'))],text:all(n,'t').map(t=>t.textContent).join('')});}
-   for(const path of Object.keys(zip.files))if(path.endsWith('.vml')){const doc=parse(await zip.file(path).async('string'));for(const n of all(doc,'ClientData').filter(n=>n.getAttribute('ObjectType')==='Note'))result.noteShapes.push({ref:XLSX.utils.encode_cell({r:Number(all(n,'Row')[0].textContent),c:Number(all(n,'Column')[0].textContent)}),visible:all(n,'Visible').length>0});}
+   for(const path of Object.keys(zip.files))if(path.endsWith('.vml')){const doc=parse(await zip.file(path).async('string'));for(const n of all(doc,'ClientData').filter(n=>n.getAttribute('ObjectType')==='Note')){const ref=XLSX.utils.encode_cell({r:Number(all(n,'Row')[0].textContent),c:Number(all(n,'Column')[0].textContent)});result.noteShapes.push({ref,visible:all(n,'Visible').length>0});result.notePositions[ref]={anchor:all(n,'Anchor')[0]?.textContent.split(',').map(Number),style:n.parentElement.getAttribute('style')};}}
    {if(result.notes.length!==result.noteShapes.length)throw Error('批注与 VML 图形数量不一致');if(new Set(result.noteShapes.map(n=>n.ref)).size!==result.noteShapes.length)throw Error('批注图形坐标重复');}
    return result;
   },{bytes:[...bytes],marker:MARKER});
+  const originalNotes=(await inspect(await exportBytes(input,{...result,applicationComments:undefined}))).notePositions;
   const output=await exportBytes(input,result),first=await inspect(output),saved=X.read(output,{cellNF:true}),neg=first.sheets['xl/worksheets/sheet1.xml'],normal=first.sheets['xl/worksheets/funds-normal.xml'];
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理']);assert.equal(neg.own.length,0);assert.equal(normal.rules.length,0);assert.deepEqual(normal.hidden,[3,4,5]);
   for(const col of ['A','B','C','D','E']){assert.equal(normal.cells[col+'2'].fill,'FFFF0000');assert.notEqual(normal.cells[col+'3'].fill,'FFFF0000');assert.notEqual(normal.cells[col+'1'].fill,'FFFF0000');}
+  const adjacent=(info,address)=>{const p=X.utils.decode_cell(address),note=info.notePositions[address];assert.deepEqual(note.anchor.slice(0,4),[p.c+1,6,p.r,2]);assert(note.anchor[4]>=p.c+1);assert(note.anchor[6]>=p.r);const style=Object.fromEntries(note.style.split(';').filter(s=>s.includes(':')).map(s=>s.split(':')));assert.equal(style.top,'0pt');assert.equal(style.left,'0pt');assert.equal(parseFloat(style['margin-top']),31.5);assert.equal(style.visibility,'hidden');};
+  adjacent(first,'C2');assert.deepEqual(first.notePositions.B2,originalNotes.B2,'不移动无关人工批注');
   assert.equal(first.notes.find(n=>n.ref==='C2').author,'原作者');assert.equal(first.notes.length,2);
   assert.equal(saved.Sheets.谈判付款.C2.c[0].t,'保留原人工批注\n申请日期（付款节奏跟进）：2026年10月27日');assert.equal(saved.Sheets.谈判付款.C2.c[0].a,X.read(input).Sheets.本周谈判付款.B2.c[0].a);assert.equal(saved.Sheets.谈判付款.B2.c[0].t,'未标红的原批注');
   assert.equal(neg.cells.C2.fill,'FFFF0000');assert.equal(neg.cells.C3.fill,'FFFF0000','Unrelated manual red is retained');assert.equal(neg.cells.C2.locked,'0');
@@ -65,6 +70,7 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
   const next={...result,applicationComments:{C2:'申请日期（付款节奏跟进）：2026年10月28日；2026年10月29日'},negotiated:{...result.negotiated,sheetName:'谈判付款',headers:headers.map((_,i)=>saved.Sheets.谈判付款[X.utils.encode_cell({r:0,c:i})].v),columnOrder:[0,1,2,3,4]},highlights:{negotiatedCells:['C2'],normalRows:[2]}};
   const repeated=await exportBytes(output,next),again=await inspect(repeated);assert.deepEqual(again.sheets['xl/worksheets/sheet1.xml'].rules,neg.rules);assert.deepEqual(again.dxfPrefix,first.dxfPrefix);assert.equal(again.sheets['xl/worksheets/sheet1.xml'].cells.C2.fill,'FFFF0000');
   assert.equal(X.read(repeated).Sheets.谈判付款.C2.c[0].t,'保留原人工批注\n申请日期（付款节奏跟进）：2026年10月28日；2026年10月29日');
+  adjacent(again,'C2');
   const withdrawn=await exportBytes(repeated,{...next,highlights:undefined}),clean=await inspect(withdrawn),cleanNeg=clean.sheets['xl/worksheets/sheet1.xml'];
   assert(Object.values(clean.sheets['xl/worksheets/funds-normal.xml'].cells).every(c=>c.fill!=='FFFF0000'),'Re-upload withdraws obsolete normal fills');
   assert.equal(X.read(withdrawn).Sheets.谈判付款.C2.c[0].t,'保留原人工批注');assert.equal(X.read(withdrawn).Sheets.谈判付款.B2.c[0].t,'未标红的原批注');
@@ -86,7 +92,7 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
   assert.deepEqual(X.read(input).Sheets.本周谈判付款['!merges'],source['!merges']);
   delete source.B2.c;delete source.C2.c;
   const fresh=await exportBytes(X.write(book,{type:'buffer',bookType:'xlsx'}),result);assert.equal(X.read(fresh).Sheets.谈判付款.C2.c[0].t,'申请日期（付款节奏跟进）：2026年10月27日');
-  assert.deepEqual((await inspect(fresh)).noteShapes,[{ref:'C2',visible:false}]);
+  assert.deepEqual((await inspect(fresh)).noteShapes,[{ref:'C2',visible:false}]);adjacent(await inspect(fresh),'C2');
   const removed=await exportBytes(fresh,{...next,highlights:undefined});assert.equal(X.read(removed).Sheets.谈判付款.C2.c,undefined);assert.equal((await inspect(removed)).notes.length,0);
   book.Workbook={WBProps:{date1904:true}};const epoch=await exportBytes(X.write(book,{type:'buffer',bookType:'xlsx'}),{...result,normalHeaders:['申请日期'],normalRows:[[{t:'n',v:46322,z:'yyyy"年"m"月"d"日"'}]]});const epochBook=X.read(epoch,{cellNF:true});assert.equal(epochBook.Workbook.WBProps.date1904,true);assert.equal(X.SSF.format(epochBook.Sheets.正常付款.A2.z,epochBook.Sheets.正常付款.A2.v,{date1904:true}),'2026年10月27日');
   console.log('PASS: application-date notes, native VML anchors and hidden display, column reordering, manual-note preservation, repeat/withdrawal, date1904; editable native fills, full-row sorting including hidden cells, legacy rule removal, repeat/withdrawal restores original fills and preserves manual overrides, formulas and unrelated conditional formatting');

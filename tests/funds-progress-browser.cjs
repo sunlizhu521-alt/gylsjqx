@@ -13,7 +13,7 @@ const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
   append(input,'applications',['2026-11-05','无流程合成供应商','迈德斯特',ID(99),12,'正常付款']);
   append(input,'applications',['2026-11-06','缺编号合成供应商','迈德斯特','',18,'正常付款']);
   append(input,'applications',['2026-11-07','多流程合成供应商','迈德斯特',ID(1)+' / '+ID(2),20,'正常付款']);
-  async function upload(role,bytes=write(input[role].book)){await frame.locator('#'+role+'File:not([disabled])').waitFor();await frame.locator('#'+role+'File').setInputFiles({name:input[role].name,mimeType:MIME,buffer:bytes});}
+  async function upload(role,bytes=write(input[role].book)){if(role==='negotiated')input[role].book=X.read(bytes,{cellStyles:true,cellNF:true});await frame.locator('#'+role+'File:not([disabled])').waitFor();await frame.locator('#'+role+'File').setInputFiles({name:input[role].name,mimeType:MIME,buffer:bytes});}
   for(const role of ['ledger','applications','oa','negotiated'])await upload(role);
   async function analyze(){await frame.locator('#analyze:not([disabled])').click();await frame.locator('#download:not([disabled])').waitFor();assert.equal(await frame.locator('#pendingCount').innerText(),'0');}
   async function download(version){const pending=page.waitForEvent('download');await frame.locator('#download').click();const d=await pending;assert.equal(d.suggestedFilename(),'付款节奏跟进-2026-11-01-V'+version+'.xlsx');return fs.readFile(await d.path());}
@@ -70,12 +70,17 @@ const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
   // Later applications sharing an archived OA are not paid without their own cash-disbursement evidence.
   append(input,'applications',['2026-11-08','合成供应商1','迈德斯特',ID(1),60,'谈判付款','分批付款第2批']);
   for(const row of [2,6])set(input,'oa','流程状态',row,'归档');await upload('applications');await upload('oa');await analyze();
-  await verify(await download(7),['已付款','未付款','已付款','未付款','待核对','待核对','待核对','待核对'],[40,200,40,0,12,18,20,60]);
+  const redBatchBytes=await download(7);await verify(redBatchBytes,['已付款','未付款','已付款','未付款','待核对','待核对','待核对','待核对'],[40,200,40,0,12,18,20,60]);
   assert.match(await frame.locator('#reviewPreview').innerText(),/请先确认是否为分批付款/);
   assert.doesNotMatch(await frame.locator('#reviewPreview').innerText(),/需要处理：分批付款核对|^\d+、[。；]+$/m);
+  // Re-uploaded source red + the same application suppresses only the missing-evidence review.
+  await upload('negotiated',redBatchBytes);await analyze();
+  await verify(await download(8),['已付款','未付款','已付款','未付款','待核对','待核对','待核对','待核对'],[40,200,40,0,12,18,20,60]);
+  assert.doesNotMatch(await frame.locator('#reviewPreview').innerText(),/分批付款核对：申请金额 60.00/);
+  assert.equal(await frame.locator('#progressPreview tbody tr').last().locator('td').nth(11).innerText(),'待核对');
   const paid60='[出纳执行]\n部分支付：60元\n合成出纳 2026-11-09 15:30:00';
   for(const row of [2,6])set(input,'oa','签字意见',row,PAID40+'\n'+paid60);await upload('oa');await analyze();
-  await verify(await download(8),['已付款','未付款','已付款','未付款','待核对','待核对','待核对','已付款'],[40,200,40,0,12,18,20,60]);
+  await verify(await download(9),['已付款','未付款','已付款','未付款','待核对','待核对','待核对','已付款'],[40,200,40,0,12,18,20,60]);
   assert.deepEqual(errors,[]);console.log(JSON.stringify({base,rows:8,batchEvidence:true,sheets:C.OUTPUT_SHEETS,preview:true,export:true,latestUpload:true,reapply:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

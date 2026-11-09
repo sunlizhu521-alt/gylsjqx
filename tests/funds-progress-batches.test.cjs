@@ -14,6 +14,47 @@ const states=r=>r.progressRows.map(row=>row[r.progressHeaders.indexOf('是否已
 const progressReviews=r=>r.reviewRows.filter(row=>String(row[r.reviewHeaders.indexOf('核对说明')]?.v||'').startsWith('付款进度核对：'));
 const reviewText=r=>progressReviews(r).map(row=>row[r.reviewHeaders.indexOf('核对说明')].v).join('\n');
 
+function redBatch(){
+ const i=batches(),s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];
+ s.M2={t:'n',v:615833};s.N2={t:'n',v:700000,s:{patternType:'solid',fgColor:{rgb:'FF0000'}}};
+ return i;
+}
+test('源谈判分批已红且本次有对应申请时不重复核对，付款状态和其他结果保持不变',()=>{
+ const i=redBatch(),before=JSON.stringify(i),r=C.build(i);
+ assert.deepEqual(states(r),['已付款','待核对']);assert.equal(progressReviews(r).length,0);
+ assert.match(r.progressEvidence[1],/已标红.*对应申请/);assert.equal(JSON.stringify(i),before);
+ const j=redBatch();delete j.negotiated.book.Sheets[j.negotiated.book.SheetNames[0]].N2.s;
+ const baseline=C.build(j);assert.match(reviewText(baseline),/700000\.00/);
+ for(const key of ['normalRows','highlights','applicationComments'])assert.deepEqual(r[key],baseline[key]);
+ assert.deepEqual(r.negotiated.rows.map(row=>row.map(({v,f})=>({v,f}))),baseline.negotiated.rows.map(row=>row.map(({v,f})=>({v,f}))));
+ append(i,'applications',row(700000,'分批付款第2批','2026-11-03'));
+ const repeated=C.build(i);assert.equal(progressReviews(repeated).length,0);assert.deepEqual(states(repeated),['已付款','待核对','待核对']);
+ assert(repeated.reviewRows.some(row=>row[5].v.includes('重复提交')),'重复申请核对独立保留');
+});
+test('新增标红、红色在其他批次或其他OA、无申请和普通付款不豁免出纳核对',()=>{
+ for(const change of [
+  i=>{delete i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]].N2.s;},
+  i=>{const s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];s.M2.s=s.N2.s;delete s.N2.s;},
+  i=>{set(i,'negotiated','对公付款0A流程号',2,ID(99));const flow=X.utils.sheet_to_json(i.oa.book.Sheets.Sheet0,{header:1})[1];flow[0]=ID(99);append(i,'oa',flow);},
+  i=>{set(i,'applications','付款分类',3,'正常付款');},
+  i=>{set(i,'negotiated','付款主体',2,'国源');},
+  i=>{set(i,'negotiated','供应商名称',2,'其他供应商');}
+ ]){const i=redBatch();change(i);const r=C.build(i);assert.match(reviewText(r),/700000\.00/);assert.deepEqual(states(r),['已付款','待核对']);}
+ const i=redBatch();i.applications.book=book('付款申请汇总',[[...AH,'核对说明'],row(615833,'第1批')]);
+ const r=C.build(i);assert.equal(r.progressRows.length,1);assert(!r.highlights.negotiatedCells.includes('N2'));
+});
+test('已有红色及对应申请不能绕过主体、金额、多批、退汇等实质冲突',()=>{
+ for(const change of [
+  i=>set(i,'oa','业务所属公司',2,'杭州国源养老科技有限公司'),
+  i=>set(i,'oa','付款金额',2,0),
+  i=>append(i,'applications',row(700000,'分批付款第3批')),
+  i=>set(i,'oa','签字意见',2,CASHIER+'\n[出纳执行]\n付款已撤回\n姚懿玲 2026-10-30 16:08:44'),
+  i=>{const s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];s.M2={...s.N2};s.M1={...s.N1};}
+ ]){const i=redBatch();change(i);assert.match(reviewText(C.build(i)),/700000\.00/);}
+ const i=redBatch();set(i,'negotiated','应付款时间',2,'无法识别');
+ const r=C.build(i);assert.match(reviewText(r),/应付时间/);assert.doesNotMatch(reviewText(r),/未找到与本笔申请金额相等/);
+});
+
 test('归档分批OA只凭唯一出纳实付金额确认对应申请，其他批保留待核对',()=>{
  const i=batches(),before=JSON.stringify(i),r=C.build(i);
  assert.deepEqual(states(r),['已付款','待核对']);assert.equal(r.progressRows.length,2);

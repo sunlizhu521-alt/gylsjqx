@@ -180,7 +180,7 @@ function build(inputs,decisions={}){
   if(names.length!==1)throw Error('资金台账中'+person+'的对账明细'+(names.length?'存在多个版本':'缺失'));
   const parsed=table(inputs.ledger,names[0],['供应商名称','申请付款金额']);for(const record of parsed.records)record.owner=person;return parsed;
  });
- const ledger=ledgerTables.flatMap(t=>t.records),issues=[],updateMap=new Map(),reviewRows=[],highlightReviews=[],highlightedNegotiated=new Set(),highlightedNormal=new Set(),applicationComments={};
+ const ledger=ledgerTables.flatMap(t=>t.records),issues=[],updateMap=new Map(),reviewRows=[],highlightReviews=[],highlightedNegotiated=new Set(),highlightedNormal=new Set(),applicationComments={},sourceRedApplications=new Set();
  function issue(id,kind,message,rec,choices=[{value:'keep',label:'保留原值'}],multiple=false){
   const requested=Array.isArray(decisions[id])?decisions[id]:[],allowed=new Set(choices.map(c=>c.value));
   const valid=requested.length>0&&requested.every(v=>allowed.has(v))&&new Set(requested).size===requested.length&&(multiple||requested.length===1)&&(!(requested.includes('keep')||requested.includes('not-submitted'))||requested.length===1);
@@ -380,6 +380,11 @@ function build(inputs,decisions={}){
     highlightedNegotiated.add(first.address);
     const key=submissionKey(application),dates=applicationDateCell(key?matched.filter(r=>submissionKey(r)===key):[application]);
     applicationComments[first.address]='申请日期（付款节奏跟进）：'+(dates.t==='n'?X.SSF.format(DATE_FORMAT,dates.v):dates.v);
+    // Only a confirmed application tied to an already-red source batch can waive this review.
+    const fill=negotiated.sheet[first.address]?.s,color=fill?.fgColor;
+    if(!ambiguous.length&&fill?.patternType==='solid'&&(/^(?:FF)?FF0000$/i.test(color?.rgb||'')||[2,10].includes(color?.indexed))){
+     for(const r of key?matched.filter(r=>submissionKey(r)===key):[application])if(classification(r).name===classification(target.record).name&&compatible(r,target.record,'付款主体'))sourceRedApplications.add(r);
+    }
     continue;
    }
    const reason=amount===undefined||amount<=0n?'申请金额为空、异常或非正数':!exact.length?'未找到金额相等的分批':!remaining.length?'同额分批已全部对应其他申请':remaining.some(b=>!b.valid)?'分批日期无法识别，不能按日期排序':first.merged?'分批金额或日期表头位于合并单元格，归属不清':'最早日期存在多个同额批次，归属不清';
@@ -717,6 +722,7 @@ function build(inputs,decisions={}){
   const reason=identityConflict?'OA收款单位与申请供应商不一致，或付款主体冲突':amountConflict?'同一OA付款金额为空、异常或存在冲突':amount===undefined||amount<=0n?'申请金额为空、异常或非正数':excessAmount?'申请或出纳支付金额超过OA付款金额':groups.size!==1?'同一金额对应多个申请批次，无法唯一归属':conflictingEvent?'出纳意见含未付、撤回或退汇等信息，需要确认支付是否有效':exact.length>1?'存在多条同额出纳支付记录，无法唯一对应':!exact.length?'未找到与本笔申请金额相等的明确出纳支付记录':'';
   const eventLabel=e=>e.time+'｜'+e.operator+'｜'+e.opinion+'｜'+sourcePosition({source:e.source});
   if(!reason)return {paid:true,evidence:'出纳支付依据：'+eventLabel(exact[0])};
+  if(reason==='未找到与本笔申请金额相等的明确出纳支付记录'&&sourceRedApplications.has(application))return {paid:false,evidence:'谈判表对应分批金额已标红，付款申请汇总有对应申请；缺少本批出纳支付依据，付款状态仍待核对。'};
   const evidence=events.length?events.map(eventLabel).join('\n'):'无可明确识别金额和时间的出纳支付记录；OA来源：'+sourcePosition(records[0]);
   return {paid:false,evidence:'分批付款待核对：'+reason,review:'分批付款核对：申请金额 '+amountText(application.values['申请付款金额'])+(applicationBatch(batchText(application))?'；第'+applicationBatch(batchText(application))+'批':'')+'。\n'+reason+'。\n出纳记录：'+evidence+'。\n需要处理：请先确认是否为分批付款，再确认本次申请对应的批次及是否实际支付；核对该批出纳付款金额、时间，记录不完整时重新导出OA签字意见。'};
  }
