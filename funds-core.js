@@ -134,6 +134,19 @@ function cashierPayments(record){
  }
  return events;
 }
+function batchCommentPayment(source,amount){
+ const lines=[...new Set((source?.c||[]).flatMap(c=>str(c.t).normalize('NFKC').split(/\r?\n/)).map(str).filter(Boolean))];
+ const paid=[],conflicts=[],applicationDates=[];
+ for(const line of lines){
+  const stamp=line.match(/^申请日期\((?:付款节奏跟进|资金整理)\):(.+)$/);
+  if(stamp){applicationDates.push(...(submissionDates(cell(stamp[1]))||[]));continue;}
+  const text=norm(line).replace(/^(?:(?:\d{4}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?)[-—:：,，]*/,'').replace(/^(?:经)?(?:财务|出纳)?(?:核实|确认)[-—:：,，]*/,'');
+  if(/未支付|未付款|未付清|未到账|支付失败|付款失败|退汇|撤回|退款|退回|冲正|作废|部分(?:已)?(?:支付|付款)/.test(text)){conflicts.push(line);continue;}
+  const match=text.match(/^(?:本批|本次)?(?:已支付|已付款|已付清)(?:完成|成功)?(?:[:：]?(?:人民币|[￥¥])?(-?[\d,]+(?:\.\d+)?)元?)?[。.!！]*$/);
+  if(match){if(match[1]&&money(cell(match[1])).cents!==amount)conflicts.push(line);else paid.push(line);}
+ }
+ return {paid:paid.length>0&&!conflicts.length,conflict:conflicts.length>0,text:[...new Set([...paid,...conflicts])].join('；'),applicationDates};
+}
 function table(input,sheetName,required){
  const sheet=input.book.Sheets[sheetName];if(!sheet)throw Error(input.name+'：缺少工作表 '+sheetName);
  // WPS can extend !ref to XFD solely because of formatting. Keep all real values/formulas.
@@ -180,7 +193,7 @@ function build(inputs,decisions={}){
   if(names.length!==1)throw Error('资金台账中'+person+'的对账明细'+(names.length?'存在多个版本':'缺失'));
   const parsed=table(inputs.ledger,names[0],['供应商名称','申请付款金额']);for(const record of parsed.records)record.owner=person;return parsed;
  });
- const ledger=ledgerTables.flatMap(t=>t.records),issues=[],updateMap=new Map(),reviewRows=[],highlightReviews=[],highlightedNegotiated=new Set(),highlightedNormal=new Set(),applicationComments={},sourceRedApplications=new Set();
+ const ledger=ledgerTables.flatMap(t=>t.records),issues=[],updateMap=new Map(),reviewRows=[],highlightReviews=[],highlightedNegotiated=new Set(),highlightedNormal=new Set(),applicationComments={},sourceRedApplications=new Set(),sourceBatchComments=new Map();
  function issue(id,kind,message,rec,choices=[{value:'keep',label:'保留原值'}],multiple=false){
   const requested=Array.isArray(decisions[id])?decisions[id]:[],allowed=new Set(choices.map(c=>c.value));
   const valid=requested.length>0&&requested.every(v=>allowed.has(v))&&new Set(requested).size===requested.length&&(multiple||requested.length===1)&&(!(requested.includes('keep')||requested.includes('not-submitted'))||requested.length===1);
@@ -381,9 +394,16 @@ function build(inputs,decisions={}){
     const key=submissionKey(application),dates=applicationDateCell(key?matched.filter(r=>submissionKey(r)===key):[application]);
     applicationComments[first.address]='申请日期（付款节奏跟进）：'+(dates.t==='n'?X.SSF.format(DATE_FORMAT,dates.v):dates.v);
     // Only a confirmed application tied to an already-red source batch can waive this review.
-    const fill=negotiated.sheet[first.address]?.s,color=fill?.fgColor;
-    if(!ambiguous.length&&fill?.patternType==='solid'&&(/^(?:FF)?FF0000$/i.test(color?.rgb||'')||[2,10].includes(color?.indexed))){
-     for(const r of key?matched.filter(r=>submissionKey(r)===key):[application])if(classification(r).name===classification(target.record).name&&compatible(r,target.record,'付款主体'))sourceRedApplications.add(r);
+    const source=negotiated.sheet[first.address],fill=source?.s,color=fill?.fgColor;
+    if(!ambiguous.length){
+     const comments=exact.map(b=>({...b,payment:batchCommentPayment(negotiated.sheet[b.address],amount)}));
+     for(const r of key?matched.filter(r=>submissionKey(r)===key):[application])if(classification(r).name===classification(target.record).name&&compatible(r,target.record,'付款主体')){
+      if(fill?.patternType==='solid'&&(/^(?:FF)?FF0000$/i.test(color?.rgb||'')||[2,10].includes(color?.indexed)))sourceRedApplications.add(r);
+      // Equal installments need a unique original application-date note; newly generated notes are not evidence.
+      const d=date(r.values['申请日期'],r.date1904),dated=d.invalid||d.v===''?[]:comments.filter(b=>b.payment.applicationDates.includes(X.SSF.format('yyyy-mm-dd',d.v)));
+      const chosen=comments.length===1?comments[0]:dated.length===1?dated[0]:null;
+      if(chosen?.valid&&!chosen.merged&&(chosen.payment.paid||chosen.payment.conflict))sourceBatchComments.set(r,{...chosen.payment,source:sourceLabel(target.record)+' / '+chosen.address});
+     }
     }
     continue;
    }
@@ -719,12 +739,15 @@ function build(inputs,decisions={}){
   const amountConflict=oaAmounts.some(n=>n===undefined||n<=0n)||new Set(oaAmounts).size!==1;
   const excessAmount=amount>oaAmounts[0]||events.some(e=>e.cents>oaAmounts[0]);
   const conflictingEvent=events.some(e=>e.cents===undefined&&/撤销|撤回|退款|退回|退汇|冲正|作废|失败|未支付|未付款|未付|未完成|取消|未成功|不成功|未到账/.test(e.opinion));
-  const reason=identityConflict?'OA收款单位与申请供应商不一致，或付款主体冲突':amountConflict?'同一OA付款金额为空、异常或存在冲突':amount===undefined||amount<=0n?'申请金额为空、异常或非正数':excessAmount?'申请或出纳支付金额超过OA付款金额':groups.size!==1?'同一金额对应多个申请批次，无法唯一归属':conflictingEvent?'出纳意见含未付、撤回或退汇等信息，需要确认支付是否有效':exact.length>1?'存在多条同额出纳支付记录，无法唯一对应':!exact.length?'未找到与本笔申请金额相等的明确出纳支付记录':'';
+  const comment=sourceBatchComments.get(application);
+  const reason=identityConflict?'OA收款单位与申请供应商不一致，或付款主体冲突':amountConflict?'同一OA付款金额为空、异常或存在冲突':amount===undefined||amount<=0n?'申请金额为空、异常或非正数':excessAmount?'申请或出纳支付金额超过OA付款金额':groups.size!==1?'同一金额对应多个申请批次，无法唯一归属':conflictingEvent?'出纳意见含未付、撤回或退汇等信息，需要确认支付是否有效':comment?.conflict?'谈判批注存在未支付、部分支付、退回或金额不一致的信息，请核实本批付款情况':exact.length>1?'存在多条同额出纳支付记录，无法唯一对应':!exact.length?'未找到与本笔申请金额相等的明确出纳支付记录':'';
   const eventLabel=e=>e.time+'｜'+e.operator+'｜'+e.opinion+'｜'+sourcePosition({source:e.source});
+  if(comment?.paid&&(!reason||reason==='未找到与本笔申请金额相等的明确出纳支付记录'))return {paid:true,evidence:'谈判批注付款依据：'+comment.text+'｜'+comment.source};
   if(!reason)return {paid:true,evidence:'出纳支付依据：'+eventLabel(exact[0])};
   if(reason==='未找到与本笔申请金额相等的明确出纳支付记录'&&sourceRedApplications.has(application))return {paid:false,evidence:'谈判表对应分批金额已标红，付款申请汇总有对应申请；缺少本批出纳支付依据，付款状态仍待核对。'};
-  const evidence=events.length?events.map(eventLabel).join('\n'):'无可明确识别金额和时间的出纳支付记录；OA来源：'+sourcePosition(records[0]);
-  return {paid:false,evidence:'分批付款待核对：'+reason,review:'分批付款核对：申请金额 '+amountText(application.values['申请付款金额'])+(applicationBatch(batchText(application))?'；第'+applicationBatch(batchText(application))+'批':'')+'。\n'+reason+'。\n出纳记录：'+evidence+'。\n需要处理：请先确认是否为分批付款，再确认本次申请对应的批次及是否实际支付；核对该批出纳付款金额、时间，记录不完整时重新导出OA签字意见。'};
+  const evidence=(events.length?events.map(eventLabel).join('\n'):'无可明确识别金额和时间的出纳支付记录；OA来源：'+sourcePosition(records[0]))+(comment?.conflict?'\n谈判批注：'+comment.text+'｜'+comment.source:'');
+  const action=comment?.conflict?'核实谈判表 '+comment.source+' 的人工批注及本批实际支付金额；批注有误请修正后重新上传，存在退汇等情况时同步核对出纳记录。':'请先确认是否为分批付款，再确认本次申请对应的批次及是否实际支付；核对该批出纳付款金额、时间，记录不完整时重新导出OA签字意见。';
+  return {paid:false,evidence:'分批付款待核对：'+reason,review:'分批付款核对：申请金额 '+amountText(application.values['申请付款金额'])+(applicationBatch(batchText(application))?'；第'+applicationBatch(batchText(application))+'批':'')+'。\n'+reason+'。\n出纳记录：'+evidence+'。\n需要处理：'+action};
  }
  const progressRows=applications.records.map(application=>{
   let paymentEvidence='';

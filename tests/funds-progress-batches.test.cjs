@@ -19,6 +19,63 @@ function redBatch(){
  s.M2={t:'n',v:615833};s.N2={t:'n',v:700000,s:{patternType:'solid',fgColor:{rgb:'FF0000'}}};
  return i;
 }
+const CONFIRMED='11月3日-OA已评论\n11月5日核实-已支付\n申请日期（付款节奏跟进）：2026年11月2日\n11月5日核实-已支付';
+function commentBatch(text=CONFIRMED){const i=redBatch();i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]].N2.c=[{a:'人工核实',t:text}];return i;}
+test('唯一分批批注明确核实已支付时确认本批，保留金额公式与人工内容',()=>{
+ for(const red of [true,false]){
+  const i=commentBatch();if(!red)delete i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]].N2.s;
+  const before=JSON.stringify(i),r=C.build(i),baseline=C.build(redBatch());
+  assert.deepEqual(states(r),['已付款','已付款']);assert.equal(progressReviews(r).length,0);
+  assert.match(r.progressEvidence[1],/谈判批注付款依据.*11月5日核实-已支付.*negotiated.xlsx.*第 2 行.*N2/);
+  assert.equal((r.progressEvidence[1].match(/11月5日核实-已支付/g)||[]).length,1);
+  for(const key of ['normalRows','highlights','applicationComments'])assert.deepEqual(r[key],baseline[key]);
+  assert.deepEqual(r.negotiated.rows.map(row=>row.map(({v,f})=>({v,f}))),baseline.negotiated.rows.map(row=>row.map(({v,f})=>({v,f}))));assert.equal(JSON.stringify(i),before);
+ }
+ for(const text of ['已付款','2026年11月5日-确认：已付清','11/5 出纳核实-本批已支付700,000.00元'])assert.deepEqual(states(C.build(commentBatch(text))),['已付款','已付款'],text);
+});
+test('评论、申请日期、疑问、计划与否定文字不冒充支付确认，最新批注移除后重新判断',()=>{
+ for(const text of ['11月3日-OA已评论','申请日期（付款节奏跟进）：2026年11月2日','申请日期（付款节奏跟进）：已支付','11月5日核实-未支付','计划已支付','预计已支付700000元','是否已支付','已支付？','如果已支付请反馈','已申请付款','已部分支付211820元'])assert.equal(states(C.build(commentBatch(text)))[1],'待核对',text);
+ const i=commentBatch();assert.equal(states(C.build(i))[1],'已付款');delete i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]].N2.c;
+ assert.equal(states(C.build(i))[1],'待核对');
+});
+test('批注金额不一致、退汇或相互矛盾时继续核对，不被红色或OA实付证据覆盖',()=>{
+ for(const text of [CONFIRMED+'\n11月6日未支付',CONFIRMED+'\n11月6日银行退汇','已支付699999.99元','已支付0元','已支付-700000元','已支付700000.001元','部分支付700000元']){
+  const i=commentBatch(text);set(i,'oa','签字意见',2,CASHIER+'\n[出纳执行]\n部分支付700000元\n姚懿玲 2026-11-05 16:00:00');
+  const r=C.build(i);assert.equal(states(r)[1],'待核对',text);assert.match(reviewText(r),/谈判批注/);assert.match(reviewText(r),/N2/);
+ }
+});
+test('批注只作用于对应OA供应商主体和唯一金额批次，不借用其他批次或普通付款',()=>{
+ for(const change of [
+  i=>{const s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];s.M2.c=s.N2.c;delete s.N2.c;},
+  i=>{const s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];s.M2.v=700000;},
+  i=>append(i,'applications',row(700000,'分批付款第3批')),
+  i=>set(i,'applications','付款分类',3,'正常付款'),
+  i=>set(i,'negotiated','付款主体',2,'国源'),
+  i=>set(i,'negotiated','供应商名称',2,'其他供应商'),
+  i=>{set(i,'negotiated','对公付款0A流程号',2,ID(99));const flow=X.utils.sheet_to_json(i.oa.book.Sheets.Sheet0,{header:1})[1];flow[0]=ID(99);append(i,'oa',flow);},
+  i=>set(i,'oa','付款金额',2,0),
+  i=>set(i,'oa','业务所属公司',2,'杭州国源养老科技有限公司'),
+  i=>set(i,'oa','签字意见',2,CASHIER+'\n[出纳执行]\n付款已撤回\n姚懿玲 2026-11-06 16:00:00')
+ ]){const i=commentBatch();change(i);assert.equal(states(C.build(i))[1],'待核对');}
+});
+test('同批重复申请共享批注依据，重复申请核对保留；重新申请优先',()=>{
+ const i=commentBatch();append(i,'applications',row(700000,'分批付款第2批','2026-11-03'));
+ const r=C.build(i);assert.deepEqual(states(r),['已付款','已付款','已付款']);assert(r.reviewRows.some(row=>row[5].v.includes('重复提交')));
+ set(i,'applications','核对说明',3,'重新申请');assert.equal(states(C.build(i))[1],'重新申请');
+});
+test('同额多批以原批注申请日期唯一定位，日期缺失或重复不猜测批次',()=>{
+ const i=commentBatch();set(i,'applications','申请日期',3,'2026-11-02');
+ const s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];
+ X.utils.sheet_add_aoa(s,[[46342],[700000]],{origin:'O1'});s.O1.z=C.DATE_FORMAT;
+ let r=C.build(i);assert.equal(states(r)[1],'已付款');assert.match(r.progressEvidence[1],/N2/);
+ s.O2.c=[{a:'人工',t:'申请日期（付款节奏跟进）：2026年11月2日'}];
+ assert.equal(states(C.build(i))[1],'待核对','同日期指向两批无法唯一定位');
+ delete s.O2.c;set(i,'applications','申请日期',3,'2026-11-16');
+ assert.equal(states(C.build(i))[1],'待核对','另一批申请不能复用11月2日的确认');
+ set(i,'applications','申请日期',3,'');assert.equal(states(C.build(i))[1],'待核对');
+ s.N2.c=[{a:'人工',t:'11月5日核实-已支付'}];set(i,'applications','申请日期',3,'2026-11-02');
+ assert.equal(states(C.build(i))[1],'待核对','没有原申请日期批注时不按最早金额猜测已付');
+});
 test('源谈判分批已红且本次有对应申请时不重复核对，付款状态和其他结果保持不变',()=>{
  const i=redBatch(),before=JSON.stringify(i),r=C.build(i);
  assert.deepEqual(states(r),['已付款','待核对']);assert.equal(progressReviews(r).length,0);

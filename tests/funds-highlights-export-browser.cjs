@@ -47,12 +47,11 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
    {if(result.notes.length!==result.noteShapes.length)throw Error('批注与 VML 图形数量不一致');if(new Set(result.noteShapes.map(n=>n.ref)).size!==result.noteShapes.length)throw Error('批注图形坐标重复');}
    return result;
   },{bytes:[...bytes],marker:MARKER});
-  const originalNotes=(await inspect(await exportBytes(input,{...result,applicationComments:undefined}))).notePositions;
   const output=await exportBytes(input,result),first=await inspect(output),saved=X.read(output,{cellNF:true}),neg=first.sheets['xl/worksheets/sheet1.xml'],normal=first.sheets['xl/worksheets/funds-normal.xml'];
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理']);assert.equal(neg.own.length,0);assert.equal(normal.rules.length,0);assert.deepEqual(normal.hidden,[3,4,5]);
   for(const col of ['A','B','C','D','E']){assert.equal(normal.cells[col+'2'].fill,'FFFF0000');assert.notEqual(normal.cells[col+'3'].fill,'FFFF0000');assert.notEqual(normal.cells[col+'1'].fill,'FFFF0000');}
-  const adjacent=(info,address)=>{const p=X.utils.decode_cell(address),note=info.notePositions[address];assert.deepEqual(note.anchor.slice(0,4),[p.c+1,6,p.r,2]);assert(note.anchor[4]>=p.c+1);assert(note.anchor[6]>=p.r);const style=Object.fromEntries(note.style.split(';').filter(s=>s.includes(':')).map(s=>s.split(':')));assert.equal(style.top,'0pt');assert.equal(style.left,'0pt');assert.equal(parseFloat(style['margin-top']),31.5);assert.equal(style.visibility,'hidden');};
-  adjacent(first,'C2');assert.deepEqual(first.notePositions.B2,originalNotes.B2,'不移动无关人工批注');
+  const adjacent=(info,address)=>{const p=X.utils.decode_cell(address),note=info.notePositions[address];assert.deepEqual(note.anchor.slice(0,4),[p.c+1,6,p.r,2]);assert(note.anchor[4]>=p.c+1);assert(note.anchor[6]>=p.r);const style=Object.fromEntries(note.style.split(';').filter(s=>s.includes(':')).map(s=>s.split(':')));assert.equal(style.top,'0pt');assert.equal(style.left,'0pt');assert.equal(parseFloat(style['margin-top']),31.5);assert.equal(style.visibility,address==='C2'?'hidden':undefined);};
+  adjacent(first,'C2');adjacent(first,'B2');
   assert.equal(first.notes.find(n=>n.ref==='C2').author,'原作者');assert.equal(first.notes.length,2);
   assert.equal(saved.Sheets.谈判付款.C2.c[0].t,'保留原人工批注\n申请日期（付款节奏跟进）：2026年10月27日');assert.equal(saved.Sheets.谈判付款.C2.c[0].a,X.read(input).Sheets.本周谈判付款.B2.c[0].a);assert.equal(saved.Sheets.谈判付款.B2.c[0].t,'未标红的原批注');
   assert.equal(neg.cells.C2.fill,'FFFF0000');assert.equal(neg.cells.C3.fill,'FFFF0000','Unrelated manual red is retained');assert.equal(neg.cells.C2.locked,'0');
@@ -72,6 +71,7 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
   assert.equal(X.read(repeated).Sheets.谈判付款.C2.c[0].t,'保留原人工批注\n申请日期（付款节奏跟进）：2026年10月28日；2026年10月29日');
   adjacent(again,'C2');
   const withdrawn=await exportBytes(repeated,{...next,highlights:undefined}),clean=await inspect(withdrawn),cleanNeg=clean.sheets['xl/worksheets/sheet1.xml'];
+  adjacent(clean,'C2');adjacent(clean,'B2');
   assert(Object.values(clean.sheets['xl/worksheets/funds-normal.xml'].cells).every(c=>c.fill!=='FFFF0000'),'Re-upload withdraws obsolete normal fills');
   assert.equal(X.read(withdrawn).Sheets.谈判付款.C2.c[0].t,'保留原人工批注');assert.equal(X.read(withdrawn).Sheets.谈判付款.B2.c[0].t,'未标红的原批注');
   assert.equal(cleanNeg.cells.C2.fill,'FF00FF00','Withdrawn tool fill restores the original green');assert.equal(cleanNeg.cells.C3.fill,'FFFF0000','Manual red survives');assert.equal(cleanNeg.cells.C2.locked,'0');assert.deepEqual(cleanNeg.rules,neg.rules);

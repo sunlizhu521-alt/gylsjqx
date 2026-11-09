@@ -440,20 +440,19 @@ window.FundsExport = async function(sourceBytes, result) {
     const moved=order?.indexOf(point.c);return [XLSX.utils.encode_cell({r:point.r,c:moved>=0?moved:point.c})];
   });
   const appliedSet=new Set(appliedCells);for(const c of elements(sheetData,'c'))if(appliedSet.has(c.getAttribute('r')))applyEditableFill(c);
-  // Place application notes after column reordering and sizing; old anchors may be hundreds of rows away.
-  if(commentEntries.length){
+  // Editing uses the native note shape too: anchor every negotiated note after final sizing.
+  if(first(sheet,'legacyDrawing')){
     const legacy=first(sheet,'legacyDrawing'),relations=await parse(zip,sheetRelationsPath);
     const relation=legacy&&elements(relations,'Relationship').find(r=>r.getAttribute('Id')===legacy.getAttributeNS(R,'id'));
     if(relation){
       const path=resolve(sheetPath,relation.getAttribute('Target')),vml=await parse(zip,path),cols=elements(sheet,'col');
-      const targetNotes=new Set(commentEntries.map(([address])=>{const p=XLSX.utils.decode_cell(address),moved=order?.indexOf(p.c);return XLSX.utils.encode_cell({r:p.r,c:moved>=0?moved:p.c});}));
       const columnPixels=c=>{const col=cols.find(e=>Number(e.getAttribute('min'))<=c+1&&Number(e.getAttribute('max'))>=c+1);return col?.getAttribute('hidden')==='1'?0:Math.max(1,Math.floor((Number(col?.getAttribute('width')||8.43)+Math.round(128/7)/256)*7));};
       const rowPixels=r=>{const row=rows.get(r+1);return row?.getAttribute('hidden')==='1'?0:Number(row?.getAttribute('ht')||first(sheet,'sheetFormatPr')?.getAttribute('defaultRowHeight')||30)*4/3;};
       const edge=(start,offset,size,limit)=>{while(start<limit&&offset>=size(start)){offset-=size(start);start++;}return [start,Math.round(offset)];};
       for(const shape of elements(vml,'shape')){
         const data=first(shape,'ClientData');if(data?.getAttribute('ObjectType')!=='Note')continue;
         const r=Number(first(data,'Row')?.textContent),c=Number(first(data,'Column')?.textContent);
-        if(!targetNotes.has(XLSX.utils.encode_cell({r,c})))continue;
+        if(!Number.isInteger(r)||!Number.isInteger(c)||r<0||c<0||r>1048575||c>16383)continue;
         const style=new Map((shape.getAttribute('style')||'').split(';').filter(p=>p.includes(':')).map(p=>{const at=p.indexOf(':');return [p.slice(0,at).trim(),p.slice(at+1).trim()];}));
         const dimension=(key,fallback)=>{const m=/^([\d.]+)(pt|px)$/i.exec(style.get(key)||'');return m&&Number(m[1])>0?Number(m[1])*(m[2].toLowerCase()==='pt'?4/3:1):fallback;};
         const width=dimension('width',288),height=dimension('height',128),startCol=Math.min(c+1,16383);

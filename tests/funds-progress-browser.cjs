@@ -81,6 +81,17 @@ const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
   const paid60='[出纳执行]\n部分支付：60元\n合成出纳 2026-11-09 15:30:00';
   for(const row of [2,6])set(input,'oa','签字意见',row,PAID40+'\n'+paid60);await upload('oa');await analyze();
   await verify(await download(9),['已付款','未付款','已付款','未付款','待核对','待核对','待核对','已付款'],[40,200,40,0,12,18,20,60]);
+  // An explicit note confirms only its unique matching batch; replacement must clear stale status.
+  for(const row of [2,6])set(input,'oa','签字意见',row,PAID40);await upload('oa');
+  const ns=input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]];
+  ns.N2.c=[{a:'人工',t:'11月3日-OA已评论\n11月5日核实-已支付\n申请日期（付款节奏跟进）：2026年11月8日'}];
+  await upload('negotiated');await analyze();
+  const byComment=await download(10);await verify(byComment,['已付款','未付款','已付款','未付款','待核对','待核对','待核对','已付款'],[40,200,40,0,12,18,20,60]);
+  assert.match(await frame.locator('#progressPreview tbody tr').last().locator('td').nth(11).getAttribute('title'),/谈判批注付款依据.*11月5日核实-已支付.*N2/);
+  assert.match(X.read(byComment).Sheets.谈判付款.N2.c[0].t,/11月5日核实-已支付/);
+  await upload('negotiated',byComment);await analyze();await verify(await download(11),['已付款','未付款','已付款','未付款','待核对','待核对','待核对','已付款'],[40,200,40,0,12,18,20,60]);
+  input.negotiated.book.Sheets.谈判付款.N2.c=[{a:'人工',t:'11月3日-OA已评论'}];
+  await upload('negotiated');await analyze();await verify(await download(12),['已付款','未付款','已付款','未付款','待核对','待核对','待核对','待核对'],[40,200,40,0,12,18,20,60]);
   assert.deepEqual(errors,[]);console.log(JSON.stringify({base,rows:8,batchEvidence:true,sheets:C.OUTPUT_SHEETS,preview:true,export:true,latestUpload:true,reapply:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
