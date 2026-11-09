@@ -37,13 +37,13 @@ const DETAIL_COLUMNS = [
   { key: "singaporeOrder", label: "是否新加坡公司下单" },
   { key: "businessUnit", label: "事业部" },
   { key: "applicant", label: "申请人" },
+  { key: "purchaseEntity", label: "采购主体" },
   { key: "supplierShortName", label: "供应商简称" },
   { key: "materialCode", label: "正确物料编码" },
   { key: "sku", label: "SKU" },
   { key: "materialName", label: "物料名称" },
   { key: "quantity", label: "数量" },
   { key: "oaProcessNo", label: "OA备货流程号" },
-  { key: "purchaseEntity", label: "采购主体" },
   { key: "materialCodeValid", label: "采购分工明细是否存在" },
   { key: "todayDate", label: "今天日期" },
   { key: "deliveryDays", label: "天数" },
@@ -426,6 +426,7 @@ async function buildDemandAllocationRows(records) {
       purchaseEntity: TABLE_FIELD_ALIASES.demandPurchaseEntity,
       requiredReadyDate: TABLE_FIELD_ALIASES.demandRequiredReadyDate,
     });
+    columnMap.purchaseEntity = findExactHeaderColumnIndex(rows[headerIndex], "采购主体") ?? columnMap.purchaseEntity;
     // 需求表只提供 OA 原编码；正确编码必须来自采购分工明细。
     columnMap.oaMaterialCode = findOaMaterialCodeColumn(rows[headerIndex], TABLE_FIELD_ALIASES.demandMaterialCode);
     columnMap.quantity = findDemandQuantityColumnIndex(rows[headerIndex], columnMap);
@@ -1008,7 +1009,7 @@ function getFilteredDemandRows() {
       return getRowFilterValues(row, filter.key).some((value) => selected.has(value));
     })
   ).map(row => ({ ...row, ...deliveryFields(row.deliveryDays),
-    purchaseEntity: state.purchaseEntityOverride || row.purchaseEntity,
+    purchaseEntity: row.purchaseEntity || state.purchaseEntityOverride,
     deliveryRowIndex: state.demandRows.indexOf(row)
   })).sort((left, right) => {
     const a = String(left.supplierShortName ?? "").trim();

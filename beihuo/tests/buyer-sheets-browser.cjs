@@ -22,7 +22,7 @@ function uploadFile(rows, sheetName, name) {
 
     const longPrefix = '非常长的采购下单人名称用于验证工作表名称截断后仍然不会发生重名';
     const buyers = [...Array(23).fill('李奇'), '徐英', '', '甲/乙', '甲:乙', longPrefix + '甲', longPrefix + '乙'];
-    const records = buyers.map((buyer, index) => ({ buyer, code: `00${String(index + 1).padStart(4, '0')}`, quantity: index === 0 ? 0 : index === 1 ? 1.5 : index === 2 ? '' : index + 1, reason: `合成原因-${index + 1}\n第二段` }));
+    const records = buyers.map((buyer, index) => ({ buyer, code: `00${String(index + 1).padStart(4, '0')}`, purchaseEntity: index % 2 ? '' : '原采购主体', quantity: index === 0 ? 0 : index === 1 ? 1.5 : index === 2 ? '' : index + 1, reason: `合成原因-${index + 1}\n第二段` }));
     const categoryHeader = Array(22).fill('');
     for (const [index, label] of [[0, '物料编码'], [2, 'SKU'], [3, '物料名称'], [6, '销售产品线'], [7, '销售系列'], [21, '采购组']]) categoryHeader[index] = label;
     const categoryRows = records.map((record, index) => {
@@ -34,7 +34,7 @@ function uploadFile(rows, sheetName, name) {
       uploadFile([categoryHeader, ...categoryRows], 'Dim-YL医疗器械商品分类', '合成商品分类.xlsx'),
       uploadFile([['物料编码', '采购下单人', '供应商简称', '采购组', '起订量'], ...records.map(record => [record.code, record.buyer, '测试供应商', '测试组', 10])], '产品线明细', '合成采购分工.xlsx'),
       uploadFile([['姓名', '一级部门'], ['测试申请人', '测试事业部']], '花名册', '合成花名册.xlsx'),
-      uploadFile([['识别码', '数量', '创建人', '流程号', '备货原因', '采购主体', '要求货好时间'], ...records.map((record, index) => [record.code, record.quantity, '测试申请人', `TEST-OA-${index + 1}`, record.reason, '原采购主体', '2026-12-01'])], '备货需求', '合成备货需求.xlsx'),
+      uploadFile([['识别码', '数量', '创建人', '流程号', '备货原因', '采购主体', '要求货好时间'], ...records.map((record, index) => [record.code, record.quantity, '测试申请人', `TEST-OA-${index + 1}`, record.reason, record.purchaseEntity, '2026-12-01'])], '备货需求', '合成备货需求.xlsx'),
     ];
     for (const [index, file] of uploads.entries()) {
       await page.locator(`[data-upload="file-${index + 1}"]`).setInputFiles(file);
@@ -45,6 +45,9 @@ function uploadFile(rows, sheetName, name) {
     assert.equal(await page.locator('#detailTableBody tr').count(), 20);
     assert(!(await page.locator('.detail-table').innerText()).includes('合成原因-'));
     await page.locator('#purchaseEntityInput').fill('手填采购主体');
+    const headers = await page.locator('.detail-table th').allTextContents();
+    assert.equal(headers.indexOf('采购主体') + 1, headers.indexOf('供应商简称'));
+    assert.deepEqual(await page.locator('#detailTableBody tr td:nth-child(5)').allTextContents(), records.slice(0, 20).map(record => record.purchaseEntity || '手填采购主体'));
     await page.locator('[data-delivery-days]').first().fill('2');
     await page.locator('[data-delivery-days]').first().press('Tab');
 
@@ -79,7 +82,8 @@ function uploadFile(rows, sheetName, name) {
       assert.equal(rows[0].length, 20);
       assert.equal(rows[0][1], '是否新加坡公司下单');
       assert.equal(rows[0][0], '采购单订单下单人');
-      assert.equal(rows[0][5], '正确物料编码');
+      assert.deepEqual(rows[0].slice(4, 6), ['采购主体', '供应商简称']);
+      assert.equal(rows[0][6], '正确物料编码');
       assert.equal(rows[0][19], '备货原因');
       assert.equal(rows[0][14], '采购单订单号');
       assert.equal(rows[0][15], '备货OA的物料编码');
@@ -87,11 +91,11 @@ function uploadFile(rows, sheetName, name) {
       assert.equal(new Set(rows.slice(1).map(row => row[0])).size, 1, `one buyer per sheet: ${name}`);
       assert(sheet['!cols'].every(column => column.width > 0));
       for (const [index, row] of rows.slice(1).entries()) {
-        const source = records.find(record => record.code === row[5]);
-        assert(source, `known material ${row[5]}`);
+        const source = records.find(record => record.code === row[6]);
+        assert(source, `known material ${row[6]}`);
         assert.equal(row[0], source.buyer);
-        assert.equal(row[8], source.quantity);
-        assert.equal(row[10], '手填采购主体');
+        assert.equal(row[9], source.quantity);
+        assert.equal(row[4], source.purchaseEntity || '手填采购主体');
         assert.equal(row[15], source.code, 'legacy source code is retained');
         assert.equal(sheet[`P${index + 2}`].t, 's');
         assert.equal(row[17], '10');
@@ -102,9 +106,9 @@ function uploadFile(rows, sheetName, name) {
         assert.equal(sheet[`L${r}`].f, 'TODAY()');
         assert.equal(sheet[`N${r}`].f, `IF(M${r}="","",L${r}+M${r})`);
         assert.equal(sheet[`N${r}`].z, 'yyyy-mm-dd');
-        assert.equal(sheet[`I${r}`].z, '0');
-        if (source.quantity !== '') assert.equal(sheet[`I${r}`].t, 'n');
-        seen.push(row[5]);
+        assert.equal(sheet[`J${r}`].z, '0');
+        if (source.quantity !== '') assert.equal(sheet[`J${r}`].t, 'n');
+        seen.push(row[6]);
       }
     }
     assert.deepEqual([...seen].sort(), records.map(record => record.code).sort());
@@ -115,7 +119,24 @@ function uploadFile(rows, sheetName, name) {
       assert.match(text, /<c[^>]*r="A1"[^>]*s="1"/);
       assert.match(text, /<c[^>]*r="T2"[^>]*s="3"/);
       assert.match(text, /<c[^>]*r="P2"[^>]*s="2"/);
-      assert.match(text, /<c[^>]*r="I2"[^>]*s="4"/);
+      assert.match(text, /<c[^>]*r="J2"[^>]*s="4"/);
+    }
+
+    const zipEvent = page.waitForEvent('download');
+    await page.locator('#downloadDetailButton').click();
+    const zipDownload = await zipEvent;
+    assert(zipDownload.suggestedFilename().endsWith('.zip'));
+    const separateRows = await page.evaluate(async bytes => {
+      const zip = await JSZip.loadAsync(new Uint8Array(bytes));
+      return Promise.all(Object.values(zip.files).filter(file => !file.dir).map(async file => {
+        const book = XLSX.read(await file.async('uint8array'), { type: 'array' });
+        return XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]], { header: 1, defval: '' });
+      }));
+    }, [...await fs.readFile(await zipDownload.path())]);
+    assert.equal(separateRows.length, 7);
+    for (const rows of separateRows) {
+      assert.deepEqual(rows[0].slice(4, 6), ['采购主体', '供应商简称']);
+      for (const row of rows.slice(1)) assert.equal(row[4], records.find(record => record.code === row[6]).purchaseEntity || '手填采购主体');
     }
 
     await page.locator('[data-filter-button="buyer"]').click();
@@ -123,10 +144,11 @@ function uploadFile(rows, sheetName, name) {
     await page.waitForFunction(() => state.filteredRows.length === 1);
     const filtered = await downloadCombined();
     assert.deepEqual(filtered.workbook.SheetNames, ['徐英']);
-    assert.equal(filtered.workbook.Sheets['徐英'].F2.v, records[23].code);
+    assert.equal(filtered.workbook.Sheets['徐英'].G2.v, records[23].code);
     await page.locator('#clearFiltersButton').click();
     await page.reload();
     await page.waitForFunction(count => state.filteredRows.length === count, records.length);
+    assert.deepEqual(await page.evaluate(() => state.filteredRows.map(row => row.purchaseEntity)), records.map(record => record.purchaseEntity));
     assert.equal(await page.locator('#downloadBuyerWorkbookButton').isDisabled(), false);
     await page.setViewportSize({ width: 390, height: 844 });
     for (const selector of ['#downloadDetailButton', '#downloadBuyerWorkbookButton']) {
@@ -143,6 +165,11 @@ function uploadFile(rows, sheetName, name) {
     const homepageDownload = await homepageEvent;
     const homepageWorkbook = XLSX.read(await fs.readFile(await homepageDownload.path()), { type: 'buffer' });
     assert.equal(homepageWorkbook.SheetNames.length, 7);
+    for (const sheet of Object.values(homepageWorkbook.Sheets)) {
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      assert.deepEqual(rows[0].slice(4, 6), ['采购主体', '供应商简称']);
+      for (const row of rows.slice(1)) assert.equal(row[4], records.find(record => record.code === row[6]).purchaseEntity);
+    }
     assert.equal(homepageWorkbook.SheetNames.reduce((count, name) => count + XLSX.utils.decode_range(homepageWorkbook.Sheets[name]['!ref']).e.r, 0), records.length);
     assert.deepEqual(errors, []);
     console.log('PASS four uploads, one XLSX with seven buyer sheets, 29 rows beyond pagination, blank/invalid/long names, formulas/styles/MOQ/reasons, manual entity, filtering, cache restoration, phone buttons and homepage embedded download');

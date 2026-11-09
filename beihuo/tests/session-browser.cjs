@@ -116,15 +116,15 @@ function fileForSlot(slot, value) {
     const sheet = exported.Sheets['采购甲'];
     assert.equal(sheet.B1.v, '是否新加坡公司下单');
     assert.deepEqual([sheet.B2.v, sheet.B3.v], ['是', '否']);
-    assert.equal(sheet.K2.v, '手填采购主体');
+    assert.equal(sheet.E2.v, '手填采购主体');
     assert.equal(sheet.M2.v, 9);
     assert.equal(sheet.O1.v, '采购单订单号');
     assert.equal(sheet.P1.v, '备货OA的物料编码');
     assert.deepEqual([sheet.P2.v, sheet.P3.v], ['0001', '0002']);
     assert.equal(sheet.P2.t, 's');
-    assert.equal(sheet.F1.v, '正确物料编码');
-    assert.equal(await page.locator('.detail-table th').nth(5).innerText(), '正确物料编码');
-    assert.deepEqual([sheet.F2.v, sheet.F3.v], ['TEST-001', 'TEST-002']);
+    assert.equal(sheet.G1.v, '正确物料编码');
+    assert.equal(await page.locator('.detail-table th').nth(6).innerText(), '正确物料编码');
+    assert.deepEqual([sheet.G2.v, sheet.G3.v], ['TEST-001', 'TEST-002']);
     assert.equal(await page.locator('#materialCodeWarnings').isHidden(), true);
 
     await page.locator('[data-upload="file-5"]').setInputFiles(fileForSlot(5, 444));
@@ -212,8 +212,8 @@ function fileForSlot(slot, value) {
     const blankDownload = await blankDownloadEvent;
     const blankWorkbook = X.read(await fs.readFile(await blankDownload.path()), { type: 'buffer' });
     const blanks = X.utils.sheet_to_json(blankWorkbook.Sheets.未填写下单人, { header: 1, defval: '' });
-    assert.deepEqual(blanks.slice(1).map(row => [row[5], row[8], row[15]]), [['', 0, '0002'], ['', 1.5, '0002']]);
-    assert.equal(blankWorkbook.Sheets.采购甲.F2.v, 'TEST-001');
+    assert.deepEqual(blanks.slice(1).map(row => [row[6], row[9], row[15]]), [['', 0, '0002'], ['', 1.5, '0002']]);
+    assert.equal(blankWorkbook.Sheets.采购甲.G2.v, 'TEST-001');
     await page.locator('[data-upload="file-2"]').setInputFiles(missingMappingFile(false));
     await page.waitForFunction(() => state.demandRows.length === 3 && state.demandRows.every(row => !row.materialCode && row.materialCodeIssue.includes('缺少')));
     assert.match(await page.locator('#materialCodeWarnings').textContent(), /分工表缺少“正确物料编码”列/);
@@ -245,7 +245,7 @@ function fileForSlot(slot, value) {
       const file = await event;
       const w = X.read(await fs.readFile(await file.path()), {type: 'buffer'});
       const sheet = w.Sheets[w.SheetNames[0]], data = X.utils.sheet_to_json(sheet, {header: 1});
-      assert.deepEqual(data.slice(1).map(r => [r[2], r[5], r[8]]), expectedGroups);
+      assert.deepEqual(data.slice(1).map(r => [r[2], r[6], r[9]]), expectedGroups);
       assert.deepEqual([sheet.M2.v, sheet.M3.v], [2, 5]);
       assert.equal(sheet.N3.f, 'IF(M3="","",L3+M3)');
     }
