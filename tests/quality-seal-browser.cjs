@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs/promises');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
-const tools=['internal-statement','funds','receipt-sign','seal','beihuo','fulfillment','contract','payment'];
+const tools=['internal-statement','funds','funds-ledger','quarter-budget','funds-budget-summary','receipt-sign','seal','beihuo','fulfillment','contract','payment'];
 (async()=>{
  const base=process.env.QA_URL||'http://127.0.0.1:8940/';
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});

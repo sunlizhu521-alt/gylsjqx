@@ -4,7 +4,7 @@ const X = require('../vendor/xlsx.full.min.js');
 
 const url = process.env.QA_URL || 'http://127.0.0.1:8940/';
 const key = 'gylsjqx-last-tool';
-const toolIds = ['internal-statement','funds','receipt-sign','seal','beihuo','fulfillment','contract','payment'];
+const toolIds = ['internal-statement','funds','funds-ledger','quarter-budget','funds-budget-summary','receipt-sign','seal','beihuo','fulfillment','contract','payment'];
 const retiredIds = ['merge','compare','ocr','match','convert','clean','diff','mask','split','formula','pivot','chart'];
 const workbook = X.utils.book_new();
 X.utils.book_append_sheet(workbook, X.utils.aoa_to_sheet([['物料编码', '数量'], ['TEST-001', 12]]), '明细');
@@ -89,6 +89,6 @@ const select = async (page, id) => { await page.locator(`.tool-tab[data-tool="${
       await context.close();
     }
     assert.deepEqual(errors,[]);
-    console.log('PASS homepage state: exactly eight tools, retired UI/scripts/global functions removed, funds default, last tool on refresh/new tab, embedded upload state retained while switching, uploads not persisted by homepage, all retired tool IDs ignored, disabled storage safe');
+    console.log('PASS homepage state: expected tool list, retired UI/scripts/global functions removed, funds default, last tool on refresh/new tab, embedded upload state retained while switching, uploads not persisted by homepage, all retired tool IDs ignored, disabled storage safe');
   } finally { await browser.close(); }
 })().catch(error=>{console.error(error);process.exit(1);});

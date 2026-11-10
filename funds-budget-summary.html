@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>资金预算汇总｜供应链数据清洗</title>
+  <link rel="stylesheet" href="styles-merge14.css?v=budget-summary-20261111">
+  <style>
+    main{max-width:1600px;margin:28px auto;padding:20px;min-width:0}section{margin:18px 0;padding:22px;border:1px solid var(--line);border-radius:14px;background:var(--surface);min-width:0}h2{font-size:1.15rem;margin:0 0 14px}p,li{line-height:1.7}label{display:block;font-weight:600;margin-bottom:12px}input,button{font:inherit;max-width:100%}input[type=file]{width:100%}input::file-selector-button{padding:10px 14px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface-solid);color:var(--text);cursor:pointer}button{border:0;border-radius:8px;background:#315b9d;color:#fff;padding:11px 20px;cursor:pointer}button:disabled,input:disabled{opacity:.5;cursor:not-allowed}.secondary{background:var(--surface-solid);border:1px solid var(--line-strong);color:var(--text)}.actions{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px}.muted{color:var(--muted)}#reference,#status,#issues{white-space:pre-wrap;overflow-wrap:anywhere}#reference{font-size:.9rem}#status{margin:0}.preview{overflow:auto;max-height:650px}table{border-collapse:collapse;width:100%;font-size:14px}th,td{border:1px solid #d6dee8;text-align:center;vertical-align:middle;padding:10px 14px;white-space:nowrap}th{position:sticky;top:0;background:#315b9d;color:white}td{background:white;color:#172033}.total td{font-weight:700}details{margin-top:16px}summary{cursor:pointer;color:var(--accent);font-weight:600}[hidden]{display:none!important}a,button,input,summary{outline-offset:3px}@media(max-width:650px){main{padding:12px}section{padding:14px}.actions{align-items:stretch;flex-direction:column}}
+  </style>
+</head>
+<body><main>
+  <a href="index.html">← 返回工具箱</a>
+  <h1>资金预算汇总</h1>
+  <p>按付款月份、分类和状态汇总预算，保留原始明细及其他工作表。</p>
+  <section aria-label="上传来源文件">
+    <label for="sourceFile">上传包含“付款汇总明细”的 Excel 文件</label>
+    <input id="sourceFile" type="file" accept=".xlsx" aria-describedby="reference" disabled>
+    <p id="reference" class="muted">尚未引用文件</p>
+    <div class="actions"><button id="download" disabled>下载付款预算汇总</button><button id="clear" class="secondary" hidden>移除文件</button><p id="status" role="status" aria-live="polite">正在加载工具…</p></div>
+    <details><summary>查看汇总说明</summary><p class="muted">申请总金额包含全部明细，仅“已支付”计入已付款，剩余为总金额减已付款。按年月汇总全部月份，“时间待定”单独列在最后。不按公司拆分、不去重。</p><p class="muted">下载时更新第一张“付款预算汇总”，保留其他原工作表。文件仅在当前页面本地处理，原文件不修改；刷新后请重新上传。</p></details>
+    <details id="issue-panel" hidden><summary id="issue-title">需要留意</summary><ul id="issues"></ul></details>
+  </section>
+  <section id="result" hidden><h2>付款预算汇总 <span id="counts" class="muted"></span></h2><div class="preview" id="preview"></div></section>
+</main>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="funds-budget-summary-core.js?v=budget-summary-20261111"></script>
+<script src="funds-budget-summary-export.js?v=budget-summary-20261111"></script>
+<script src="funds-budget-summary-tool.js?v=budget-summary-20261111"></script>
+</body>
+</html>
