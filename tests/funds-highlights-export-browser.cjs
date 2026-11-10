@@ -28,7 +28,7 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
    for(const path of Object.keys(zip.files))if(path.endsWith('.vml')){const vml=parse(await zip.file(path).async('string'));for(const data of all(vml,'ClientData'))if(all(data,'Column')[0]?.textContent==='1'){all(data,'Anchor')[0].textContent='38, 185, 1009, 8, 41, 18, 1014, 27';data.parentElement.setAttribute('style','position:absolute;margin-left:3276pt;margin-top:30909pt;width:302pt;height:169pt;visibility:hidden');}zip.file(path,s.serializeToString(vml));}
    return [...await zip.generateAsync({type:'uint8array'})];
   },[...X.write(book,{type:'buffer',bookType:'xlsx'})]));
-  const normalHeaders=['供应商名称','申请付款金额','单据号【财务应付单】','OA合同编号','合同总金额'],normalRows=[['甲',30,'AP001','HT001',30],['乙',40,'AP002','HT002',40]].map(row=>row.map(v=>({t:typeof v==='number'?'n':'s',v})));
+  const normalHeaders=['供应商名称','申请付款金额','OA合同编号','合同总金额'],normalRows=[['甲',30,'HT001',30],['乙',40,'HT002',40]].map(row=>row.map(v=>({t:typeof v==='number'?'n':'s',v})));
   const result={applicationComments:{B2:'申请日期（付款节奏跟进）：2026年10月27日'},normalHeaders,normalRows,reviewHeaders:['核对说明'],reviewRows:[],negotiated:{sheetName:'本周谈判付款',headerRow:0,headers,rows:[1,2,3].map(r=>headers.map((_,c)=>source[X.utils.encode_cell({r,c})])),updates:[],columnOrder:[0,2,1,3,4]},highlights:{negotiatedCells:['B1','B2','B2'],normalRows:[1,2,2]}};
   const exportBytes=async(bytes,data)=>Buffer.from(await page.evaluate(async({bytes,result})=>[...new Uint8Array(await(await FundsExport(new Uint8Array(bytes),result)).arrayBuffer())],{bytes:[...bytes],result:data}));
   const inspect=async bytes=>page.evaluate(async({bytes,marker})=>{
@@ -48,7 +48,7 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
    return result;
   },{bytes:[...bytes],marker:MARKER});
   const output=await exportBytes(input,result),first=await inspect(output),saved=X.read(output,{cellNF:true}),neg=first.sheets['xl/worksheets/sheet1.xml'],normal=first.sheets['xl/worksheets/funds-normal.xml'];
-  assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理']);assert.equal(neg.own.length,0);assert.equal(normal.rules.length,0);assert.deepEqual(normal.hidden,[3,4,5]);
+  assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理']);assert.equal(neg.own.length,0);assert.equal(normal.rules.length,0);assert.deepEqual(normal.hidden,[3,4]);
   for(const col of ['A','B','C','D','E']){assert.equal(normal.cells[col+'2'].fill,'FFFF0000');assert.notEqual(normal.cells[col+'3'].fill,'FFFF0000');assert.notEqual(normal.cells[col+'1'].fill,'FFFF0000');}
   const adjacent=(info,address)=>{const p=X.utils.decode_cell(address),note=info.notePositions[address];assert.deepEqual(note.anchor.slice(0,4),[p.c+1,6,p.r,2]);assert(note.anchor[4]>=p.c+1);assert(note.anchor[6]>=p.r);const style=Object.fromEntries(note.style.split(';').filter(s=>s.includes(':')).map(s=>s.split(':')));assert.equal(style.top,'0pt');assert.equal(style.left,'0pt');assert.equal(parseFloat(style['margin-top']),31.5);assert.equal(style.visibility,address==='C2'?'hidden':undefined);};
   adjacent(first,'C2');adjacent(first,'B2');

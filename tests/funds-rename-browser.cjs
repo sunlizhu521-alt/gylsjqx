@@ -58,7 +58,7 @@ const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
    assert.notEqual(row,undefined);const get=h=>sheet[X.utils.encode_cell({r:row,c:headers.indexOf(h)})];
    assert.equal(get('已付金额').v,40);assert.equal(get('剩余金额').v,choice==='keep'?999:60);assert.equal(get('是否结清').v,choice==='keep'?'是':'否');
    assert.equal(get('本次申请付款金额').v,100);assert.equal(get('对公付款0A流程号').v,'MDST-DGFK20261024001');
-   if(choice==='recalculate')assert.equal(get('剩余金额').f,'G'+(row+1)+'-N'+(row+1));
+   if(choice==='recalculate')assert.equal(get('剩余金额').f,'G'+(row+1)+'-M'+(row+1));
    const preview=await frame.locator('#normalPreview tbody tr').evaluateAll(rows=>rows.map(r=>[...r.cells].map(c=>c.textContent)));
    const visible=preview.find(r=>r[supplier]==='正常供应商1');for(const h of ['已付金额','剩余金额','是否结清'])assert.equal(visible[headers.indexOf(h)],X.utils.format_cell(get(h)));
    for(const name of SHEETS.slice(0,4))assert(book.Sheets[name]['!autofilter']);

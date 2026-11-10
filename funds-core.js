@@ -1,10 +1,10 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FundsCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间','开票时间','开票金额','单据号【财务应付单】','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','申请日期','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
+const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间','开票时间','开票金额','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','申请日期','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
 const ADDED_HEADERS=['提交付款申请单日期','提交时间汇总','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号','付款自然周'];
 const SUPPLEMENT_HEADERS=['对公付款0A流程号','付款主体','单据号【财务应付单】'];
-const NORMAL_HIDDEN_HEADERS=['单据号【财务应付单】','OA合同编号','合同总金额','是否对账'];
+const NORMAL_HIDDEN_HEADERS=['OA合同编号','合同总金额','是否对账'];
 const REVIEW_HEADERS=['付款类别','供应商名称','付款主体','申请付款金额','是否提交付款申请单','核对说明','来源文件','来源工作表','来源行号','跟单员'];
 const PROGRESS_HEADERS=['申请日期','跟单员','供应商名称','付款主体','对公付款OA号','申请付款金额','应付时间','当前节点','未操作者','流程状态','申请人','是否已付款'];
 const OUTPUT_SHEETS=['谈判付款','正常付款','付款申请核对','付款进度整理'];
@@ -34,7 +34,7 @@ const clone=c=>c?{...c}:empty();
 const aliases={月份:'登记月份',所属月份:'登记月份',供应商:'供应商名称',供应商全称:'供应商名称',对公付款OA流程号:'对公付款0A流程号',付款OA号:'对公付款0A流程号',应付时间:'应付款时间',已付款金额:'已付金额',剩余付款金额:'剩余金额',合同号:'OA合同编号',合同金额:'合同总金额',本次申请付款金额:'申请付款金额','OA-申请付款金额':'申请付款金额',付款事由:'摘要'};
 const canonical=v=>aliases[norm(v)]||norm(v);
 const BATCH_HEADERS=['谈判明细','分批总金额','核对'];
-const relevant=new Set([...NORMAL_HEADERS.map(canonical),...ADDED_HEADERS,...BATCH_HEADERS,'付款分类','申请日期','备注','对接人','创建人','流程编号','流程编码','核对说明']);
+const relevant=new Set([...NORMAL_HEADERS.map(canonical),...ADDED_HEADERS,...BATCH_HEADERS,'单据号【财务应付单】','付款分类','申请日期','备注','对接人','创建人','流程编号','流程编码','核对说明']);
 const entity=v=>({'浙江迈德斯特医疗器械科技有限公司':'迈德斯特','杭州国源养老科技有限公司':'国源'}[norm(v)]||norm(v));
 function money(c){
  if(c?.t==='e'||(c?.f&&(c.v==null||c.v==='')))return {invalid:true};
@@ -217,7 +217,7 @@ function build(inputs,decisions={}){
  const headerRecord=t=>({source:{file:t.name,sheet:t.sheetName,row:t.headerRow+1},values:{}});
  for(const t of ledgerTables){
   const usesReconciliationDate=norm(t.sheetName).includes('孙立柱')&&t.headers.some(h=>norm(h)==='对账时间');
-  const absent=NORMAL_HEADERS.map(canonical).filter(k=>k!=='跟单员').slice(0,17).filter(k=>k!=='是否谈判付款'&&t.map[k]===undefined&&!(usesReconciliationDate&&k==='开票时间'));
+  const absent=NORMAL_HEADERS.slice(0,NORMAL_HEADERS.indexOf('是否提交付款申请单')+1).map(canonical).filter(k=>k!=='跟单员'&&k!=='是否谈判付款'&&t.map[k]===undefined&&!(usesReconciliationDate&&k==='开票时间'));
   if(absent.length)issue('headers:'+t.sheetName,'missing-header','缺少字段，输出保留空白：'+absent.join('、'),headerRecord(t));
  }
  const absentFlow=['收款单位','付款金额',...FLOW_FIELDS].filter(k=>flow.map[k]===undefined);
@@ -225,7 +225,7 @@ function build(inputs,decisions={}){
  const targetCols={...negotiated.map},negHeaders=[...negotiated.headers];
  const batchLayout=BATCH_HEADERS.every(h=>targetCols[h]!==undefined);
  const addedHeaders=batchLayout?ADDED_HEADERS.filter(h=>!['提交付款申请单日期','提交时间汇总','付款自然周'].includes(h)):ADDED_HEADERS;
- for(const h of [...SUPPLEMENT_HEADERS,'应付款时间',...addedHeaders])if(targetCols[h]===undefined){targetCols[h]=negHeaders.length;negHeaders.push(h);updateMap.set(X.utils.encode_cell({r:negotiated.headerRow,c:targetCols[h]}),cell(h));}
+ for(const h of [...SUPPLEMENT_HEADERS.filter(h=>h!=='单据号【财务应付单】'),'应付款时间',...addedHeaders])if(targetCols[h]===undefined){targetCols[h]=negHeaders.length;negHeaders.push(h);updateMap.set(X.utils.encode_cell({r:negotiated.headerRow,c:targetCols[h]}),cell(h));}
  const classification=r=>{
   const supplier=r.values['供应商名称'],amount=money(r.values['申请付款金额']);
   const name=supplier?.t==='e'||(supplier?.f&&(supplier.v==null||supplier.v===''))?'':norm(supplier?.v);

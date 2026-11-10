@@ -128,7 +128,7 @@ test('正常付款同额不同OA的重复申请只归本OA；分类、供应商�
 });
 test('正常付款缺申请OA仅唯一同名同额可补判，多笔时不猜测并列明补编号的来源',()=>{
  const input=sameAmountNormals();set(input,'applications','流程编码',2,'');let result=C.build(input);
- assert(result.normalRows.every(r=>r[17].v==='未申请'));assert.deepEqual(result.highlights.normalRows,[]);
+ assert(result.normalRows.every(r=>r[16].v==='未申请'));assert.deepEqual(result.highlights.normalRows,[]);
  const reviews=result.reviewRows.filter(r=>r[5].v.startsWith('付款申请归属核对：'));
  assert.equal(reviews.length,2);assert(reviews.every(r=>r[5].v.includes(OLD)&&r[5].v.includes(CANDIDATE)&&r[5].v.includes('合成申请.xlsx / 申请汇总 第 2 行')&&r[5].v.includes('需要处理')));
  assert.equal(result.stats.pending,0,'归属核对不阻止下载');

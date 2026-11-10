@@ -94,7 +94,7 @@ function fixture({ removeFirstApplication = false } = {}) {
       assert(normal.rows[0].some(cell => cell.hidden && cell.applied), '隐藏列也属于整行标红范围');
       assert(normal.rows[1].every(cell => !cell.applied), '正常未申请不标红');
       assert(actual.reviewPreview.rows.every(row => row.every(cell => !cell.applied)), '核对表不套用申请标红');
-      assert.equal(actual.reviewPreview.rows.length, 0, '同额批次已按日期确定，不生成同额核对');
+      assert.equal(actual.reviewPreview.rows.filter(row=>!row[5].text.includes('付款进度核对：')).length, 0, '同额批次已按日期确定，不生成同额核对');
     }
     async function analyze(highlighted) {
       // Pause export once: inspect the initial preview before the production export/re-read refresh.
@@ -140,10 +140,10 @@ function fixture({ removeFirstApplication = false } = {}) {
         assert.equal(n['F' + row].f, 'D' + row + '-E' + row); assert.equal(n['L' + row].f, 'SUM(U' + row + ':V' + row + ')');
         assert.equal(n['L' + row].v, r.amount); assert.equal(n['G' + row].v, '否');
       }
-      assert.deepEqual([normal.G2.v, normal.N2.v, normal.P2.v, normal.G3.v, normal.N3.v, normal.P3.v], [123.45, 23.45, 100, 123.45, 0, 123.45]);
-      assert.deepEqual([normal.E2.v,normal.E3.v],[records[2].id,records[3].id]);assert.deepEqual([normal.R2.v,normal.R3.v],['已提交','未申请']);
-      assert.deepEqual([normal.Y2.v,normal.Y3.v],[records[2].id,records[3].id]);assert.deepEqual([normal.U2.v,normal.U3.v],['财务审核','复核']);assert.deepEqual([normal.X2.v,normal.X3.v],['李奇','徐英']);
-      assert.equal(normal.P2.f, 'G2-N2'); assert.equal(normal.P3.f, 'G3-N3');
+      assert.deepEqual([normal.G2.v, normal.M2.v, normal.O2.v, normal.G3.v, normal.M3.v, normal.O3.v], [123.45, 23.45, 100, 123.45, 0, 123.45]);
+      assert.deepEqual([normal.E2.v,normal.E3.v],[records[2].id,records[3].id]);assert.deepEqual([normal.Q2.v,normal.Q3.v],['已提交','未申请']);
+      assert.deepEqual([normal.X2.v,normal.X3.v],[records[2].id,records[3].id]);assert.deepEqual([normal.T2.v,normal.T3.v],['财务审核','复核']);assert.deepEqual([normal.W2.v,normal.W3.v],['李奇','徐英']);
+      assert.equal(normal.O2.f, 'G2-M2'); assert.equal(normal.O3.f, 'G3-M3');
       for (const header of C.NORMAL_HIDDEN_HEADERS) assert.equal(normal['!cols'][C.NORMAL_HEADERS.indexOf(header)].hidden, true);
       const metadata = await frame.locator('body').evaluate(async (_, { bytes, marker }) => {
         const zip = await JSZip.loadAsync(Uint8Array.from(bytes)), parse = text => new DOMParser().parseFromString(text, 'application/xml'), all = (doc, name) => [...doc.getElementsByTagNameNS('*', name)];
@@ -173,7 +173,7 @@ function fixture({ removeFirstApplication = false } = {}) {
       assert.deepEqual(metadata.谈判付款.rules, [], '谈判付款底色也可手动修改，不添加覆盖底色的条件格式');
       assert.deepEqual(metadata.付款申请核对.cells, []);
       for (const sheet of Object.values(metadata)) for (const rule of sheet.rules) { assert.equal(rule.type, 'expression'); assert.match(rule.color, /^(?:FF)?FF0000$/i); assert.equal(rule.background, 'FFFF0000', 'WPS conditional-format background must be explicitly red'); assert.equal(rule.backgroundIndex, null); }
-      assert.equal(X.utils.sheet_to_json(book.Sheets.付款申请核对).length, 0, '同额批次按日期确定后不再产生核对记录');
+      assert.equal(X.utils.sheet_to_json(book.Sheets.付款申请核对).filter(row=>!row.核对说明.includes('付款进度核对：')).length, 0, '同额批次按日期确定后不再产生核对记录');
     }
 
     const initial = await analyze(true);
@@ -207,7 +207,7 @@ function fixture({ removeFirstApplication = false } = {}) {
     const sortedBytes=await download(3),sortedBook=X.read(sortedBytes,{cellNF:true,cellStyles:true}),sorted=sortedBook.Sheets.正常付款;
     const output=X.utils.sheet_to_json(sorted);assert.deepEqual(output.map(row=>row['供应商名称']),[records[3].supplier,records[2].supplier]);
     assert.deepEqual(output.map(row=>row['申请付款的日期']),['2026/10/26周','2026/12/28周']);
-    assert.equal(sorted.P2.f,'G2-N2');assert.equal(sorted.P2.v,123.45);assert.equal(sorted.P3.f,'G3-N3');assert.equal(sorted.P3.v,100);
+    assert.equal(sorted.O2.f,'G2-M2');assert.equal(sorted.O2.v,123.45);assert.equal(sorted.O3.f,'G3-M3');assert.equal(sorted.O3.v,100);
     for(const r of [2,3])for(let c=0;c<C.NORMAL_HEADERS.length;c++)assert.equal(/^(?:FF)?FF0000$/i.test(sorted[X.utils.encode_cell({r:r-1,c})].s?.fgColor?.rgb||''),r===3,'排序后整行标红必须随记录移动，包括隐藏列');
     assert.equal(sorted[X.utils.encode_cell({r:1,c:at('申请日期')})].v??'','');assert.equal(sorted[X.utils.encode_cell({r:2,c:at('申请日期')})].v,46322);
     assert.equal(sortedBook.Sheets.谈判付款.U3.c[0].t,'申请日期（付款节奏跟进）：2026年10月27日');
@@ -218,8 +218,8 @@ function fixture({ removeFirstApplication = false } = {}) {
     const switchedPreview=(await snapshot()).normalPreview;assert.deepEqual(switchedPreview.rows.map(r=>r[at('是否提交付款申请单')].text),['已提交','未申请']);
     assert(switchedPreview.rows[0].every(c=>c.applied));assert(switchedPreview.rows[1].every(c=>!c.applied));
     const switchedBook=X.read(await download(4),{cellNF:true,cellStyles:true}),switchedNormal=switchedBook.Sheets.正常付款;
-    assert.deepEqual([switchedNormal.E2.v,switchedNormal.E3.v],[records[3].id,records[2].id]);assert.deepEqual([switchedNormal.R2.v,switchedNormal.R3.v],['已提交','未申请']);
-    assert.equal(switchedNormal.S2.v,46322);assert.equal(switchedNormal.S3.v??'','');assert.match(switchedNormal.T2.v,/2026-10-27-123.45/);assert.equal(switchedNormal.T3.v??'','');
+    assert.deepEqual([switchedNormal.E2.v,switchedNormal.E3.v],[records[3].id,records[2].id]);assert.deepEqual([switchedNormal.Q2.v,switchedNormal.Q3.v],['已提交','未申请']);
+    assert.equal(switchedNormal.R2.v,46322);assert.equal(switchedNormal.R3.v??'','');assert.match(switchedNormal.S2.v,/2026-10-27-123.45/);assert.equal(switchedNormal.S3.v??'','');
     for(const r of [2,3])for(let c=0;c<C.NORMAL_HEADERS.length;c++)assert.equal(/^(?:FF)?FF0000$/i.test(switchedNormal[X.utils.encode_cell({r:r-1,c})].s?.fgColor?.rgb||''),r===2);
     assert.deepEqual(errors, []);
     console.log('PASS: ascending application payment dates with matching formulas and highlights; native application-date notes and normal date column; homepage upload, first/re-read preview, earliest equal-amount installment and full normal-row red fill, no unnecessary review, original formulas, hidden columns, fresh-input CF replacement');
