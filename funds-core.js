@@ -8,6 +8,20 @@ const NORMAL_HIDDEN_HEADERS=['单据号【财务应付单】','OA合同编号','
 const REVIEW_HEADERS=['付款类别','供应商名称','付款主体','申请付款金额','是否提交付款申请单','核对说明','来源文件','来源工作表','来源行号','跟单员'];
 const PROGRESS_HEADERS=['申请日期','跟单员','供应商名称','付款主体','对公付款OA号','申请付款金额','应付时间','当前节点','未操作者','流程状态','申请人','是否已付款'];
 const OUTPUT_SHEETS=['谈判付款','正常付款','付款申请核对','付款进度整理'];
+function outputSheetPlan(names,selected){
+ if(!names.includes(selected))throw Error('未找到选中的谈判付款工作表');
+ const used=new Set([...names,...OUTPUT_SHEETS].map(name=>name.toLowerCase()));
+ const retained=names.filter(name=>name!==selected&&!OUTPUT_SHEETS.slice(1).includes(name)).map(sourceName=>{
+  let name=sourceName;
+  if(name==='谈判付款'){
+   name='谈判付款（原表）';let suffix=2;
+   while(used.has(name.toLowerCase()))name='谈判付款（原表'+suffix+++'）';
+   used.add(name.toLowerCase());
+  }
+  return {name,sourceName};
+ });
+ return [...OUTPUT_SHEETS.map((name,i)=>({name,sourceName:i===0?selected:names.includes(name)?name:null})),...retained];
+}
 const FLOW_FIELDS=['当前节点','未操作者','流程状态','申请人'];
 const OA_FIELDS=['流程编号','收款单位','付款金额',...FLOW_FIELDS];
 const OA_PROGRESS_FIELDS=['签字意见','业务所属公司'];
@@ -818,5 +832,5 @@ function build(inputs,decisions={}){
  });
  return {progressHeaders:[...PROGRESS_HEADERS],progressRows,progressEvidence,normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,highlights:{negotiatedCells:[...highlightedNegotiated],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
 }
-return {PEOPLE,PROGRESS_HEADERS,OUTPUT_SHEETS,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText};
+return {PEOPLE,PROGRESS_HEADERS,OUTPUT_SHEETS,outputSheetPlan,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText};
 });

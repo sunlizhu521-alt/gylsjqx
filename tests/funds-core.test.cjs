@@ -7,6 +7,16 @@ const LH=['月份','供应商名称','付款主体','对公付款0A流程号','�
 const NH=['供应商','付款主体','对公付款0A流程号','合同总金额','已付金额','摘要','申请付款金额','单据号【财务应付单】','创建人','是否结清','剩余付款金额','原备注','付款计划'];
 const AH=['申请日期','供应商全称','付款主体','合同号','合同金额','已付金额','付款事由','备注','本次申请付款金额'];
 const OH=['流程编号','当前节点','未操作者','流程状态','申请人','收款单位','付款金额'];
+test('export keeps original sheets after the four result sheets and updates existing results',()=>{
+ const names=['辅助说明','11月谈判付款','正常付款','付款进度整理','付款申请核对','隐藏原表'];
+ const before=names.slice(),plan=C.outputSheetPlan(names,'11月谈判付款');
+ assert.deepEqual(plan.map(s=>s.name),[...C.OUTPUT_SHEETS,'辅助说明','隐藏原表']);
+ assert.equal(plan[0].sourceName,'11月谈判付款');assert.equal(plan[1].sourceName,'正常付款');assert.deepEqual(names,before);
+ assert.deepEqual(C.outputSheetPlan(['谈判付款'],'谈判付款').map(s=>s.sourceName),['谈判付款',null,null,null]);
+ const conflict=C.outputSheetPlan(['谈判付款','谈判付款（原表）','新谈判付款'],'新谈判付款');
+ assert.deepEqual(conflict.map(s=>s.name),[...C.OUTPUT_SHEETS,'谈判付款（原表2）','谈判付款（原表）']);
+ assert.throws(()=>C.outputSheetPlan(names,'不存在'),/未找到/);
+});
 test('V19 batch columns ignore styled tails and preserve plan formulas and synchronize financial values',()=>{
  const input=fixture(),sheet=input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]];
  sheet.N1={t:'s',v:'谈判明细'};sheet.O1={t:'s',v:'分批总金额'};sheet.P1={t:'s',v:'核对'};

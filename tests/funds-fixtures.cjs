@@ -33,7 +33,7 @@ async function fixtures(){
  sheet.N2={t:'n',f:'G2-E2',v:300};sheet.Q2={t:'n',f:'N2-P2',v:220};sheet.N3={t:'n',f:'G3-E3',v:0};sheet.R2={t:'s',v:'2026-09-01-999.00'};sheet.L2.z=sheet.L3.z='yyyy"年"m"月"d"日"';sheet.O2.c=[{a:'原作者',t:'不能丢失的原批注'}];
  sheet['!merges']=[{s:{r:1,c:14},e:{r:2,c:14}}];sheet['!cols']=NEGOTIATED_HEADERS.map((_,i)=>({wch:i===14?36:20}));sheet['!rows']=[{hpt:30},{hpt:36},{hpt:36},{hpt:22}];
  X.utils.book_append_sheet(negotiated,sheet,'10月更新谈判付款计划');
- X.utils.book_append_sheet(negotiated,X.utils.aoa_to_sheet([['不应导出的其他工作表'],['私有备注']]),'辅助说明');
+ X.utils.book_append_sheet(negotiated,X.utils.aoa_to_sheet([['需要保留的其他工作表'],['私有备注']]),'辅助说明');
  X.utils.book_append_sheet(negotiated,X.utils.aoa_to_sheet([NEGOTIATED_HEADERS,['不应默认选取的反馈版本']]),'谈判付款-反馈');
  // Give the source a distinctive existing cell style to detect destructive round-trips.
  const zip=await Zip.loadAsync(write(negotiated));let styles=await zip.file('xl/styles.xml').async('string');

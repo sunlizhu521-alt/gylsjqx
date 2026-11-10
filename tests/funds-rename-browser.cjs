@@ -2,7 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=r
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const X=require('../vendor/xlsx.full.min.js'),{fixtures}=require('./funds-fixtures.cjs');
 const MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',TITLE='付款节奏跟进';
-const SHEETS=['谈判付款','正常付款','付款申请核对','付款进度整理'];
+const SHEETS=['谈判付款','正常付款','付款申请核对','付款进度整理','辅助说明','谈判付款-反馈'];
 const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
 (async()=>{
  const base=process.env.BASE_URL||process.env.QA_URL||'http://127.0.0.1:8899/',out=process.env.OUT_DIR||process.env.QA_OUT||'/private/tmp/funds-rename-browser';
@@ -61,7 +61,7 @@ const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
    if(choice==='recalculate')assert.equal(get('剩余金额').f,'G'+(row+1)+'-N'+(row+1));
    const preview=await frame.locator('#normalPreview tbody tr').evaluateAll(rows=>rows.map(r=>[...r.cells].map(c=>c.textContent)));
    const visible=preview.find(r=>r[supplier]==='正常供应商1');for(const h of ['已付金额','剩余金额','是否结清'])assert.equal(visible[headers.indexOf(h)],X.utils.format_cell(get(h)));
-   for(const name of SHEETS)assert(book.Sheets[name]['!autofilter']);
+   for(const name of SHEETS.slice(0,4))assert(book.Sheets[name]['!autofilter']);
   }
   await setup();await checkChoices();await choose('keep');await verify(await download(10),'keep');
   await frame.locator('#onlyPending').uncheck();await checkChoices();await choose('recalculate');await verify(await download(11),'recalculate');

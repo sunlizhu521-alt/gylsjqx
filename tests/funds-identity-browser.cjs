@@ -21,7 +21,7 @@ function assign(sheet,row,values){const headers=fields(sheet);for(const [key,val
   await frame.locator('#negotiatedSheet option').filter({hasText:data.sheetName}).first().waitFor({state:'attached'});await frame.locator('#negotiatedSheet').selectOption(data.sheetName);await frame.locator('#analyze:not([disabled])').click();await frame.locator('#download:not([disabled])').waitFor({timeout:60000});
   assert.equal(await frame.locator('#pendingCount').textContent(),'0');
   const event=page.waitForEvent('download');await frame.locator('#download').click();const download=await event,saved=X.read(await fs.readFile(await download.path()),{cellNF:true,cellStyles:true});
-  assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理']);
+  assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理','辅助说明','谈判付款-反馈']);
   const normal=saved.Sheets.正常付款,neg=saved.Sheets.谈判付款,review=saved.Sheets.付款申请核对,normalFields=fields(normal),negFields=fields(neg);
   for(const [sheetName,sheet,headers,expectedRows,expectedHeaders] of [['正常付款',normal,normalFields,result.normalRows,result.normalHeaders],['付款申请核对',review,fields(review),result.reviewRows,result.reviewHeaders]]){
    assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1})[0],expectedHeaders);

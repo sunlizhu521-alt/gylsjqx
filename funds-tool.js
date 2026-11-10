@@ -118,7 +118,8 @@
         const blob = await FundsExport(inputs.negotiated.bytes,result);
         if (FundsExport.lastWarnings?.length) throw Error('以下公式无法完成结果校验，请调整源公式后重新上传：'+FundsExport.lastWarnings.join('；'));
         const saved = XLSX.read(await blob.arrayBuffer(),{type:'array',cellNF:true});
-        if (saved.SheetNames.join('|') !== FundsCore.OUTPUT_SHEETS.join('|')) throw Error('导出工作表检查未通过');
+        const expectedSheets=FundsCore.outputSheetPlan(inputs.negotiated.book.SheetNames,result.negotiated.sheetName).map(item=>item.name);
+        if (saved.SheetNames.join('|') !== expectedSheets.join('|')) throw Error('导出工作表检查未通过，原工作表未完整保留');
         const progress=saved.Sheets['付款进度整理'],progressRange=XLSX.utils.decode_range(progress['!ref']);
         if(progressRange.e.c!==result.progressHeaders.length-1||result.progressHeaders.some((h,c)=>progress[XLSX.utils.encode_cell({r:0,c})]?.v!==h))throw Error('付款进度表头检查未通过');
         const progressRows=result.progressRows.map((_,r)=>result.progressHeaders.map((_,c)=>progress[XLSX.utils.encode_cell({r:r+1,c})]));
