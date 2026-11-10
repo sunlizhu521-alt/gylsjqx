@@ -2,6 +2,7 @@
   'use strict';
   const $ = id => document.getElementById(id), C = window.FundsBudgetSummaryCore;
   let result = null, sourceBytes = null, busy = false;
+  const versionKey = 'funds-budget-summary-export-versions', memoryVersions = {};
   const money = cents => (cents / 100).toLocaleString('zh-CN', {minimumFractionDigits:2,maximumFractionDigits:2});
   const month = key => key ? key.replace(/^(\d{4})-(\d{2})$/, (_,y,m) => `${y}年${Number(m)}月`) : '时间待定';
   function controls() {
@@ -69,6 +70,18 @@
     reset(); $('sourceFile').value = ''; $('reference').textContent = '尚未引用文件';
     $('clear').hidden = true; $('status').textContent = '请上传文件。';
   });
+  function nextDownload() {
+    const date = new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+    let versions = {};
+    try {
+      const saved = JSON.parse(localStorage.getItem(versionKey) || '{}');
+      if (saved && typeof saved === 'object' && !Array.isArray(saved)) versions = saved;
+    } catch (_) {}
+    const stored = Number(versions[date]);
+    const version = Math.max(Number.isSafeInteger(stored) && stored >= 0 ? stored : 0,memoryVersions[date] || 0) + 1;
+    if (!Number.isSafeInteger(version)) throw Error('当天版本号已超出有效范围，请核实浏览器保存的版本记录');
+    return {date,version,versions,name:`付款预算汇总-${date}-V${version}.xlsx`};
+  }
   $('download').addEventListener('click',async () => {
     if (busy || !result?.canExport || !sourceBytes) return;
     busy = true; controls(); $('status').textContent = '正在生成并校验 Excel…';
@@ -80,11 +93,13 @@
       if (book.SheetNames[0] !== '付款预算汇总' || JSON.stringify(rows[0]) !== JSON.stringify(C.HEADERS) || rows.length !== result.groups.length + 2) throw Error('导出结构校验未通过');
       const totals = rows.at(-1);
       if ([result.totals.totalCents,result.totals.paidCents,result.totals.remainingCents].some((v,i) => Math.round(totals[i+3]*100) !== v)) throw Error('导出金额校验未通过');
-      const date = new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-      const name = `付款预算汇总-${date}.xlsx`;
+      const {date,version,versions,name} = nextDownload();
       url = URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
       const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
-      $('status').textContent = '已生成：' + name;
+      memoryVersions[date] = version;
+      let saved = true;
+      try { localStorage.setItem(versionKey,JSON.stringify({...versions,[date]:version})); } catch (_) { saved = false; }
+      $('status').textContent = '已生成：' + name + (saved ? '' : '。浏览器未能保存版本号，本页内仍会递增。');
     } catch (error) { $('status').textContent = '导出失败：' + error.message; }
     finally { if (url) setTimeout(() => URL.revokeObjectURL(url),1000); busy = false; controls(); }
   });

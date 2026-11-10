@@ -19,11 +19,12 @@ const rows = [[46327,'供应商甲','主体甲',100,'已支付','正常付款'],
 const original = fixture(rows);
 async function upload(scope,bytes=original,name='合成预算.xlsx') { await scope.locator('#sourceFile:not([disabled])').setInputFiles({name,mimeType:mime,buffer:bytes}); }
 async function ready(scope) { await scope.locator('#download:not([disabled])').waitFor(); }
-async function download(page,scope) {
+async function download(page,scope,version,date='2026-11-11') {
   const pending = page.waitForEvent('download'); await scope.locator('#download').click();
   const file = await pending, chunks = [];
   for await (const chunk of await file.createReadStream()) chunks.push(chunk);
-  assert.match(file.suggestedFilename(),/^付款预算汇总-\d{4}-\d{2}-\d{2}\.xlsx$/);
+  assert.match(file.suggestedFilename(),/^付款预算汇总-\d{4}-\d{2}-\d{2}-V[1-9]\d*\.xlsx$/);
+  if(version)assert.equal(file.suggestedFilename(),`付款预算汇总-${date}-V${version}.xlsx`);
   return Buffer.concat(chunks);
 }
 async function preserved(before,after) {
@@ -36,6 +37,13 @@ async function preserved(before,after) {
   const browser = await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH || (process.platform==='darwin'?'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome':undefined)});
   try {
     const context = await browser.newContext({acceptDownloads:true,viewport:{width:1440,height:1000}}), page = await context.newPage(), errors=[];
+    await context.addInitScript(() => {
+      const RealDate = Date;
+      window.Date = class extends RealDate {
+        constructor(...args) { super(...(args.length ? args : [window.__budgetTestNow || '2026-11-11T02:00:00Z'])); }
+        static now() { return new RealDate(window.__budgetTestNow || '2026-11-11T02:00:00Z').getTime(); }
+      };
+    });
     page.on('pageerror',e=>errors.push(e.message));
     await context.route('**/*',route => {
       const req=route.request(),url=new URL(req.url());
@@ -59,7 +67,7 @@ async function preserved(before,after) {
     await page.locator('.tool-tab[data-tool="quarter-budget"]').click();
     await page.locator('.tool-tab[data-tool="funds-budget-summary"]').click();
     assert.equal(await frame.locator('#preview').innerText(),preview,'切换工具保留结果');
-    const bytes=await download(page,frame),book=X.read(bytes,{type:'buffer',cellNF:true});
+    const bytes=await download(page,frame,1),book=X.read(bytes,{type:'buffer',cellNF:true});
     assert.deepEqual(book.SheetNames,['付款预算汇总','付款汇总明细','原始记录']);
     assert.equal(book.Sheets.付款预算汇总.D5.v,175);
     assert.equal(book.Sheets.付款预算汇总.E5.v,100);
@@ -68,7 +76,7 @@ async function preserved(before,after) {
     await preserved(original,bytes);
     await upload(frame,bytes,'再次上传.xlsx');await ready(frame);
     assert.equal(await frame.locator('#preview').innerText(),preview,'重新导入不重复累计');
-    const again=X.read(await download(page,frame),{type:'buffer'});assert.deepEqual(again.SheetNames,book.SheetNames);
+    const again=X.read(await download(page,frame,2),{type:'buffer'});assert.deepEqual(again.SheetNames,book.SheetNames);
     const invalid=fixture([[46327,'供应商','','错误金额','已支付','<img src=x onerror=alert(1)>']]);
     await upload(frame,invalid,'异常.xlsx'); await frame.locator('#status').filter({hasText:'整理未完成'}).waitFor();
     assert(await frame.locator('#download').isDisabled());assert(await frame.locator('#result').isHidden());
@@ -84,7 +92,18 @@ async function preserved(before,after) {
     await frame.locator('#clear').click();assert(await frame.locator('#download').isDisabled());
     await page.goto(new URL('funds-budget-summary.html',base).href,{waitUntil:'networkidle'});
     await upload(page);await ready(page);assert.equal(await page.locator('h1').innerText(),'资金预算汇总');
-    await download(page,page);
+    await download(page,page,3);
+    await page.evaluate(() => { window.__realExport=window.FundsBudgetSummaryExport; window.FundsBudgetSummaryExport=async()=>{throw Error('测试生成失败');}; });
+    await page.locator('#download').click();await page.locator('#status').filter({hasText:'测试生成失败'}).waitFor();
+    assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('funds-budget-summary-export-versions'))['2026-11-11']),3,'生成失败不推进版本');
+    await page.evaluate(()=>window.FundsBudgetSummaryExport=window.__realExport);
+    await download(page,page,4);
+    await page.reload({waitUntil:'networkidle'});await upload(page);await ready(page);await download(page,page,5);
+    await page.evaluate(()=>window.__budgetTestNow='2026-11-11T16:00:00Z');
+    await download(page,page,1,'2026-11-12');
+    await page.evaluate(()=>Object.defineProperty(window,'localStorage',{get(){throw new DOMException('测试缓存不可用','SecurityError');}}));
+    await download(page,page,2,'2026-11-12');await download(page,page,3,'2026-11-12');
+    assert.match(await page.locator('#status').innerText(),/本页内仍会递增/);
     if(process.env.QA_SAMPLE_FILE){
       await upload(page,fs.readFileSync(process.env.QA_SAMPLE_FILE),path.basename(process.env.QA_SAMPLE_FILE));await ready(page);
       assert.match(await page.locator('#counts').innerText(),/234 条明细，19 个分组/);
@@ -92,6 +111,6 @@ async function preserved(before,after) {
       assert.deepEqual([s.D21.v,s.E21.v,s.F21.v],[56608023.24,15233313.66,41374709.58]);
       if(process.env.QA_SAMPLE_OUTPUT)fs.writeFileSync(process.env.QA_SAMPLE_OUTPUT,sample);
     }
-    assert.deepEqual(errors,[]);console.log('PASS: 首页/独立页、预览、下载、源表保留、切换、重复上传、错误清理、手机布局'+(process.env.QA_SAMPLE_FILE?'、真实样表金额':''));
+    assert.deepEqual(errors,[]);console.log('PASS: 首页/独立页、预览、下载、源表保留、切换、重复上传、错误清理、手机布局、版本递增/刷新/失败不递增/北京时间跨日/缓存不可用'+(process.env.QA_SAMPLE_FILE?'、真实样表金额':''));
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
