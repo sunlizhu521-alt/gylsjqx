@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>季度预算整理｜供应链数据清洗</title>
+  <link rel="stylesheet" href="styles-merge14.css?v=quarter-budget-20261110-1">
+  <style>
+    main{max-width:1600px;margin:28px auto;padding:20px;min-width:0}section{margin:18px 0;padding:22px;border:1px solid var(--line);border-radius:14px;background:var(--surface);min-width:0}h2{font-size:1.15rem;margin:0 0 14px}p,small,li{line-height:1.7}label{font-weight:600}input,button,select{font:inherit;max-width:100%}input,select{border:1px solid var(--line-strong);border-radius:6px;padding:8px;background:var(--surface-solid);color:var(--text)}input[type=file]{width:100%;padding:0;border:0;background:transparent}input::file-selector-button{padding:9px 12px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface-solid);color:var(--text);cursor:pointer}small{display:block;color:var(--muted)}button{border:0;border-radius:8px;background:#315b9d;color:#fff;padding:11px 20px;cursor:pointer}button:disabled,input:disabled,select:disabled{opacity:.5;cursor:not-allowed}button.secondary{background:var(--surface-solid);border:1px solid var(--line-strong);color:var(--text)}button.remove{padding:5px 0;border-radius:0;background:transparent;color:var(--muted);text-decoration:underline}.actions,.mode-row,.filters{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.mode-row{margin-bottom:18px}.mode-row select{min-width:260px}.uploads-scroll{overflow-x:auto}.uploads{display:grid;grid-template-columns:repeat(5,minmax(230px,1fr));gap:14px}.upload{padding:14px;border:1px solid var(--line);border-radius:10px;min-width:0}.upload label{display:block;margin-bottom:10px}.upload small{margin-top:10px;min-height:42px}.requirement{font-weight:400;font-size:.85rem;color:var(--muted)}.actions{margin-top:18px}.file-reference,#status,#cache-status{white-space:pre-wrap;overflow-wrap:anywhere}.file-reference{min-height:62px!important}#status{margin:0}#cache-status{margin-bottom:0;color:var(--muted);font-size:.9rem}.preview{max-height:560px;overflow:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #d6dee8;text-align:center;vertical-align:middle;padding:9px 12px;white-space:pre-wrap;min-width:110px}th{white-space:nowrap;position:sticky;top:0;background:#315b9d;color:white}td{background:#fff;color:#172033;max-width:430px;overflow-wrap:anywhere}.summary-table td{min-width:145px}.summary-table td:first-child{min-width:125px}.total td{font-weight:700;background:#e9eff8}.paid td{background:#fff3f1}.related td,.excluded td{background:#ffdddd}.excluded td{color:#6d2430}.detail-money{white-space:nowrap}.row-source{font-size:.85rem;color:#526278;margin:5px 0 0;white-space:pre-wrap}.review-card{border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0}.review-card p{margin:6px 0;overflow-wrap:anywhere;white-space:pre-wrap}.review-controls{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-top:12px}.review-controls label{display:flex;flex-direction:column;gap:5px;font-size:.85rem}.review-controls input{width:310px}.review-controls select{max-width:100%;min-width:150px}.row-action{min-width:210px}.row-action select,.row-action input{width:100%;font-size:12px;margin:3px 0}.filters{margin-bottom:14px}.filters label{display:flex;align-items:center;gap:6px;font-weight:400}.count,.muted{font-size:.9rem;color:var(--muted);font-weight:400}.empty{padding:12px;color:var(--muted)}details{margin-top:14px}summary{cursor:pointer;font-weight:600;color:var(--accent)}.rules{color:var(--muted)}[hidden]{display:none!important}a,button,input,select,summary{outline-offset:3px}@media(max-width:700px){main{padding:12px}section{padding:14px}.actions{align-items:stretch;flex-direction:column}.mode-row select{width:100%;min-width:0}.filters label{flex:1 1 130px}.filters select{min-width:0;flex:1}.review-controls{flex-direction:column}.review-controls label,.review-controls input,.review-controls select{width:100%;min-width:0}.review-card{padding:10px}}
+  </style>
+</head>
+<body><main>
+  <a href="index.html">← 返回工具箱</a>
+  <h1>季度预算整理</h1>
+  <p>合并付款明细、核对付款状态，并生成月份与分类汇总。</p>
+  <section aria-label="来源文件">
+    <div class="mode-row"><label for="mode">整理方式</label><select id="mode" disabled><option value="new">新建整理</option><option value="existing">继续已有明细</option></select><span class="muted" id="mode-help">新建整理需上传前三项文件。</span></div>
+    <div class="uploads-scroll"><div class="uploads">
+      <div class="upload"><label for="negotiatedFile">谈判付款 <span class="requirement" id="required-negotiated">必需</span></label><input id="negotiatedFile" type="file" accept=".xlsx,.xls" disabled aria-describedby="reference-negotiated"><small>谈判分期明细或付款节奏工作簿。</small><small class="file-reference" id="reference-negotiated">尚未引用文件</small><button id="clear-negotiated" class="remove" hidden>移除谈判付款</button></div>
+      <div class="upload"><label for="ledgerFile">资金台账整理 <span class="requirement" id="required-ledger">必需</span></label><input id="ledgerFile" type="file" accept=".xlsx,.xls" disabled aria-describedby="reference-ledger"><small>资金台账整理后的正常付款明细。</small><small class="file-reference" id="reference-ledger">尚未引用文件</small><button id="clear-ledger" class="remove" hidden>移除资金台账整理</button></div>
+      <div class="upload"><label for="budgetFile">预估预算 <span class="requirement" id="required-budget">必需</span></label><input id="budgetFile" type="file" accept=".xlsx,.xls" disabled aria-describedby="reference-budget"><small>预估付款明细或人员收集工作表。</small><small class="file-reference" id="reference-budget">尚未引用文件</small><button id="clear-budget" class="remove" hidden>移除预估预算</button></div>
+      <div class="upload"><label for="evidenceFile">付款状态依据 <span class="requirement" id="required-evidence">可选</span></label><input id="evidenceFile" type="file" accept=".xlsx,.xls" disabled aria-describedby="reference-evidence"><small>第一槽已上传付款节奏表时自动复用其中的付款依据，无需重复上传。</small><small class="file-reference" id="reference-evidence">尚未引用文件</small><button id="clear-evidence" class="remove" hidden>移除付款状态依据</button></div>
+      <div class="upload"><label for="existingFile">已有付款汇总明细 <span class="requirement" id="required-existing">可选</span></label><input id="existingFile" type="file" accept=".xlsx,.xls" disabled aria-describedby="reference-existing"><small>继续已有明细时必需，保留其人工填写内容。</small><small class="file-reference" id="reference-existing">尚未引用文件</small><button id="clear-existing" class="remove" hidden>移除已有付款汇总明细</button></div>
+    </div></div>
+    <div class="actions"><button id="download" disabled>下载整理结果</button><button id="clear-cache" class="secondary" disabled>清空本工具文件与选择</button><p id="status" role="status" aria-live="polite">正在加载工具…</p></div>
+    <p id="cache-status" role="status" aria-live="polite">文件与核对选择仅缓存在当前浏览器，不上传服务器。</p>
+    <details class="rules"><summary>使用说明</summary><ul><li>每项最多上传一个 60 MB 以内的 Excel 文件。补充文件如有读取错误，请重新选择或移除。</li><li>先核对来源和疑似关联，再下载；未作人工选择的疑似记录保留。付款证据由本笔款项及分期共同判断。</li><li>网页筛选只改变显示范围，下载与两组汇总仍包含全部整理结果。</li><li>文件与核对选择保存在本机浏览器，刷新后自动恢复。替换、移除文件或切换整理方式会清除之前的核对选择。</li><li>下载生成独立文件，原文件不修改；汇总备注留空，金额导出为值。</li></ul></details>
+    <details id="warning-panel" hidden><summary>需要留意（<span id="warning-count">0</span> 项）</summary><ul id="warnings"></ul></details>
+  </section>
+  <div id="result" hidden>
+    <section id="review-panel" aria-label="关联与付款核对" hidden><h2>关联与付款核对 <span class="count" id="review-count"></span></h2><p class="muted">核对来源、保留或剔除，并为有歧义的付款记录选择对应凭据。</p><div id="review-list"></div></section>
+    <section><h2>付款明细 <span class="count">（共 <span id="record-count">0</span> 条，显示 <span id="visible-count">0</span> 条）</span></h2>
+      <div class="filters"><label for="filter-month">月份<select id="filter-month"><option value="">全部</option></select></label><label for="filter-category">分类<select id="filter-category"><option value="">全部</option></select></label><label for="filter-status">付款状态<select id="filter-status"><option value="">全部</option></select></label><label for="filter-excluded">是否剔除<select id="filter-excluded"><option value="">全部</option><option value="否">否</option><option value="是">是</option></select></label><button id="reset-filters" class="secondary">清除筛选</button></div>
+      <div id="preview" class="preview"></div>
+      <details id="deleted-panel" hidden><summary>自动删除的跨表重复记录（<span id="deleted-count">0</span> 条）</summary><div id="deleted-list"></div></details>
+    </section>
+    <section><h2>按月份与分类汇总</h2><div id="classified-summary" class="preview"></div></section>
+    <section><h2>按月份汇总</h2><div id="monthly-summary" class="preview"></div></section>
+  </div>
+</main>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="quarter-budget-cache.js?v=quarter-budget-20261110-1"></script>
+<script src="quarter-budget-import.js?v=quarter-budget-20261110-1"></script>
+<script src="quarter-budget-core.js?v=quarter-budget-20261110-1"></script>
+<script src="quarter-budget-export.js?v=quarter-budget-20261110-1"></script>
+<script src="quarter-budget-tool.js?v=quarter-budget-20261110-1"></script>
+</body>
+</html>
