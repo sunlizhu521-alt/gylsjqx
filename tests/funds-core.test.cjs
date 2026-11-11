@@ -525,9 +525,9 @@ test('谈判按OA号归集，缺编号按名称金额补判，错误或冲突编
  for(const name of ['其他供应商','',{t:'e',v:23,w:'#REF!'}]){const i=installmentFixture([{'供应商全称':name,'本次申请付款金额':40},{'供应商全称':'不同名称','本次申请付款金额':60}]),r=C.build(i);assert.equal(negotiatedValue(r,'是否提交付款申请单'),'已经提交全部');assert.equal(negotiatedValue(r,'提交时间汇总'),'2026-10-10-40.00\n2026-10-10-60.00');assert.equal(applicationAndOAReviews(r).length,0);}
  for(const id of ['', 'MDST-DGFK20990101999',{t:'s',f:'A99'},{t:'e',v:23,w:'#REF!'}]){const i=fixture();set(i,'applications','合同号',2,id);const r=C.build(i);const missing=id===''||id?.f;assert.equal(negotiatedValue(r,'是否提交付款申请单'),missing?'已经提交全部':'未提交');assert.equal(negotiatedValue(r,'提交时间汇总'),missing?'2026-10-10-100.00':'');assert.equal((missing?applicationAndOAReviews(r):legacyReviews(r)).length,0);}
 });
-test('提交日期与汇总相邻，已有字段只重排列顺序，不重复新增或改源表',()=>{
+test('谈判原列位置保留，缺少跟踪字段仅追加，不移动备注公式和计划列',()=>{
  for(const existing of [[],['提交时间汇总'],['提交付款申请单日期'],['提交付款申请单日期','人工备注','提交时间汇总']]){
-  const i=fixture();if(existing.length)X.utils.sheet_add_aoa(i.negotiated.book.Sheets['10月谈判付款主表'],[existing,existing.map(h=>h==='人工备注'?'必须保留':'')],{origin:'N1'});const before=JSON.stringify(i),r=C.build(i),h=r.negotiated.columnOrder.map(c=>r.negotiated.headers[c]);assert.equal(Math.abs(h.indexOf('提交付款申请单日期')-h.indexOf('提交时间汇总')),1);assert.equal(h.filter(x=>x==='提交时间汇总').length,1);assert.equal(h.filter(x=>x==='提交付款申请单日期').length,1);assert.equal(JSON.stringify(i),before);if(existing.includes('人工备注'))assert.equal(r.negotiated.rows[0][r.negotiated.headers.indexOf('人工备注')].v,'必须保留');
+  const i=fixture();if(existing.length)X.utils.sheet_add_aoa(i.negotiated.book.Sheets['10月谈判付款主表'],[existing,existing.map(h=>h==='人工备注'?'必须保留':'')],{origin:'N1'});const before=JSON.stringify(i),r=C.build(i),h=r.negotiated.columnOrder.map(c=>r.negotiated.headers[c]);assert.deepEqual(r.negotiated.columnOrder,r.negotiated.headers.map((_,c)=>c));assert.deepEqual(h.slice(0,NH.length+existing.length),[...NH,...existing]);assert.equal(h.filter(x=>x==='提交时间汇总').length,1);assert.equal(h.filter(x=>x==='提交付款申请单日期').length,1);assert.equal(JSON.stringify(i),before);if(existing.includes('人工备注'))assert.equal(r.negotiated.rows[0][r.negotiated.headers.indexOf('人工备注')].v,'必须保留');
  }
 });
 test('仅有付款OA号的申请也保留，空金额仍确认已提交并核对金额',()=>{

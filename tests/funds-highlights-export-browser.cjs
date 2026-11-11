@@ -25,7 +25,7 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
    // Prefix-only source namespaces exercise red-dxf reuse after XMLSerializer adds local xmlns declarations.
    const prefixed=s.serializeToString(styles).replace(/(<\/?)([A-Za-z][\w.-]*)(?=[\s/>])/g,'$1s:$2').replace('xmlns="'+ns+'"','xmlns:s="'+ns+'"');
    zip.file('xl/styles.xml',prefixed);zip.file('xl/worksheets/sheet1.xml',s.serializeToString(doc));
-   for(const path of Object.keys(zip.files))if(path.endsWith('.vml')){const vml=parse(await zip.file(path).async('string'));for(const data of all(vml,'ClientData'))if(all(data,'Column')[0]?.textContent==='1'){all(data,'Anchor')[0].textContent='38, 185, 1009, 8, 41, 18, 1014, 27';data.parentElement.setAttribute('style','position:absolute;margin-left:3276pt;margin-top:30909pt;width:302pt;height:169pt;visibility:hidden');}zip.file(path,s.serializeToString(vml));}
+   for(const path of Object.keys(zip.files))if(path.endsWith('.vml')){const vml=parse(await zip.file(path).async('string'));for(const data of all(vml,'ClientData'))if(['1','2'].includes(all(data,'Column')[0]?.textContent)){all(data,'Anchor')[0].textContent='38, 185, 1009, 8, 41, 18, 1014, 27';data.parentElement.setAttribute('style','position:absolute;margin-left:3276pt;margin-top:30909pt;width:302pt;height:169pt;visibility:hidden');}zip.file(path,s.serializeToString(vml));}
    return [...await zip.generateAsync({type:'uint8array'})];
   },[...X.write(book,{type:'buffer',bookType:'xlsx'})]));
   const normalHeaders=['供应商名称','申请付款金额','OA合同编号','合同总金额'],normalRows=[['甲',30,'HT001',30],['乙',40,'HT002',40]].map(row=>row.map(v=>({t:typeof v==='number'?'n':'s',v})));
@@ -42,16 +42,17 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
     result.sheets[filename]={rules,own:rules.filter(r=>r.formula===marker),cells,tags:[...doc.documentElement.children].map(n=>n.localName),hidden:all(doc,'col').filter(c=>c.getAttribute('hidden')==='1').map(c=>Number(c.getAttribute('min')))};
    }
    result.notes=[];result.noteShapes=[];result.notePositions={};
-   for(const path of Object.keys(zip.files))if(path.endsWith('.xml')&&/comments/i.test(path)){const doc=parse(await zip.file(path).async('string')),authors=all(doc,'author').map(n=>n.textContent);for(const n of all(doc,'comment'))result.notes.push({ref:n.getAttribute('ref'),author:authors[Number(n.getAttribute('authorId'))],text:all(n,'t').map(t=>t.textContent).join('')});}
+   for(const path of Object.keys(zip.files))if(path.endsWith('.xml')&&/comments/i.test(path)){const doc=parse(await zip.file(path).async('string')),authors=all(doc,'author').map(n=>n.textContent);for(const n of all(doc,'comment'))result.notes.push({ref:n.getAttribute('ref'),author:authors[Number(n.getAttribute('authorId'))],text:all(n,'t').map(t=>t.textContent).join(''),runs:all(n,'r').map(r=>({text:all(r,'t').map(t=>t.textContent).join(''),format:[...all(r,'rPr')[0]?.children||[]].map(p=>p.localName)}))});}
    for(const path of Object.keys(zip.files))if(path.endsWith('.vml')){const doc=parse(await zip.file(path).async('string'));for(const n of all(doc,'ClientData').filter(n=>n.getAttribute('ObjectType')==='Note')){const ref=XLSX.utils.encode_cell({r:Number(all(n,'Row')[0].textContent),c:Number(all(n,'Column')[0].textContent)});result.noteShapes.push({ref,visible:all(n,'Visible').length>0});result.notePositions[ref]={anchor:all(n,'Anchor')[0]?.textContent.split(',').map(Number),style:n.parentElement.getAttribute('style')};}}
    {if(result.notes.length!==result.noteShapes.length)throw Error('批注与 VML 图形数量不一致');if(new Set(result.noteShapes.map(n=>n.ref)).size!==result.noteShapes.length)throw Error('批注图形坐标重复');}
    return result;
   },{bytes:[...bytes],marker:MARKER});
   const output=await exportBytes(input,result),first=await inspect(output),saved=X.read(output,{cellNF:true}),neg=first.sheets['xl/worksheets/sheet1.xml'],normal=first.sheets['xl/worksheets/funds-normal.xml'];
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理']);assert.equal(neg.own.length,0);assert.equal(normal.rules.length,0);assert.deepEqual(normal.hidden,[3,4]);
-  for(const col of ['A','B','C','D','E']){assert.equal(normal.cells[col+'2'].fill,'FFFF0000');assert.notEqual(normal.cells[col+'3'].fill,'FFFF0000');assert.notEqual(normal.cells[col+'1'].fill,'FFFF0000');}
+  for(const col of normalHeaders.map((_,i)=>X.utils.encode_col(i))){assert.equal(normal.cells[col+'2'].fill,'FFFF0000');assert.notEqual(normal.cells[col+'3'].fill,'FFFF0000');assert.notEqual(normal.cells[col+'1'].fill,'FFFF0000');}
   const adjacent=(info,address)=>{const p=X.utils.decode_cell(address),note=info.notePositions[address];assert.deepEqual(note.anchor.slice(0,4),[p.c+1,6,p.r,2]);assert(note.anchor[4]>=p.c+1);assert(note.anchor[6]>=p.r);const style=Object.fromEntries(note.style.split(';').filter(s=>s.includes(':')).map(s=>s.split(':')));assert.equal(style.top,'0pt');assert.equal(style.left,'0pt');assert.equal(parseFloat(style['margin-top']),31.5);assert.equal(style.visibility,address==='C2'?'hidden':undefined);};
-  adjacent(first,'C2');adjacent(first,'B2');
+  adjacent(first,'C2');
+  assert.deepEqual(first.notePositions.B2,{anchor:[38,185,1009,8,41,18,1014,27],style:'position:absolute;margin-left:3276pt;margin-top:30909pt;width:302pt;height:169pt;visibility:hidden'},'Unrelated manual notes retain their original position');
   assert.equal(first.notes.find(n=>n.ref==='C2').author,'原作者');assert.equal(first.notes.length,2);
   assert.equal(saved.Sheets.谈判付款.C2.c[0].t,'保留原人工批注\n申请日期（付款节奏跟进）：2026年10月27日');assert.equal(saved.Sheets.谈判付款.C2.c[0].a,X.read(input).Sheets.本周谈判付款.B2.c[0].a);assert.equal(saved.Sheets.谈判付款.B2.c[0].t,'未标红的原批注');
   assert.equal(neg.cells.C2.fill,'FFFF0000');assert.equal(neg.cells.C3.fill,'FFFF0000','Unrelated manual red is retained');assert.equal(neg.cells.C2.locked,'0');
@@ -65,16 +66,29 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
   },[...output]));
   const sortedInfo=(await inspect(sorted)).sheets['xl/worksheets/funds-normal.xml'],sortedBook=X.read(sorted,{cellStyles:true});
   assert.equal(sortedBook.Sheets.正常付款.A2.v,'乙');assert.equal(sortedBook.Sheets.正常付款.A3.v,'甲');assert.equal(sortedInfo.rules.length,0);
-  for(const col of ['A','B','C','D','E']){assert.notEqual(sortedInfo.cells[col+'2'].fill,'FFFF0000');assert.equal(sortedInfo.cells[col+'3'].fill,'FFFF0000','Red follows the submitted record including hidden columns');}
+  for(const col of normalHeaders.map((_,i)=>X.utils.encode_col(i))){assert.notEqual(sortedInfo.cells[col+'2'].fill,'FFFF0000');assert.equal(sortedInfo.cells[col+'3'].fill,'FFFF0000','Red follows the submitted record including hidden columns');}
   const next={...result,applicationComments:{C2:'申请日期（付款节奏跟进）：2026年10月28日；2026年10月29日'},negotiated:{...result.negotiated,sheetName:'谈判付款',headers:headers.map((_,i)=>saved.Sheets.谈判付款[X.utils.encode_cell({r:0,c:i})].v),columnOrder:[0,1,2,3,4]},highlights:{negotiatedCells:['C2'],normalRows:[2]}};
   const repeated=await exportBytes(output,next),again=await inspect(repeated);assert.deepEqual(again.sheets['xl/worksheets/sheet1.xml'].rules,neg.rules);assert.deepEqual(again.dxfPrefix,first.dxfPrefix);assert.equal(again.sheets['xl/worksheets/sheet1.xml'].cells.C2.fill,'FFFF0000');
   assert.equal(X.read(repeated).Sheets.谈判付款.C2.c[0].t,'保留原人工批注\n申请日期（付款节奏跟进）：2026年10月28日；2026年10月29日');
   adjacent(again,'C2');
   const withdrawn=await exportBytes(repeated,{...next,highlights:undefined}),clean=await inspect(withdrawn),cleanNeg=clean.sheets['xl/worksheets/sheet1.xml'];
-  adjacent(clean,'C2');adjacent(clean,'B2');
+  assert.deepEqual(clean.notePositions,again.notePositions,'Without newly generated notes, existing note positions stay unchanged');
   assert(Object.values(clean.sheets['xl/worksheets/funds-normal.xml'].cells).every(c=>c.fill!=='FFFF0000'),'Re-upload withdraws obsolete normal fills');
   assert.equal(X.read(withdrawn).Sheets.谈判付款.C2.c[0].t,'保留原人工批注');assert.equal(X.read(withdrawn).Sheets.谈判付款.B2.c[0].t,'未标红的原批注');
   assert.equal(cleanNeg.cells.C2.fill,'FF00FF00','Withdrawn tool fill restores the original green');assert.equal(cleanNeg.cells.C3.fill,'FFFF0000','Manual red survives');assert.equal(cleanNeg.cells.C2.locked,'0');assert.deepEqual(cleanNeg.rules,neg.rules);
+  // Excel can split both tool lines and manual sentences across rich-text runs.
+  const richInput=Buffer.from(await page.evaluate(async bytes=>{
+   const zip=await JSZip.loadAsync(new Uint8Array(bytes)),p=new DOMParser(),s=new XMLSerializer(),ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main',all=(d,n)=>[...d.getElementsByTagNameNS('*',n)];
+   for(const name of Object.keys(zip.files).filter(n=>/comments[^/]*\.xml$/i.test(n))){const doc=p.parseFromString(await zip.file(name).async('string'),'application/xml'),note=all(doc,'comment').find(n=>n.getAttribute('ref')==='C2');if(!note)continue;const text=all(note,'text')[0];text.replaceChildren();
+    for(const [value,format]of [['人工备注：','b'],['申请日期（付款节奏跟进）：人工说明，请保留\r\n','i'],['申请日期（付款节奏','u'],['跟进）：2026年11月10日\r\n',''],['第一条人工记录\n\n第二条人工记录\n','b'],['申请日期（资金整理）：2026年',''],['10月1日','i']]){const run=doc.createElementNS(ns,'r'),t=doc.createElementNS(ns,'t');if(format){const props=doc.createElementNS(ns,'rPr');props.append(doc.createElementNS(ns,format));run.append(props);}t.setAttribute('xml:space','preserve');t.textContent=value;run.append(t);text.append(run);}zip.file(name,s.serializeToString(doc));
+   }return [...await zip.generateAsync({type:'uint8array'})];
+  },[...output]));
+  const richManual='人工备注：申请日期（付款节奏跟进）：人工说明，请保留\n第一条人工记录\n\n第二条人工记录',richOutput=await exportBytes(richInput,next),rich=await inspect(richOutput),richNote=rich.notes.find(n=>n.ref==='C2');
+  assert.equal(richNote.text,richManual+'\n'+next.applicationComments.C2,'Only complete tool lines are replaced, even when prefixes or dates span runs');
+  assert.deepEqual(richNote.runs.slice(0,3),[{text:'人工备注：',format:['b']},{text:'申请日期（付款节奏跟进）：人工说明，请保留\n',format:['i']},{text:'第一条人工记录\n\n第二条人工记录',format:['b']}],'Manual text, blank lines, line breaks and rich-text formatting survive');
+  adjacent(rich,'C2');assert.deepEqual(rich.notePositions.B2,first.notePositions.B2);
+  const richRepeated=await inspect(await exportBytes(richOutput,next));assert.equal(richRepeated.notes.find(n=>n.ref==='C2').text,richNote.text,'Repeated export adds exactly one current tool line');assert.deepEqual(richRepeated.notes.find(n=>n.ref==='C2').runs,richNote.runs,'Repeated export retains manual rich-text runs');
+  const richWithdrawn=await inspect(await exportBytes(richOutput,{...next,highlights:undefined}));assert.equal(richWithdrawn.notes.find(n=>n.ref==='C2').text,richManual);assert.deepEqual(richWithdrawn.notes.find(n=>n.ref==='C2').runs,richNote.runs.slice(0,3),'Withdrawing the tool line retains manual rich-text runs');assert.deepEqual(richWithdrawn.notePositions,rich.notePositions);
   // Native editing changes just the fill; no tool rule may force it back to red.
   const edited=Buffer.from(await page.evaluate(async bytes=>{
    const zip=await JSZip.loadAsync(new Uint8Array(bytes)),p=new DOMParser(),s=new XMLSerializer(),ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main',all=(d,n)=>[...d.getElementsByTagNameNS('*',n)],parse=t=>p.parseFromString(t,'application/xml'),styles=parse(await zip.file('xl/styles.xml').async('string')),fills=all(styles,'fills')[0],xfs=all(styles,'cellXfs')[0];

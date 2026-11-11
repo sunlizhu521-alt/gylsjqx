@@ -55,7 +55,7 @@
     for (const [r,row] of rows.slice(0,100).entries()) {
       const tr = body.insertRow();
       for (let i=0;i<headers.length;i++){
-        const td=tr.insertCell(),text=valueText(row[i],date1904);td.hidden=hiddenColumns[i];td.textContent=flowColumn[i]?text.replace(/\r\n|[\r\n]/g,'；'):text;if(flowColumn[i])td.className='flow-code';if(headers[i]==='谈判明细')td.className='batch-detail';if(id==='reviewPreview'&&headers[i]==='核对说明')td.className='review-detail';
+        const td=tr.insertCell(),text=valueText(row[i],date1904);td.hidden=hiddenColumns[i];td.textContent=id!=='negotiatedPreview'&&flowColumn[i]?text.replace(/\r\n|[\r\n]/g,'；'):text;if(flowColumn[i])td.className='flow-code';if(headers[i]==='谈判明细')td.className='batch-detail';if(id==='reviewPreview'&&headers[i]==='核对说明')td.className='review-detail';
         const applied=id==='normalPreview'?appliedRows.has(r+2):id==='negotiatedPreview'&&appliedCells.has(XLSX.utils.encode_cell({r:r+result.negotiated.headerRow+1,c:result.negotiated.columnOrder[i]}));
         if(id==='progressPreview'&&headers[i]==='是否已付款'&&row[i]?.v==='已付款'){td.classList.add('funds-applied');td.title=result?.progressEvidence?.[r]||(String(row[headers.indexOf('当前节点')]?.v??'').replace(/\s+/g,'')==='办理人执行'?'OA当前节点：办理人执行':'OA流程状态：归档');}
         if(applied){td.classList.add('funds-applied');td.title=id==='negotiatedPreview'?(result.applicationComments?.[XLSX.utils.encode_cell({r:r+result.negotiated.headerRow+1,c:result.negotiated.columnOrder[i]})]||'已匹配本次付款申请'):'已匹配本次付款申请';}

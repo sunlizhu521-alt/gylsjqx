@@ -192,7 +192,7 @@ window.FundsExport = async function(sourceBytes, result) {
     for(const c of elements(data,'c')){
       const address=c.getAttribute('r'),point=XLSX.utils.decode_cell(address),header=point.r===headerRow,flow=singleLineColumns.has(point.c);
       if(point.c>end.c||point.r>end.r)continue;
-      if(flow&&!header&&!first(c,'f')&&/[\r\n]/.test(cellText(c))){const text=cellText(c).replace(/\r\n|[\r\n]/g,'；');for(const child of [...c.children])if(['v','is'].includes(child.localName))child.remove();const is=create(doc,'is'),t=create(doc,'t');t.textContent=text;is.append(t);c.setAttribute('t','inlineStr');c.insertBefore(is,c.firstChild);}
+      if(doc!==sheet&&flow&&!header&&!first(c,'f')&&/[\r\n]/.test(cellText(c))){const text=cellText(c).replace(/\r\n|[\r\n]/g,'；');for(const child of [...c.children])if(['v','is'].includes(child.localName))child.remove();const is=create(doc,'is'),t=create(doc,'t');t.textContent=text;is.append(t);c.setAttribute('t','inlineStr');c.insertBefore(is,c.firstChild);}
       if(header&&['',null,'n'].includes(c.getAttribute('t'))&&Number(xfs.children[styleId(c)].getAttribute('numFmtId'))===31)c.setAttribute('s',dateDisplayStyle(styleId(c)));
       if(header||flow||populatedColumns.has(point.c))c.setAttribute('s',layoutStyle(styleId(c),header,flow));
       const xf=xfs.children[styleId(c)];
@@ -323,17 +323,26 @@ window.FundsExport = async function(sourceBytes, result) {
     const authors=first(comments,'authors'),list=first(comments,'commentList');
     if(!authors||!list)throw Error('谈判付款原批注结构无法识别，未覆盖原批注');
     const textOf=node=>elements(node,'t').map(t=>t.textContent).join('');
-    // A dedicated line identifies only our generated annotation; retain manual notes and rich text.
+    // Locate complete tool lines before editing runs: rich-text boundaries are not line boundaries.
     for(const comment of elements(list,'comment')){
-      const text=first(comment,'text');if(!text||!textOf(text).split(/\r?\n/).some(isToolComment))continue;
-      for(const part of [...text.children]){
-        const original=part.localName==='t'?part.textContent:textOf(part),clean=original.split(/\r?\n/).filter(line=>!isToolComment(line)).join('\n');
-        if(clean===original)continue;
-        if(!clean.trim()){part.remove();continue;}
-        const t=create(comments,'t');t.setAttribute('xml:space','preserve');t.textContent=clean;
-        if(part.localName==='r'){for(const child of [...part.children])if(child.localName==='t')child.remove();part.append(t);}else part.replaceWith(t);
+      const text=first(comment,'text');if(!text)continue;
+      const original=textOf(text),removed=[];
+      for(const line of original.matchAll(/[^\r\n]*(?:\r\n|\r|\n|$)/g))if(isToolComment(line[0].replace(/[\r\n]+$/,''))){
+        const end=line.index+line[0].length,last=removed.at(-1);
+        if(last?.[1]===line.index)last[1]=end;else removed.push([line.index,end]);
       }
-      if(!textOf(text).trim())comment.remove();
+      if(!removed.length)continue;
+      const last=removed.at(-1);
+      if(last[1]===original.length&&last[0]>0&&!/[\r\n]$/.test(original))last[0]-=original.slice(last[0]-2,last[0])==='\r\n'?2:1;
+      let offset=0;
+      for(const t of elements(text,'t')){
+        const start=offset,end=offset+t.textContent.length;offset=end;let cursor=start,clean='';
+        for(const [from,to] of removed){if(to<=start)continue;if(from>=end)break;clean+=original.slice(cursor,Math.max(cursor,from));cursor=Math.max(cursor,Math.min(end,to));}
+        clean+=original.slice(cursor,end);if(clean===t.textContent)continue;
+        if(clean){t.textContent=clean;t.setAttribute('xml:space','preserve');}
+        else {const parent=t.parentElement;t.remove();if(parent.localName==='r'&&!elements(parent,'t').length)parent.remove();}
+      }
+      if(!textOf(text))comment.remove();
     }
     let authorId=elements(authors,'author').findIndex(a=>a.textContent===commentAuthor);
     if(authorId<0&&commentEntries.length){authorId=authors.children.length;const author=create(comments,'author');author.textContent=commentAuthor;authors.append(author);}
@@ -454,8 +463,9 @@ window.FundsExport = async function(sourceBytes, result) {
     const moved=order?.indexOf(point.c);return [XLSX.utils.encode_cell({r:point.r,c:moved>=0?moved:point.c})];
   });
   const appliedSet=new Set(appliedCells);for(const c of elements(sheetData,'c'))if(appliedSet.has(c.getAttribute('r')))applyEditableFill(c);
-  // Editing uses the native note shape too: anchor every negotiated note after final sizing.
-  if(first(sheet,'legacyDrawing')){
+  const applicationNoteCells=new Set(commentEntries.map(([address])=>{const point=XLSX.utils.decode_cell(address),moved=order?.indexOf(point.c);return XLSX.utils.encode_cell({r:point.r,c:moved>=0?moved:point.c});}));
+  // Only this export's application-date notes need repositioning; retain manual note placement.
+  if(applicationNoteCells.size&&first(sheet,'legacyDrawing')){
     const legacy=first(sheet,'legacyDrawing'),relations=await parse(zip,sheetRelationsPath);
     const relation=legacy&&elements(relations,'Relationship').find(r=>r.getAttribute('Id')===legacy.getAttributeNS(R,'id'));
     if(relation){
@@ -467,6 +477,7 @@ window.FundsExport = async function(sourceBytes, result) {
         const data=first(shape,'ClientData');if(data?.getAttribute('ObjectType')!=='Note')continue;
         const r=Number(first(data,'Row')?.textContent),c=Number(first(data,'Column')?.textContent);
         if(!Number.isInteger(r)||!Number.isInteger(c)||r<0||c<0||r>1048575||c>16383)continue;
+        if(!applicationNoteCells.has(XLSX.utils.encode_cell({r,c})))continue;
         const style=new Map((shape.getAttribute('style')||'').split(';').filter(p=>p.includes(':')).map(p=>{const at=p.indexOf(':');return [p.slice(0,at).trim(),p.slice(at+1).trim()];}));
         const dimension=(key,fallback)=>{const m=/^([\d.]+)(pt|px)$/i.exec(style.get(key)||'');return m&&Number(m[1])>0?Number(m[1])*(m[2].toLowerCase()==='pt'?4/3:1):fallback;};
         const width=dimension('width',288),height=dimension('height',128),startCol=Math.min(c+1,16383);

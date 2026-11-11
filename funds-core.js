@@ -718,8 +718,8 @@ function build(inputs,decisions={}){
  const normalRows=normalObjects.map(t=>NORMAL_HEADERS.map(h=>h==='是否谈判付款'?cell('否'):normalCell(t,canonical(h))));
  const rows=[];for(let r=negotiated.headerRow+1;r<=negotiated.range.e.r;r++)rows.push(negHeaders.map((_,c)=>clone(updateMap.get(X.utils.encode_cell({r,c}))||negotiated.sheet[X.utils.encode_cell({r,c})])));
  const updates=[...updateMap].map(([address,c])=>({address,cell:c}));
- const columnOrder=negHeaders.map((_,i)=>i),dateColumn=targetCols['提交付款申请单日期'],summaryColumn=targetCols['提交时间汇总'];
- if(dateColumn!==undefined&&summaryColumn!==undefined&&Math.abs(dateColumn-summaryColumn)!==1){columnOrder.splice(summaryColumn,1);columnOrder.splice(columnOrder.indexOf(dateColumn)+1,0,summaryColumn);}
+ // Keep every original column in place; missing tracking fields are appended only.
+ const columnOrder=negHeaders.map((_,i)=>i);
  reviewRows.push(...highlightReviews);
  // Progress is application-grained: never deduplicate it or infer paid amounts from workflow status.
  const progressFlows=new Map();
