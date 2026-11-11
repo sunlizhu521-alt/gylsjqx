@@ -30,6 +30,12 @@ window.FundsExport = async function(sourceBytes, result) {
   const sheetPath=resolve('xl/workbook.xml',selectedRel.getAttribute('Target'));
   const sheet=await parse(zip,sheetPath),sheetData=first(sheet,'sheetData');
   if(!sheetData)throw Error('谈判付款表缺少单元格数据');
+  const originalRange=result.negotiated.sourceRange||XLSX.utils.decode_range(first(sheet,'dimension')?.getAttribute('ref')||'A1');
+  const managedColumns=result.negotiated.managedColumns?new Set(result.negotiated.managedColumns):null;
+  if(managedColumns&&result.negotiated.columnOrder?.some((c,i)=>c!==i))throw Error('谈判付款原列顺序不能变更，未生成移动保留列的文件');
+  const managedColumn=c=>!managedColumns||managedColumns.has(c);
+  const managedAddress=address=>managedColumn(XLSX.utils.decode_cell(address).c);
+  const preserveRowLayout=managedColumns&&Array.from({length:originalRange.e.c+1},(_,c)=>c).some(c=>!managedColumn(c));
   const quote=name=>"'"+name.replace(/'/g,"''")+"'";
   const renameSelf=formula=>formula.split(/("(?:[^"]|"")*")/g).map((part,index)=>{
     if(index%2)return part;
@@ -84,6 +90,20 @@ window.FundsExport = async function(sourceBytes, result) {
   const appliedFormula='N("GYLSJQX_FUNDS_APPLIED_V1")=0',appliedStylePrefix='GYLSJQX_FUNDS_APPLIED_V2_';
   // Remove only our old fixed-address rules; they override manual colors and drift after sorting.
   for(const container of elements(sheet,'conditionalFormatting')){
+    // Withdraw old tool rules only from business columns, retaining custom-column rules.
+    const owned=[...container.children].filter(rule=>rule.namespaceURI===S&&rule.localName==='cfRule'&&first(rule,'formula')?.textContent.trim()===appliedFormula);
+    if(owned.length&&managedColumns){
+      const retained=[];let touchesManaged=false;
+      for(const ref of (container.getAttribute('sqref')||'').trim().split(/\s+/).filter(Boolean)){
+        const range=XLSX.utils.decode_range(ref);let start=null;
+        for(let c=range.s.c;c<=range.e.c+1;c++){
+          if(c<=range.e.c&&!managedColumn(c)){if(start===null)start=c;}
+          else {if(c<=range.e.c)touchesManaged=true;if(start!==null){retained.push(XLSX.utils.encode_range({s:{r:range.s.r,c:start},e:{r:range.e.r,c:c-1}}));start=null;}}
+        }
+      }
+      if(!touchesManaged)continue;
+      if(retained.length){const copy=container.cloneNode(false);copy.setAttribute('sqref',retained.join(' '));for(const rule of owned)copy.append(rule.cloneNode(true));container.after(copy);}
+    }
     let removed=false;
     for(const rule of [...container.children])if(rule.namespaceURI===S&&rule.localName==='cfRule'&&first(rule,'formula')?.textContent.trim()===appliedFormula){rule.remove();removed=true;}
     if(removed&&!container.children.length)container.remove();
@@ -95,6 +115,7 @@ window.FundsExport = async function(sourceBytes, result) {
   const restoredStyles=new Map(),appliedStyles=new Map();
   // Hidden native cell styles keep the previous fill with the cell, including after sorting/save.
   for(const c of elements(sheetData,'c')){
+    if(!managedAddress(c.getAttribute('r')))continue;
     const id=Number(c.getAttribute('s')||0),xf=xfs.children[id],parent=Number(xf?.getAttribute('xfId')||0);if(!ownedBases.has(parent))continue;
     if(!restoredStyles.has(id)){
       const base=baseXfs.children[parent];if(!base)throw Error('付款申请标色的原样式缺失');
@@ -176,6 +197,7 @@ window.FundsExport = async function(sourceBytes, result) {
     const next=append('cellXfs',xf);dateDisplayStyles.set(id,next);return next;
   };
   const fitSheet=(doc,end,headerRow=0,review=false,progress=false)=>{
+    const scoped=c=>doc!==sheet||managedColumn(result.negotiated.columnOrder?.[c]??c);
     const batch=doc===sheet&&result.negotiated.batchLayout,detailColumn=batch?result.negotiated.headers.findIndex(h=>String(h).trim()==='谈判明细'):-1;
     const data=first(doc,'sheetData');let cols=first(doc,'cols');
     if(!cols){cols=create(doc,'cols');doc.documentElement.insertBefore(cols,data);}
@@ -183,15 +205,15 @@ window.FundsExport = async function(sourceBytes, result) {
     const rows=new Map(elements(data,'row').map(row=>[Number(row.getAttribute('r'))-1,row])),cells=new Map(elements(data,'c').map(c=>[c.getAttribute('r'),c]));
     const ensureCell=(r,c)=>{const address=XLSX.utils.encode_cell({r,c});if(cells.has(address))return cells.get(address);let row=rows.get(r);if(!row){row=create(doc,'row',{r:r+1});data.insertBefore(row,[...data.children].find(e=>Number(e.getAttribute('r'))>r+1)||null);rows.set(r,row);}const cell=create(doc,'c',{r:address});row.insertBefore(cell,[...row.children].find(e=>XLSX.utils.decode_cell(e.getAttribute('r')).c>c)||null);cells.set(address,cell);return cell;};
     const styleId=c=>{const point=XLSX.utils.decode_cell(c.getAttribute('r')),column=oldCols.find(e=>Number(e.getAttribute('min'))<=point.c+1&&Number(e.getAttribute('max'))>=point.c+1);return Number(c.getAttribute('s')??c.parentElement.getAttribute('s')??column?.getAttribute('style')??0);};
-    const flowColumns=new Set();for(let c=0;c<=end.c;c++)if(['流程编号','付款自然周','申请付款的日期'].includes(cellText(ensureCell(headerRow,c)).normalize('NFKC').replace(/\s+/g,'')))flowColumns.add(c);
+    const flowColumns=new Set();for(let c=0;c<=end.c;c++)if(scoped(c)&&['流程编号','付款自然周','申请付款的日期'].includes(cellText(ensureCell(headerRow,c)).normalize('NFKC').replace(/\s+/g,'')))flowColumns.add(c);
     const singleLineColumns=new Set(flowColumns),dateColumns=new Set();
     if(doc!==sheet)for(let c=0;c<=end.c;c++){const title=cellText(ensureCell(headerRow,c));if(['对公付款0A流程号','对公付款OA流程号','开票时间','OA合同编号',...(progress?['对公付款OA号','申请日期','应付时间']:[])].includes(title))singleLineColumns.add(c);if(title==='开票时间'||progress&&['申请日期','应付时间'].includes(title))dateColumns.add(c);}
-    const populatedColumns=new Set([...cells.values()].filter(c=>cellText(c)!==''||first(c,'f')).map(c=>XLSX.utils.decode_cell(c.getAttribute('r')).c));
+    const populatedColumns=new Set([...cells.values()].filter(c=>cellText(c)!==''||first(c,'f')).map(c=>XLSX.utils.decode_cell(c.getAttribute('r')).c).filter(scoped));
     // Keep the grid continuous through blank cells within every populated column.
     for(const c of populatedColumns)for(let r=headerRow;r<=end.r;r++)ensureCell(r,c);
     for(const c of elements(data,'c')){
       const address=c.getAttribute('r'),point=XLSX.utils.decode_cell(address),header=point.r===headerRow,flow=singleLineColumns.has(point.c);
-      if(point.c>end.c||point.r>end.r)continue;
+      if(point.c>end.c||point.r>end.r||!scoped(point.c))continue;
       if(doc!==sheet&&flow&&!header&&!first(c,'f')&&/[\r\n]/.test(cellText(c))){const text=cellText(c).replace(/\r\n|[\r\n]/g,'；');for(const child of [...c.children])if(['v','is'].includes(child.localName))child.remove();const is=create(doc,'is'),t=create(doc,'t');t.textContent=text;is.append(t);c.setAttribute('t','inlineStr');c.insertBefore(is,c.firstChild);}
       if(header&&['',null,'n'].includes(c.getAttribute('t'))&&Number(xfs.children[styleId(c)].getAttribute('numFmtId'))===31)c.setAttribute('s',dateDisplayStyle(styleId(c)));
       if(header||flow||populatedColumns.has(point.c))c.setAttribute('s',layoutStyle(styleId(c),header,flow));
@@ -206,7 +228,7 @@ window.FundsExport = async function(sourceBytes, result) {
     if(batch||review){
       const detailStyles=new Map();
       for(const c of elements(data,'c')){
-        const point=XLSX.utils.decode_cell(c.getAttribute('r'));if((!review&&point.c!==detailColumn)||point.r<=headerRow)continue;
+        const point=XLSX.utils.decode_cell(c.getAttribute('r'));if(!scoped(point.c)||(!review&&point.c!==detailColumn)||point.r<=headerRow)continue;
         const id=styleId(c);if(!detailStyles.has(id)){const xf=xfs.children[id].cloneNode(true);let alignment=first(xf,'alignment');if(!alignment){alignment=create(styles,'alignment');xf.insertBefore(alignment,first(xf,'protection')||null);}alignment.setAttribute('horizontal','left');alignment.setAttribute('vertical',review?'top':'center');alignment.setAttribute('wrapText','1');alignment.setAttribute('shrinkToFit','0');xf.setAttribute('applyAlignment','1');detailStyles.set(id,append('cellXfs',xf));}c.setAttribute('s',detailStyles.get(id));
       }
     }
@@ -223,11 +245,13 @@ window.FundsExport = async function(sourceBytes, result) {
       if(reviewHeight(c)>409.5)throw Error('付款申请核对第'+(point.r+1)+'行内容超过单行可完整显示的高度，请精简源说明后重新生成；未导出截断内容');
     }
     // A populated merged cell also needs borders on its perimeter, without changing the merge.
-    for(const range of merges){const anchor=cells.get(XLSX.utils.encode_cell(range.s));if(cellText(anchor)===''&&!anchor?.getElementsByTagNameNS('*','f').length)continue;for(let r=range.s.r;r<=range.e.r;r++)for(let c=range.s.c;c<=range.e.c;c++){const edges=[c===range.s.c&&'left',c===range.e.c&&'right',r===range.s.r&&'top',r===range.e.r&&'bottom'].filter(Boolean);if(edges.length){const cell=ensureCell(r,c);cell.setAttribute('s',layoutStyle(styleId(cell),r===headerRow,flowColumns.has(c),edges));}}}
-    cols.replaceChildren(...widths.map((width,c)=>{
+    for(const range of merges){if(Array.from({length:range.e.c-range.s.c+1},(_,i)=>range.s.c+i).some(c=>!scoped(c)))continue;const anchor=cells.get(XLSX.utils.encode_cell(range.s));if(cellText(anchor)===''&&!anchor?.getElementsByTagNameNS('*','f').length)continue;for(let r=range.s.r;r<=range.e.r;r++)for(let c=range.s.c;c<=range.e.c;c++){const edges=[c===range.s.c&&'left',c===range.e.c&&'right',r===range.s.r&&'top',r===range.e.r&&'bottom'].filter(Boolean);if(edges.length){const cell=ensureCell(r,c);cell.setAttribute('s',layoutStyle(styleId(cell),r===headerRow,flowColumns.has(c),edges));}}}
+    cols.replaceChildren(...widths.flatMap((width,c)=>{
       const old=oldCols.find(e=>Number(e.getAttribute('min'))<=c+1&&Number(e.getAttribute('max'))>=c+1),col=old?old.cloneNode(true):create(doc,'col');
+      if(!scoped(c)){if(!old)return [];col.setAttribute('min',c+1);col.setAttribute('max',c+1);return [col];}
       for(const [key,value] of Object.entries({min:c+1,max:c+1,width:Math.ceil(width*100)/100,bestFit:1,customWidth:1}))col.setAttribute(key,value);return col;
     }),...oldCols.filter(c=>Number(c.getAttribute('max'))>end.c+1).map(c=>{const col=c.cloneNode(true);col.setAttribute('min',Math.max(Number(col.getAttribute('min')),end.c+2));return col;}));
+    if(doc!==sheet||!preserveRowLayout){
     let format=first(doc,'sheetFormatPr');if(!format){format=create(doc,'sheetFormatPr');doc.documentElement.insertBefore(format,cols);}format.setAttribute('defaultRowHeight','30');format.setAttribute('customHeight','1');
     for(const row of elements(data,'row')){
       let height=30;
@@ -239,20 +263,21 @@ window.FundsExport = async function(sourceBytes, result) {
       if((review||progress)&&Number(row.getAttribute('r'))>headerRow+1)for(const c of elements(row,'c'))height=Math.max(height,reviewHeight(c));
       row.setAttribute('ht',Math.min(409.5,height));row.setAttribute('customHeight','1');row.removeAttribute('hidden');
     }
+    }
     const range=XLSX.utils.encode_range({s:{r:headerRow,c:0},e:end});let filter=first(doc,'autoFilter');
     if(!filter){filter=create(doc,'autoFilter');let after=data.nextElementSibling;while(after&&['sheetCalcPr','sheetProtection','protectedRanges','scenarios'].includes(after.localName))after=after.nextElementSibling;doc.documentElement.insertBefore(filter,after);}
-    filter.setAttribute('ref',range);filter.replaceChildren();
+    filter.setAttribute('ref',range);if(doc!==sheet||!preserveRowLayout)filter.replaceChildren();
     if(doc===sheet)for(const name of elements(workbook,'definedName'))if(name.getAttribute('name')==='_xlnm._FilterDatabase'&&name.getAttribute('localSheetId')==='0')name.textContent="'谈判付款'!$A$"+(headerRow+1)+':$'+XLSX.utils.encode_col(end.c)+'$'+(end.r+1);
   };
   const rows=new Map(elements(sheetData,'row').map(r=>[Number(r.getAttribute('r')),r]));
   const cells=new Map(elements(sheetData,'c').map(c=>[c.getAttribute('r'),c]));
-  const originalRange=result.negotiated.sourceRange||XLSX.utils.decode_range(first(sheet,'dimension')?.getAttribute('ref')||'A1');
   const submissionColumns=new Set((result.negotiated.headers||[]).flatMap((h,c)=>['提交时间汇总','提交付款申请单日期'].includes(String(h).normalize('NFKC').replace(/\s+/g,''))?[c]:[]));
   const sourceColumns=elements(sheet,'col');
   let maxRow=originalRange.e.r,maxColumn=originalRange.e.c;
   const changed=new Set();
   // A changed shared-formula master must not leave untouched followers without their formula.
   const touchedShared=new Set(result.negotiated.updates.map(u=>cells.has(u.address)?first(cells.get(u.address),'f'):null).filter(f=>f?.getAttribute('t')==='shared').map(f=>f.getAttribute('si')));
+  for(const [address,c] of cells)if(!managedAddress(address)&&first(c,'f')?.getAttribute('t')==='shared'&&touchedShared.has(first(c,'f').getAttribute('si')))throw Error('谈判付款!'+address+' 的共享公式跨越业务列和保留列，无法安全更新；请先在原表将两列公式分开后重新上传');
   for(const [address,c] of cells){
     const f=first(c,'f');if(!f||f.getAttribute('t')!=='shared'||!touchedShared.has(f.getAttribute('si')))continue;
     const point=XLSX.utils.decode_cell(address),expanded=result.negotiated.rows?.[point.r-result.negotiated.headerRow-1]?.[point.c]?.f||f.textContent;
@@ -262,6 +287,7 @@ window.FundsExport = async function(sourceBytes, result) {
   const amountStyles=new Map();
   for(const {address,cell} of result.negotiated.updates){
     if(!/^[A-Z]+[1-9]\d*$/.test(address))throw Error('谈判付款更新地址无效');
+    if(!managedAddress(address))throw Error('谈判付款更新超出业务列：'+address+'，未改动保留列');
     const point=XLSX.utils.decode_cell(address),old=cells.get(address);let row=rows.get(point.r+1);
     if(!row){row=create(sheet,'row',{r:point.r+1});const after=[...rows].filter(([r])=>r>point.r+1).sort((a,b)=>a[0]-b[0])[0]?.[1];sheetData.insertBefore(row,after||null);rows.set(point.r+1,row);}
     const isHeader=point.r===result.negotiated.headerRow;
@@ -306,7 +332,7 @@ window.FundsExport = async function(sourceBytes, result) {
     const add=()=>{let v=multiply();while(['+','-'].includes(tokens[at])){const op=tokens[at++],n=multiply();v=op==='+'?v+n:v-n;}return v;};
     const value=add();if(at!==tokens.length)throw Error('公式');return value;
   }
-  for(const [address,c] of formulaCells)if(affected.has(address)){
+  for(const [address,c] of formulaCells)if(affected.has(address)&&managedAddress(address)){
     for(const v of elements(c,'v'))v.remove();
     try{const value=evaluateCell(address);c.removeAttribute('t');const v=create(sheet,'v');v.textContent=String(Math.round((value+Number.EPSILON)*1e8)/1e8);c.append(v);}catch(_){window.FundsExport.lastWarnings.push('谈判付款!'+address+' 保留公式，需在 Excel/WPS 打开时重新计算。');}
   }
@@ -325,6 +351,7 @@ window.FundsExport = async function(sourceBytes, result) {
     const textOf=node=>elements(node,'t').map(t=>t.textContent).join('');
     // Locate complete tool lines before editing runs: rich-text boundaries are not line boundaries.
     for(const comment of elements(list,'comment')){
+      if(!managedAddress(comment.getAttribute('ref')))continue;
       const text=first(comment,'text');if(!text)continue;
       const original=textOf(text),removed=[];
       for(const line of original.matchAll(/[^\r\n]*(?:\r\n|\r|\n|$)/g))if(isToolComment(line[0].replace(/[\r\n]+$/,''))){
@@ -348,6 +375,7 @@ window.FundsExport = async function(sourceBytes, result) {
     if(authorId<0&&commentEntries.length){authorId=authors.children.length;const author=create(comments,'author');author.textContent=commentAuthor;authors.append(author);}
     for(const [address,message] of commentEntries){
       if(!/^[A-Z]+[1-9]\d*$/.test(address)||typeof message!=='string'||!message.startsWith(commentPrefix)||/[\r\n]/.test(message))throw Error('申请日期批注数据无效');
+      if(!managedAddress(address))throw Error('谈判付款批注超出业务列：'+address+'，未改动保留列');
       let comment=elements(list,'comment').find(c=>c.getAttribute('ref')===address);
       if(!comment){comment=create(comments,'comment',{ref:address,authorId});comment.append(create(comments,'text'));list.append(comment);}
       const text=first(comment,'text');
@@ -367,8 +395,8 @@ window.FundsExport = async function(sourceBytes, result) {
     let vmlPath=vmlRelation?resolve(sheetPath,vmlRelation.getAttribute('Target')):null,vml=vmlPath?await parse(zip,vmlPath):null;
     const refs=new Set(elements(list,'comment').map(c=>c.getAttribute('ref')));
     const noteAddress=shape=>{const data=first(shape,'ClientData');return data?.getAttribute('ObjectType')==='Note'?XLSX.utils.encode_cell({r:Number(first(data,'Row')?.textContent),c:Number(first(data,'Column')?.textContent)}):null;};
-    if(vml)for(const shape of elements(vml,'shape')){const address=noteAddress(shape);if(address&&!refs.has(address))shape.remove();}
-    const existing=new Set(vml?elements(vml,'shape').map(noteAddress):[]),missing=[...refs].filter(ref=>!existing.has(ref));
+    if(vml)for(const shape of elements(vml,'shape')){const address=noteAddress(shape);if(address&&managedAddress(address)&&!refs.has(address))shape.remove();}
+    const existing=new Set(vml?elements(vml,'shape').map(noteAddress):[]),missing=[...refs].filter(ref=>managedAddress(ref)&&!existing.has(ref));
     if(missing.length){
       const scratch=XLSX.utils.book_new(),notes={};for(const ref of missing){notes[ref]={t:'s',v:'',c:[{a:commentAuthor,t:'申请日期'}]};notes[ref].c.hidden=true;}
       notes['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:maxRow,c:maxColumn}});XLSX.utils.book_append_sheet(scratch,notes,'批注');
@@ -458,6 +486,7 @@ window.FundsExport = async function(sourceBytes, result) {
   fitSheet(sheet,{r:maxRow,c:maxColumn},result.negotiated.headerRow||0);
   const appliedCells=highlightedCells.flatMap(address=>{
     if(typeof address!=='string'||!/^[A-Z]+[1-9]\d*$/.test(address))throw Error('谈判付款标红地址无效');
+    if(!managedAddress(address))throw Error('谈判付款标红超出业务列：'+address+'，未改动保留列');
     const point=XLSX.utils.decode_cell(address);if(point.r<=(result.negotiated.headerRow||0))return [];
     if(point.r>maxRow||point.c>maxColumn)throw Error('谈判付款标红地址超出明细范围');
     const moved=order?.indexOf(point.c);return [XLSX.utils.encode_cell({r:point.r,c:moved>=0?moved:point.c})];

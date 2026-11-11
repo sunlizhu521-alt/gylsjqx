@@ -530,6 +530,25 @@ test('谈判原列位置保留，缺少跟踪字段仅追加，不移动备注�
   const i=fixture();if(existing.length)X.utils.sheet_add_aoa(i.negotiated.book.Sheets['10月谈判付款主表'],[existing,existing.map(h=>h==='人工备注'?'必须保留':'')],{origin:'N1'});const before=JSON.stringify(i),r=C.build(i),h=r.negotiated.columnOrder.map(c=>r.negotiated.headers[c]);assert.deepEqual(r.negotiated.columnOrder,r.negotiated.headers.map((_,c)=>c));assert.deepEqual(h.slice(0,NH.length+existing.length),[...NH,...existing]);assert.equal(h.filter(x=>x==='提交时间汇总').length,1);assert.equal(h.filter(x=>x==='提交付款申请单日期').length,1);assert.equal(JSON.stringify(i),before);if(existing.includes('人工备注'))assert.equal(r.negotiated.rows[0][r.negotiated.headers.indexOf('人工备注')].v,'必须保留');
  }
 });
+test('受管列仅包含已识别业务字段和分批日期，手工及空表头列保持原样',()=>{
+ const input=fixture(),name=input.negotiated.book.SheetNames[0],sheet=input.negotiated.book.Sheets[name];
+ sheet.A1.v='供应商全称';sheet.G1.v='OA-申请付款金额';
+ X.utils.sheet_add_aoa(sheet,[['人工跟进','',46325,'2026年11月2日','日期待确认'],['保留\n人工记录',25,40,60,'月底再确认']],{origin:'N1'});
+ sheet.O2={t:'n',v:25,f:'E2+25',s:{fill:{fgColor:{rgb:'FFFF00'}}},c:[{a:'人工',t:'这列不改'}]};
+ const before=JSON.stringify(input),result=C.build(input),n=result.negotiated,managed=new Set(n.managedColumns);
+ assert.deepEqual(n.columnOrder,n.headers.map((_,c)=>c));
+ for(const c of [0,6,12,15,16])assert(managed.has(c),'识别别名、付款计划及分批日期 '+c);
+ for(const c of [11,13,14,17])assert(!managed.has(c),'未知或空表头列不能受管 '+c);
+ assert.deepEqual(n.rows[0][14],sheet.O2);assert.equal(n.rows[0][13].v,'保留\n人工记录');assert.equal(n.rows[0][17].v,'月底再确认');
+ for(const update of n.updates)assert(managed.has(X.utils.decode_cell(update.address).c),'新增及更新字段必须受管');
+ for(let c=18;c<n.headers.length;c++)assert(managed.has(c),'缺失字段在末尾追加且受管');
+ assert.equal(JSON.stringify(input),before,'不修改来源单元格');
+ const saved=JSON.parse(before),savedSheet=saved.negotiated.book.Sheets[name];
+ for(const {address,cell}of n.updates)savedSheet[address]=cell;
+ savedSheet['!ref']=X.utils.encode_range({s:{r:0,c:0},e:{r:1,c:n.headers.length-1}});
+ const repeated=C.build(saved).negotiated;
+ assert.deepEqual(repeated.managedColumns,n.managedColumns);assert.deepEqual(repeated.headers,n.headers);assert.deepEqual(repeated.rows[0][14],sheet.O2);
+});
 test('仅有付款OA号的申请也保留，空金额仍确认已提交并核对金额',()=>{
  const i=installmentFixture([{'供应商全称':'','本次申请付款金额':''}]),r=C.build(i);assert.equal(negotiatedValue(r,'是否提交付款申请单'),'');assert.equal(negotiatedValue(r,'提交时间汇总'),'2026-10-10-金额为空');assert.equal(applicationAndOAReviews(r).length,1);assert.match(legacyReviews(r)[0][5].v,/申请金额为空或异常/);
 });

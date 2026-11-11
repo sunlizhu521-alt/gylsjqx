@@ -720,6 +720,7 @@ function build(inputs,decisions={}){
  const updates=[...updateMap].map(([address,c])=>({address,cell:c}));
  // Keep every original column in place; missing tracking fields are appended only.
  const columnOrder=negHeaders.map((_,i)=>i);
+ const managedColumns=[...new Set([...Object.values(targetCols),...scheduleColumns])].sort((a,b)=>a-b);
  reviewRows.push(...highlightReviews);
  // Progress is application-grained: never deduplicate it or infer paid amounts from workflow status.
  const progressFlows=new Map();
@@ -830,7 +831,7 @@ function build(inputs,decisions={}){
   if(notes.length&&!isReapplication(application)){const source=application.source;reviewRows.push([cell(type||'待核对'),values['供应商名称'],values['付款主体'],values['申请付款金额'],cell('已提交'),cell('付款进度核对：'+(sourceText(reference)||'OA号空白')+'。\n'+[...new Set(notes.map(note=>note.replace(/[。；\s]+$/u,'')))].join('。\n')+'。'),cell(source.file),cell(source.sheet),cell(source.row),values['跟单员']]);}
   return PROGRESS_HEADERS.map(h=>values[h]);
  });
- return {progressHeaders:[...PROGRESS_HEADERS],progressRows,progressEvidence,normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,highlights:{negotiatedCells:[...highlightedNegotiated],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,headers:negHeaders,rows,updates,columnOrder},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
+ return {progressHeaders:[...PROGRESS_HEADERS],progressRows,progressEvidence,normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,highlights:{negotiatedCells:[...highlightedNegotiated],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,headers:negHeaders,rows,updates,columnOrder,managedColumns},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
 }
 return {PEOPLE,PROGRESS_HEADERS,OUTPUT_SHEETS,outputSheetPlan,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText};
 });
