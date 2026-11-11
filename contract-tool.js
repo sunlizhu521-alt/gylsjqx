@@ -677,7 +677,7 @@
     if (!state.previewDocument && !state.previewPdfiumDocument) return;
     state.previewPage = Math.max(0, Math.min(state.previewPage, state.previewPageCount - 1));
     const pageNumber = state.previewPage + 1, renderToken = ++state.previewRenderToken;
-    $('generatedPreview').innerHTML = `<div class="pdf-preview-shell"><canvas class="pdf-preview-canvas" data-page="${pageNumber}" aria-label="生成合同PDF第${pageNumber}页"></canvas><span class="pdf-render-status">正在渲染第 ${pageNumber} 页…</span></div>`;
+    $('generatedPreview').innerHTML = `<div class="pdf-preview-shell"><canvas class="pdf-preview-canvas" data-page="${pageNumber}" aria-label="生成合同PDF第${pageNumber}页"></canvas><div class="pdf-preview-watermark" aria-label="仅供确认，非盖章版">${'<span aria-hidden="true">仅供确认，非盖章版</span>'.repeat(3)}</div><span class="pdf-render-status">正在渲染第 ${pageNumber} 页…</span></div>`;
     $('resultPagination').hidden = state.previewPageCount <= 1;
     $('resultPageLabel').textContent = `第 ${pageNumber} / ${state.previewPageCount} 页`;
     $('resultPrevious').disabled = state.previewPage === 0;
@@ -720,6 +720,11 @@
 
   function mappedEntries() { return Object.entries(state.mappings).filter(([, mapping]) => mapping?.field); }
   function findTarget(id) { return state.templateModel?.targets.find(target => target.id === id); }
+  function emptyUnmappedDetailTargets() {
+    return Object.values(state.templateBindings).filter(binding => binding.mode === 'detail')
+      .map(binding => findTarget(binding.targetId))
+      .filter(target => target?.rowKey === state.detailRow && !state.mappings[target.id]?.field && !C.text(target.value).trim());
+  }
 
   function updateAutomaticOutputName() {
     if (state.customOutputName) return;
@@ -1089,6 +1094,7 @@
       if (!row) throw new Error('找不到Word明细模板行');
       const reservedRows = tableRows.slice(Number(match[2]), Number(match[2]) + detailTemplateRowCount());
       const rowMappings = mappedEntries().filter(([id, mapping]) => mapping.mode === 'detail' && findTarget(id)?.rowKey === state.detailRow);
+      const emptyTargets = emptyUnmappedDetailTargets();
       widenWordSkuColumn(table, row, rowMappings, detailRecords());
       for (const [recordIndex, record] of detailRecords().entries()) {
         const clone = row.cloneNode(true), cells = direct(clone, 'tc');
@@ -1098,6 +1104,10 @@
             putWordText(cells[cellIndex], detailValue(mapping, record, recordIndex));
             if (SINGLE_LINE_DETAIL_FIELDS.has(mapping.businessKey)) fitWordDetailCell(cells[cellIndex], table, mapping.businessKey);
           }
+        }
+        for (const target of emptyTargets) {
+          const cell = cells[target.cellIndex], merge = cell && all(cell, 'vMerge')[0];
+          if (cell && (!merge || merge.getAttributeNS(W, 'val') === 'restart')) putWordText(cell, '/');
         }
         row.parentNode.insertBefore(clone, row);
       }
@@ -1982,7 +1992,12 @@
       await shiftRelatedExcelParts(zip, relationships, rowNumber, delta);
       shiftWorkbookNames(context.workbookDoc, state.templateSheet, rowNumber, delta);
     }
-    const singleLineCells = [];
+    const singleLineCells = [], templateSheet = state.templateBook.Sheets[state.templateSheet];
+    const emptyTargets = emptyUnmappedDetailTargets().filter(target => {
+      if (templateSheet[target.address]?.f) return false;
+      return !(templateSheet['!merges'] || []).some(range => target.rowIndex >= range.s.r && target.rowIndex <= range.e.r
+        && target.cellIndex >= range.s.c && target.cellIndex <= range.e.c && (target.rowIndex !== range.s.r || target.cellIndex !== range.s.c));
+    });
     records.forEach((record, offset) => {
       const clone = prototype.cloneNode(true), targetRow = rowNumber + offset; clone.setAttribute('r', String(targetRow));
       for (const cell of direct(clone, 'c', S)) {
@@ -1997,6 +2012,9 @@
         const cell = ensureRowCell(clone, address);
         writeCellValue(cell, detailValue(mapping, record, offset), { forceNumber: NUMERIC_BUSINESS_FIELDS.has(mapping.businessKey) });
         if (SINGLE_LINE_DETAIL_FIELDS.has(mapping.businessKey)) singleLineCells.push(cell);
+      }
+      for (const target of emptyTargets) {
+        writeCellValue(ensureRowCell(clone, XLSX.utils.encode_cell({ r: targetRow - 1, c: target.cellIndex })), '/');
       }
       data.insertBefore(clone, prototype);
     });
@@ -2188,7 +2206,10 @@
     const match = C.text(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
     return match ? `${match[1]}年${Number(match[2])}月${Number(match[3])}日` : C.text(value);
   }
-  function detailValue(mapping, record, index) { if (mapping.field === '@line-amount') return calculatedAmount(record); return mapping.field === '@sequence' ? String(index + 1) : C.text(record[mapping.field]); }
+  function detailValue(mapping, record, index) {
+    const value = mapping.field === '@line-amount' ? calculatedAmount(record) : mapping.field === '@sequence' ? String(index + 1) : C.text(record[mapping.field]);
+    return C.text(value).trim() ? value : '/';
+  }
   function templateValue(mapping, value) {
     if (mapping.inlinePrefix || mapping.inlineSuffix) {
       let output = C.text(value);

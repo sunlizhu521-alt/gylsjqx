@@ -28,6 +28,15 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
     const page = await context.newPage();
+    const assertPreviewWatermark = async () => {
+      const watermark = page.locator('.pdf-preview-shell .pdf-preview-watermark');
+      assert.equal(await watermark.isVisible(), true);
+      assert.deepEqual(await watermark.locator('span').allTextContents(), Array(3).fill('仅供确认，非盖章版'));
+      assert.deepEqual(await watermark.evaluate(element => {
+        const style = getComputedStyle(element), rect = element.getBoundingClientRect(), pageRect = element.parentElement.getBoundingClientRect();
+        return [style.position, style.pointerEvents, Math.abs(rect.width - pageRect.width) <= 1 && Math.abs(rect.height - pageRect.height) <= 1];
+      }), ['absolute', 'none', true]);
+    };
     await page.clock.setFixedTime(new Date('2026-10-22T16:30:00Z'));
     const errors = [], consoleErrors = [], httpErrors = [], mutatingRequests = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -48,8 +57,8 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const sheet = XLSX.utils.aoa_to_sheet([
         ['合同编号：', '', '', '', '', '', '', '', '', 'HT-TEST-001', '', ''],
         ['序号', '物料编码', '物料名称', '', '规格型号', 'SKU', '单位', '数量', '含税单价\n(元)', '含税总金额\n(元)', '备注', '供应商'],
-        ['1', 'MAT-001', '产品A', '', 'A型', 'SKU-A', '件', '2', '10.5', '9999', '首批', '甲公司'],
-        ['2', 'MAT-002', '产品B', '', 'B型', 'SKU-B', '件', '3', '20', '9999', '', '甲公司'],
+        ['1', 'MAT-001', '产品A', '', 'A型', 'SKU-A', '件', '2', '10.5', '9999', 0, '甲公司'],
+        ['2', 'MAT-002', '产品B', '', 'B型', 'SKU-B', '件', '3', '20', '9999', '  \t ', '甲公司'],
         ['交货地点', '虚构交货地点', '', '', '', '', '', '', '交货时间', '2026-10-01', '', ''],
         ['含税合计', '人民币小写', '0.00', '', '人民币大写', '零元整'],
       ], { origin: 'B3' });
@@ -77,7 +86,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       const headers = ['序号', '物料编码', '物料名称', '规格型号', 'SKU', '单位', '数量', '含税运单价（元）', '含税运总金额（元）', '备注'];
       const widths = [400, 1100, 1800, 1550, 500, 400, 500, 950, 1000, 500];
       const headerRow = headers.map(value => `<w:tc><w:p><w:pPr><w:spacing w:line="60" w:lineRule="exact"/></w:pPr><w:r><w:t>${value}</w:t></w:r></w:p></w:tc>`).join('');
-      const detailRow = headers.map((_, index) => `<w:tc><w:tcPr><w:tcW w:w="${widths[index]}" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:ind w:firstLine="200"/></w:pPr><w:r><w:rPr><w:sz w:val="28"/></w:rPr><w:t>待填写</w:t></w:r></w:p></w:tc>`).join('');
+      const detailRow = headers.map((_, index) => `<w:tc><w:tcPr><w:tcW w:w="${widths[index]}" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:ind w:firstLine="200"/></w:pPr><w:r><w:rPr><w:sz w:val="28"/></w:rPr><w:t>${index === 5 ? '' : '待填写'}</w:t></w:r></w:p></w:tc>`).join('');
       const reservedDetailRows = [2, 3].map(sequence => `<w:tr>${headers.map((_, index) => `<w:tc><w:p><w:r><w:t>${index === 0 ? sequence : ''}</w:t></w:r></w:p></w:tc>`).join('')}</w:tr>`).join('');
       const deliveryRow = headers.map((_, index) => `<w:tc><w:p><w:r><w:t>${index === 7 ? '交货时间：' : (index === 8 ? '待填写' : '')}</w:t></w:r></w:p></w:tc>`).join('');
       const labeledRow = (label, placeholder = '待填写') => `<w:tr><w:tc><w:p><w:r><w:t>${label}</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>${placeholder}</w:t></w:r></w:p></w:tc></w:tr>`;
@@ -150,6 +159,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.equal(await page.locator('#outputName').inputValue(), '亿恒&迈德斯特-2026-09-29-81.00-HT-TEST-001');
     await page.locator('[data-manual-key="signDate"]').fill('2026-09-24');
     await page.locator('#outputName').fill('虚构采购合同');
+    await page.locator('[data-field-key="unit"]').selectOption('');
 
     await page.evaluate(bytes => {
       let calls = 0;
@@ -162,6 +172,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     }, Array.from(previewPdfBytes));
     await page.locator('#generateContract').click();
     await page.waitForFunction(() => !document.querySelector('#resultStage').hidden && document.querySelector('.pdf-preview-canvas')?.dataset.rendered === 'true');
+    await assertPreviewWatermark();
     const previewLayout = await page.evaluate(() => {
       const host = document.querySelector('#generatedPreview'), shell = host.querySelector('.pdf-preview-shell'), canvas = host.querySelector('.pdf-preview-canvas');
       const hostRect = host.getBoundingClientRect(), shellRect = shell.getBoundingClientRect(), canvasRect = canvas.getBoundingClientRect();
@@ -193,6 +204,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     await page.locator('#resultNext').click();
     await page.waitForFunction(() => document.querySelector('.pdf-preview-canvas')?.dataset.page === '2' && document.querySelector('.pdf-preview-canvas')?.dataset.rendered === 'true');
     assert.equal(await page.locator('#resultPageLabel').innerText(), '第 2 / 2 页');
+    await assertPreviewWatermark();
     await page.locator('#resultStage').screenshot({ path: path.join(out, 'contract-pdf-page2.png') });
     await page.locator('#confirmExport').check();
     assert.equal(await page.locator('#downloadContract').isDisabled(), false);
@@ -204,6 +216,12 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     for (const value of ['交货时间：', '>2026-10-01<', '合同编号：', '交货地点：', '签署时间：', '>2026年9月24日<', '人民币小写：81.00元', '人民币大写：捌拾壹圆整', 'MAT-001', 'MAT-002', '产品A', '产品B', 'SKU-A', 'SKU-B', '>1<', '>2<', '>3<']) assert.ok(generatedXml.includes(value), value);
     assert.doesNotMatch(generatedXml, /9999|甲公司|虚构交货地点/);
     assert.doesNotMatch(generatedXml, /HT-TEST-001|OLD-WORD-123|OLD-CELL-456/);
+    assert.doesNotMatch(generatedXml, /仅供确认，非盖章版/);
+    const generatedDetailValues = await page.evaluate(xml => {
+      const doc = new DOMParser().parseFromString(xml, 'application/xml'), ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+      return [...doc.getElementsByTagNameNS(ns, 'tr')].slice(1, 3).map(row => [...row.children].filter(cell => cell.localName === 'tc').map(cell => [...cell.getElementsByTagNameNS(ns, 't')].map(node => node.textContent).join('')));
+    }, generatedXml);
+    assert.deepEqual(generatedDetailValues.map(row => [row[3], row[5], row[9]]), [['A型', '/', '0'], ['B型', '/', '/']], '明细空白补斜杠，零值和已有内容保留');
     const singleLine = await page.evaluate(xml => {
       const doc = new DOMParser().parseFromString(xml, 'application/xml'), ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
       return [...doc.getElementsByTagNameNS(ns, 'tc')].filter(cell => cell.getElementsByTagNameNS(ns, 'noWrap').length).map(cell => ({
@@ -283,7 +301,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     await page.reload({ waitUntil: 'networkidle' });
     await page.locator('#orderFile').setInputFiles({ name: '虚构订单.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from(orderBytes) });
     const templateXlsx = await page.evaluate(async terms => {
-      const matrix = [['采购合同', '', '', ''], ['序号', '物料名称', '数量', '行金额', '物料编码', 'SKU', '含税单价', '含税总金额'], ['待填写', '待填写', '待填写', '', '待填写', '待填写', '待填写', '待填写'], [2, '', '', ''], [3, '', '', ''], ['合计', '', '', ''], ['含税合计', '人民币小写：            元', '', '', '', '人民币大写：              圆整', '', '', '', '']];
+      const matrix = [['采购合同', '', '', ''], ['序号', '物料名称', '数量', '行金额', '物料编码', 'SKU', '含税单价', '含税总金额', '备注', '单位'], ['待填写', '待填写', '待填写', '', '待填写', '待填写', '待填写', '待填写', '待填写', ''], [2, '', '', ''], [3, '', '', ''], ['合计', '', '', ''], ['含税合计', '人民币小写：            元', '', '', '', '人民币大写：              圆整', '', '', '', '']];
       for (let row = 8; row <= 33; row += 1) matrix.push([row === 8 ? '通用条款' : row === 20 ? '附件一：供应方廉洁诚信承诺书' : row === 21 ? '供应方廉洁诚信承诺书' : `附注${row}`, '', '', '']);
       const incompleteTerms = terms.slice(1).join('\n').replace('复印件与本合同原件具有同等法律效力。', '复印件与本合同原件');
       matrix.push(['合同条款', incompleteTerms, '', '', '', '', '', '', '', '']);
@@ -332,6 +350,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     await page.evaluate(() => scrollTo(0, 0));
     await page.screenshot({ path: path.join(out, 'contract-complex-upload.png'), fullPage: false });
     await page.locator('#outputName').fill('虚构Excel合同'); await page.locator('#confirmGenerate').check();
+    await page.locator('[data-field-key="unit"]').selectOption('');
     await page.evaluate(bytes => {
       window.__CONTRACT_FORCE_LEGACY_PDF_PREVIEW__ = true;
       window.__CONTRACT_PDF_CONVERTER__ = async () => new File([new Uint8Array(bytes)], '虚构Excel合同.pdf', { type: 'application/pdf' });
@@ -342,6 +361,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.equal(await page.locator('.compat-pdf-preview').count(), 0);
     assert.equal(await page.locator('#resultPagination').getAttribute('data-total-pages'), '2');
     assert.match(await page.locator('#contractStatus').innerText(), /兼容渲染，整页显示/);
+    await assertPreviewWatermark();
     const legacyLayout = await page.evaluate(() => {
       const host = document.querySelector('#generatedPreview'), shell = host.querySelector('.pdf-preview-shell'), canvas = host.querySelector('.pdf-preview-canvas');
       const hostRect = host.getBoundingClientRect(), shellRect = shell.getBoundingClientRect(), canvasRect = canvas.getBoundingClientRect();
@@ -362,6 +382,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     await page.waitForFunction(() => document.querySelector('.pdf-preview-canvas')?.dataset.page === '2' && document.querySelector('.pdf-preview-canvas')?.dataset.rendered === 'true');
     assert.equal(await page.locator('#resultPageLabel').innerText(), '第 2 / 2 页');
     await page.locator('#resultStage').screenshot({ path: path.join(out, 'contract-legacy-preview.png') });
+    await assertPreviewWatermark();
     await page.evaluate(() => {
       window.__CONTRACT_FORCE_LEGACY_PDF_PREVIEW__ = false;
       window.__CONTRACT_FORCE_PDFIUM_PREVIEW__ = true;
@@ -371,6 +392,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.equal(await page.locator('.compat-pdf-preview').count(), 0);
     assert.equal(await page.locator('.pdf-preview-canvas').getAttribute('data-page'), '1');
     assert.match(await page.locator('#contractStatus').innerText(), /PDFium完整渲染，整页显示/);
+    await assertPreviewWatermark();
     const pdfiumLayout = await page.evaluate(() => {
       const host = document.querySelector('#generatedPreview'), shell = host.querySelector('.pdf-preview-shell'), canvas = host.querySelector('.pdf-preview-canvas');
       const hostRect = host.getBoundingClientRect(), shellRect = shell.getBoundingClientRect(), canvasRect = canvas.getBoundingClientRect();
@@ -395,6 +417,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     await page.waitForFunction(() => document.querySelector('.pdf-preview-canvas[data-renderer="pdfium"]')?.dataset.page === '2' && document.querySelector('.pdf-preview-canvas')?.dataset.rendered === 'true');
     assert.equal(await page.locator('#resultPageLabel').innerText(), '第 2 / 2 页');
     await page.locator('#resultStage').screenshot({ path: path.join(out, 'contract-pdfium-preview.png') });
+    await assertPreviewWatermark();
     await page.locator('#confirmExport').check();
     const xlsxDownloadPromise = page.waitForEvent('download'); await page.locator('#downloadContract').click(); const xlsxDownload = await xlsxDownloadPromise;
     assert.equal(xlsxDownload.suggestedFilename(), '虚构Excel合同.xlsx');
@@ -404,6 +427,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
       return {
         contractNumber: sheet.H1?.v, outsideCode: sheet.K1?.v,
         details: ['A3', 'B3', 'C3', 'A4', 'B4', 'C4', 'A5'].map(address => sheet[address]?.v),
+        blankDetails: ['I3', 'J3', 'I4', 'J4'].map(address => sheet[address]?.v),
         totalLower: sheet.B6?.v,
         totalUpper: sheet.F6?.v,
         hiddenTotalCells: [sheet.C6?.v, sheet.G6?.v],
@@ -413,6 +437,7 @@ const CONTRACT_TERMS_TEXT = CONTRACT_TERMS.join('\n');
     assert.equal(generatedCells.contractNumber, '合同编号：');
     assert.equal(generatedCells.outsideCode, undefined, '编号不得写到表格外');
     assert.deepEqual(generatedCells.details, [1, '产品A', 2, 2, '产品B', 3, '合计']);
+    assert.deepEqual(generatedCells.blankDetails.map(String), ['0', '/', '/', '/']);
     assert.equal(generatedCells.totalLower, '人民币小写：81.00元');
     assert.equal(generatedCells.totalUpper, '人民币大写：捌拾壹圆整');
     assert.deepEqual(generatedCells.hiddenTotalCells, ['', '']);
