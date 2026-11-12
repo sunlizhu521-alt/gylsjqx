@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const X = require('../vendor/xlsx.full.min.js');
 const Zip = require('../vendor/jszip.min.js');
+const Core = require('../negotiated-payment-summary-core.js');
 const Export = require('../negotiated-payment-summary-export.js');
 
 function fixture(count = 8) {
@@ -13,8 +14,8 @@ function fixture(count = 8) {
     const year=date.getUTCFullYear(),month=date.getUTCMonth()+1,day=date.getUTCDate();
     return {key:`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`,label:`${year}年${month}月${day}日`};
   });
-  const negotiatedCents = Array.from({length:count},(_,i) => i ? null : 12345);
-  const normalCents = Array.from({length:count},(_,i) => i ? null : 0);
+  const negotiatedCents = Array.from({length:count},(_,i) => i ? 0 : 12345);
+  const normalCents = Array.from({length:count},() => 0);
   return {canExport:true,errors:[],unresolved:[],dates,rows:[{supplier:'供应商甲',negotiatedCents,normalCents,negotiatedTotalCents:12345,normalTotalCents:0}]};
 }
 async function read(result) {
@@ -40,7 +41,9 @@ test('八个日期生成单张19列表，双层表头合并及年月日文本正
 test('合计使用动态SUM并缓存金额，保留空白、零、负数及数字类型',async () => {
   const result=fixture();
   result.rows[0].negotiatedCents[1]=-45;result.rows[0].negotiatedTotalCents=12300;
+  result.rows[0].negotiatedCents[2]=null;
   result.rows[0].normalCents[7]=90001;result.rows[0].normalTotalCents=90001;
+  result.rows.push({supplier:'保留日期的另一供应商',negotiatedCents:[null,null,1,null,null,null,null,null],normalCents:Array(8).fill(null),negotiatedTotalCents:1,normalTotalCents:0});
   const {sheet}=await read(result);
   assert.equal(sheet.B3.f,'SUM(C3:J3)');assert.equal(sheet.B3.v,123);assert.equal(sheet.B3.z,'#,##0.00');
   assert.equal(sheet.K3.f,'SUM(L3:S3)');assert.equal(sheet.K3.v,900.01);
@@ -48,19 +51,113 @@ test('合计使用动态SUM并缓存金额，保留空白、零、负数及数�
   assert.equal(sheet.E3.v,'');assert.equal(sheet.L3.v,0);assert.equal(sheet.L3.t,'n');assert.equal(sheet.S3.v,900.01);
 });
 
-test('同一月不同日期分列，两类付款共用日期且金额只计入对应日',async () => {
+test('同一月不同日期分列，两类付款分别删除整列空日期且金额只计入对应日',async () => {
   const data=fixture(2);
   data.dates=[{key:'2026-11-02',label:'2026年11月2日'},{key:'2026-11-18',label:'2026年11月18日'}];
   data.rows[0]={supplier:'同月多批供应商',negotiatedCents:[10000,20000],normalCents:[null,5000],negotiatedTotalCents:30000,normalTotalCents:5000};
   const {sheet}=await read(data);
-  assert.equal(sheet['!ref'],'A1:G3');
-  assert.deepEqual(['C2','D2','F2','G2'].map(a=>sheet[a].v),['2026年11月2日','2026年11月18日','2026年11月2日','2026年11月18日']);
-  assert.deepEqual(['C3','D3','F3','G3'].map(a=>sheet[a].v),[100,200,'',50]);
+  assert.equal(sheet['!ref'],'A1:F3');
+  assert.deepEqual(['C2','D2','F2'].map(a=>sheet[a].v),['2026年11月2日','2026年11月18日','2026年11月18日']);
+  assert.deepEqual(['C3','D3','F3'].map(a=>sheet[a].v),[100,200,50]);
   assert.equal(sheet.B3.f,'SUM(C3:D3)');assert.equal(sheet.B3.v,300);
-  assert.equal(sheet.E3.f,'SUM(F3:G3)');assert.equal(sheet.E3.v,50);
-  for(const c of [2,3,5,6]){
+  assert.equal(sheet.E3.f,'SUM(F3:F3)');assert.equal(sheet.E3.v,50);
+  for(const c of [2,3,5]){
     const needed=[...sheet[X.utils.encode_col(c)+'2'].v].reduce((n,ch)=>n+(ch.codePointAt(0)>255?2:1),4);
     assert(sheet['!cols'][c].wch>=needed,'完整具体日期和筛选按钮需完整显示');
+  }
+});
+
+test('不对称日期保留明确零、负数及整列相抵为零，其他供应商的单格空白不删',async () => {
+  const data=fixture(4);
+  data.rows=[
+    {supplier:'供应商甲',negotiatedCents:[0,null,null,null],normalCents:[null,700,null,null],negotiatedTotalCents:0,normalTotalCents:700},
+    {supplier:'供应商乙',negotiatedCents:[null,-500,100,null],normalCents:[null,-700,null,null],negotiatedTotalCents:-400,normalTotalCents:-700}
+  ];
+  const {sheet,xml,styles}=await read(data);
+  assert.equal(sheet['!ref'],'A1:G4');assert.equal(sheet['!autofilter'].ref,'A2:G4');
+  assert.deepEqual(['C2','D2','E2','G2'].map(a=>sheet[a].v),[data.dates[0].label,data.dates[1].label,data.dates[2].label,data.dates[1].label]);
+  assert.deepEqual(['C3','D3','E3','C4','D4','E4','G3','G4'].map(a=>sheet[a].v),[0,'','','',-5,1,7,-7]);
+  assert.equal(sheet.B4.f,'SUM(C4:E4)');assert.equal(sheet.B4.v,-4);
+  assert.equal(sheet.F3.f,'SUM(G3:G3)');assert.equal(sheet.F3.v,7);
+  assert.deepEqual(sheet['!merges'].map(X.utils.encode_range),['A1:A2','B1:B2','F1:F2','C1:E1']);
+  const xfs=styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*(?:\/>|>[\s\S]*?<\/xf>)/g);
+  for(const address of ['D3','E3','C4']){
+    const attrs=xml.match(new RegExp(`<c\\b(?=[^>]*\\br="${address}")[^>]*>`))[0];
+    assert.match(xfs[Number(attrs.match(/\bs="(\d+)"/)[1])],/borderId="2"/,'有效行列内部空白仍有发丝边框');
+  }
+});
+
+test('已付款标记按原日期索引映射删除空列后的两侧，仅日期金额格普通填充红色',async () => {
+  const data=fixture(5);
+  data.rows=[
+    {supplier:'汇总已付和部分已付',negotiatedCents:[null,10000,null,20000,0],normalCents:[5000,null,null,null,6000],negotiatedTotalCents:30000,normalTotalCents:11000},
+    {supplier:'尚未付清',negotiatedCents:[null,7000,null,null,null],normalCents:[null,null,null,null,8000],negotiatedTotalCents:7000,normalTotalCents:8000}
+  ];
+  data.paid={negotiated:[[false,true,false,false,true],[false,false,false,true,false]],normal:[[false,false,false,false,true],[true,false,false,false,false]]};
+  const before=JSON.stringify(data),{sheet,xml,styles}=await read(data);
+  assert.equal(sheet['!ref'],'A1:H4');
+  assert.deepEqual(['C2','D2','E2','G2','H2'].map(a=>sheet[a].v),[data.dates[1].label,data.dates[3].label,data.dates[4].label,data.dates[0].label,data.dates[4].label]);
+  const xfs=styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*(?:\/>|>[\s\S]*?<\/xf>)/g);
+  const fills=styles.match(/<fills\b[^>]*>([\s\S]*?)<\/fills>/)[1].match(/<fill\b[^>]*>[\s\S]*?<\/fill>/g);
+  const red=new Set(['C3','E3','H3']);
+  for(let row=1;row<=4;row++)for(let col=0;col<8;col++){
+    const address=X.utils.encode_col(col)+row,attrs=xml.match(new RegExp(`<c\\b(?=[^>]*\\br="${address}")[^>]*>`))[0];
+    const xf=xfs[Number(attrs.match(/\bs="(\d+)"/)[1])],fill=fills[Number(xf.match(/\bfillId="(\d+)"/)[1])];
+    assert.match(fill,new RegExp(`fgColor rgb="${row<=2?'FF315B9D':red.has(address)?'FFFF0000':'FFFFFFFF'}"`),address);
+    assert.match(xf,new RegExp(`borderId="${row<=2?1:2}"`));
+  }
+  assert.doesNotMatch(xml,/<conditionalFormatting\b/,'普通填充可在WPS/Excel手动改色');
+  assert.equal(sheet.C3.v,100);assert.equal(sheet.E3.v,0);assert.equal(sheet.H3.v,60);
+  assert.equal(sheet.C3.z,'#,##0.00');assert.equal(sheet.D3.z,'#,##0.00');
+  assert.equal(sheet.B3.f,'SUM(C3:E3)');assert.equal(sheet.B3.v,300);assert.equal(sheet.F3.f,'SUM(G3:H3)');assert.equal(sheet.F3.v,110);
+  assert.equal(sheet.D4.v,'','空白不因错误paid标记被标红或填值');
+  assert.equal(JSON.stringify(data),before);
+});
+
+test('未提供已付款矩阵或部分已付标记false时日期金额仍白底',async () => {
+  for(const paid of [undefined,{negotiated:[[false]],normal:[[false]]}]){
+    const data=fixture(1);if(paid)data.paid=paid;
+    const {sheet,xml}=await read(data);
+    for(const address of ['A3','B3','C3','D3','E3'])assert.equal(sheet[address].s.fgColor.rgb,'FFFFFF',address);
+    assert.doesNotMatch(xml,/<conditionalFormatting\b/);
+  }
+});
+
+test('单侧没有数值日期时只保留总金额，另一侧范围、组头和筛选仍正确',async () => {
+  for(const negotiatedEmpty of [true,false]){
+    const data=fixture(3);
+    data.rows[0]={supplier:'单侧付款',negotiatedCents:negotiatedEmpty?[null,null,null]:[null,-100,null],normalCents:negotiatedEmpty?[null,100,null]:[null,null,null],negotiatedTotalCents:negotiatedEmpty?0:-100,normalTotalCents:negotiatedEmpty?100:0};
+    const {sheet}=await read(data);
+    assert.equal(sheet['!ref'],'A1:D3');assert.equal(sheet['!autofilter'].ref,'A2:D3');
+    assert.equal(sheet['!merges'].length,3);
+    if(negotiatedEmpty){
+      assert.equal(sheet.C1.v,'正常付款总金额');assert.equal(sheet.D1.v,'正常付款');assert.equal(sheet.D2.v,data.dates[1].label);
+      assert.equal(sheet.B3.f,'SUM(0)');assert.equal(sheet.B3.v,0);assert.equal(sheet.C3.f,'SUM(D3:D3)');assert.equal(sheet.C3.v,1);
+      assert(!Object.values(sheet).some(c=>c?.v==='谈判付款节奏'));
+    }else{
+      assert.equal(sheet.C1.v,'谈判付款节奏');assert.equal(sheet.D1.v,'正常付款总金额');assert.equal(sheet.C2.v,data.dates[1].label);
+      assert.equal(sheet.B3.f,'SUM(C3:C3)');assert.equal(sheet.B3.v,-1);assert.equal(sheet.D3.f,'SUM(0)');assert.equal(sheet.D3.v,0);
+      assert(!Object.values(sheet).some(c=>c?.v==='正常付款'));
+    }
+  }
+});
+
+test('两侧日期金额全部为空或没有日期时仍输出供应商与两个零总金额',async () => {
+  for(const count of [0,3]){
+    const data=fixture(count);
+    data.rows[0]={supplier:'没有分批金额',negotiatedCents:Array(count).fill(null),normalCents:Array(count).fill(null),negotiatedTotalCents:0,normalTotalCents:0};
+    const {sheet}=await read(data);
+    assert.equal(sheet['!ref'],'A1:C3');assert.equal(sheet['!autofilter'].ref,'A2:C3');
+    assert.deepEqual(['A1','B1','C1'].map(a=>sheet[a].v),['供应商','谈判总金额','正常付款总金额']);
+    assert.deepEqual(sheet['!merges'].map(X.utils.encode_range),['A1:A2','B1:B2','C1:C2']);
+    for(const a of ['B3','C3']){assert.equal(sheet[a].f,'SUM(0)');assert.equal(sheet[a].v,0);assert.equal(sheet[a].t,'n');}
+  }
+});
+
+test('先校验全部原金额，不能通过删除空列绕过NaN、Infinity、缺值、字符串和小数分',async () => {
+  for(const invalid of [NaN,Infinity,undefined,'123',false,1.5])for(const field of ['negotiatedCents','normalCents']){
+    const data=fixture(2);data.rows[0][field][1]=invalid;
+    await assert.rejects(Export(data),/金额不是有效的整数分/);
   }
 });
 
@@ -108,7 +205,7 @@ test('表头深灰细边框，正文有效行列交叉区域含中间空白和�
   assert.match(xml,/<autoFilter ref="A2:S3"\/>/);
   assert(sheet['!cols'][10].wch>=18,'normal total heading must fit');
   assert(sheet['!cols'][2].wch>=16,'full year/month/day must fit');
-  assert.equal(sheet.D3.v,'','中间无金额日期仍为空，边框不能改变数值');
+  assert.equal(sheet.D3.v,0,'中间零金额日期仍为零，边框不能改变数值');
   assert.equal(sheet.L3.v,0,'零金额仍为数值零');
 });
 
@@ -175,7 +272,7 @@ test('接近整数分上限而转元后损失一分时拒绝导出',async () => 
 });
 
 test('浏览器UMD接口使用现有本地XLSX与JSZip',async () => {
-  const context={XLSX:X,JSZip:Zip};
+  const context={XLSX:X,JSZip:Zip,NegotiatedPaymentSummaryCore:Core};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../negotiated-payment-summary-export.js'),'utf8'),context);
   assert.equal(typeof context.NegotiatedPaymentSummaryExport,'function');
   const bytes=await context.NegotiatedPaymentSummaryExport(fixture());

@@ -6,6 +6,17 @@ const X = require('../vendor/xlsx.full.min.js');
 const Zip = require('../vendor/jszip.min.js');
 const Core = require('../negotiated-payment-summary-core.js');
 
+test('两个付款区块分别移除全空日期列，零值、负数和正负抵消均保留',()=>{
+  const result={dates:[0,1,2,3,4],rows:[
+    {negotiatedCents:[100,null,0,-50,null],normalCents:[null,0,null,null,null]},
+    {negotiatedCents:[-100,null,null,null,null],normalCents:[null,null,null,60,null]}
+  ]},before=JSON.stringify(result);
+  assert.deepEqual(Core.dateColumns(result),{negotiated:[0,2,3],normal:[1,3]});
+  assert.equal(JSON.stringify(result),before);
+  result.rows=[];
+  assert.deepEqual(Core.dateColumns(result),{negotiated:[],normal:[]});
+});
+
 const headers = ['供应商','是否谈判分批','谈判明细','2026年11月支付','2027年1月支付','付款主体','OA-申请付款金额'];
 const detail = (first,second) => '11月25日－'+first+(second === undefined ? '' : '\n1月10日－'+second);
 function source(rows=[], labels=headers) {
@@ -207,6 +218,104 @@ test('浏览器与CommonJS导出相同构建接口',()=>{
   const r=context.NegotiatedPaymentSummaryCore.build(source([['甲','否',detail(12.34)]]));assert.equal(r.canExport,true);assert.equal(r.totals.normalCents,1234);assert.equal(r.dates[0].key,'2026-11-25');
 });
 
+function paymentSource(rows, dates=['2026年11月2日','2026年11月16日']) {
+  return source(rows,['供应商','是否谈判分批','谈判明细',...dates,'2026年11月支付','2026年12月支付']);
+}
+function comment(input,address,value) {
+  input.book.Sheets.谈判付款[address].c=[{a:'人工核实',t:value}];
+}
+const paidAt=(r,type,supplier,date)=>r.paid[type][r.rows.findIndex(row=>row.supplier===supplier)][r.dates.findIndex(d=>d.key===date)];
+
+test('金额单元格明确支付批注生成矩阵，精确日期优先，同月唯一排期可定位，金额和源内容不变',()=>{
+  const input=paymentSource([
+    ['甲','是','11月2日－700000\n11月25日－30',700000,30],
+    ['乙','否','11月25日－100',null,100]
+  ]),baseline=Core.build(input);
+  comment(input,'D2','11月3日-OA已评论\n11月5日核实-已支付\n申请日期（付款节奏跟进）：2026年11月2日\n11月5日核实-已支付');
+  comment(input,'E2','11/5 出纳核实-本批已支付30.00元');comment(input,'E3','已付款');
+  const before=JSON.stringify(input),r=Core.build(input);
+  assert.equal(r.canExport,true);assert.deepEqual(r.paid,{negotiated:[[true,true],[false,false]],normal:[[false,false],[false,true]]});
+  assert.deepEqual(r.rows,baseline.rows);assert.deepEqual(r.totals,baseline.totals);assert.equal(r.warnings.length,0);assert.equal(JSON.stringify(input),before);
+});
+
+test('只有明确完成的批注肯定支付，申请日期、原填色、已付金额、归档及结清不作证据',()=>{
+  for(const note of ['已支付','已付款','2026年11月5日-确认：已付清','11/5 出纳核实-本批已支付100.00元','已支付：人民币100元']) {
+    const input=paymentSource([['甲','是','11月2日－100',100]]);comment(input,'D2',note);
+    const r=Core.build(input);assert.equal(paidAt(r,'negotiated','甲','2026-11-02'),true,note);assert.equal(r.warnings.length,0);
+  }
+  const input=paymentSource([['甲','是','11月2日－100',100]]),sheet=input.book.Sheets.谈判付款;
+  sheet.D2.s={fill:{fgColor:{rgb:'FFFF0000'}}};sheet.H1={t:'s',v:'已付金额'};sheet.H2={t:'n',v:100};sheet.I1={t:'s',v:'是否结清'};sheet.I2={t:'s',v:'是'};sheet.J1={t:'s',v:'流程状态'};sheet.J2={t:'s',v:'归档'};
+  for(const note of ['申请日期（付款节奏跟进）：2026年11月2日','11月3日-OA已评论','']) {
+    comment(input,'D2',note);const r=Core.build(input);assert.equal(paidAt(r,'negotiated','甲','2026-11-02'),false,note);assert.equal(r.warnings.length,0,'普通无支付信息批注不产生噪音');
+  }
+  sheet.F2={t:'n',v:100,c:[{a:'人工',t:'已支付'}]};
+  const monthlyOnly=Core.build(input);assert.equal(paidAt(monthlyOnly,'negotiated','甲','2026-11-02'),false);assert.equal(monthlyOnly.warnings.length,0,'月支付列批注不作为付款证据');
+});
+
+test('否定、计划、疑问、部分支付、矛盾和批注明确金额不一致均不确认，非阻塞提示来源',()=>{
+  for(const note of ['未支付','未付款','未到账','计划已支付','预计已支付100元','是否已支付','已支付？','如果已支付请反馈','已申请付款','已部分支付100元','部分已支付100元','已支付99.99元','已支付0元','已支付-100元','已支付100.001元','已支付\n银行退汇','已支付\n11月6日未支付','已支付\n是否已支付','已支付100元\n已支付99元']) {
+    const input=paymentSource([['甲','是','11月2日－100',100]]);comment(input,'D2',note);
+    const r=Core.build(input);assert.equal(r.canExport,true,note);assert.equal(paidAt(r,'negotiated','甲','2026-11-02'),false,note);assert.equal(r.warnings.length,1,note);assert.match(r.warnings[0],/D2.*支付批注未用于标红.*请核对/);
+  }
+});
+
+test('同额两批先按精确日期保留归属，第一笔支付不会带红后面的同额付款',()=>{
+  const input=paymentSource([['甲','是','11月2日－1090000\n11月25日－1090000',1090000,1090000]]);
+  comment(input,'D2','11月5日核实-已支付');
+  let r=Core.build(input);assert.deepEqual(r.paid.negotiated,[[true,false]]);assert.equal(r.warnings.length,0);
+  delete input.book.Sheets.谈判付款.D2.c;comment(input,'E2','11月20日核实-已支付');
+  r=Core.build(input);assert.deepEqual(r.paid.negotiated,[[false,true]]);assert.equal(r.warnings.length,0,'无批注精确日期批次必须保留自己的归属');
+});
+
+test('同月同额无法唯一配对时只有全部源格明确已付且数量相等才确认，不重复使用一格',()=>{
+  const input=paymentSource([['甲','是','11月25日－100\n11月26日－100',100,100]]);
+  comment(input,'D2','已支付');let r=Core.build(input);
+  assert.deepEqual(r.paid.negotiated,[[false,false]]);assert.equal(r.warnings.length,1);assert.match(r.warnings[0],/同月同金额的多批归属不唯一/);
+  comment(input,'E2','已支付');r=Core.build(input);assert.deepEqual(r.paid.negotiated,[[true,true]]);assert.equal(r.warnings.length,0);
+  delete input.book.Sheets.谈判付款.E2;r=Core.build(input);assert.deepEqual(r.paid.negotiated,[[false,false]]);assert.equal(r.warnings.length,1,'一个付款格不能重复确认两批');
+  const duplicate=paymentSource([['甲','是','11月25日－100\n11月25日－100',100,100]],['2026年11月25日','2026年11月25日']);
+  comment(duplicate,'D2','已支付');comment(duplicate,'E2','已支付');assert.deepEqual(Core.build(duplicate).paid.negotiated,[[true]]);
+});
+
+test('同供应商同日所有组成款项均明确支付才标红，跨行或同日不同金额部分已付不标红',()=>{
+  const input=paymentSource([['甲','是','11月2日－100',100],['甲','是','11月2日－200',200]]);comment(input,'D2','已支付');
+  let r=Core.build(input);assert.equal(r.rows[0].negotiatedCents[0],30000);assert.deepEqual(r.paid.negotiated,[[false]]);
+  comment(input,'D3','已支付200元');assert.deepEqual(Core.build(input).paid.negotiated,[[true]]);
+  const sameRow=paymentSource([['甲','是','11月2日－100\n11月2日－200',100,200]],['2026年11月2日','2026年11月2日']);
+  comment(sameRow,'D2','已支付');assert.deepEqual(Core.build(sameRow).paid.negotiated,[[false]]);
+  comment(sameRow,'E2','已支付');assert.deepEqual(Core.build(sameRow).paid.negotiated,[[true]]);
+});
+
+test('不同供应商、分类、月份和年份隔离，未配对支付批注只提醒不影响金额或下载',()=>{
+  const input=paymentSource([['甲','是','11月2日－100',100],['甲','否','11月2日－100',100],['乙','是','11月2日－100',100]]);comment(input,'D2','已支付');
+  let r=Core.build(input);assert.deepEqual(r.paid.negotiated,[[true],[false]]);assert.deepEqual(r.paid.normal,[[false],[false]]);
+  for(const date of ['2026年12月2日','2027年11月2日']) {
+    const other=paymentSource([['甲','是','2026年11月25日－100',100]],[date]);comment(other,'D2','已支付');r=Core.build(other);
+    assert.equal(r.canExport,true);assert.deepEqual(r.paid.negotiated,[[false]]);assert.match(r.warnings[0],/D2.*不跨月配对/);
+  }
+  const mismatch=paymentSource([['甲','是','11月2日－200',100]]);comment(mismatch,'D2','已支付100元');r=Core.build(mismatch);
+  assert.equal(r.rows[0].negotiatedTotalCents,20000);assert.deepEqual(r.paid.negotiated,[[false]]);assert.match(r.warnings[0],/唯一谈判明细/);
+});
+
+test('跨记录合并金额及不可用公式不作为支付证据，不新增阻塞错误',()=>{
+  const input=paymentSource([['甲','是','11月2日－100',100],['乙','否','11月2日－100',null]]);comment(input,'D2','已支付');
+  input.book.Sheets.谈判付款['!merges']=[{s:{r:1,c:3},e:{r:2,c:3}}];
+  let r=Core.build(input);assert.equal(r.canExport,true);assert.deepEqual(r.paid,{negotiated:[[false],[false]],normal:[[false],[false]]});assert.match(r.warnings[0],/D2.*跨多条记录合并/);
+  const bad=paymentSource([['甲','是','11月2日－100',100]]);bad.book.Sheets.谈判付款.D2={f:'BAD()',t:'e',v:7,c:[{t:'已支付'}]};
+  r=Core.build(bad);assert.equal(r.canExport,true);assert.equal(r.errors.length,0);assert.deepEqual(r.paid.negotiated,[[false]]);assert.match(r.warnings[0],/D2.*公式结果不可用/);
+});
+
+test('真实案例的申请日期批注不标红，明确支付批注只确认对应的700000和1090000批次',()=>{
+  const input=paymentSource([
+    ['科福','是','9月30日－615833\n11月2日－700000\n11月25日－670407',615833,700000,670407],
+    ['迈锐','是','9月30日－211820\n11月2日－1090000\n11月25日－1090000',211820,1090000,1090000]
+  ],['2026年9月28日','2026年11月2日','2026年11月16日']);
+  comment(input,'D2','申请日期（付款节奏跟进）：2026年9月28日');comment(input,'D3','申请日期（付款节奏跟进）：2026年9月28日');
+  comment(input,'E2','11月5日核实-已支付');comment(input,'E3','申请日期（付款节奏跟进）：2026年11月2日\n11月5日核实-已支付');
+  const r=Core.build(input);assert.equal(r.canExport,true);assert.deepEqual(r.paid.negotiated,[[false,true,false],[false,true,false]]);assert.equal(r.warnings.length,0);
+  delete input.book.Sheets.谈判付款.E2.c;assert.equal(paidAt(Core.build(input),'negotiated','科福','2026-11-02'),false,'重新上传重新读取本次批注，不沿用旧标记');
+});
+
 const snapshot=process.env.NEGOTIATED_DATE_QA_SNAPSHOT||'/tmp/negotiated-date-inspect.json';
 test('真实样表快照119条47家：空明细和额外金额说明阻止下载，四月取2027且不读月金额',{skip:!fs.existsSync(snapshot)},()=>{
   const input=JSON.parse(fs.readFileSync(snapshot,'utf8')),r=Core.build(input);
@@ -215,7 +324,7 @@ test('真实样表快照119条47家：空明细和额外金额说明阻止下载
   assert.equal(r.canExport,false);assert.equal(r.unresolved[0].id,'G40');assert.equal(r.unresolved[0].amountCents,18000000);
   assert.equal(r.errors.length,4,r.errors.join('\n'));for(const address of ['L25','L44','L73','L78'])assert(r.errors.some(e=>e.includes('/ '+address+' ' )||e.includes('/ '+address+'：')),address);
   assert(r.dates.some(d=>d.key==='2027-04-25'));assert(!r.dates.some(d=>d.key==='2026-04-25'));assert(r.dates.some(d=>d.key==='2026-11-02'));
-  assert.equal(r.warnings.length,2);assert(r.warnings.every(w=>w.includes('沟通延后')));
+  assert.equal(r.warnings.filter(w=>w.includes('括号说明')&&w.includes('沟通延后')).length,2); // This old snapshot verifies amounts only, never current payment comments.
   const original=JSON.stringify(input);
   for(const [address,cell] of Object.entries(input.book.Sheets.谈判付款))if(/^(AI|AJ|AK|AL|AM|AN|AO|AP)\d+$/.test(address)&&!address.endsWith('1'))cell.v=99999999;
   const changed=Core.build(input);assert.deepEqual(changed.totals,r.totals,'月度金额变动不参与汇总');

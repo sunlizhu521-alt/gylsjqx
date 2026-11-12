@@ -50,17 +50,24 @@
   function preview() {
     $('preview').replaceChildren(); $('result').hidden = !result.dates.length || !result.rows.length;
     if ($('result').hidden) return;
+    const columns = C.dateColumns(result);
     const table = document.createElement('table'), head = table.createTHead(), first = head.insertRow(), second = head.insertRow(), body = table.createTBody();
     const add = (row,label,rowSpan=1,colSpan=1) => {
       const th = document.createElement('th'); th.textContent = label; th.rowSpan = rowSpan; th.colSpan = colSpan;
       th.scope = colSpan > 1 ? 'colgroup' : 'col'; row.append(th);
     };
-    add(first,'供应商',2); add(first,'谈判总金额',2); add(first,'谈判付款节奏',1,result.dates.length);
-    add(first,'正常付款总金额',2); add(first,'正常付款',1,result.dates.length);
-    for (let block=0;block<2;block++) for (const date of result.dates) add(second,date.label);
-    for (const item of result.rows) {
+    add(first,'供应商',2); add(first,'谈判总金额',2);
+    if (columns.negotiated.length) add(first,'谈判付款节奏',1,columns.negotiated.length);
+    add(first,'正常付款总金额',2);
+    if (columns.normal.length) add(first,'正常付款',1,columns.normal.length);
+    for (const type of ['negotiated','normal']) for (const index of columns[type]) add(second,result.dates[index].label);
+    for (const [rowIndex,item] of result.rows.entries()) {
       const row = body.insertRow(); row.insertCell().textContent = item.supplier;
-      for (const value of [item.negotiatedTotalCents,...item.negotiatedCents,item.normalTotalCents,...item.normalCents]) row.insertCell().textContent = money(value);
+      const dateCells = type => columns[type].map(i=>({value:item[type+'Cents'][i],paid:result.paid?.[type]?.[rowIndex]?.[i]===true}));
+      for (const display of [{value:item.negotiatedTotalCents},...dateCells('negotiated'),{value:item.normalTotalCents},...dateCells('normal')]) {
+        const cell = row.insertCell(); cell.textContent = money(display.value);
+        if (display.paid && Number.isFinite(display.value)) { cell.classList.add('is-paid'); cell.title = '已支付（源表批注确认）'; }
+      }
     }
     $('preview').append(table);
     $('counts').textContent = `（${result.recordCount} 条明细，${result.rows.length} 家供应商）`;
@@ -106,21 +113,24 @@
     $('clear').hidden = true; $('status').textContent = '请上传文件。';
   });
   function verify(bytes) {
-    const book = XLSX.read(bytes,{type:'array',cellNF:true}), sheet = book.Sheets['谈判付款整理'], n = result.dates.length;
-    if (book.SheetNames.length !== 1 || !sheet || sheet['!ref'] !== `A1:${XLSX.utils.encode_col(2+2*n)}${result.rows.length+2}`) throw Error('导出结构校验未通过');
+    const book = XLSX.read(bytes,{type:'array',cellNF:true}), sheet = book.Sheets['谈判付款整理'], columns = C.dateColumns(result);
+    const n = columns.negotiated.length, m = columns.normal.length, last = 2+n+m;
+    if (book.SheetNames.length !== 1 || !sheet || sheet['!ref'] !== `A1:${XLSX.utils.encode_col(last)}${result.rows.length+2}`) throw Error('导出结构校验未通过');
     if (sheet.A1?.v !== '供应商' || sheet.B1?.v !== '谈判总金额' || sheet[XLSX.utils.encode_cell({r:0,c:n+2})]?.v !== '正常付款总金额') throw Error('导出表头校验未通过');
-    for (let i=0;i<n;i++) for (const col of [i+2,i+n+3]) {
-      const cell = sheet[XLSX.utils.encode_cell({r:1,c:col})];
-      if (cell?.t !== 's' || cell.v !== result.dates[i].label || cell.z !== '@') throw Error('导出付款日期校验未通过');
-    }
+    for (const [type,start] of [['negotiated',2],['normal',n+3]]) columns[type].forEach((dateIndex,index) => {
+      const cell = sheet[XLSX.utils.encode_cell({r:1,c:start+index})];
+      if (cell?.t !== 's' || cell.v !== result.dates[dateIndex].label || cell.z !== '@') throw Error('导出付款日期校验未通过');
+    });
     result.rows.forEach((row,index) => {
-      const r = index+3, values = [row.negotiatedTotalCents,...row.negotiatedCents,row.normalTotalCents,...row.normalCents];
+      const r = index+3, values = [row.negotiatedTotalCents,...columns.negotiated.map(i=>row.negotiatedCents[i]),row.normalTotalCents,...columns.normal.map(i=>row.normalCents[i])];
       if (sheet['A'+r]?.v !== row.supplier) throw Error('导出供应商校验未通过');
       values.forEach((cents,column) => {
         const cell = sheet[XLSX.utils.encode_cell({r:r-1,c:column+1})];
         if (cents == null ? cell?.v != null && cell.v !== '' : cell?.t !== 'n' || Math.round(cell.v*100) !== cents) throw Error('导出金额校验未通过：第'+r+'行');
       });
-      if (sheet['B'+r]?.f !== `SUM(C${r}:${XLSX.utils.encode_col(n+1)}${r})` || sheet[XLSX.utils.encode_col(n+2)+r]?.f !== `SUM(${XLSX.utils.encode_col(n+3)}${r}:${XLSX.utils.encode_col(2*n+2)}${r})`) throw Error('导出合计公式校验未通过');
+      const negotiatedFormula = n ? `SUM(C${r}:${XLSX.utils.encode_col(n+1)}${r})` : 'SUM(0)';
+      const normalFormula = m ? `SUM(${XLSX.utils.encode_col(n+3)}${r}:${XLSX.utils.encode_col(last)}${r})` : 'SUM(0)';
+      if (sheet['B'+r]?.f !== negotiatedFormula || sheet[XLSX.utils.encode_col(n+2)+r]?.f !== normalFormula) throw Error('导出合计公式校验未通过');
     });
   }
   function nextDownload() {
