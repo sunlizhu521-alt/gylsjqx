@@ -102,6 +102,49 @@ test('谈判按台账实付同步三项，零实付有效，已申请和归档�
   assert.deepEqual(financial(r),[[paid,left,status]]);if(left!==100)assert.equal(update(r,'K2').f,'G2-E2');assert.equal(paidReviews(r).length,0);assert.equal(r.stats.pending,0);assert.equal(JSON.stringify(i),before);
  }
 });
+const RONGJIE_NAMES=['中山荣杰医疗器械工业有限公司','中山荣杰医疗器器材工业有限公司'];
+function rongjieFixture(names=RONGJIE_NAMES.concat(RONGJIE_NAMES)){
+ const i=classifiedFixture(),id='MDST-DGFK20261021013';
+ for(const [j,role,field] of [[0,'negotiated','供应商'],[1,'ledger','供应商名称'],[2,'applications','供应商全称'],[3,'oa','收款单位']]){
+  set(i,role,field,2,names[j]);set(i,role,role==='oa'?'付款金额':role==='applications'?'本次申请付款金额':'申请付款金额',2,79500);
+  set(i,role,role==='oa'?'流程编号':role==='applications'?'合同号':'对公付款0A流程号',2,id);
+  if(role!=='oa')set(i,role,'付款主体',2,'国源');
+ }
+ set(i,'ledger','已付款金额',2,79500);set(i,'ledger','剩余付款金额',2,0);set(i,'ledger','是否结清',2,'是');
+ const s=i.negotiated.book.Sheets['10月谈判付款主表'];s.K2={t:'n',f:'G2-E2',v:79500};s.M2={t:'n',f:'G2',v:79500};
+ X.utils.sheet_add_aoa(s,[['2026年11月2日'],[79500]],{origin:'N1'});
+ X.utils.sheet_add_aoa(s,[['应付款时间'],['2026-11-02']],{origin:'O1'});
+ return i;
+}
+test('已确认的荣杰两种名称跨四份来源匹配，保留原名称且不报名称或实付同步冲突',()=>{
+ for(let mask=0;mask<16;mask++){
+  const names=Array.from({length:4},(_,j)=>RONGJIE_NAMES[(mask>>j)&1]),i=rongjieFixture(names),before=JSON.stringify(i),r=C.build(i);
+  assert.deepEqual(financial(r),[[79500,0,'是']]);assert.equal(r.negotiated.rows[0][0].v,names[0]);
+  assert.equal(negotiatedValue(r,'对公付款0A流程号'),'MDST-DGFK20261021013');assert.equal(negotiatedValue(r,'是否提交付款申请单'),'已经提交全部');
+  assert.equal(r.negotiated.rows[0][10].f,'G2-E2');assert.equal(r.reviewRows.length,0,JSON.stringify(r.reviewRows));assert.equal(r.stats.pending,0);
+  assert.equal(r.progressRows[0][2].v,names[2]);assert.equal(JSON.stringify(i),before);
+ }
+});
+test('荣杰别名不掩盖台账金额、主体、编号和重复记录冲突；零值及空白仍按原规则处理',()=>{
+ for(const [field,value] of [['申请付款金额',79499],['付款主体','迈德斯特'],['对公付款0A流程号','MDST-DGFK20261021099']]){
+  const i=rongjieFixture();set(i,'ledger',field,2,value);const r=C.build(i);
+  assert.deepEqual(financial(r),[[0,79500,'否']]);assert.equal(paidReviews(r).length,1);
+ }
+ const duplicate=rongjieFixture(),ledger=duplicate.ledger.book.Sheets['对账明细-李奇'];
+ X.utils.sheet_add_aoa(ledger,[X.utils.sheet_to_json(ledger,{header:1})[1]],{origin:-1});
+ assert.equal(paidReviews(C.build(duplicate)).length,1);
+ for(const paid of [0,'']){const i=rongjieFixture();set(i,'ledger','已付款金额',2,paid);const r=C.build(i);assert.deepEqual(financial(r),[[0,79500,'否']]);assert.equal(paidReviews(r).length,0);}
+ const other=rongjieFixture();set(other,'oa','收款单位',2,'中山荣杰医疗器材工业有限公司');
+ assert(C.build(other).reviewRows.some(row=>row[5].v.startsWith('OA供应商冲突：')),'未确认的近似名称不能合并');
+});
+test('正常付款使用荣杰别名匹配OA和申请，同号别名OA重复行不算身份冲突',()=>{
+ const i=rongjieFixture();
+ i.negotiated.book=book('10月谈判付款主表',NH,[]);set(i,'ledger','是否谈判付款',2,'否');set(i,'applications','付款分类',2,'正常付款');
+ const oa=i.oa.book.Sheets.Sheet0,row=X.utils.sheet_to_json(oa,{header:1})[1].slice();row[5]=RONGJIE_NAMES[0];X.utils.sheet_add_aoa(oa,[row],{origin:-1});
+ const before=JSON.stringify(i),r=C.build(i),actual=r.normalRows.find(row=>row[4].v==='MDST-DGFK20261021013');
+ assert(actual);assert.equal(actual[2].v,RONGJIE_NAMES[1]);assert.equal(actual[16].v,'已提交');assert.equal(actual[r.normalHeaders.indexOf('流程编号')].v,actual[4].v);
+ assert.equal(r.normalRows.length,2);assert.equal(r.reviewRows.length,0);assert.equal(r.stats.pending,0);assert.equal(JSON.stringify(i),before);
+});
 test('五个人员不同列位置及已付字段别名均可同步，来源公式只取有效数值',()=>{
  for(const person of C.PEOPLE){
   const i=fixture(),original=i.ledger.book.Sheets['对账明细-李奇'],row=X.utils.sheet_to_json(original,{header:1})[1];

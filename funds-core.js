@@ -27,6 +27,8 @@ const OA_FIELDS=['流程编号','收款单位','付款金额',...FLOW_FIELDS];
 const OA_PROGRESS_FIELDS=['签字意见','业务所属公司'];
 const DATE_FORMAT='yyyy"年"m"月"d"日"';
 const norm=v=>String(v??'').normalize('NFKC').replace(/\s+/g,'').trim();
+// User-confirmed supplier alias; canonicalize matching keys without rewriting source names.
+const supplierKey=v=>{const name=norm(v);return name==='中山荣杰医疗器器材工业有限公司'?'中山荣杰医疗器械工业有限公司':name;};
 const str=v=>String(v??'').trim();
 const empty=()=>({t:'s',v:''});
 const cell=v=>({t:typeof v==='number'?'n':'s',v:v??''});
@@ -212,7 +214,7 @@ function build(inputs,decisions={}){
  for(const h of [...SUPPLEMENT_HEADERS.filter(h=>h!=='单据号【财务应付单】'),'应付款时间',...ADDED_HEADERS])if(targetCols[h]===undefined){targetCols[h]=negHeaders.length;negHeaders.push(h);updateMap.set(X.utils.encode_cell({r:negotiated.headerRow,c:targetCols[h]}),cell(h));}
  const classification=r=>{
   const supplier=r.values['供应商名称'],amount=money(r.values['申请付款金额']);
-  const name=supplier?.t==='e'||(supplier?.f&&(supplier.v==null||supplier.v===''))?'':norm(supplier?.v);
+  const name=supplier?.t==='e'||(supplier?.f&&(supplier.v==null||supplier.v===''))?'':supplierKey(supplier?.v);
   const cents=amount.cents!==undefined&&amount.cents>=0n?amount.cents:undefined;
   return {name,cents,key:name&&cents!==undefined?JSON.stringify([name,cents.toString()]):''};
  };
@@ -412,7 +414,7 @@ function build(inputs,decisions={}){
   }
  }
  const flowId=r=>norm(value(r,'流程编号')).toUpperCase();
- const payee=r=>r.values['收款单位']?.t==='e'?'':norm(value(r,'收款单位'));
+ const payee=r=>r.values['收款单位']?.t==='e'?'':supplierKey(value(r,'收款单位'));
  const flowProblems=r=>OA_FIELDS.filter(f=>{const c=r.values[f];return c?.t==='e'||(c?.f&&(c.v==null||c.v===''));});
  const flowText=(r,f)=>{const c=r.values[f];return c?.t==='e'?c.w||'Excel错误':c?.f&&(c.v==null||c.v==='')?'公式结果不可用':str(c?.v);};
  const flowLabel=r=>`${r.source.file} / ${r.source.sheet} 第 ${r.source.row} 行；流程编号 ${flowText(r,'流程编号')}；收款单位 ${flowText(r,'收款单位')}；付款金额 ${flowText(r,'付款金额')}；`+FLOW_FIELDS.map(f=>f+'='+flowText(r,f)).join('；');
@@ -521,7 +523,7 @@ function build(inputs,decisions={}){
  }
  function applyFlow(target){
   if(supplierConflicts.has(target))return;
-  const ids=oas(target.record),supplier=norm(value(target.record,'供应商名称')),amount=money(target.record.values['申请付款金额']);
+  const ids=oas(target.record),supplier=supplierKey(value(target.record,'供应商名称')),amount=money(target.record.values['申请付款金额']);
   const valid=supplier&&target.record.values['供应商名称']?.t!=='e'&&amount.cents!==undefined&&amount.cents>=0n;
   const problems=target.normal?flowProblems:r=>flowProblems(r).filter(f=>f==='流程编号'||FLOW_FIELDS.includes(f));
   let exact=target.normal?(valid?flowRecords.filter(r=>payee(r)===supplier&&money(r.values['付款金额']).cents===amount.cents):[]):

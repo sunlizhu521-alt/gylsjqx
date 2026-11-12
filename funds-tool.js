@@ -4,6 +4,7 @@
   const kinds = ['ledger', 'applications', 'negotiated', 'oa'];
   const inputs = {}, revisions = {}, decisions = {};
   let result = null, preparedBlob = null, busy = false;
+  let sourceRevision = 0, resultRevision = -1;
   const memoryVersions = {};
   const dateNow = () => new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   const timeNow = () => new Intl.DateTimeFormat('zh-CN', {timeZone:'Asia/Shanghai',dateStyle:'short',timeStyle:'medium'}).format(new Date());
@@ -24,6 +25,7 @@
     } catch (_) { return false; }
   }
   function pending() { return result ? result.issues.filter(issue => !issue.resolved).length : 0; }
+  function currentSources() { return kinds.every(kind => inputs[kind]?.file && inputs[kind].file === $(kind+'File').files[0]); }
   function controls() {
     for (const kind of kinds) $(kind+'File').disabled = busy;
     $('negotiatedSheet').disabled = busy || !inputs.negotiated;
@@ -33,9 +35,12 @@
     $('filenameHint').textContent = nextDownload().name;
   }
   function invalidate() {
+    sourceRevision++; resultRevision = -1;
     result = null; preparedBlob = null;
+    $('sourceVersion').textContent = '';
     for (const id of Object.keys(decisions)) delete decisions[id];
     for (const id of ['results','negotiatedPreviewSection','normalPreviewSection','reviewPreviewSection','progressPreviewSection']) $(id).hidden = true;
+    for (const id of ['issueList','normalPreview','negotiatedPreview','reviewPreview','progressPreview']) $(id).replaceChildren();
     controls();
   }
   function valueText(cell, date1904=false) {
@@ -96,11 +101,15 @@
     list.replaceChildren(fragment); list.scrollTop = scroll;
   }
   async function analyze(review=false) {
+    if (!currentSources()) { invalidate(); $('status').textContent = '来源版本不一致或文件尚未读取完成，请重新选择最新文件后整理。'; return; }
+    const revision = sourceRevision;
     preparedBlob = null;
     try {
       const source = {...inputs, negotiated:{...inputs.negotiated,sheetName:$('negotiatedSheet').value}};
       result = FundsCore.build(source,decisions);
+      resultRevision = revision;
       $('results').hidden = false;
+      $('sourceVersion').textContent = '本次谈判来源：'+source.negotiated.name+' / '+source.negotiated.sheetName;
       $('pendingCount').textContent = pending();
       $('stats').textContent = `谈判付款 ${result.stats.negotiatedRows} 条；正常付款 ${result.normalRows.length} 条；流程编号已填写 ${result.stats.oaMatched} 条；付款申请核对表 ${result.reviewRows.length} 条；付款进度 ${result.progressRows.length} 条；待处理 ${pending()} 项。`;
       $('classificationSummary').textContent = `资金台账 ${result.stats.ledgerRows} 条：${result.stats.negotiatedLedgerRows} 条按台账标记、付款申请分类或谈判表识别为谈判付款，${result.normalRows.length} 条正常付款，${result.stats.excludedNormalRows} 条无对公付款 OA 号未纳入正常付款，${result.stats.unclassifiedLedgerRows} 条暂未分类。`;
@@ -116,8 +125,13 @@
       if (!pending()) {
         busy = true; controls();
         const blob = await FundsExport(inputs.negotiated.bytes,result);
+        if (revision !== sourceRevision) return;
+        if (!currentSources()) { invalidate(); $('status').textContent = '来源文件已更换，请重新选择最新文件后整理。'; return; }
         if (FundsExport.lastWarnings?.length) throw Error('以下公式无法完成结果校验，请调整源公式后重新上传：'+FundsExport.lastWarnings.join('；'));
-        const saved = XLSX.read(await blob.arrayBuffer(),{type:'array',cellNF:true});
+        const bytes = await blob.arrayBuffer();
+        if (revision !== sourceRevision) return;
+        if (!currentSources()) { invalidate(); $('status').textContent = '来源文件已更换，请重新选择最新文件后整理。'; return; }
+        const saved = XLSX.read(bytes,{type:'array',cellNF:true});
         const expectedSheets=FundsCore.outputSheetPlan(inputs.negotiated.book.SheetNames,result.negotiated.sheetName).map(item=>item.name);
         if (saved.SheetNames.join('|') !== expectedSheets.join('|')) throw Error('导出工作表检查未通过，原工作表未完整保留');
         const progress=saved.Sheets['付款进度整理'],progressRange=XLSX.utils.decode_range(progress['!ref']);
@@ -132,16 +146,21 @@
         $('status').textContent = '核对及导出检查已完成，预览与下载使用同一份结果。';
       }
     } catch (e) {
+      if (revision !== sourceRevision) return;
       result = null; $('results').hidden = true;
       for (const id of ['normalPreviewSection','negotiatedPreviewSection','reviewPreviewSection','progressPreviewSection']) $(id).hidden = true;
       $('status').textContent = (review?'核对失败：':'整理失败：') + e.message;
-    }
-    busy = false; controls();
+    } finally { busy = false; controls(); }
   }
   for (const kind of kinds) $(kind+'File').addEventListener('change', async event => {
-    const file = event.target.files[0]; if (!file) return;
+    const file = event.target.files[0];
     const revision = revisions[kind] = (revisions[kind] || 0)+1;
     delete inputs[kind]; invalidate();
+    if (!file) {
+      $(kind+'Info').textContent = '尚未引用';
+      if (kind === 'negotiated') $('negotiatedSheet').replaceChildren(new Option('请上传文件',''));
+      $('status').textContent = '文件已移除，请上传最新文件后重新整理。'; return;
+    }
     const info = $(kind+'Info'); info.classList.remove('file-error'); info.textContent = '正在读取 '+file.name+'…';
     if (kind === 'negotiated') $('negotiatedSheet').replaceChildren(new Option('正在读取…',''));
     try {
@@ -158,7 +177,7 @@
         for (const name of candidates) $('negotiatedSheet').add(new Option(name,name));
         if (candidates.length === 1) $('negotiatedSheet').value = candidates[0];
       }
-      inputs[kind] = {book,name:file.name,bytes};
+      inputs[kind] = {book,name:file.name,bytes,file};
       info.textContent = file.name+'\n引用时间：'+timeNow();
       $('status').textContent = '文件已读取。上传四份文件并确认谈判工作表后，点击“整理并核对”。';
     } catch (e) {
@@ -173,6 +192,7 @@
   $('analyze').addEventListener('click',()=>analyze());
   $('onlyPending').addEventListener('change',()=>{if(result)showIssues();});
   $('download').addEventListener('click',async()=>{
+    if (!currentSources() || resultRevision !== sourceRevision) { invalidate(); $('status').textContent = '来源文件已更换，请按最新上传版本重新整理后下载。'; return; }
     if (busy || !result || !preparedBlob || pending()) return;
     busy = true; controls(); $('status').textContent = '正在生成四张工作表，请稍候…';
     let url;

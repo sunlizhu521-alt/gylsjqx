@@ -12,7 +12,7 @@ const X=require('../vendor/xlsx.full.min.js'),{fixtures}=require('./funds-fixtur
   await page.goto(base,{waitUntil:'networkidle'});await page.locator('.tool-tab[data-tool="funds"]').click();
   let frame=page.frameLocator('iframe[data-tool="funds"]');await frame.locator('#ledgerFile:not([disabled])').waitFor();
   assert.match(await page.locator('iframe[data-tool="funds"]').getAttribute('src'),/[?&]v=/,'首页传入版本号，避免旧工具页面缓存');
-  const upload=async(kind,bytes=data[kind])=>frame.locator('#'+kind+'File').setInputFiles({name:kind+'.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:bytes});
+  const upload=async(kind,bytes=data[kind],name=kind+'.xlsx')=>frame.locator('#'+kind+'File').setInputFiles({name,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:bytes});
   const ready=async()=>{await frame.locator('#analyze:not([disabled])').click();await frame.locator('#download:not([disabled])').waitFor({timeout:60000});};
   const downloaded=async()=>{const event=page.waitForEvent('download');await frame.locator('#download').click();const d=await event;return X.read(await fs.readFile(await d.path()),{cellNF:true,cellStyles:true});};
   const oaVersion=label=>{const b=X.read(data.oa);for(const row of X.utils.sheet_to_json(b.Sheets.Sheet0,{header:1}).keys())if(row)b.Sheets.Sheet0['B'+(row+1)]={t:'s',v:label};return Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));};
@@ -42,6 +42,37 @@ const X=require('../vendor/xlsx.full.min.js'),{fixtures}=require('./funds-fixtur
   await frame.locator('body').evaluate(async()=>{await window.__releaseOldRead();});
   await ready();saved=await downloaded();assert(X.utils.sheet_to_json(saved.Sheets.正常付款).every(row=>row['当前节点']==='最后上传的文件'),'较早上传的慢读取不能覆盖较晚上传');
 
+  const negotiatedVersion=(date='',note='')=>{
+   const book=X.read(data.negotiated,{cellNF:true,cellStyles:true}),sheet=book.Sheets[data.sheetName];sheet.L2={t:'s',v:date};sheet.O2={t:'s',v:note};
+   X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([['核对说明'],['旧结果：付款节奏跟进-2026-11-13-V2.xlsx']]),'付款申请核对');
+   return Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
+  };
+  const version2='付款节奏跟进-2026-11-13-V2.xlsx',version3='付款节奏跟进-2026-11-13-V3.xlsx',missingDate=negotiatedVersion(),newDate=negotiatedVersion('2026-11-12','同名V3最新内容');
+  const readNegotiated=async(bytes,name)=>{await upload('negotiated',bytes,name);await frame.locator('#negotiatedSheet').selectOption(data.sheetName);};
+  await readNegotiated(missingDate,version2);await ready();assert.match(await frame.locator('#reviewPreview').innerText(),/V2\.xlsx/);assert.match(await frame.locator('#sourceVersion').innerText(),/V2\.xlsx/);
+  await readNegotiated(missingDate,version3);
+  for(const id of ['issueList','normalPreview','negotiatedPreview','reviewPreview','progressPreview','sourceVersion'])assert.equal(await frame.locator('#'+id).textContent(),'','换文件彻底清空旧结果 '+id);
+  assert(await frame.locator('#download').isDisabled());await ready();
+  const currentReview=await frame.locator('#reviewPreview').innerText();assert.match(currentReview,/V3\.xlsx/);assert.doesNotMatch(currentReview,/V2\.xlsx/);assert.match(await frame.locator('#sourceVersion').innerText(),/V3\.xlsx/);
+  saved=await downloaded();let exportedReviews=JSON.stringify(X.utils.sheet_to_json(saved.Sheets.付款申请核对));assert.match(exportedReviews,/V3\.xlsx/);assert.doesNotMatch(exportedReviews,/V2\.xlsx/,'更新来源文件原来已有的核对sheet，不沿用旧说明');
+  await readNegotiated(newDate,version3);await ready();saved=await downloaded();
+  assert.equal(saved.Sheets.谈判付款.L2.v,'2026-11-12');assert.equal(saved.Sheets.谈判付款.O2.v,'同名V3最新内容');
+  exportedReviews=JSON.stringify(X.utils.sheet_to_json(saved.Sheets.付款申请核对));assert.doesNotMatch(exportedReviews,/V2\.xlsx|应付时间为空或无法识别/);
+  await frame.locator('#negotiatedFile').setInputFiles([]);assert.equal(await frame.locator('#negotiatedInfo').textContent(),'尚未引用');assert(await frame.locator('#download').isDisabled());assert(await frame.locator('#analyze').isDisabled());assert.equal(await frame.locator('#reviewPreview').textContent(),'');
+  await readNegotiated(newDate,version3);await ready();
+  const silentlyReplace=()=>frame.locator('#negotiatedFile').evaluate((input,{bytes,name})=>{const transfer=new DataTransfer();transfer.items.add(new File([new Uint8Array(bytes)],name,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));input.files=transfer.files;},{bytes:[...newDate],name:version3});
+  await silentlyReplace();await frame.locator('#analyze').click();assert.match(await frame.locator('#status').textContent(),/来源版本不一致/);assert(await frame.locator('#download').isDisabled());assert.equal(await frame.locator('#reviewPreview').textContent(),'');
+  await readNegotiated(newDate,version3);await ready();let unintendedDownloads=0;const countDownload=()=>unintendedDownloads++;page.on('download',countDownload);
+  await silentlyReplace();await frame.locator('#download').click();assert.match(await frame.locator('#status').textContent(),/来源文件已更换/);assert(await frame.locator('#download').isDisabled());assert.equal(unintendedDownloads,0);page.off('download',countDownload);
+  // A replacement event during an in-flight export must not restore the previous result.
+  await readNegotiated(missingDate,version2);
+  await frame.locator('body').evaluate(()=>{const original=FundsExport;window.__holdExport=true;window.FundsExport=async(...args)=>{const blob=await original(...args);if(window.__holdExport){window.__holdExport=false;return new Promise(resolve=>{window.__releaseExport=()=>resolve(blob);});}return blob;};});
+  await frame.locator('#analyze').click();await frame.locator('body').evaluate(async()=>{while(!window.__releaseExport)await new Promise(resolve=>setTimeout(resolve,10));});
+  await frame.locator('#negotiatedFile').evaluate((input,{bytes,name})=>{const transfer=new DataTransfer();transfer.items.add(new File([new Uint8Array(bytes)],name,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));},{bytes:[...newDate],name:version3});
+  await frame.locator('#negotiatedInfo').filter({hasText:version3+'\n引用时间'}).waitFor();await frame.locator('body').evaluate(()=>window.__releaseExport());
+  await frame.locator('#negotiatedSheet:not([disabled])').waitFor();assert(await frame.locator('#download').isDisabled());assert.equal(await frame.locator('#reviewPreview').textContent(),'');
+  await frame.locator('#negotiatedSheet').selectOption(data.sheetName);await ready();saved=await downloaded();assert.equal(saved.Sheets.谈判付款.O2.v,'同名V3最新内容');assert.doesNotMatch(JSON.stringify(X.utils.sheet_to_json(saved.Sheets.付款申请核对)),/V2\.xlsx/);
+
   await frame.locator('body').evaluate(()=>{
    const original=FundsCore.build;window.__buildDecisions=[];window.FundsCore={...FundsCore,build:(sources,decisions)=>{
     window.__buildDecisions.push(JSON.parse(JSON.stringify(decisions)));const result=original(sources,decisions);
@@ -65,6 +96,6 @@ const X=require('../vendor/xlsx.full.min.js'),{fixtures}=require('./funds-fixtur
   for(const kind of ['ledger','applications','oa','negotiated']){assert.equal(await frame.locator('#'+kind+'Info').textContent(),'尚未引用');assert.equal(await frame.locator('#'+kind+'File').evaluate(el=>el.files.length),0);}
   assert(await frame.locator('#analyze').isDisabled());assert(await frame.locator('#download').isDisabled());assert.equal(await frame.locator('#filenameHint').textContent(),'付款节奏跟进-2026-10-27-V10.xlsx');
   assert.deepEqual(errors,[]);
-  console.log('PASS: funds files are not persisted or restored; versioned iframe, same-name latest bytes, per-role reference time, slow old upload discarded, old decisions cleared, failed upload blocks stale results, refresh requires all four files; only download version persists.');
+  console.log('PASS: V2 to V3 review sources and same-name latest contents; original review sheet replaced, remove/silent replacement/in-flight export block stale results; uploads are not persisted, revision and manual-decision reset guards, refresh requires all four files.');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1);});
