@@ -1,7 +1,7 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FundsCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间','开票时间','开票金额','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','申请日期','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
+const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间','开票时间','开票金额','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','申请日期','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
 const ADDED_HEADERS=['是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号'];
 const SUPPLEMENT_HEADERS=['对公付款0A流程号','付款主体','单据号【财务应付单】'];
 const NORMAL_HIDDEN_HEADERS=['OA合同编号','合同总金额','是否对账'];
@@ -95,6 +95,13 @@ function applicationDateCell(matched){
  if(dates.length===1&&!other.size)return dates[0][1];
  return cell([...dates.map(([,d])=>X.SSF.format(DATE_FORMAT,d.v)),...other].join('；'));
 }
+function submissionSummary(matched){
+ return cell(matched.map((r,i)=>{
+  const d=date(r.values['申请日期'],r.date1904),valid=!d.invalid&&d.v!=='';
+  const label=valid?X.SSF.format('yyyy-mm-dd',d.v):str(r.values['申请日期']?.w??r.values['申请日期']?.v)||'日期为空';
+  return {sort:valid?label:'\uffff',i,text:label+'-'+amountText(r.values['申请付款金额'])};
+ }).sort((a,b)=>a.sort.localeCompare(b.sort)||a.i-b.i).map(r=>r.text).join('\n'));
+}
 function applicationBatch(text){
  const match=norm(text).match(/第([0-9零〇一二两三四五六七八九十百]+)批/);
  if(!match)return '';
@@ -139,7 +146,7 @@ function batchCommentPayment(source,amount){
  }
  return {paid:paid.length>0&&!conflicts.length,conflict:conflicts.length>0,text:[...new Set([...paid,...conflicts])].join('；'),applicationDates};
 }
-function table(input,sheetName,required){
+function table(input,sheetName,required,ignoredHeaders=[]){
  const sheet=input.book.Sheets[sheetName];if(!sheet)throw Error(input.name+'：缺少工作表 '+sheetName);
  // WPS can extend !ref to XFD solely because of formatting. Keep all real values/formulas.
  const points=Object.keys(sheet).filter(a=>/^[A-Z]+[1-9]\d*$/.test(a)&&(sheet[a]?.f||sheet[a]?.v!==null&&sheet[a]?.v!==undefined&&sheet[a]?.v!=='')).map(a=>X.utils.decode_cell(a));
@@ -147,7 +154,7 @@ function table(input,sheetName,required){
  if((range.e.r-range.s.r+1)*(range.e.c-range.s.c+1)>2000000)throw Error(sheetName+'：数据范围过大');
  let headerRow=-1,map,headers;
  for(let r=range.s.r;r<=Math.min(range.e.r,range.s.r+29);r++){
-  const h={},hs=[];for(let c=0;c<=range.e.c;c++){const cc=sheet[X.utils.encode_cell({r,c})],key=canonical(cc?.v);hs.push(str(cc?.w??cc?.v));if((required.includes('流程编号')?OA_FIELDS.includes(key)||OA_PROGRESS_FIELDS.includes(key):relevant.has(key)))(h[key]??=[]).push(c);}
+  const h={},hs=[];for(let c=0;c<=range.e.c;c++){const cc=sheet[X.utils.encode_cell({r,c})],key=canonical(cc?.v);hs.push(str(cc?.w??cc?.v));if(!ignoredHeaders.includes(key)&&(required.includes('流程编号')?OA_FIELDS.includes(key)||OA_PROGRESS_FIELDS.includes(key):relevant.has(key)))(h[key]??=[]).push(c);}
   if(required.every(k=>h[k])){headerRow=r;map=h;headers=hs;break;}
  }
  if(headerRow<0)throw Error(input.name+' / '+sheetName+'：找不到表头，必须包含 '+required.join('、'));
@@ -177,7 +184,7 @@ function build(inputs,decisions={}){
  for(const role of ['ledger','applications','negotiated','oa'])if(!inputs[role]?.book)throw Error('请上传全部四份文件');
  const candidates=negotiatedSheets(inputs.negotiated.book),selected=inputs.negotiated.sheetName||(candidates.length===1?candidates[0]:'');
  if(!selected||!candidates.includes(selected))throw Error(candidates.length?'请选择包含“谈判付款”的工作表':'未找到名称包含“谈判付款”的工作表');
- const negotiated=table(inputs.negotiated,selected,['供应商名称','申请付款金额']);
+ const negotiated=table(inputs.negotiated,selected,['供应商名称','申请付款金额'],['提交付款申请单日期','提交时间汇总','付款自然周']);
  const applications=oneTable(inputs.applications,['供应商名称','申请付款金额']);
  const flow=oneTable(inputs.oa,['流程编号']);
  const ledgerTables=PEOPLE.map(person=>{
@@ -329,6 +336,7 @@ function build(inputs,decisions={}){
   const {matched,ambiguous,peers}=normalApplications(target);
   if(matched.length)highlightedNormal.add(target.index+2);
   set(target,'是否提交付款申请单',cell(matched.length?'已提交':'未申请'));
+  set(target,'提交时间汇总',submissionSummary(matched));
   set(target,'申请日期',applicationDateCell(matched));
   const reviewable=ambiguous.filter(r=>!isReapplication(r));
   if(reviewable.length)reviewApplication(target,'付款申请归属核对：同一供应商、同一申请金额对应多笔正常付款，缺少有效 OA 号，无法区分。\n当前付款 OA 号：'+(str(target.values['对公付款0A流程号']?.v)||'空白')+'。\n候选付款 OA 号：'+[...new Set(peers.map(t=>str(t.values['对公付款0A流程号']?.v)||'空白'))].join('、')+'。\n申请来源：'+reviewable.map(r=>r.source.file+' / '+r.source.sheet+' 第 '+r.source.row+' 行').join('；')+'。\n需要处理：核实并补充付款申请汇总的流程编码及台账的对公付款0A流程号，再重新上传；本次未将这些申请计入提交状态或标红。',reviewable);

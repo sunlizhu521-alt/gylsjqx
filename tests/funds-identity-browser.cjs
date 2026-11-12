@@ -23,7 +23,7 @@ function assign(sheet,row,values){const headers=fields(sheet);for(const [key,val
   const event=page.waitForEvent('download');await frame.locator('#download').click();const download=await event,saved=X.read(await fs.readFile(await download.path()),{cellNF:true,cellStyles:true});
   assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理','辅助说明','谈判付款-反馈']);
   const normal=saved.Sheets.正常付款,neg=saved.Sheets.谈判付款,review=saved.Sheets.付款申请核对,normalFields=fields(normal),negFields=fields(neg);
-  assert.equal(normalFields['提交时间汇总'],undefined);assert.equal(normalFields['提交付款申请单日期'],undefined);assert.equal(normalFields['付款自然周'],undefined);
+  assert.equal(normalFields['提交时间汇总'],18);assert.equal(normalFields['提交付款申请单日期'],undefined);assert.equal(normalFields['付款自然周'],undefined);
   for(const [sheetName,sheet,headers,expectedRows,expectedHeaders] of [['正常付款',normal,normalFields,result.normalRows,result.normalHeaders],['付款申请核对',review,fields(review),result.reviewRows,result.reviewHeaders]]){
    assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1})[0],expectedHeaders);
    for(let r=0;r<expectedRows.length;r++)for(let c=0;c<expectedHeaders.length;c++)assert.equal(sheet[X.utils.encode_cell({r:r+1,c})]?.v??'',sheetName==='付款申请核对'&&c===5?C.formatReviewText(expectedRows[r][c].v):expectedRows[r][c].v);
@@ -33,7 +33,7 @@ function assign(sheet,row,values){const headers=fields(sheet);for(const [key,val
    assert.equal(cell('对公付款0A流程号'),oldId);assert.equal(cell('是否提交付款申请单'),state);
    for(const [key,value] of Object.entries(originalFields)){if(headers[key]===undefined)continue;assert.equal(cell(key),value,'原信息应保留：'+key);}
    const previewHeaders=await frame.locator('#'+preview+' th').allTextContents();
-   for(const key of ['对公付款0A流程号','流程编号','当前节点','未操作者','流程状态','申请人','是否提交付款申请单',...(preview==='negotiatedPreview'?['提交时间汇总','提交付款申请单日期']:[])])assert.equal(await frame.locator('#'+preview+' tbody tr').first().locator('td').nth(previewHeaders.indexOf(key)).textContent(),String(cell(key)));
+   for(const key of ['对公付款0A流程号','流程编号','当前节点','未操作者','流程状态','申请人','是否提交付款申请单','提交时间汇总',...(preview==='negotiatedPreview'?['提交付款申请单日期']:[])])assert.equal(await frame.locator('#'+preview+' tbody tr').first().locator('td').nth(previewHeaders.indexOf(key)).textContent(),String(cell(key)));
   }
   const reviews=X.utils.sheet_to_json(review),conflicts=reviews.filter(row=>row['核对说明'].includes('OA供应商冲突'));assert.equal(conflicts.length,2);
   for(const [supplier,other,oldId,candidate,amount,otherAmount] of [['正常供应商1','正常供应商2',oldNormal,candidateNormal,'100.00','101'],['谈判甲公司','正常供应商3',oldNegotiated,candidateNegotiated,'300.00','102']]){

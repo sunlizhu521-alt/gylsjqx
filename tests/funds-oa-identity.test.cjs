@@ -30,7 +30,7 @@ function assertConflict(input,kind,{supplier=SUPPLIER,oldOA=OLD}={}){
  assert.equal(row['对公付款0A流程号'].v,oldOA,'an OA belonging to another supplier must never be replaced automatically');
  for(const field of FLOW_FIELDS)assert.equal(row[field].v,retained[field],field+' must retain its source value');
  assert.equal(row['是否提交付款申请单'].v,kind==='谈判付款'?'未提交':'未申请');
- if(kind==='谈判付款')assert.equal(row['提交时间汇总'].v,retained['提交时间汇总']);else assert.equal(row['提交时间汇总'],undefined);
+ assert.equal(row['提交时间汇总'].v,retained['提交时间汇总']);
  if(kind==='谈判付款')assert.equal(row['提交付款申请单日期'].v,retained['提交付款申请单日期']);
  const reviews=result.reviewRows.filter(r=>r[0].v===kind&&r[1].v===supplier),message=reviews.map(r=>r[5].v).join('\n');
  assert.match(message,/供应商.*冲突|冲突.*供应商/);assert(message.includes(OLD));assert(message.includes(supplier));assert(message.includes(OTHER));assert(message.includes('合成OA.xlsx'));assert(message.includes('Sheet0'));assert(!message.includes('已更新为'));
@@ -52,7 +52,7 @@ for(const kind of ['谈判付款','正常付款']){
  });
  test(kind+'跨供应商冲突时空白原流程字段及提交信息不得被其他供应商记录补入',()=>{
   const input=fixture(kind),role=kind==='谈判付款'?'negotiated':'ledger';for(const h of [...FLOW_FIELDS,'是否提交付款申请单','提交付款申请单日期','提交时间汇总'])set(input,role,h,2,'');
-  const result=C.build(input),row=output(result,kind);assert.equal(row['对公付款0A流程号'].v,OLD);for(const h of [...FLOW_FIELDS,'是否提交付款申请单',...(kind==='谈判付款'?['提交时间汇总']:[])])assert.equal(row[h].v,'',h);if(kind==='正常付款')assert.equal(row['提交时间汇总'],undefined);
+  const result=C.build(input),row=output(result,kind);assert.equal(row['对公付款0A流程号'].v,OLD);for(const h of [...FLOW_FIELDS,'是否提交付款申请单','提交时间汇总'])assert.equal(row[h].v,'',h);
   if(kind==='谈判付款')assert.equal(row['提交付款申请单日期'].v,'');assert(result.reviewRows.some(r=>/供应商.*冲突|冲突.*供应商/.test(r[5].v)));
  });
  test(kind+'原号未在OA表找到但名称金额唯一时维持原有自动修正规则',()=>{
@@ -97,8 +97,8 @@ test('正常付款同供应商同金额按OA号区分提交状态、申请日期
  const input=sameAmountNormals(),before=JSON.stringify(input),result=C.build(input),submitted=normalByOA(result,OLD),unsubmitted=normalByOA(result,CANDIDATE);
  assert.equal(result.normalRows.filter(r=>r[2].v===SUPPLIER).length,2,'台账两行原样保留');
  assert.equal(submitted['流程编号'].v,OLD);assert.equal(unsubmitted['流程编号'].v,CANDIDATE);
- assert.equal(submitted['是否提交付款申请单'].v,'已提交');assert.equal(submitted['申请日期'].t,'n');assert.equal(submitted['提交时间汇总'],undefined);
- assert.equal(unsubmitted['是否提交付款申请单'].v,'未申请');assert.equal(unsubmitted['申请日期'].v,'');assert.equal(unsubmitted['提交时间汇总'],undefined);
+ assert.equal(submitted['是否提交付款申请单'].v,'已提交');assert.equal(submitted['申请日期'].t,'n');assert.equal(submitted['提交时间汇总'].v,'2026-10-25-100.00');
+ assert.equal(unsubmitted['是否提交付款申请单'].v,'未申请');assert.equal(unsubmitted['申请日期'].v,'');assert.equal(unsubmitted['提交时间汇总'].v,'');
  assert.deepEqual(result.highlights.normalRows,[result.normalRows.findIndex(r=>r[4].v===OLD)+2]);assert.equal(JSON.stringify(input),before);
 });
 test('正常付款不同人员的同供应商同额OA分别保留，流程节点及申请人不会串到另一行',()=>{
@@ -123,7 +123,7 @@ test('正常付款同额不同OA的重复申请只归本OA；分类、供应商�
  const input=sameAmountNormals();append(input,'applications',APP_HEADERS,{...application(OLD,SUPPLIER,'￥100.00','正常付款'),'申请日期':'2026-10-26'});
  append(input,'applications',APP_HEADERS,application(CANDIDATE,OTHER,100,'正常付款'));
  append(input,'applications',APP_HEADERS,application(CANDIDATE,SUPPLIER,99.99,'正常付款'));
- const result=C.build(input);assert.equal(normalByOA(result,CANDIDATE)['是否提交付款申请单'].v,'未申请');assert.equal(normalByOA(result,OLD)['提交时间汇总'],undefined);assert.equal(normalByOA(result,OLD)['申请日期'].v,'2026年10月25日；2026年10月26日');
+ const result=C.build(input);assert.equal(normalByOA(result,CANDIDATE)['是否提交付款申请单'].v,'未申请');assert.equal(normalByOA(result,OLD)['提交时间汇总'].v,'2026-10-25-100.00\n2026-10-26-100.00');assert.equal(normalByOA(result,OLD)['申请日期'].v,'2026年10月25日；2026年10月26日');
  assert.equal(result.highlights.normalRows.length,1);assert.equal(result.reviewRows.filter(r=>r[5].v.startsWith('重复提交')).length,1);
 });
 test('正常付款缺申请OA仅唯一同名同额可补判，多笔时不猜测并列明补编号的来源',()=>{
@@ -149,6 +149,6 @@ test('正常付款使用核验后的OA且兼容编号标准化、旧合同号；
 test('正常付款有编号冲突时唯一同额也不回退，跨多个OA申请不能误配单个OA',()=>{
  for(const id of [CANDIDATE,OLD+' / '+CANDIDATE]){
   const input=fixture('正常付款',{oldSupplier:SUPPLIER,oldAmount:100,candidate:false});input.applications.book=book('申请汇总',APP_HEADERS,[application(id,SUPPLIER,100,'正常付款')]);
-  const result=C.build(input),row=output(result,'正常付款');assert.equal(row['是否提交付款申请单'].v,'未申请');assert.equal(row['申请日期'].v,'');assert.equal(row['提交时间汇总'],undefined);assert.deepEqual(result.highlights.normalRows,[]);
+  const result=C.build(input),row=output(result,'正常付款');assert.equal(row['是否提交付款申请单'].v,'未申请');assert.equal(row['申请日期'].v,'');assert.equal(row['提交时间汇总'].v,'');assert.deepEqual(result.highlights.normalRows,[]);
  }
 });
