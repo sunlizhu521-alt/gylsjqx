@@ -76,9 +76,14 @@
     const rows=[HEADERS.map(value=>({value})),...result.groups.map((g,index)=>[monthCell(g.monthKey),{value:g.category??''},{value:g.state??''},{value:g.totalCents/100,money:true},{value:g.paidCents/100,money:true},{value:g.remainingCents/100,money:true,formula:`D${index+2}-E${index+2}`},{value:''}])];
     const end=rows.length,total=result.totals;
     rows.push([{value:'合计'},{value:''},{value:''},...['totalCents','paidCents','remainingCents'].map((key,index)=>({value:total[key]/100,money:true,formula:end>1?`SUM(${String.fromCharCode(68+index)}2:${String.fromCharCode(68+index)}${end})`:'SUM(0)'})),{value:''}]);
+    const contentRows=new Set(),contentColumns=new Set();
+    rows.forEach((row,r)=>row.forEach((cell,c)=>{
+      if(cell.value==null||(typeof cell.value==='string'&&!cell.value.trim()))return;
+      contentRows.add(r);contentColumns.add(c);
+    }));
     const widths=HEADERS.map((_,col)=>Math.min(255,rows.reduce((size,row)=>Math.max(size,[...String(row[col].display??(row[col].money?X.SSF.format('#,##0.00',row[col].value):row[col].value))].reduce((n,c)=>n+(c.codePointAt(0)>255?2:1),0)),12)+2));
     const data=rows.map((row,r)=>`<row r="${r+1}" ht="26" customHeight="1">`+row.map((cell,c)=>{
-      const blank=cell.value==null||(typeof cell.value==='string'&&!cell.value.trim());
+      const blank=!contentRows.has(r)||!contentColumns.has(c);
       const ref=String.fromCharCode(65+c)+(r+1),style=r===0?styles.header:(cell.month?styles.month:cell.money?styles.money:styles.text)+(blank?3:0);
       if(typeof cell.value==='number')return `<c r="${ref}" s="${style}">${cell.formula?'<f>'+escape(cell.formula)+'</f>':''}<v>${cell.value}</v></c>`;
       return `<c r="${ref}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${cellText(cell.value)}</t></is></c>`;

@@ -104,22 +104,24 @@ test('普通明细筛选可取消，全部可见，两页冻结表头、居中�
     assert.match(style,/borderId="2"/);
     for(const c of sheet.match(/<c\b[^>]+>/g)){
       const address=c.match(/\br="([A-Z]+\d+)"/)[1],row=Number(address.match(/\d+$/)[0]);
-      const border=styleAt(sheet,styles,address).border,expected=row===1||(index===2&&row===5)?'thin':'hair',value=book.Sheets[book.SheetNames[index-1]][address]?.v;
-      if(expected==='hair'&&(value==null||(typeof value==='string'&&!value.trim())))assert.doesNotMatch(border,/style=/,address);
-      else for(const side of ['left','right','top','bottom'])assert.match(border,new RegExp(`<${side} style="${expected}"><color rgb="FF404040"/></${side}>`),address);
+      const border=styleAt(sheet,styles,address).border,expected=row===1||(index===2&&row===5)?'thin':'hair';
+      for(const side of ['left','right','top','bottom'])assert.match(border,new RegExp(`<${side} style="${expected}"><color rgb="FF404040"/></${side}>`),address);
     }
   }
   assert.match(await xml(zip,1),/<autoFilter ref="A1:K3"\/>/);
   assert.doesNotMatch(await xml(zip,2),/<autoFilter\b/);
 });
 
-test('空白与空格不画边框，零及false有边框，原标红和总计格式保持',async()=>{
-  const {zip,book}=await read(result([record({supplier:false,notes:' \n ',summary:null,amount:0,cents:0,related:true})],{classified:[],monthly:[],totals:{totalCents:0,paidCents:0,remainingCents:0}}));
+test('有内容的行包含空白备注也画边框，全空行和分隔行不画，零及false有效',async()=>{
+  const empty={month:null,monthKey:'',supplier:' ',subject:'',oa:'',summary:null,amount:null,cents:null,status:'',notes:' \n ',category:'',owner:'',excluded:'',related:false};
+  const {zip,book}=await read(result([record({supplier:false,notes:' \n ',summary:null,amount:0,cents:0,related:true}),record(empty),record({...empty,amount:0,cents:0}),record({...empty,supplier:false})],{classified:[],monthly:[],totals:{totalCents:0,paidCents:0,remainingCents:0}}));
   const styles=stylesFrom(await zip.file('xl/styles.xml').async('string')),detail=await xml(zip,1),summary=await xml(zip,2);
-  for(const address of ['E2','H2']){assert.doesNotMatch(styleAt(detail,styles,address).border,/style=/);assert.equal(styleAt(detail,styles,address).color,'FFFFC7CE');}
-  for(const address of ['B2','F2']){assert.match(styleAt(detail,styles,address).border,/style="hair"/);assert.equal(styleAt(detail,styles,address).color,'FFFFC7CE');}
+  for(const address of ['E2','H2','B2','F2']){assert.match(styleAt(detail,styles,address).border,/style="hair"/);assert.equal(styleAt(detail,styles,address).color,'FFFFC7CE');}
+  for(let col=0;col<11;col++)assert.doesNotMatch(styleAt(detail,styles,X.utils.encode_col(col)+'3').border,/style=/);
+  for(const address of ['A4','F4','H4','A5','B5','H5'])assert.match(styleAt(detail,styles,address).border,/style="hair"/);
   assert.equal(book.Sheets.付款汇总明细.B2.v,'false');assert.equal(book.Sheets.付款汇总明细.F2.v,0);assert.equal(book.Sheets.付款汇总明细.F2.z,'#,##0.00');assert.equal(book.Sheets.付款汇总明细.H2.v,' \n ');
-  assert.doesNotMatch(styleAt(summary,styles,'B2').border,/style=/);assert.match(styleAt(summary,styles,'C2').border,/style="hair"/);assert.match(styleAt(summary,styles,'B2').xf,/fontId="2"/);
+  assert.match(styleAt(summary,styles,'B2').border,/style="hair"/);assert.match(styleAt(summary,styles,'C2').border,/style="hair"/);assert.match(styleAt(summary,styles,'B2').xf,/fontId="2"/);
+  assert.doesNotMatch(summary,/<c\b[^>]*\br="[A-Z]+3"/);assert.equal(book.Sheets.付款汇总明细['!ref'],'A1:K5');assert.equal(book.Sheets.付款汇总明细.L2,undefined);
 });
 
 test('多行备注按内容增加行高，不裁切内容，超过Excel行高上限明确报错', async () => {

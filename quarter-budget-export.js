@@ -89,6 +89,11 @@
     zip.file('xl/styles.xml', styles);
     for (let index = 0; index < sheets.length; index++) {
       const info = sheets[index], path = `xl/worksheets/sheet${index + 1}.xml`;
+      const contentRows = new Set(), contentColumns = new Set();
+      info.rows.forEach((row,r) => row.forEach((cell,c) => {
+        if (cell.v == null || (typeof cell.v === 'string' && !cell.v.trim())) return;
+        contentRows.add(r); contentColumns.add(c);
+      }));
       let xml = await zip.file(path).async('string');
       xml = xml.replace(/<c\b([^>]*?)(\/?)>/g, (tag, attrs, end) => {
         const address = attrs.match(/\br="([A-Z]+)(\d+)"/);
@@ -96,7 +101,7 @@
         const row = Number(address[2]) - 1, col = X.utils.decode_col(address[1]);
         const old = Number(attrs.match(/\bs="(\d+)"/)?.[1] || 0), record = index === 0 ? result.records[row - 1] : null;
         const red = record && (record.related === true || record.excluded === '是' || (record.status === '已支付' && (col === 5 || col === 6)));
-        const value = info.rows[row]?.[col]?.v, blank = value == null || (typeof value === 'string' && !value.trim());
+        const blank = !contentRows.has(row) || !contentColumns.has(col);
         const style = info.headers.has(row) ? count * 3 : old + (red ? count : info.totals.has(row) ? count * 2 : 0) + (blank ? count * 3 + 1 : 0);
         return '<c' + attrs.replace(/\s+s="\d+"/, '') + ` s="${style}"${end}>`;
       });

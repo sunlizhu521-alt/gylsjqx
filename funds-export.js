@@ -219,7 +219,9 @@ window.FundsExport = async function(sourceBytes, result) {
     const flowColumns=new Set();for(let c=0;c<=end.c;c++)if(scoped(c)&&['流程编号','付款自然周','申请付款的日期'].includes(cellText(ensureCell(headerRow,c)).normalize('NFKC').replace(/\s+/g,'')))flowColumns.add(c);
     const singleLineColumns=new Set(flowColumns),dateColumns=new Set();
     if(doc!==sheet)for(let c=0;c<=end.c;c++){const title=cellText(ensureCell(headerRow,c));if(['对公付款0A流程号','对公付款OA流程号','开票时间','OA合同编号',...(progress?['对公付款OA号','申请日期','应付时间']:[])].includes(title))singleLineColumns.add(c);if(title==='开票时间'||progress&&['申请日期','应付时间'].includes(title))dateColumns.add(c);}
-    const populatedColumns=new Set([...cells.values()].filter(c=>cellText(c)!==''||first(c,'f')).map(c=>XLSX.utils.decode_cell(c.getAttribute('r')).c).filter(scoped));
+    const populatedColumns=new Set(),populatedRows=new Set();
+    for(const cell of cells.values())if(cellText(cell).trim()){const point=XLSX.utils.decode_cell(cell.getAttribute('r'));populatedRows.add(point.r);if(scoped(point.c))populatedColumns.add(point.c);}
+    for(const range of merges)if(cellText(cells.get(XLSX.utils.encode_cell(range.s))).trim()){for(let r=range.s.r;r<=range.e.r;r++)populatedRows.add(r);for(let c=range.s.c;c<=range.e.c;c++)if(scoped(c))populatedColumns.add(c);}
     // Explicit blank cells override inherited column borders without changing their values.
     for(const c of populatedColumns)for(let r=headerRow;r<=end.r;r++)ensureCell(r,c);
     for(const c of elements(data,'c')){
@@ -228,7 +230,7 @@ window.FundsExport = async function(sourceBytes, result) {
       if(doc!==sheet&&flow&&!header&&!first(c,'f')&&/[\r\n]/.test(cellText(c))){const text=cellText(c).replace(/\r\n|[\r\n]/g,'；');for(const child of [...c.children])if(['v','is'].includes(child.localName))child.remove();const is=create(doc,'is'),t=create(doc,'t');t.textContent=text;is.append(t);c.setAttribute('t','inlineStr');c.insertBefore(is,c.firstChild);}
       if(header&&['',null,'n'].includes(c.getAttribute('t'))&&Number(xfs.children[styleId(c)].getAttribute('numFmtId'))===31)c.setAttribute('s',dateDisplayStyle(styleId(c)));
       if(header||flow||populatedColumns.has(point.c))c.setAttribute('s',layoutStyle(styleId(c),header,flow));
-      if(!header&&!cellText(c).trim())c.setAttribute('s',withoutBorder(styleId(c)));
+      if(!header&&(!populatedRows.has(point.r)||!populatedColumns.has(point.c)))c.setAttribute('s',withoutBorder(styleId(c)));
       const xf=xfs.children[styleId(c)];
       const size=Number(first(fonts.children[Number(xf?.getAttribute('fontId')||0)],'sz')?.getAttribute('val')||11),type=c.getAttribute('t'),raw=first(c,'v')?.textContent??'';
       let text=type==='s'?sharedTexts[Number(raw)]||'':type==='inlineStr'?elements(c,'t').map(t=>t.textContent).join(''):raw;

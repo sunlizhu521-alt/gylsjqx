@@ -33,6 +33,12 @@
     zip.file('xl/styles.xml', styles);
     for (let index = 0; index < book.SheetNames.length; index++) {
       const sheet = book.Sheets[book.SheetNames[index]], rows = result.sheets[index].rows;
+      const contentRows = new Set(), contentColumns = new Set();
+      for (const [address,cell] of Object.entries(sheet)) {
+        const match = /^([A-Z]+)(\d+)$/.exec(address), value = cell?.v;
+        if (!match || value == null || (typeof value === 'string' && !value.trim())) continue;
+        contentRows.add(Number(match[2])); contentColumns.add(match[1]);
+      }
       const paidColumn = result.sheets[index].headers.indexOf('是否已付款');
       const noWrap = new Set(['采购跟单员','对公付款OA流程号','申请付款金额','应付款时间','申请付款月份','需要提交付款审单的日期']);
       const wrapColumns = result.sheets[index].headers.map((name,c) => noWrap.has(name) ? -1 : c).filter(c => c >= 0);
@@ -43,7 +49,7 @@
         if (!address) return tag;
         const old = Number(attrs.match(/\bs="(\d+)"/)?.[1] || 0);
         const paid = rows[Number(address[2]) - 2]?.[paidColumn]?.v === '已付款';
-        const value = sheet[address[1] + address[2]]?.v, blank = value == null || (typeof value === 'string' && !value.trim());
+        const blank = !contentRows.has(Number(address[2])) || !contentColumns.has(address[1]);
         const style = address[2] === '1' ? count * 4 : old + (wrapColumns.includes(X.utils.decode_col(address[1])) ? count : 0) + (paid ? count * 2 : 0) + (blank ? count * 4 + 1 : 0);
         return '<c' + attrs.replace(/\s+s="\d+"/, '') + ` s="${style}"${end}>`;
       });

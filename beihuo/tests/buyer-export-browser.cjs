@@ -12,10 +12,10 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises');
  assert.deepEqual(files.map(f=>f.rows.slice(1).map(r=>r[6])),[['A','B'],['C'],['D']]);
  assert.deepEqual(files.map(f=>f.rows.slice(1).map(r=>r[18])),[['原因A','原因B'],['原因C'],['原因D']]);
  for(const f of files){assert.equal(f.rows[0][18],'备货原因');assert.equal(f.rows[0][1],'是否新加坡公司下单');assert(f.rows.slice(1).every(row=>row[1]===''));assert(!f.rows[0].includes('采购分工明细是否存在'));assert.equal(f.highlight,true);assert.equal(f.formula,'IF(M2="","",TEXT(DATE(VALUE(LEFT(L2,4)),VALUE(MID(L2,6,2)),VALUE(RIGHT(L2,2)))+M2,"yyyy-mm-dd"))');assert.equal(f.dateFormat,'@');assert.equal(f.dateType,'s');assert.equal(f.todayType,'s');assert.match(f.styles,/FF1F4E78/);assert.equal((f.styles.match(/style="thin"><color rgb="FF404040"/g)||[]).length,4);assert.equal((f.styles.match(/style="hair"><color rgb="FF404040"/g)||[]).length,4);}
- for(const [index,f] of files.entries()) {
-  assert.match(f.xml,/<c[^>]*r="B2"[^>]*s="6"/,'blank Singapore result has no border');
+ for(const f of files) {
+  assert.match(f.xml,/<c[^>]*r="B2"[^>]*s="2"/,'blank Singapore result is inside the active record and header column');
   assert.match(f.xml,/<c[^>]*r="J2"[^>]*s="4"/,'numeric quantity including zero retains hair border');
-  assert.match(f.xml,new RegExp('<c[^>]*r="N2"[^>]*s="'+(index===0?'5':'9')+'"'),'blank delivery formula keeps text style without border');
+  assert.match(f.xml,/<c[^>]*r="N2"[^>]*s="5"/,'blank delivery formula keeps text style and active-area border');
  }
  assert((await page.locator('.detail-table th').allTextContents()).includes('采购分工明细是否存在'));
  await page.locator('[data-filter-button="materialCodeValid"]').click();

@@ -1358,10 +1358,22 @@ function buildDetailWorkbookStylesXml() {
 </styleSheet>`;
 }
 
-function detailExportStyle(rowIndex, key, value) {
+function detailExportContentAxes(values, shape) {
+  const rows = new Set(), columns = new Set();
+  for (const [address, value] of Object.entries(values)) {
+    if (value == null || String(value).trim() === "") continue;
+    const row = Number(address.match(/\d+$/)?.[0]), column = cellNameToColumnIndex(address);
+    if (row < 1 || row > shape.rowCount || column < 1 || column > shape.columnCount) continue;
+    rows.add(row);
+    columns.add(column);
+  }
+  return { rows, columns };
+}
+
+function detailExportStyle(rowIndex, key, hasBorder) {
   if (rowIndex === 1) return "1";
   const style = key === "quantity" ? 4 : ["todayDate", "supplierDeliveryDate"].includes(key) ? 5 : key === "stockReason" ? 3 : 2;
-  return String(style + (value == null || String(value).trim() === "" ? 4 : 0));
+  return String(style + (hasBorder ? 0 : 4));
 }
 
 function styleDetailWorksheetXml(xml, shape) {
@@ -1374,12 +1386,16 @@ function styleDetailWorksheetXml(xml, shape) {
   if (!sheetData) return xml;
 
   const columns = shape.columns || EXPORT_COLUMNS;
+  const values = {};
+  for (const cell of sheetData.querySelectorAll("c[r]")) {
+    values[cell.getAttribute("r")] = cell.querySelector("is")?.textContent ?? cell.querySelector("v")?.textContent;
+  }
+  const active = detailExportContentAxes(values, shape);
   for (let rowIndex = 1; rowIndex <= shape.rowCount; rowIndex += 1) {
     const row = ensureWorksheetRow(documentXml, sheetData, rowIndex);
     for (let columnIndex = 1; columnIndex <= shape.columnCount; columnIndex += 1) {
       const cell = ensureWorksheetCell(documentXml, row, rowIndex, columnIndex);
-      const value = cell.querySelector("is")?.textContent ?? cell.querySelector("v")?.textContent;
-      cell.setAttribute("s", detailExportStyle(rowIndex, columns[columnIndex-1]?.key, value));
+      cell.setAttribute("s", detailExportStyle(rowIndex, columns[columnIndex-1]?.key, active.rows.has(rowIndex) && active.columns.has(columnIndex)));
     }
   }
 

@@ -48,7 +48,7 @@ test('合计使用动态SUM并缓存金额，保留空白、零、负数及数�
   assert.equal(sheet.E3.v,'');assert.equal(sheet.L3.v,0);assert.equal(sheet.L3.t,'n');assert.equal(sheet.S3.v,900.01);
 });
 
-test('表头深灰细边框、正文仅有内容格发丝边框，空白无框而零值保留边框',async () => {
+test('表头深灰细边框，正文有效行列交叉区域含中间空白和零值均保留发丝边框',async () => {
   const {xml,styles,sheet}=await read(fixture());
   const xfs=styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*(?:\/>|>[\s\S]*?<\/xf>)/g);
   const borders=styles.match(/<borders\b[^>]*>([\s\S]*?)<\/borders>/)[1].match(/<border\b[^>]*>[\s\S]*?<\/border>/g);
@@ -58,12 +58,8 @@ test('表头深灰细边框、正文仅有内容格发丝边框，空白无框�
     assert(attrs,address+' should preserve its explicit cell');
     const xf=xfs[Number(attrs.match(/\bs="(\d+)"/)[1])];
     const borderId=Number(xf.match(/borderId="(\d+)"/)[1]);
-    const blank=sheet[address]?.v==null||typeof sheet[address].v==='string'&&!sheet[address].v.trim();
-    assert.equal(borderId,row<=2?1:blank?0:2,address);
-    for(const side of ['left','right','top','bottom']) {
-      if(row>2&&blank)assert.doesNotMatch(borders[borderId],new RegExp(`<${side}\\b[^>]*style=`),address+' '+side);
-      else assert.match(borders[borderId],new RegExp(`<${side} style="${row<=2?'thin':'hair'}"><color rgb="FF404040"\\/></${side}>`),address+' '+side);
-    }
+    assert.equal(borderId,row<=2?1:2,address);
+    for(const side of ['left','right','top','bottom']) assert.match(borders[borderId],new RegExp(`<${side} style="${row<=2?'thin':'hair'}"><color rgb="FF404040"\\/></${side}>`),address+' '+side);
     assert.match(xf,/wrapText="0" shrinkToFit="0"/);
     assert.match(xf,new RegExp(`fillId="${row<=2?3:2}"`));
   }
@@ -73,6 +69,8 @@ test('表头深灰细边框、正文仅有内容格发丝边框，空白无框�
   assert.match(xml,/<autoFilter ref="A2:S3"\/>/);
   assert(sheet['!cols'][10].wch>=18,'normal total heading must fit');
   assert(sheet['!cols'][2].wch>=13,'full year/month must fit');
+  assert.equal(sheet.D3.v,'','中间无金额月份仍为空，边框不能改变数值');
+  assert.equal(sheet.L3.v,0,'零金额仍为数值零');
 });
 
 test('月份只有一个或跨越Z列时，合计范围、合并和末列仍正确',async () => {

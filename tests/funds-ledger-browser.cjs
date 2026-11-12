@@ -141,6 +141,11 @@ function fixture(replacement=false){
     const zip=await JSZip.loadAsync(Uint8Array.from(data.bytes)),parse=s=>new DOMParser().parseFromString(s,'application/xml'),all=(d,n)=>[...d.getElementsByTagNameNS('*',n)];
     const styles=parse(await zip.file('xl/styles.xml').async('string')),xfs=all(styles,'cellXfs')[0].children,fonts=all(styles,'fonts')[0].children,borders=all(styles,'borders')[0].children,fills=all(styles,'fills')[0].children;
     const doc=parse(await zip.file('xl/worksheets/sheet1.xml').async('string')),problems=[],names=new Set(),sizes=new Set(),widths=[];
+    const contentRows=new Set(),contentColumns=new Set();
+    for(const cell of all(doc,'c')){
+     const content=[...all(cell,'v'),...all(cell,'t')].map(node=>node.textContent).join(''),address=cell.getAttribute('r').match(/^([A-Z]+)(\d+)$/);
+     if(content.trim()){contentRows.add(Number(address[2]));contentColumns.add(address[1]);}
+    }
     const pane=all(doc,'pane')[0];if(pane?.getAttribute('state')!=='frozen'||pane?.getAttribute('ySplit')!=='1')problems.push('首行未冻结');
     if(all(doc,'f').length||all(doc,'filterColumn').length||all(doc,'conditionalFormatting').length)problems.push('存在公式、旧筛选条件或条件格式');
     if(all(doc,'row').some(r=>r.getAttribute('hidden')==='1'||all(r,'c').length!==14))problems.push('隐藏行或缺少矩形单元格');
@@ -149,7 +154,7 @@ function fixture(replacement=false){
      const xf=xfs[+(cell.getAttribute('s')||0)],font=fonts[+(xf.getAttribute('fontId')||0)],border=borders[+(xf.getAttribute('borderId')||0)];
      names.add(all(font,'name')[0]?.getAttribute('val'));sizes.add(all(font,'sz')[0]?.getAttribute('val'));
      const row=Number(cell.getAttribute('r').match(/\d+$/)[0]),fill=fills[+(xf.getAttribute('fillId')||0)],expectedFill=row===1?'FF315B9D':data.paid[row-2]?'FFFF9999':'FFFFFFFF';
-     const content=[...all(cell,'v'),...all(cell,'t')].map(node=>node.textContent).join(''),blank=row>1&&!content.trim();
+     const blank=row>1&&(!contentRows.has(row)||!contentColumns.has(cell.getAttribute('r').match(/^[A-Z]+/)[0]));
      if(['left','right','top','bottom'].some(edge=>{const side=all(border,edge)[0];return blank?Boolean(side?.getAttribute('style')):side?.getAttribute('style')!==(row===1?'thin':'hair')||all(side,'color')[0]?.getAttribute('rgb')!=='FF404040';}))problems.push('表头/正文边框不符 '+cell.getAttribute('r'));
      if(all(fill,'patternFill')[0]?.getAttribute('patternType')!=='solid'||all(fill,'fgColor')[0]?.getAttribute('rgb')!==expectedFill||xf.getAttribute('applyFill')!=='1')problems.push('原生填充颜色不符 '+cell.getAttribute('r'));
      if((row===1||/^[AML]\d+$/.test(cell.getAttribute('r')))&&all(xf,'alignment')[0]?.getAttribute('wrapText')==='1')problems.push('表头或提交日期换行');

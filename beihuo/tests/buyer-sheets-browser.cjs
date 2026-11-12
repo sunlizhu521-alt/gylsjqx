@@ -74,10 +74,16 @@ function uploadFile(rows, sheetName, name) {
       assert(xfs.slice(6).every(xf=>xf.includes('borderId="0"')));
       for(const [index,{text}] of xmls.entries()) {
         const sheet=workbook.Sheets[workbook.SheetNames[index]];
+        const activeRows=new Set(),activeColumns=new Set();
+        for(const [address,cell] of Object.entries(sheet)) {
+          if(!/^[A-Z]+\d+$/.test(address)||cell.v==null||String(cell.v).trim()==='')continue;
+          const location=XLSX.utils.decode_cell(address);activeRows.add(location.r);activeColumns.add(location.c);
+        }
         for(const match of text.matchAll(/<c\b([^>]*)>/g)) {
           const address=match[1].match(/\br="([A-Z]+\d+)"/)?.[1];if(!address)continue;
           const style=Number(match[1].match(/\bs="(\d+)"/)?.[1]||0),row=Number(address.match(/\d+/)[0]);
-          const expected=row===1?'1':String(sheet[address]?.v??'').trim()!==''?'2':'0';
+          const location=XLSX.utils.decode_cell(address);
+          const expected=row===1?'1':activeRows.has(location.r)&&activeColumns.has(location.c)?'2':'0';
           assert.equal(xfs[style].match(/borderId="(\d+)"/)[1],expected,`${workbook.SheetNames[index]}!${address} border`);
         }
       }

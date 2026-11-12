@@ -140,13 +140,18 @@ async function checkGeneratedBorders(bytes, sheetPaths) {
   for (const sheetPath of sheetPaths) {
     const xml = await zip.file(sheetPath).async('string');
     const sheet = book.Sheets[book.SheetNames[Number(sheetPath.match(/(?:fulfillment|sheet)(\d+)\.xml$/)[1]) - 1]];
+    const activeRows = new Set(), activeColumns = new Set();
+    for (const [address, item] of Object.entries(sheet)) {
+      const point = /^([A-Z]+)(\d+)$/.exec(address), value = item?.v;
+      if (point && value != null && (typeof value !== 'string' || value.trim())) { activeRows.add(point[2]); activeColumns.add(point[1]); }
+    }
     for (const cell of xml.match(/<c\b[^>]*>/g) || []) {
       const address = cell.match(/\br="([A-Z]+)(\d+)"/), style = Number(cell.match(/\bs="(\d+)"/)?.[1] || 0);
       const border = borders[Number(xfs[style].match(/\bborderId="(\d+)"/)[1])];
-      const value = sheet[address[1] + address[2]]?.v, blank = value == null || typeof value === 'string' && !value.trim();
+      const framed = activeRows.has(address[2]) && activeColumns.has(address[1]);
       for (const side of ['left', 'right', 'top', 'bottom']) {
-        if (Number(address[2]) > 1 && blank) {
-          assert.doesNotMatch(border, new RegExp(`<${side}\\b[^>]*style=`), sheetPath + '!' + address[0] + '空白不画边框');
+        if (Number(address[2]) > 1 && !framed) {
+          assert.doesNotMatch(border, new RegExp(`<${side}\\b[^>]*style=`), sheetPath + '!' + address[0] + '整行或整列无内容才不画边框');
           continue;
         }
         const edge = border.match(new RegExp(`<${side}\\b[^>]*>[\\s\\S]*?</${side}>`))?.[0] || '';

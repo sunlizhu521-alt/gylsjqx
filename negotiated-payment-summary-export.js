@@ -70,6 +70,10 @@
     });
     if (widths.some(value => value > 255)) throw Error('内容超过 Excel 列宽限制，请核对供应商名称或金额。');
     const sheet = X.utils.aoa_to_sheet(rows), book = X.utils.book_new();
+    const activeRows = new Set(), activeColumns = new Set();
+    rows.forEach((row,r) => row.forEach((item,c) => {
+      if (item.v != null && (typeof item.v !== 'string' || item.v.trim())) { activeRows.add(r); activeColumns.add(c); }
+    }));
     sheet['!cols'] = widths.map(wch => ({wch})); sheet['!rows'] = heights;
     sheet['!autofilter'] = {ref:X.utils.encode_range({s:{r:1,c:0},e:{r:rows.length-1,c:columns-1}})};
     sheet['!merges'] = [0,1,normalTotal].map(c => ({s:{r:0,c},e:{r:1,c}}));
@@ -82,7 +86,7 @@
     const fonts = '<fonts count="2"><font><sz val="11"/><color rgb="FF172033"/><name val="宋体"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="宋体"/></font></fonts>';
     const fills = '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFFFF"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF315B9D"/><bgColor indexed="64"/></patternFill></fill></fills>';
     const borders = '<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border>' + ['thin','hair'].map(style => '<border>' + ['left','right','top','bottom'].map(side => `<${side} style="${style}"><color rgb="FF404040"/></${side}>`).join('') + '<diagonal/></border>').join('') + '</borders>';
-    const xf = (format,header,blank=false) => `<xf numFmtId="${format}" fontId="${header?1:0}" fillId="${header?3:2}" borderId="${header?1:blank?0:2}" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="0" shrinkToFit="0"/></xf>`;
+    const xf = (format,header,unframed=false) => `<xf numFmtId="${format}" fontId="${header?1:0}" fillId="${header?3:2}" borderId="${header?1:unframed?0:2}" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="0" shrinkToFit="0"/></xf>`;
     styles = styles.replace(/<fonts\b[^>]*>[\s\S]*?<\/fonts>/,fonts).replace(/<fills\b[^>]*>[\s\S]*?<\/fills>/,fills).replace(/<borders\b[^>]*>[\s\S]*?<\/borders>/,borders)
       .replace(/<cellXfs\b[^>]*>[\s\S]*?<\/cellXfs>/,`<cellXfs count="${styleCount*3}">${formats.map(format => xf(format,false)).join('')}${formats.map(format => xf(format,true)).join('')}${formats.map(format => xf(format,false,true)).join('')}</cellXfs>`);
     zip.file('xl/styles.xml',styles);
@@ -90,8 +94,8 @@
     xml = xml.replace(/<c\b([^>]*?)(\/?)>/g,(tag,attrs,end) => {
       const address = attrs.match(/\br="([A-Z]+(\d+))"/);
       if (!address) return tag;
-      const value = sheet[address[1]]?.v, blank = value == null || typeof value === 'string' && !value.trim();
-      const style = Number(attrs.match(/\bs="(\d+)"/)?.[1] || 0) + (Number(address[2]) <= 2 ? styleCount : blank ? styleCount*2 : 0);
+      const point = X.utils.decode_cell(address[1]), framed = activeRows.has(point.r) && activeColumns.has(point.c);
+      const style = Number(attrs.match(/\bs="(\d+)"/)?.[1] || 0) + (Number(address[2]) <= 2 ? styleCount : framed ? 0 : styleCount*2);
       return '<c' + attrs.replace(/\s+s="\d+"/,'') + ` s="${style}"${end}>`;
     });
     const views = '<sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A3" sqref="A3"/></sheetView></sheetViews>';

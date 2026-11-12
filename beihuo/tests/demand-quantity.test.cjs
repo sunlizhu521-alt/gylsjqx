@@ -314,23 +314,30 @@ test('all exported sheets use single-line text, full-text widths and no-wrap cen
   for(let i=6;i<10;i++) assert.equal(xfs[i],xfs[i-4].replace('borderId="2"','borderId="0"'));
 });
 
-test('export borders apply only to populated body cells, preserving zero/false and all header borders',()=>{
+test('export borders cover active row/column intersections, including blank cells, but skip empty axes',()=>{
   const {context,run}=loadApp();
   for(const [key,contentStyle,emptyStyle] of [['supplierShortName','2','6'],['stockReason','3','7'],['quantity','4','8'],['todayDate','5','9'],['supplierDeliveryDate','5','9']]) {
     context.key=key;
-    for(const value of [null,undefined,'',' \t\n ']) {
-      context.value=value;
-      assert.equal(run('detailExportStyle(2,key,value)'),emptyStyle);
-      assert.equal(run('detailExportStyle(1,key,value)'),'1');
-    }
-    for(const value of [0,false,'0','FALSE','2026-11-12','文字']) {
-      context.value=value;assert.equal(run('detailExportStyle(2,key,value)'),contentStyle);
-    }
+    assert.equal(run('detailExportStyle(2,key,false)'),emptyStyle);
+    assert.equal(run('detailExportStyle(2,key,true)'),contentStyle);
+    assert.equal(run('detailExportStyle(1,key,false)'),'1');
+    assert.equal(run('detailExportStyle(1,key,true)'),'1');
   }
+  context.values={A1:'物料',B1:'天数',C1:'',D1:'日期',E1:'备注',A2:'甲',B2:null,D2:'',E2:'',A3:' \t\n ',B3:null,D3:undefined,E3:'',A4:0,A5:false,F2:'范围外列',A6:'范围外行'};
+  const axes=run('detailExportContentAxes(values,{rowCount:5,columnCount:5})');
+  assert.deepEqual([...axes.rows],[1,2,4,5]);
+  assert.deepEqual([...axes.columns],[1,2,4,5]);
+  assert(axes.rows.has(2)&&axes.columns.has(4),'blank date in an active record has a border');
+  assert(!axes.rows.has(3),'wholly blank row has no body borders');
+  assert(!axes.columns.has(3),'wholly blank column has no body borders');
+  assert(!axes.rows.has(6)&&!axes.columns.has(6),'no range expansion');
   context.rows=[{buyer:'甲',todayDate:'2026-11-12',deliveryDays:'',supplierDeliveryDate:''}];
   const {workbook}=run('buildDetailWorkbook(rows)'),cell=workbook.Sheets.备货需求分配明细.N2;
   assert.equal(cell.v,'');assert.equal(cell.t,'s');assert.ok(cell.f.includes('TEXT(DATE('));
-  context.value=cell.v;assert.equal(run('detailExportStyle(2,"supplierDeliveryDate",value)'),'9');
+  context.values=Object.fromEntries(Object.entries(workbook.Sheets.备货需求分配明细).filter(([address])=>/^[A-Z]+\d+$/.test(address)).map(([address,cell])=>[address,cell.v]));
+  const workbookAxes=run('detailExportContentAxes(values,{rowCount:2,columnCount:19})');
+  assert(workbookAxes.rows.has(2)&&workbookAxes.columns.has(14),'cached-empty date formula is within the active row/header column intersection');
+  assert.equal(run('detailExportStyle(2,"supplierDeliveryDate",true)'),'5');
 });
 
 test('one workbook splits buyers into sheets with complete rows and sheet-local formulas', () => {
