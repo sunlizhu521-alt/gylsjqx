@@ -296,7 +296,7 @@ test('all exported sheets use single-line text, full-text widths and no-wrap cen
   }
   assert.equal(context.rows[0].stockReason, reason, 'source values remain unchanged');
   const alignments = [...run('buildDetailWorkbookStylesXml()').matchAll(/<alignment\b[^>]*\/>/g)].map(match => match[0]);
-  assert.equal(alignments.length, 5);
+  assert.equal(alignments.length, 9);
   for (const alignment of alignments) {
     assert.match(alignment, /wrapText="0"/);
     assert.match(alignment, /horizontal="center"/);
@@ -310,7 +310,27 @@ test('all exported sheets use single-line text, full-text widths and no-wrap cen
   }
   const xfs=[...styles.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/)[1].matchAll(/<xf\b[^>]*>/g)].map(match=>match[0]);
   assert.match(xfs[1],/borderId="1"/);
-  for(const xf of xfs.slice(2)) assert.match(xf,/borderId="2"/);
+  for(const xf of xfs.slice(2,6)) assert.match(xf,/borderId="2"/);
+  for(let i=6;i<10;i++) assert.equal(xfs[i],xfs[i-4].replace('borderId="2"','borderId="0"'));
+});
+
+test('export borders apply only to populated body cells, preserving zero/false and all header borders',()=>{
+  const {context,run}=loadApp();
+  for(const [key,contentStyle,emptyStyle] of [['supplierShortName','2','6'],['stockReason','3','7'],['quantity','4','8'],['todayDate','5','9'],['supplierDeliveryDate','5','9']]) {
+    context.key=key;
+    for(const value of [null,undefined,'',' \t\n ']) {
+      context.value=value;
+      assert.equal(run('detailExportStyle(2,key,value)'),emptyStyle);
+      assert.equal(run('detailExportStyle(1,key,value)'),'1');
+    }
+    for(const value of [0,false,'0','FALSE','2026-11-12','文字']) {
+      context.value=value;assert.equal(run('detailExportStyle(2,key,value)'),contentStyle);
+    }
+  }
+  context.rows=[{buyer:'甲',todayDate:'2026-11-12',deliveryDays:'',supplierDeliveryDate:''}];
+  const {workbook}=run('buildDetailWorkbook(rows)'),cell=workbook.Sheets.备货需求分配明细.N2;
+  assert.equal(cell.v,'');assert.equal(cell.t,'s');assert.ok(cell.f.includes('TEXT(DATE('));
+  context.value=cell.v;assert.equal(run('detailExportStyle(2,"supplierDeliveryDate",value)'),'9');
 });
 
 test('one workbook splits buyers into sheets with complete rows and sheet-local formulas', () => {

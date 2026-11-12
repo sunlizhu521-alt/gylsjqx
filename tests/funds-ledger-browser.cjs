@@ -149,7 +149,8 @@ function fixture(replacement=false){
      const xf=xfs[+(cell.getAttribute('s')||0)],font=fonts[+(xf.getAttribute('fontId')||0)],border=borders[+(xf.getAttribute('borderId')||0)];
      names.add(all(font,'name')[0]?.getAttribute('val'));sizes.add(all(font,'sz')[0]?.getAttribute('val'));
      const row=Number(cell.getAttribute('r').match(/\d+$/)[0]),fill=fills[+(xf.getAttribute('fillId')||0)],expectedFill=row===1?'FF315B9D':data.paid[row-2]?'FFFF9999':'FFFFFFFF';
-     if(['left','right','top','bottom'].some(edge=>{const side=all(border,edge)[0];return side?.getAttribute('style')!==(row===1?'thin':'hair')||all(side,'color')[0]?.getAttribute('rgb')!=='FF404040';}))problems.push('表头/正文边框不符 '+cell.getAttribute('r'));
+     const content=[...all(cell,'v'),...all(cell,'t')].map(node=>node.textContent).join(''),blank=row>1&&!content.trim();
+     if(['left','right','top','bottom'].some(edge=>{const side=all(border,edge)[0];return blank?Boolean(side?.getAttribute('style')):side?.getAttribute('style')!==(row===1?'thin':'hair')||all(side,'color')[0]?.getAttribute('rgb')!=='FF404040';}))problems.push('表头/正文边框不符 '+cell.getAttribute('r'));
      if(all(fill,'patternFill')[0]?.getAttribute('patternType')!=='solid'||all(fill,'fgColor')[0]?.getAttribute('rgb')!==expectedFill||xf.getAttribute('applyFill')!=='1')problems.push('原生填充颜色不符 '+cell.getAttribute('r'));
      if((row===1||/^[AML]\d+$/.test(cell.getAttribute('r')))&&all(xf,'alignment')[0]?.getAttribute('wrapText')==='1')problems.push('表头或提交日期换行');
     }

@@ -50,9 +50,23 @@ test('新增第一张汇总，固定7列、年月文本、金额和公式缓存�
   for(const c of xml.match(/<c\b[^>]+>/g)){
     const style=xfs[Number(c.match(/s="(\d+)"/)[1])];assert.match(style,/horizontal="center" vertical="center" wrapText="0"/);assert.match(style,/applyBorder="1"/);
     const address=c.match(/\br="([A-Z]+\d+)"/)[1],row=Number(address.match(/\d+$/)[0]),border=borders[Number(style.match(/\bborderId="(\d+)"/)[1])];
-    for(const side of ['left','right','top','bottom'])assert.match(border,new RegExp(`<${side} style="${row===1?'thin':'hair'}"><color rgb="FF404040"/></${side}>`),address);
+    const value=sheet[address]?.v,blank=value==null||(typeof value==='string'&&!value.trim());
+    if(row>1&&blank)assert.doesNotMatch(border,/style=/,address);
+    else for(const side of ['left','right','top','bottom'])assert.match(border,new RegExp(`<${side} style="${row===1?'thin':'hair'}"><color rgb="FF404040"/></${side}>`),address);
   }
   assert.equal(sheet.A1.s.fgColor.rgb,'315B9D');assert.equal(sheet.A2.s.fgColor.rgb,'FFFFFF');assert(sheet['!cols'][3].width>=14);
+});
+
+test('生成表空白正文无边框，零金额与false仍有边框，公式及原表格式不变',async()=>{
+  const source=await fixture(),{book,zip}=await unpack(await Export(source,result([group({category:' \n ',state:false,totalCents:0,paidCents:0,remainingCents:0})]))),sheet=book.Sheets[NAME];
+  const styles=await zip.file('xl/styles.xml').async('string'),xfs=section(styles,'cellXfs').match(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g),borders=section(styles,'borders').match(/<border\b[^>]*(?:\/>|>[\s\S]*?<\/border>)/g),xml=await zip.file(await summaryPath(zip)).async('string');
+  for(const [address,hasBorder] of [['B2',false],['C2',true],['D2',true],['F2',true],['G2',false],['B3',false],['D3',true]]){
+    const tag=xml.match(new RegExp(`<c\\b(?=[^>]*\\br="${address}")[^>]*>`))[0],style=xfs[Number(tag.match(/\bs="(\d+)"/)[1])],border=borders[Number(style.match(/\bborderId="(\d+)"/)[1])];
+    if(hasBorder)assert.match(border,/style="hair"/,address);else assert.doesNotMatch(border,/style=/,address);
+    assert.equal(sheet[address].s.fgColor.rgb,'FFFFFF');
+  }
+  assert.equal(sheet.B2.v,' \n ');assert.equal(sheet.C2.v,'false');assert.equal(sheet.D2.v,0);assert.equal(sheet.D2.t,'n');assert.equal(sheet.F2.f,'D2-E2');assert.equal(sheet.F3.f,'SUM(F2:F2)');assert.equal(sheet.D2.z,'#,##0.00');
+  const original=await Zip.loadAsync(source);assert.equal(await zip.file('xl/worksheets/sheet1.xml').async('string'),await original.file('xl/worksheets/sheet1.xml').async('string'));
 });
 
 test('原工作表XML、批注、格式、隐藏和无关ZIP原生部分逐字节保留',async()=>{

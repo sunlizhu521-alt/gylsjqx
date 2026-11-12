@@ -82,9 +82,10 @@
     const fonts = '<fonts count="3"><font><sz val="11"/><color rgb="FF172033"/><name val="等线"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="等线"/></font><font><b/><sz val="11"/><color rgb="FF172033"/><name val="等线"/></font></fonts>';
     const fills = '<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFFFF"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF315B9D"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFC7CE"/><bgColor indexed="64"/></patternFill></fill></fills>';
     const borders = '<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border>' + ['thin','hair'].map(style => '<border>' + ['left','right','top','bottom'].map(side => `<${side} style="${style}"><color rgb="FF404040"/></${side}>`).join('') + '<diagonal/></border>').join('') + '</borders>';
-    const xf = (format, font, fill) => `<xf numFmtId="${format}" fontId="${font}" fillId="${fill}" borderId="${font===1?1:2}" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="1" shrinkToFit="0"/></xf>`;
+    const xf = (format, font, fill, blank = false) => `<xf numFmtId="${format}" fontId="${font}" fillId="${fill}" borderId="${font===1?1:blank?0:2}" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="1" shrinkToFit="0"/></xf>`;
+    const bodyStyles = blank => [[0,2],[0,4],[2,2]].map(([font,fill]) => formats.map(f => xf(f,font,fill,blank)).join('')).join('');
     styles = styles.replace(/<fonts\b[^>]*>[\s\S]*?<\/fonts>/, fonts).replace(/<fills\b[^>]*>[\s\S]*?<\/fills>/, fills).replace(/<borders\b[^>]*>[\s\S]*?<\/borders>/, borders)
-      .replace(/<cellXfs\b[^>]*>[\s\S]*?<\/cellXfs>/, `<cellXfs count="${count * 3 + 1}">${formats.map(f => xf(f,0,2)).join('')}${formats.map(f => xf(f,0,4)).join('')}${formats.map(f => xf(f,2,2)).join('')}${xf(0,1,3)}</cellXfs>`);
+      .replace(/<cellXfs\b[^>]*>[\s\S]*?<\/cellXfs>/, `<cellXfs count="${count * 6 + 1}">${bodyStyles(false)}${xf(0,1,3)}${bodyStyles(true)}</cellXfs>`);
     zip.file('xl/styles.xml', styles);
     for (let index = 0; index < sheets.length; index++) {
       const info = sheets[index], path = `xl/worksheets/sheet${index + 1}.xml`;
@@ -95,7 +96,8 @@
         const row = Number(address[2]) - 1, col = X.utils.decode_col(address[1]);
         const old = Number(attrs.match(/\bs="(\d+)"/)?.[1] || 0), record = index === 0 ? result.records[row - 1] : null;
         const red = record && (record.related === true || record.excluded === '是' || (record.status === '已支付' && (col === 5 || col === 6)));
-        const style = info.headers.has(row) ? count * 3 : old + (red ? count : info.totals.has(row) ? count * 2 : 0);
+        const value = info.rows[row]?.[col]?.v, blank = value == null || (typeof value === 'string' && !value.trim());
+        const style = info.headers.has(row) ? count * 3 : old + (red ? count : info.totals.has(row) ? count * 2 : 0) + (blank ? count * 3 + 1 : 0);
         return '<c' + attrs.replace(/\s+s="\d+"/, '') + ` s="${style}"${end}>`;
       });
       const views = '<sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>';

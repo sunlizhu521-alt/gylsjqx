@@ -23,8 +23,22 @@ for(const date1904 of [false,true])test(`实际导出日期为文本，${date190
  const xfs=styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*(?:\/>|>[\s\S]*?<\/xf>)/g),borders=styles.match(/<borders\b[^>]*>([\s\S]*?)<\/borders>/)[1].match(/<border>[\s\S]*?<\/border>/g);
  for(const c of xml.match(/<c\b[^>]+>/g)){
   const address=c.match(/\br="([A-Z]+\d+)"/)[1],row=Number(address.match(/\d+$/)[0]),style=xfs[Number(c.match(/\bs="(\d+)"/)[1])],border=borders[Number(style.match(/\bborderId="(\d+)"/)[1])];
-  for(const side of ['left','right','top','bottom'])assert.match(border,new RegExp(`<${side} style="${row===1?'thin':'hair'}"><color rgb="FF404040"/></${side}>`),address);
+  const value=s[address]?.v,blank=value==null||(typeof value==='string'&&!value.trim());
+  if(row>1&&blank)assert.doesNotMatch(border,/style=/,address);
+  else for(const side of ['left','right','top','bottom'])assert.match(border,new RegExp(`<${side} style="${row===1?'thin':'hair'}"><color rgb="FF404040"/></${side}>`),address);
  }
+});
+test('实际导出空白不画边框，零和false有边框，已付款空白格仍保留红色',async()=>{
+ const Export=require('../funds-ledger-export.js'),result=build(book([row({'申请付款金额':0})]));
+ result.sheets[0].rows[0][5]={t:'s',v:' \n '};result.sheets[0].rows[0][7]={t:'b',v:false};result.sheets[0].rows[0][10]={t:'s',v:'已付款'};
+ const before=JSON.stringify(result),bytes=await Export(result),out=X.read(bytes,{type:'array',cellNF:true,cellStyles:true}),s=out.Sheets.正常付款;
+ const zip=await require('../vendor/jszip.min.js').loadAsync(bytes),styles=await zip.file('xl/styles.xml').async('string'),xml=await zip.file('xl/worksheets/sheet1.xml').async('string');
+ const xfs=styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*(?:\/>|>[\s\S]*?<\/xf>)/g);
+ for(const [address,borderId] of [['A1',1],['E2',2],['F2',0],['H2',2],['I2',0]]){
+  const tag=xml.match(new RegExp(`<c\\b(?=[^>]*\\br="${address}")[^>]*>`))[0],style=xfs[Number(tag.match(/\bs="(\d+)"/)[1])];assert.match(style,new RegExp(`borderId="${borderId}"`),address);
+  if(address!=='A1')assert.equal(s[address].s.fgColor.rgb,'FF9999',address);
+ }
+ assert.equal(s.E2.v,0);assert.equal(s.E2.t,'n');assert.equal(s.E2.z,result.sheets[0].rows[0][4].z);assert.equal(s.F2.v,' \n ');assert.equal(s.H2.v,false);assert.equal(s.H2.t,'b');assert.equal(s.I2.v,'');assert.equal(JSON.stringify(result),before);
 });
 function set(b,h,cell,r=2){b.Sheets['对账明细-李奇'][X.utils.encode_cell({r:r-1,c:H.indexOf(h)})]=cell;}
 test('全部月份单表14列，仅谈判否筛选，已结清仍保留且结清列无需存在或可含错误',()=>{

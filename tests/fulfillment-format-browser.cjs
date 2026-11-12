@@ -134,14 +134,21 @@ function checkSourceSheets(sourceBytes, exported, expected) {
 
 async function checkGeneratedBorders(bytes, sheetPaths) {
   const zip = await Zip.loadAsync(bytes), styles = await zip.file('xl/styles.xml').async('string');
+  const book = X.read(bytes, { type: 'buffer', cellNF: true });
   const xfs = styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g);
   const borders = styles.match(/<borders\b[^>]*>([\s\S]*?)<\/borders>/)[1].match(/<border\b[^>]*>[\s\S]*?<\/border>/g);
   for (const sheetPath of sheetPaths) {
     const xml = await zip.file(sheetPath).async('string');
+    const sheet = book.Sheets[book.SheetNames[Number(sheetPath.match(/(?:fulfillment|sheet)(\d+)\.xml$/)[1]) - 1]];
     for (const cell of xml.match(/<c\b[^>]*>/g) || []) {
       const address = cell.match(/\br="([A-Z]+)(\d+)"/), style = Number(cell.match(/\bs="(\d+)"/)?.[1] || 0);
       const border = borders[Number(xfs[style].match(/\bborderId="(\d+)"/)[1])];
+      const value = sheet[address[1] + address[2]]?.v, blank = value == null || typeof value === 'string' && !value.trim();
       for (const side of ['left', 'right', 'top', 'bottom']) {
+        if (Number(address[2]) > 1 && blank) {
+          assert.doesNotMatch(border, new RegExp(`<${side}\\b[^>]*style=`), sheetPath + '!' + address[0] + '空白不画边框');
+          continue;
+        }
         const edge = border.match(new RegExp(`<${side}\\b[^>]*>[\\s\\S]*?</${side}>`))?.[0] || '';
         assert.match(edge, new RegExp(`style="${Number(address[2]) === 1 ? 'thin' : 'hair'}"`), sheetPath + '!' + address[0]);
         assert.match(edge, /<color\b[^>]*rgb="FF404040"/, sheetPath + '!' + address[0]);

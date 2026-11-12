@@ -64,13 +64,23 @@ function uploadFile(rows, sheetName, name) {
         return { xmls, styles: await zip.file('xl/styles.xml').async('string') };
       }, [...bytes]);
       const alignments = [...styles.matchAll(/<alignment\b[^>]*\/>/g)].map(match => match[0]);
-      assert.equal(alignments.length, 5);
+      assert.equal(alignments.length, 9);
       assert(alignments.every(style => style.includes('wrapText="0"') && style.includes('horizontal="center"') && style.includes('vertical="center"')));
       assert.equal((styles.match(/style="thin"><color rgb="FF404040"/g)||[]).length,4);
       assert.equal((styles.match(/style="hair"><color rgb="FF404040"/g)||[]).length,4);
       const xfs=[...styles.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/)[1].matchAll(/<xf\b[^>]*>/g)].map(match=>match[0]);
       assert.match(xfs[1],/borderId="1"/);
-      assert(xfs.slice(2).every(xf=>xf.includes('borderId="2"')));
+      assert(xfs.slice(2,6).every(xf=>xf.includes('borderId="2"')));
+      assert(xfs.slice(6).every(xf=>xf.includes('borderId="0"')));
+      for(const [index,{text}] of xmls.entries()) {
+        const sheet=workbook.Sheets[workbook.SheetNames[index]];
+        for(const match of text.matchAll(/<c\b([^>]*)>/g)) {
+          const address=match[1].match(/\br="([A-Z]+\d+)"/)?.[1];if(!address)continue;
+          const style=Number(match[1].match(/\bs="(\d+)"/)?.[1]||0),row=Number(address.match(/\d+/)[0]);
+          const expected=row===1?'1':String(sheet[address]?.v??'').trim()!==''?'2':'0';
+          assert.equal(xfs[style].match(/borderId="(\d+)"/)[1],expected,`${workbook.SheetNames[index]}!${address} border`);
+        }
+      }
       return { workbook, xmls };
     }
 

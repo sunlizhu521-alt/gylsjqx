@@ -82,15 +82,16 @@
     const fonts = '<fonts count="2"><font><sz val="11"/><color rgb="FF172033"/><name val="宋体"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="宋体"/></font></fonts>';
     const fills = '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFFFF"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF315B9D"/><bgColor indexed="64"/></patternFill></fill></fills>';
     const borders = '<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border>' + ['thin','hair'].map(style => '<border>' + ['left','right','top','bottom'].map(side => `<${side} style="${style}"><color rgb="FF404040"/></${side}>`).join('') + '<diagonal/></border>').join('') + '</borders>';
-    const xf = (format,header) => `<xf numFmtId="${format}" fontId="${header?1:0}" fillId="${header?3:2}" borderId="${header?1:2}" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="0" shrinkToFit="0"/></xf>`;
+    const xf = (format,header,blank=false) => `<xf numFmtId="${format}" fontId="${header?1:0}" fillId="${header?3:2}" borderId="${header?1:blank?0:2}" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="0" shrinkToFit="0"/></xf>`;
     styles = styles.replace(/<fonts\b[^>]*>[\s\S]*?<\/fonts>/,fonts).replace(/<fills\b[^>]*>[\s\S]*?<\/fills>/,fills).replace(/<borders\b[^>]*>[\s\S]*?<\/borders>/,borders)
-      .replace(/<cellXfs\b[^>]*>[\s\S]*?<\/cellXfs>/,`<cellXfs count="${styleCount*2}">${formats.map(format => xf(format,false)).join('')}${formats.map(format => xf(format,true)).join('')}</cellXfs>`);
+      .replace(/<cellXfs\b[^>]*>[\s\S]*?<\/cellXfs>/,`<cellXfs count="${styleCount*3}">${formats.map(format => xf(format,false)).join('')}${formats.map(format => xf(format,true)).join('')}${formats.map(format => xf(format,false,true)).join('')}</cellXfs>`);
     zip.file('xl/styles.xml',styles);
     let xml = await zip.file('xl/worksheets/sheet1.xml').async('string');
     xml = xml.replace(/<c\b([^>]*?)(\/?)>/g,(tag,attrs,end) => {
-      const address = attrs.match(/\br="[A-Z]+(\d+)"/);
+      const address = attrs.match(/\br="([A-Z]+(\d+))"/);
       if (!address) return tag;
-      const style = Number(attrs.match(/\bs="(\d+)"/)?.[1] || 0) + (Number(address[1]) <= 2 ? styleCount : 0);
+      const value = sheet[address[1]]?.v, blank = value == null || typeof value === 'string' && !value.trim();
+      const style = Number(attrs.match(/\bs="(\d+)"/)?.[1] || 0) + (Number(address[2]) <= 2 ? styleCount : blank ? styleCount*2 : 0);
       return '<c' + attrs.replace(/\s+s="\d+"/,'') + ` s="${style}"${end}>`;
     });
     const views = '<sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A3" sqref="A3"/></sheetView></sheetViews>';

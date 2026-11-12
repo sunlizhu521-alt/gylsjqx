@@ -1340,18 +1340,28 @@ function buildDetailWorkbookStylesXml() {
     </border>
   </borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="6">
+  <cellXfs count="10">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="2" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="2" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
     <xf numFmtId="1" fontId="0" fillId="0" borderId="2" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
     <xf numFmtId="49" fontId="0" fillId="0" borderId="2" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
+    <xf numFmtId="1" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
+    <xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
   </cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
   <dxfs count="0"/>
   <tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleMedium9"/>
 </styleSheet>`;
+}
+
+function detailExportStyle(rowIndex, key, value) {
+  if (rowIndex === 1) return "1";
+  const style = key === "quantity" ? 4 : ["todayDate", "supplierDeliveryDate"].includes(key) ? 5 : key === "stockReason" ? 3 : 2;
+  return String(style + (value == null || String(value).trim() === "" ? 4 : 0));
 }
 
 function styleDetailWorksheetXml(xml, shape) {
@@ -1364,14 +1374,12 @@ function styleDetailWorksheetXml(xml, shape) {
   if (!sheetData) return xml;
 
   const columns = shape.columns || EXPORT_COLUMNS;
-  const wrapColumnIndex = columns.findIndex((column) => column.key === "stockReason") + 1;
-  const quantityColumnIndex = columns.findIndex((column) => column.key === "quantity") + 1;
   for (let rowIndex = 1; rowIndex <= shape.rowCount; rowIndex += 1) {
     const row = ensureWorksheetRow(documentXml, sheetData, rowIndex);
     for (let columnIndex = 1; columnIndex <= shape.columnCount; columnIndex += 1) {
       const cell = ensureWorksheetCell(documentXml, row, rowIndex, columnIndex);
-      const styleId = rowIndex === 1 ? "1" : columnIndex === quantityColumnIndex ? "4" : ["todayDate", "supplierDeliveryDate"].includes(columns[columnIndex-1]?.key) ? "5" : columnIndex === wrapColumnIndex ? "3" : "2";
-      cell.setAttribute("s", styleId);
+      const value = cell.querySelector("is")?.textContent ?? cell.querySelector("v")?.textContent;
+      cell.setAttribute("s", detailExportStyle(rowIndex, columns[columnIndex-1]?.key, value));
     }
   }
 

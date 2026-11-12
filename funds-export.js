@@ -180,6 +180,8 @@ window.FundsExport = async function(sourceBytes, result) {
   const sharedRel=elements(rels,'Relationship').find(e=>e.getAttribute('Type')===R+'/sharedStrings');
   const sharedTexts=sharedRel?elements(await parse(zip,resolve('xl/workbook.xml',sharedRel.getAttribute('Target'))),'si').map(si=>elements(si,'t').map(t=>t.textContent).join('')):[];
   const cellText=c=>c?.getAttribute('t')==='s'?sharedTexts[Number(first(c,'v')?.textContent)]||'':c?.getAttribute('t')==='inlineStr'?elements(c,'t').map(t=>t.textContent).join(''):c?first(c,'v')?.textContent??'':'';
+  const emptyBorderId=append('borders',create(styles,'border')),emptyBorderStyles=new Map();
+  const withoutBorder=id=>{if(!emptyBorderStyles.has(id)){const xf=xfs.children[id].cloneNode(true);xf.setAttribute('borderId',emptyBorderId);xf.setAttribute('applyBorder','1');emptyBorderStyles.set(id,append('cellXfs',xf));}return emptyBorderStyles.get(id);};
   const layoutStyles=new Map(),headerFonts=new Map(),borderStyles=new Map();
   const layoutStyle=(id,header,flow,edges=['left','right','top','bottom'])=>{
     const key=[id,header,flow,edges.join(',')].join('|');if(layoutStyles.has(key))return layoutStyles.get(key);
@@ -218,7 +220,7 @@ window.FundsExport = async function(sourceBytes, result) {
     const singleLineColumns=new Set(flowColumns),dateColumns=new Set();
     if(doc!==sheet)for(let c=0;c<=end.c;c++){const title=cellText(ensureCell(headerRow,c));if(['对公付款0A流程号','对公付款OA流程号','开票时间','OA合同编号',...(progress?['对公付款OA号','申请日期','应付时间']:[])].includes(title))singleLineColumns.add(c);if(title==='开票时间'||progress&&['申请日期','应付时间'].includes(title))dateColumns.add(c);}
     const populatedColumns=new Set([...cells.values()].filter(c=>cellText(c)!==''||first(c,'f')).map(c=>XLSX.utils.decode_cell(c.getAttribute('r')).c).filter(scoped));
-    // Keep the grid continuous through blank cells within every populated column.
+    // Explicit blank cells override inherited column borders without changing their values.
     for(const c of populatedColumns)for(let r=headerRow;r<=end.r;r++)ensureCell(r,c);
     for(const c of elements(data,'c')){
       const address=c.getAttribute('r'),point=XLSX.utils.decode_cell(address),header=point.r===headerRow,flow=singleLineColumns.has(point.c);
@@ -226,6 +228,7 @@ window.FundsExport = async function(sourceBytes, result) {
       if(doc!==sheet&&flow&&!header&&!first(c,'f')&&/[\r\n]/.test(cellText(c))){const text=cellText(c).replace(/\r\n|[\r\n]/g,'；');for(const child of [...c.children])if(['v','is'].includes(child.localName))child.remove();const is=create(doc,'is'),t=create(doc,'t');t.textContent=text;is.append(t);c.setAttribute('t','inlineStr');c.insertBefore(is,c.firstChild);}
       if(header&&['',null,'n'].includes(c.getAttribute('t'))&&Number(xfs.children[styleId(c)].getAttribute('numFmtId'))===31)c.setAttribute('s',dateDisplayStyle(styleId(c)));
       if(header||flow||populatedColumns.has(point.c))c.setAttribute('s',layoutStyle(styleId(c),header,flow));
+      if(!header&&!cellText(c).trim())c.setAttribute('s',withoutBorder(styleId(c)));
       const xf=xfs.children[styleId(c)];
       const size=Number(first(fonts.children[Number(xf?.getAttribute('fontId')||0)],'sz')?.getAttribute('val')||11),type=c.getAttribute('t'),raw=first(c,'v')?.textContent??'';
       let text=type==='s'?sharedTexts[Number(raw)]||'':type==='inlineStr'?elements(c,'t').map(t=>t.textContent).join(''):raw;
@@ -254,7 +257,7 @@ window.FundsExport = async function(sourceBytes, result) {
       if(reviewHeight(c)>409.5)throw Error('付款申请核对第'+(point.r+1)+'行内容超过单行可完整显示的高度，请精简源说明后重新生成；未导出截断内容');
     }
     // A populated merged cell also needs borders on its perimeter, without changing the merge.
-    for(const range of merges){if(Array.from({length:range.e.c-range.s.c+1},(_,i)=>range.s.c+i).some(c=>!scoped(c)))continue;const anchor=cells.get(XLSX.utils.encode_cell(range.s));if(cellText(anchor)===''&&!anchor?.getElementsByTagNameNS('*','f').length)continue;for(let r=range.s.r;r<=range.e.r;r++)for(let c=range.s.c;c<=range.e.c;c++){const edges=[c===range.s.c&&'left',c===range.e.c&&'right',r===range.s.r&&'top',r===range.e.r&&'bottom'].filter(Boolean);if(edges.length){const cell=ensureCell(r,c);cell.setAttribute('s',layoutStyle(styleId(cell),r===headerRow,flowColumns.has(c),edges));}}}
+    for(const range of merges){if(Array.from({length:range.e.c-range.s.c+1},(_,i)=>range.s.c+i).some(c=>!scoped(c)))continue;const anchor=cells.get(XLSX.utils.encode_cell(range.s));if(!cellText(anchor).trim())continue;for(let r=range.s.r;r<=range.e.r;r++)for(let c=range.s.c;c<=range.e.c;c++){const edges=[c===range.s.c&&'left',c===range.e.c&&'right',r===range.s.r&&'top',r===range.e.r&&'bottom'].filter(Boolean);if(edges.length){const cell=ensureCell(r,c);cell.setAttribute('s',layoutStyle(styleId(cell),r===headerRow,flowColumns.has(c),edges));}}}
     cols.replaceChildren(...widths.flatMap((width,c)=>{
       const old=oldCols.find(e=>Number(e.getAttribute('min'))<=c+1&&Number(e.getAttribute('max'))>=c+1),col=old?old.cloneNode(true):create(doc,'col');
       if(!scoped(c)){if(!old)return [];col.setAttribute('min',c+1);col.setAttribute('max',c+1);return [col];}
