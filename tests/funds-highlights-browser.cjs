@@ -132,7 +132,7 @@ function fixture({ removeFirstApplication = false } = {}) {
       assert.deepEqual(book.SheetNames, ['谈判付款', '正常付款', '付款申请核对', '付款进度整理']);
       const n = book.Sheets.谈判付款, normal = book.Sheets.正常付款;
       assert.equal(n.U2.c?.[0]?.t,highlighted?'申请日期（付款节奏跟进）：2026年10月27日':undefined);assert.equal(n.U3.c[0].t,'申请日期（付款节奏跟进）：2026年10月27日');assert.equal(n.V2.c,undefined);
-      const actualDate=normal[X.utils.encode_cell({r:1,c:C.NORMAL_HEADERS.indexOf('申请日期')})];assert.equal(actualDate.t,'n');assert.equal(X.SSF.format(actualDate.z,actualDate.v),'2026年10月27日');
+      const actualDate=normal[X.utils.encode_cell({r:1,c:C.NORMAL_HEADERS.indexOf('申请日期')})];assert.equal(actualDate.t,'s');assert.equal(actualDate.z,'@');assert.equal(X.SSF.format(actualDate.z,actualDate.v),'2026年10月27日');
       for (const row of [2, 3]) {
         const r = records[row - 2];
         assert.deepEqual([n['U' + row].v, n['V' + row].v], r.plan, '原分批金额不变');
@@ -209,7 +209,7 @@ function fixture({ removeFirstApplication = false } = {}) {
     assert.deepEqual(output.map(row=>row['申请付款的日期']),['2026/10/26周','2026/12/28周']);
     assert.equal(sorted.O2.f,'G2-M2');assert.equal(sorted.O2.v,123.45);assert.equal(sorted.O3.f,'G3-M3');assert.equal(sorted.O3.v,100);
     for(const r of [2,3])for(let c=0;c<C.NORMAL_HEADERS.length;c++)assert.equal(/^(?:FF)?FF0000$/i.test(sorted[X.utils.encode_cell({r:r-1,c})].s?.fgColor?.rgb||''),r===3,'排序后整行标红必须随记录移动，包括隐藏列');
-    assert.equal(sorted[X.utils.encode_cell({r:1,c:at('申请日期')})].v??'','');assert.equal(sorted[X.utils.encode_cell({r:2,c:at('申请日期')})].v,46322);
+    assert.equal(sorted[X.utils.encode_cell({r:1,c:at('申请日期')})].v??'','');assert.equal(sorted[X.utils.encode_cell({r:2,c:at('申请日期')})].v,'2026年10月27日');
     assert.equal(sortedBook.Sheets.谈判付款.U3.c[0].t,'申请日期（付款节奏跟进）：2026年10月27日');
     if(process.env.QA_OUT){await fs.writeFile(process.env.QA_OUT+'/sorted-dates.xlsx',sortedBytes);await frame.locator('#normalPreview tbody tr').first().locator('td').nth(at('申请付款的日期')).scrollIntoViewIfNeeded();await frame.locator('#normalPreview').screenshot({path:process.env.QA_OUT+'/sorted-dates.png'});}
     // Replacing the application OA must move dates and red fill to that OA only, even at the same amount.
@@ -219,7 +219,7 @@ function fixture({ removeFirstApplication = false } = {}) {
     assert(switchedPreview.rows[0].every(c=>c.applied));assert(switchedPreview.rows[1].every(c=>!c.applied));
     const switchedBook=X.read(await download(4),{cellNF:true,cellStyles:true}),switchedNormal=switchedBook.Sheets.正常付款;
     assert.deepEqual([switchedNormal.E2.v,switchedNormal.E3.v],[records[3].id,records[2].id]);assert.deepEqual([switchedNormal.Q2.v,switchedNormal.Q3.v],['已提交','未申请']);
-    assert.equal(switchedNormal.R2.v,46322);assert.equal(switchedNormal.R3.v??'','');assert.equal(switchedNormal.S1.v,'提交时间汇总');assert.match(switchedNormal.S2.v,/2026-10-27-123.45/);assert.equal(switchedNormal.S3.v??'','');
+    assert.equal(switchedNormal.R2.v,'2026年10月27日');assert.equal(switchedNormal.R3.v??'','');assert.equal(switchedNormal.S1.v,'提交时间汇总');assert.match(switchedNormal.S2.v,/2026-10-27-123.45/);assert.equal(switchedNormal.S3.v??'','');
     for(const r of [2,3])for(let c=0;c<C.NORMAL_HEADERS.length;c++)assert.equal(/^(?:FF)?FF0000$/i.test(switchedNormal[X.utils.encode_cell({r:r-1,c})].s?.fgColor?.rgb||''),r===2);
     assert.deepEqual(errors, []);
     console.log('PASS: ascending application payment dates with matching formulas and highlights; native application-date notes and normal date column; homepage upload, first/re-read preview, earliest equal-amount installment and full normal-row red fill, no unnecessary review, original formulas, hidden columns, fresh-input CF replacement');

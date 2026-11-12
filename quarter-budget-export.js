@@ -6,7 +6,7 @@
   const DETAIL_HEADERS = ['预估付款月份','供应商名称','付款主体','对公付款0A流程号','摘要','申请付款金额','是否已支付','备注','分类','跟单员','是否剔除'];
   const CLASSIFIED_HEADERS = ['付款月份','分类','申请总金额','已付款金额','剩余付款金额','备注'];
   const MONTHLY_HEADERS = ['付款月份','申请总金额','已付款金额','剩余付款金额','备注'];
-  const MONTH_FORMAT = 'yyyy"年"m"月"', AMOUNT_FORMAT = '#,##0.00';
+  const AMOUNT_FORMAT = '#,##0.00';
   const width = text => [...String(text)].reduce((n, c) => n + (c.codePointAt(0) > 255 ? 2 : 1), 0);
 
   function cell(value, format) {
@@ -27,10 +27,7 @@
     if (!key) return cell('月份待核对');
     const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(key);
     if (!match) return cell(key);
-    const date = new Date(0);
-    date.setUTCFullYear(Number(match[1]), Number(match[2]) - 1, 1);
-    date.setUTCHours(0, 0, 0, 0);
-    return cell((date.getTime() - Date.UTC(1899, 11, 30)) / 86400000, MONTH_FORMAT);
+    return {...cell(Number(match[1]) + '年' + Number(match[2]) + '月'),z:'@'};
   }
 
   function formatCell(value) {
@@ -49,7 +46,7 @@
       throw new Error('缺少季度预算整理结果，请先整理数据。');
     }
     const detailRows = [DETAIL_HEADERS.map(v => cell(v)), ...result.records.map(r => [
-      cell(r.monthDate1904 && typeof r.month === 'number' && r.month > 12 && r.monthKey ? r.month + 1462 : r.month, MONTH_FORMAT), cell(r.supplier), cell(r.subject), cell(r.oa), cell(r.summary), cell(r.amount, AMOUNT_FORMAT),
+      r.monthKey ? month(r.monthKey) : {...cell(r.month == null ? '' : String(r.month)),z:'@'}, cell(r.supplier), cell(r.subject), cell(r.oa), cell(r.summary), cell(r.amount, AMOUNT_FORMAT),
       cell(r.status), cell(r.notes), cell(r.category), cell(r.owner), cell(r.excluded)
     ])];
     const total = result.summary.totals;
@@ -84,8 +81,8 @@
     const formats = original.map(s => s.match(/\bnumFmtId="(\d+)"/)?.[1] || '0'), count = formats.length;
     const fonts = '<fonts count="3"><font><sz val="11"/><color rgb="FF172033"/><name val="等线"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="等线"/></font><font><b/><sz val="11"/><color rgb="FF172033"/><name val="等线"/></font></fonts>';
     const fills = '<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFFFF"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF315B9D"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFC7CE"/><bgColor indexed="64"/></patternFill></fill></fills>';
-    const borders = '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border>' + ['left','right','top','bottom'].map(side => `<${side} style="thin"><color rgb="FFD6DEE8"/></${side}>`).join('') + '<diagonal/></border></borders>';
-    const xf = (format, font, fill) => `<xf numFmtId="${format}" fontId="${font}" fillId="${fill}" borderId="1" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="1" shrinkToFit="0"/></xf>`;
+    const borders = '<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border>' + ['thin','hair'].map(style => '<border>' + ['left','right','top','bottom'].map(side => `<${side} style="${style}"><color rgb="FF404040"/></${side}>`).join('') + '<diagonal/></border>').join('') + '</borders>';
+    const xf = (format, font, fill) => `<xf numFmtId="${format}" fontId="${font}" fillId="${fill}" borderId="${font===1?1:2}" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="1" shrinkToFit="0"/></xf>`;
     styles = styles.replace(/<fonts\b[^>]*>[\s\S]*?<\/fonts>/, fonts).replace(/<fills\b[^>]*>[\s\S]*?<\/fills>/, fills).replace(/<borders\b[^>]*>[\s\S]*?<\/borders>/, borders)
       .replace(/<cellXfs\b[^>]*>[\s\S]*?<\/cellXfs>/, `<cellXfs count="${count * 3 + 1}">${formats.map(f => xf(f,0,2)).join('')}${formats.map(f => xf(f,0,4)).join('')}${formats.map(f => xf(f,2,2)).join('')}${xf(0,1,3)}</cellXfs>`);
     zip.file('xl/styles.xml', styles);

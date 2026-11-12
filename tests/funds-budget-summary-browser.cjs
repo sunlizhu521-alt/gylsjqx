@@ -69,6 +69,7 @@ async function preserved(before,after) {
     assert.equal(await frame.locator('#preview').innerText(),preview,'切换工具保留结果');
     const bytes=await download(page,frame,1),book=X.read(bytes,{type:'buffer',cellNF:true});
     assert.deepEqual(book.SheetNames,['付款预算汇总','付款汇总明细','原始记录']);
+    assert.equal(book.Sheets.付款预算汇总.A2.t,'s');assert.equal(book.Sheets.付款预算汇总.A2.v,'2026年11月');assert.equal(book.Sheets.付款预算汇总.A2.z,'@');
     assert.equal(book.Sheets.付款预算汇总.D5.v,175);
     assert.equal(book.Sheets.付款预算汇总.E5.v,100);
     assert.equal(book.Sheets.付款预算汇总.F2.f,'D2-E2');

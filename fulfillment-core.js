@@ -16,7 +16,7 @@ function summaryRows(rows,sources=[]){return rows.map((row,index)=>SUMMARY_COLUM
  if(key==='采购跟单员')return {t:'s',v:sources[index]?.sheet||'',z:'@'};
  const sourceKey=key==='OA流程号'?'OA备货单号':key==='为生产预计交付时间'?'未生产预计交付时间':key;
  const cell=defaultCell(sourceKey,row[COLUMNS.indexOf(sourceKey)]);
- if(sourceKey==='下单月份'){const date=dateCell(cell);return date.invalid?cell:date.t==='n'?{...date,z:MONTH_FORMAT}:date;}
+ if(sourceKey==='下单月份'){const date=dateCell(cell);return {t:'s',v:date.invalid?formatCell(cell):date.t==='n'?X.SSF.format(MONTH_FORMAT,date.v):String(date.v??''),z:'@'};}
  if(QUANTITY_FIELDS.includes(sourceKey)&&cell.t==='n'&&Number.isFinite(cell.v)){
   const precision=(quantityText(cell.v).split('.')[1]||'').length;
   return {t:'n',v:cell.v,z:precision>250?'0.0000000000000000E+00':precision?'0.'+'0'.repeat(precision):'0'};

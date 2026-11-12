@@ -6,7 +6,7 @@ test('历史订单按2025年1月保存真实日期，忽略空格且不猜测其
  for(const value of ['历史订单',' 历史\n订单 '])for(const date1904 of [false,true]){const cell=C.dateCell({v:value},date1904,2030);assert.equal(cell.t,'n');assert.equal(cell.v,45658);assert.equal(X.SSF.format(cell.z,cell.v),'2025年1月');}
  assert.ok(C.dateCell({v:'历史订单待确认'}).invalid);assert.equal(C.dateCell({v:''}).v,'');assert.equal(C.dateCell({v:'/'}).v,'/');
  const source=fixture();source.Sheets.徐英.X3={t:'s',v:'历史订单'};source.Sheets.徐英.C3={t:'s',v:'历史订单'};const result=C.merge(source),sheet=X.read(X.write(C.workbook(result),{type:'buffer',bookType:'xlsx'}),{cellNF:true}).Sheets.汇总表;
- assert.equal(sheet.E2.t,'n');assert.equal(X.SSF.format(sheet.E2.z,sheet.E2.v),'2025年1月');assert.equal(result.rows[0][C.COLUMNS.indexOf('下单月份')].v,45658);assert.ok(!result.warnings.some(w=>w.includes('历史订单')));assert.equal(source.Sheets.徐英.X3.v,'历史订单');
+ assert.equal(sheet.E2.t,'s');assert.equal(sheet.E2.z,'@');assert.equal(sheet.E2.v,'2025年1月');assert.equal(result.rows[0][C.COLUMNS.indexOf('下单月份')].v,45658);assert.ok(!result.warnings.some(w=>w.includes('历史订单')));assert.equal(source.Sheets.徐英.X3.v,'历史订单');
 });
 test('旧缓存仅迁移日期字段的历史订单，不改数量与其他文字',()=>{
  const original=snapshot([['MAT',123]]);original.sources=[{sheet:'徐英',row:2}];for(const key of ['下单日期','下单月份','合同约定交期','生产中交付时间','未生产预计交付时间','物料名称'])original.rows[0][C.COLUMNS.indexOf(key)]={t:'s',v:'历史订单'};
@@ -22,7 +22,7 @@ test('年月文本保存真实日期并显示中文月份，无效月份保留�
  for(const value of ['2025-11','2025-1','2025年11月',' 2025 / 11 ']){const cell=C.dateCell({v:value});assert.equal(cell.t,'n');assert.equal(X.SSF.format(cell.z,cell.v),value==='2025-1'?'2025年1月':'2025年11月');}
  for(const value of ['2025-0','2025-13','2025-11待定'])assert.ok(C.dateCell({v:value}).invalid);
  const source=fixture();source.Sheets.徐英.C3={t:'s',v:'2025-11'};source.Sheets.徐英.X3={t:'s',v:'2025-11'};source.Sheets.徐英.N3={t:'s',v:'2025-11'};const result=C.merge(source);assert.equal(X.SSF.format(result.rows[0][20].z,result.rows[0][20].v),'2025年11月');assert.equal(source.Sheets.徐英.C3.v,'2025-11');assert.equal(result.rows[0][9].v,'2025-11');
- const saved=X.read(X.write(C.workbook(result),{type:'buffer',bookType:'xlsx'}),{cellNF:true});assert.equal(saved.Sheets.汇总表.E2.t,'n');assert.equal(X.SSF.format(saved.Sheets.汇总表.E2.z,saved.Sheets.汇总表.E2.v),'2025年11月');
+ const saved=X.read(X.write(C.workbook(result),{type:'buffer',bookType:'xlsx'}),{cellNF:true});assert.equal(saved.Sheets.汇总表.E2.t,'s');assert.equal(saved.Sheets.汇总表.E2.z,'@');assert.equal(saved.Sheets.汇总表.E2.v,'2025年11月');
  const cached=structuredClone(result);cached.rows[0][20]={t:'s',v:'2025-11'};cached.rows[0][23]={t:'s',v:'2025-11'};cached.warnings=['徐英!X3：日期“2025-11”无法识别，保留原文','徐英!X4：日期“2025-13”无法识别，保留原文'];const migrated=C.currentScope(cached);assert.equal(migrated.rows[0][20].t,'n');assert.equal(migrated.rows[0][23].t,'n');assert.deepEqual(migrated.warnings,[cached.warnings[1]]);
 });
 test('OA备货单号缺失或斜杠填无，已有编号和其他单号不变，预览导出缓存一致',()=>{
@@ -118,7 +118,7 @@ test('汇总22列按指定顺序，月份及OA字段对应，旧缓存缺月份�
  const oldRow=structuredClone(result.rows[0]);oldRow[20]={t:'s',v:''};assert.equal(C.summaryRows([oldRow])[0][4].v,'');assert.equal(C.summaryRows([result.rows[0].slice(0,23)])[0][4].v,sheet.E2.v);
 });
 
-test('四人月份按各自表头读取，月份为真实日期，其余非数量列为文本且交期显示年月日',()=>{
+test('四人月份按各自表头读取，汇总日期和其他非数量列为文本，内部日期保持可校准数值',()=>{
  const book=X.utils.book_new(),months=['2025-11',46275,'历史订单','/'];
  for(const [i,name] of C.SHEETS.entries()){
   const columns=C.COLUMNS.filter(k=>k!=='下单日期'),headers=columns.slice(i*3).concat(columns.slice(0,i*3));
@@ -129,9 +129,9 @@ test('四人月份按各自表头读取，月份为真实日期，其余非数�
  assert.deepEqual(preview.map(row=>X.SSF.format(row[4].z,row[4].v)),['2025年11月','2026年9月','2025年1月','2026年4月']);
  assert.deepEqual(result.warnings,[]);assert.deepEqual(book,original);
  for(let i=0;i<4;i++){
-  const month=saved['E'+(i+2)];assert.equal(month.t,'n');assert.equal(month.z,'yyyy"年"m"月"');assert.equal(month.v,preview[i][4].v);
+  const month=saved['E'+(i+2)];assert.equal(month.t,'s');assert.equal(month.z,'@');assert.equal(month.v,preview[i][4].v);assert.equal(result.rows[i][C.COLUMNS.indexOf('下单月份')].t,'n');
   for(const col of ['S','T','U'])assert.equal(saved[col+(i+2)].v,'2026年10月23日');
-  for(let col=0;col<22;col++){if(col===4||(col>=12&&col<=17))continue;const cell=saved[X.utils.encode_cell({r:i+1,c:col})];assert.equal(cell.t,'s');assert.equal(cell.z,'@');assert.equal(typeof cell.v,'string');assert.equal(preview[i][col].t,'s');assert.equal(preview[i][col].z,'@');assert.equal(preview[i][col].v,cell.v);}
+  for(let col=0;col<22;col++){if(col>=12&&col<=17)continue;const cell=saved[X.utils.encode_cell({r:i+1,c:col})];assert.equal(cell.t,'s');assert.equal(cell.z,'@');assert.equal(typeof cell.v,'string');assert.equal(preview[i][col].t,'s');assert.equal(preview[i][col].z,'@');assert.equal(preview[i][col].v,cell.v);}
   assert.equal(saved['D'+(i+2)].v,'101');
   for(const [col,value] of [['F','0000123'],['J','000123'],['K','000SKU']]){assert.equal(saved[col+(i+2)].t,'s');assert.equal(saved[col+(i+2)].v,value);}
  }

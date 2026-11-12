@@ -16,13 +16,15 @@ async function read(data) {
   const zip = await Zip.loadAsync(bytes);
   return {bytes,book,zip};
 }
-test('1904日期系统合并导出后保持实际日历日期', async () => {
+test('1904日期系统合并导出为年月文本，内部月份保持原数值', async () => {
   const Core = require('../quarter-budget-core.js');
   const source = {filename:'1904.xlsx',fingerprint:'1904',book:{SheetNames:['付款汇总明细'],Workbook:{WBProps:{date1904:true}},Sheets:{付款汇总明细:X.utils.aoa_to_sheet([Core.HEADERS,[44865,'合成供应商','主体','FP001','货款',100,'未支付','原备注','人工分类','跟单员','否']])}}};
   const built = Core.build({existing:source},{mode:'existing'});
   assert.equal(built.records[0].month,44865);
   const {book} = await read(built);
-  assert.equal(book.Sheets.付款汇总明细.A2.v,46327);
+  assert.equal(book.Sheets.付款汇总明细.A2.v,'2026年11月');
+  assert.equal(book.Sheets.付款汇总明细.A2.t,'s');
+  assert.equal(book.Sheets.付款汇总明细.A2.z,'@');
   assert.equal(book.Sheets.付款汇总明细.A2.w,'2026年11月');
   assert.equal(book.Sheets.付款汇总明细.H2.v,'原备注');
   assert.equal(source.book.Sheets.付款汇总明细.A2.v,44865);
@@ -31,17 +33,18 @@ const xml = (zip, index) => zip.file(`xl/worksheets/sheet${index}.xml`).async('s
 function stylesFrom(text) {
   return {
     xfs:text.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*(?:\/>|>[\s\S]*?<\/xf>)/g),
-    fills:text.match(/<fills\b[^>]*>([\s\S]*?)<\/fills>/)[1].match(/<fill>[\s\S]*?<\/fill>/g)
+    fills:text.match(/<fills\b[^>]*>([\s\S]*?)<\/fills>/)[1].match(/<fill>[\s\S]*?<\/fill>/g),
+    borders:text.match(/<borders\b[^>]*>([\s\S]*?)<\/borders>/)[1].match(/<border>[\s\S]*?<\/border>/g)
   };
 }
 function styleAt(sheetXml, styles, address) {
   const attrs = sheetXml.match(new RegExp(`<c\\b(?=[^>]*\\br="${address}")[^>]*>`))[0];
   const xf = styles.xfs[Number(attrs.match(/\bs="(\d+)"/)?.[1] || 0)];
   const fill = styles.fills[Number(xf.match(/\bfillId="(\d+)"/)[1])];
-  return {xf,color:fill.match(/\brgb="([^"]+)"/)?.[1]};
+  return {xf,color:fill.match(/\brgb="([^"]+)"/)?.[1],border:styles.borders[Number(xf.match(/\bborderId="(\d+)"/)[1])]};
 }
 
-test('固定11列，两张表；原数值日期、金额精度、空值和文本原样回读且没有公式', async () => {
+test('固定11列，两张表；日期为文本，金额精度、空值和文本不变且没有公式', async () => {
   const data = result([
     record({amount:123.456,cents:12346,summary:'=1+1',notes:'=HYPERLINK("https://example.invalid","text")'}),
     record({id:'r2',month:'月份待定',monthKey:'',amount:0,cents:0,oa:'=SUM(1,2)'}),
@@ -51,7 +54,7 @@ test('固定11列，两张表；原数值日期、金额精度、空值和文本
   const before = JSON.stringify(data), {book} = await read(data), sheet = book.Sheets.付款汇总明细;
   assert.deepEqual(book.SheetNames,['付款汇总明细','付款预算汇总']);
   assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1})[0],['预估付款月份','供应商名称','付款主体','对公付款0A流程号','摘要','申请付款金额','是否已支付','备注','分类','跟单员','是否剔除']);
-  assert.equal(sheet.A2.t,'n'); assert.equal(sheet.A2.v,46327); assert.equal(sheet.A2.z,'yyyy"年"m"月"'); assert.equal(sheet.A2.w,'2026年11月');
+  assert.equal(sheet.A2.t,'s'); assert.equal(sheet.A2.v,'2026年11月'); assert.equal(sheet.A2.z,'@'); assert.equal(sheet.A2.w,'2026年11月');
   assert.equal(sheet.F2.v,123.456); assert.equal(sheet.F2.z,'#,##0.00'); assert.equal(sheet.F2.w,'123.46');
   assert.equal(sheet.F3.v,0); assert.equal(sheet.F3.t,'n'); assert.equal(sheet.F4.v,''); assert.equal(sheet.F4.t,'s');
   assert.equal(sheet.A3.v,'月份待定'); assert.equal(sheet.A4.v,''); assert.equal(sheet.A5.v,'2027年11月/12月'); assert.equal(sheet.F5.v,'待核对');
@@ -70,7 +73,7 @@ test('同页按月分类和按月汇总，记录数不同也正确，剔除记�
   const {book}=await read(data),s=book.Sheets.付款预算汇总;
   assert.deepEqual(X.utils.sheet_to_json(s,{header:1})[0],['付款月份','分类','申请总金额','已付款金额','剩余付款金额','备注']);
   assert.deepEqual(X.utils.sheet_to_json(s,{header:1})[6],['付款月份','申请总金额','已付款金额','剩余付款金额','备注']);
-  assert.equal(s.A2.v,46327); assert.equal(s.A2.z,'yyyy"年"m"月"'); assert.equal(s.A4.v,'月份待核对'); assert.equal(s.A9.v,'月份待核对');
+  assert.equal(s.A2.v,'2026年11月'); assert.equal(s.A2.t,'s'); assert.equal(s.A2.z,'@'); assert.equal(s.A4.v,'月份待核对'); assert.equal(s.A9.v,'月份待核对');
   assert.deepEqual([s.C5.v,s.D5.v,s.E5.v],[123.45,23.45,100]);
   assert.deepEqual([s.B10.v,s.C10.v,s.D10.v],[123.45,23.45,100]);
   assert.equal(s.F5.v,''); assert.equal(s.E10.v,'');
@@ -98,7 +101,12 @@ test('普通明细筛选可取消，全部可见，两页冻结表头、居中�
     assert.doesNotMatch(sheet,/hidden="1"|<filterColumn\b|<tableParts\b/);
     const style=styleAt(sheet,styles,'A2').xf;
     assert.match(style,/horizontal="center" vertical="center" wrapText="1" shrinkToFit="0"/);
-    assert.match(style,/borderId="1"/);
+    assert.match(style,/borderId="2"/);
+    for(const c of sheet.match(/<c\b[^>]+>/g)){
+      const address=c.match(/\br="([A-Z]+\d+)"/)[1],row=Number(address.match(/\d+$/)[0]);
+      const border=styleAt(sheet,styles,address).border,expected=row===1||(index===2&&row===5)?'thin':'hair';
+      for(const side of ['left','right','top','bottom'])assert.match(border,new RegExp(`<${side} style="${expected}"><color rgb="FF404040"/></${side}>`),address);
+    }
   }
   assert.match(await xml(zip,1),/<autoFilter ref="A1:K3"\/>/);
   assert.doesNotMatch(await xml(zip,2),/<autoFilter\b/);
@@ -126,6 +134,15 @@ test('异常数字和缺失输入阻止导出，不把未知金额写成零', as
   await assert.rejects(Export({}),/缺少季度预算整理结果/);
   await assert.rejects(Export(result([record({amount:Infinity})])),/无效数字/);
   await assert.rejects(Export(result([],{totals:{totalCents:NaN,paidCents:0,remainingCents:0}})),/汇总金额无效/);
+});
+
+test('月份只作展示，不参与数值求和；缺年份数值保留文本，零金额仍为数值', async () => {
+  const data=result([record({amount:0,cents:0}),record({month:11,monthKey:'',amount:0,cents:0}),record({month:'2027-01-31',monthKey:'2027-01',amount:1,cents:100})]);
+  const {book}=await read(data),sheet=book.Sheets.付款汇总明细;
+  assert.deepEqual([sheet.A2.v,sheet.A3.v,sheet.A4.v],['2026年11月','11','2027年1月']);
+  for(const address of ['A2','A3','A4']){assert.equal(sheet[address].t,'s');assert.equal(sheet[address].z,'@');assert.equal(sheet[address].f,undefined);}
+  for(const address of ['F2','F3']){assert.equal(sheet[address].t,'n');assert.equal(sheet[address].v,0);}
+  assert.equal([sheet.A2,sheet.A3,sheet.A4,sheet.F2,sheet.F3,sheet.F4].filter(c=>c.t==='n').reduce((sum,c)=>sum+c.v,0),1);
 });
 
 test('浏览器UMD入口可直接使用本地XLSX和JSZip导出', async () => {

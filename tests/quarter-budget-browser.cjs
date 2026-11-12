@@ -100,6 +100,7 @@ async function context(browser,storageDisabled=false) {
     for (const sheet of Object.values(exported.book.Sheets)) for (const [key,cell] of Object.entries(sheet)) if (!key.startsWith('!')) assert.equal(cell.f,undefined,'导出不得含公式');
     const sheet = exported.book.Sheets['付款预算汇总'];
     assert.equal(Object.values(sheet).filter(cell => cell?.v === '付款月份').length,2,'一个汇总sheet中应有两表');
+    for (const s of Object.values(exported.book.Sheets)) for (const [address,cell] of Object.entries(s)) if (/^A\d+$/.test(address)) assert.equal(cell.t,'s','导出月份应为展示文本，不参与数值求和');
     assert.equal(Object.values(sheet).filter(cell => cell?.v === '备注').length,2);
     assert.equal(await page.evaluate(() => localStorage.getItem('funds-export-versions')),'{"2026-11-10":37}','不能修改其他工具版本号');
     assert(Object.values(JSON.parse(await page.evaluate(() => localStorage.getItem('quarter-budget-export-versions')))).includes(1));

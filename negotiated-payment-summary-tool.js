@@ -2,6 +2,7 @@
   'use strict';
   const $ = id => document.getElementById(id), C = window.NegotiatedPaymentSummaryCore;
   let source = null, result = null, decisions = {}, reviews = [], busy = false;
+  const versionKey = 'negotiated-payment-summary-export-versions', memoryVersions = {};
   const money = cents => cents == null ? '' : (cents / 100).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
   function controls() {
     $('sourceFile').disabled = $('clear').disabled = busy;
@@ -110,7 +111,7 @@
     if (sheet.A1?.v !== '供应商' || sheet.B1?.v !== '谈判总金额' || sheet[XLSX.utils.encode_cell({r:0,c:n+2})]?.v !== '正常付款总金额') throw Error('导出表头校验未通过');
     for (let i=0;i<n;i++) for (const col of [i+2,i+n+3]) {
       const cell = sheet[XLSX.utils.encode_cell({r:1,c:col})];
-      if (cell?.t !== 'n' || XLSX.SSF.format(cell.z,cell.v) !== result.months[i].label) throw Error('导出月份校验未通过');
+      if (cell?.t !== 's' || cell.v !== result.months[i].label || cell.z !== '@') throw Error('导出月份校验未通过');
     }
     result.rows.forEach((row,index) => {
       const r = index+3, values = [row.negotiatedTotalCents,...row.negotiatedCents,row.normalTotalCents,...row.normalCents];
@@ -122,15 +123,30 @@
       if (sheet['B'+r]?.f !== `SUM(C${r}:${XLSX.utils.encode_col(n+1)}${r})` || sheet[XLSX.utils.encode_col(n+2)+r]?.f !== `SUM(${XLSX.utils.encode_col(n+3)}${r}:${XLSX.utils.encode_col(2*n+2)}${r})`) throw Error('导出合计公式校验未通过');
     });
   }
+  function nextDownload() {
+    const date = new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+    let versions = {};
+    try {
+      const saved = JSON.parse(localStorage.getItem(versionKey) || '{}');
+      if (saved && typeof saved === 'object' && !Array.isArray(saved)) versions = saved;
+    } catch (_) {}
+    const stored = Number(versions[date]);
+    const version = Math.max(Number.isSafeInteger(stored) && stored >= 0 ? stored : 0,memoryVersions[date] || 0) + 1;
+    if (!Number.isSafeInteger(version)) throw Error('当天版本号已超出有效范围，请核实浏览器保存的版本记录');
+    return {date,version,versions,name:`谈判付款整理-${date}-V${version}.xlsx`};
+  }
   $('download').addEventListener('click',async () => {
     if (busy || !result?.canExport) return;
     busy = true; controls(); $('status').textContent = '正在生成并校验 Excel…'; let url;
     try {
       const bytes = await window.NegotiatedPaymentSummaryExport(result); verify(bytes);
-      const date = new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()), name = `谈判付款整理-${date}.xlsx`;
+      const {date,version,versions,name} = nextDownload();
       url = URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
       const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
-      $('status').textContent = '已生成：' + name;
+      memoryVersions[date] = version;
+      let saved = true;
+      try { localStorage.setItem(versionKey,JSON.stringify({...versions,[date]:version})); } catch (_) { saved = false; }
+      $('status').textContent = '已生成：' + name + (saved ? '' : '。浏览器未能保存版本号，本页内仍会递增。');
     } catch (error) { $('status').textContent = '导出失败：' + error.message; }
     finally { if (url) setTimeout(() => URL.revokeObjectURL(url),1000); busy = false; controls(); }
   });

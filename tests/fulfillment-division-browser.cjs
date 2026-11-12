@@ -28,10 +28,9 @@ function fixture(departments){
    const rows=X.utils.sheet_to_json(w.Sheets.汇总表,{header:1,defval:''});
    assert.deepEqual(rows[0],C.SUMMARY_COLUMNS);assert.equal(rows[0][4],'下单月份');assert.equal(rows[0].length,22);
    assert.deepEqual(rows.slice(1).map(r=>r[9]),departments.flatMap((name,i)=>name===d?['M'+i]:[]));
-   assert(rows.slice(1).every(r=>r[1]===d && r[0]==='徐英'));assert.equal(w.Sheets.汇总表.E2.t,'n');assert.equal(w.Sheets.汇总表.E2.z,'yyyy"年"m"月"');assert.equal(w.Sheets.汇总表.E2.w,'2026年10月');
+   assert(rows.slice(1).every(r=>r[1]===d && r[0]==='徐英'));assert.equal(w.Sheets.汇总表.E2.t,'s');assert.equal(w.Sheets.汇总表.E2.z,'@');assert.equal(w.Sheets.汇总表.E2.v,'2026年10月');
    for(let r=1;r<rows.length;r++)for(const [c,field]of C.SUMMARY_COLUMNS.entries()){
     const cell=w.Sheets.汇总表[X.utils.encode_cell({r,c})];
-    if(field==='下单月份')continue;
     if(C.QUANTITY_FIELDS.includes(field)){if(cell?.v!==''){assert.equal(cell.t,'n');assert.equal(cell.z,'0');}}
     else{assert.equal(cell.t,'s');assert.equal(cell.z,'@');}
    }

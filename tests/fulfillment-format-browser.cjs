@@ -67,8 +67,9 @@ function checkSummary(sheet, expected) {
   assert.equal(X.utils.decode_range(sheet['!ref']).e.r, expected.length);
   for (const [index, row] of expected.entries()) {
     const cell = field => sheet[X.utils.encode_cell({ r: index + 1, c: C.SUMMARY_COLUMNS.indexOf(field) })];
-    assert.equal(cell('下单月份').t, 'n');
-    assert.equal(cell('下单月份').z, monthFormat);
+    assert.equal(cell('下单月份').t, 's');
+    assert.equal(cell('下单月份').z, '@');
+    assert.equal(cell('下单月份').v, row.month);
     assert.equal(cell('下单月份').w, row.month);
     for (const field of ['物料编码', 'SKU']) {
       assert.equal(cell(field).t, 's');
@@ -82,7 +83,7 @@ function checkSummary(sheet, expected) {
       assert.equal(cell(field).z, '@');
       assert.equal(cell(field).v, text);
     }
-    for (const field of C.SUMMARY_COLUMNS.filter(field => field !== '下单月份' && !quantities.includes(field))) {
+    for (const field of C.SUMMARY_COLUMNS.filter(field => !quantities.includes(field))) {
       assert.equal(cell(field).t, 's', field + '统一文本类型');
       assert.equal(cell(field).z, '@', field + '统一文本格式');
     }
@@ -127,6 +128,24 @@ function checkSourceSheets(sourceBytes, exported, expected) {
         assert.equal(cell.v, original[address]?.v ?? '', name + '!' + address + '原文字保留');
       }
       assert.equal(cell.f, undefined);
+    }
+  }
+}
+
+async function checkGeneratedBorders(bytes, sheetPaths) {
+  const zip = await Zip.loadAsync(bytes), styles = await zip.file('xl/styles.xml').async('string');
+  const xfs = styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g);
+  const borders = styles.match(/<borders\b[^>]*>([\s\S]*?)<\/borders>/)[1].match(/<border\b[^>]*>[\s\S]*?<\/border>/g);
+  for (const sheetPath of sheetPaths) {
+    const xml = await zip.file(sheetPath).async('string');
+    for (const cell of xml.match(/<c\b[^>]*>/g) || []) {
+      const address = cell.match(/\br="([A-Z]+)(\d+)"/), style = Number(cell.match(/\bs="(\d+)"/)?.[1] || 0);
+      const border = borders[Number(xfs[style].match(/\bborderId="(\d+)"/)[1])];
+      for (const side of ['left', 'right', 'top', 'bottom']) {
+        const edge = border.match(new RegExp(`<${side}\\b[^>]*>[\\s\\S]*?</${side}>`))?.[0] || '';
+        assert.match(edge, new RegExp(`style="${Number(address[2]) === 1 ? 'thin' : 'hair'}"`), sheetPath + '!' + address[0]);
+        assert.match(edge, /<color\b[^>]*rgb="FF404040"/, sheetPath + '!' + address[0]);
+      }
     }
   }
 }
@@ -176,10 +195,15 @@ function checkSourceSheets(sourceBytes, exported, expected) {
     const diffXml = await outputZip.file('xl/worksheets/fulfillment3.xml').async('string');
     assert.match(diffXml, /ht="22"/);
     assert.match(diffXml, /ht="18"/);
+    await checkGeneratedBorders(full.bytes, [1, 2, 3].map(n => `xl/worksheets/fulfillment${n}.xml`));
+    const review = await download('#download-review', '合并核对.xlsx');
+    assert.deepEqual(review.book.SheetNames, ['合并核对']);
+    await checkGeneratedBorders(review.bytes, ['xl/worksheets/sheet1.xml']);
     for (const division of divisions) {
       const divided = await download('[data-download-division="' + division + '"]', division + '.xlsx');
       assert.deepEqual(divided.book.SheetNames, ['汇总表']);
       checkSummary(divided.book.Sheets.汇总表, current.expected.filter(r => r.事业部 === division));
+      await checkGeneratedBorders(divided.bytes, ['xl/worksheets/sheet1.xml']);
     }
 
     // Simulate cached snapshots from the preceding version, where summary cells had day or General formats.

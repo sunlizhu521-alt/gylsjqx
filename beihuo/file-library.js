@@ -1196,7 +1196,7 @@ async function downloadDetailWorkbook(splitIntoSheets = false) {
     window.alert("暂无可下载的明细数据。");
     return;
   }
-  if (!window.XLSX) {
+  if (!window.XLSX || !window.JSZip) {
     window.alert("Excel 导出组件未加载，请刷新页面后重试。");
     return;
   }
@@ -1208,16 +1208,11 @@ async function downloadDetailWorkbook(splitIntoSheets = false) {
     groups.get(buyer).push(row);
   }
   const stamp = formatFileTimestamp(new Date());
-  if (!splitIntoSheets && groups.size > 1 && !window.JSZip) {
-    window.alert('打包组件未加载，请刷新页面后重试。');
-    return;
-  }
   try {
     if (splitIntoSheets) {
       const { workbook, sheetShapes } = buildDetailWorkbook(state.filteredRows, true);
       const fileName = `${deliveryFields("").todayDate}-备货分配分配.xlsx`;
-      if (window.JSZip) await writeStyledDetailWorkbook(workbook, sheetShapes, fileName);
-      else window.XLSX.writeFile(workbook, fileName);
+      await writeStyledDetailWorkbook(workbook, sheetShapes, fileName);
       return;
     }
     const archive = groups.size > 1 ? new window.JSZip() : null;
@@ -1229,10 +1224,8 @@ async function downloadDetailWorkbook(splitIntoSheets = false) {
       if (archive) {
         const blob = await writeStyledDetailWorkbook(workbook, sheetShapes);
         archive.file(fileName, await blob.arrayBuffer());
-      } else if (window.JSZip) {
-        await writeStyledDetailWorkbook(workbook, sheetShapes, fileName);
       } else {
-        window.XLSX.writeFile(workbook, fileName);
+        await writeStyledDetailWorkbook(workbook, sheetShapes, fileName);
       }
     }
     if (archive) downloadBlob(await archive.generateAsync({ type: 'blob' }), `备货需求分配明细_按采购下单人_${stamp}.zip`);
@@ -1282,19 +1275,14 @@ function buildDetailWorkbook(rows, splitIntoSheets = false) {
 function addDeliveryFormulas(sheet, rows, columns = EXPORT_COLUMNS) {
   const X = window.XLSX;
   const col = key => columns.findIndex(c => c.key === key);
-  const serial = value => {
-    const [y,m,d] = value.split('-').map(Number);
-    return (Date.UTC(y,m-1,d)-Date.UTC(1899,11,30))/86400000;
-  };
   rows.forEach((row,index)=>{
     if (!/^\d{4}-\d{2}-\d{2}$/.test(row.todayDate || '')) return;
     const address = key => X.utils.encode_cell({r:index+1,c:col(key)});
     const today = address('todayDate'), days = address('deliveryDays'), delivery = address('supplierDeliveryDate');
-    sheet[today] = {t:'n',v:serial(row.todayDate),f:'TODAY()',z:'yyyy-mm-dd'};
-    const formula = `IF(${days}="","",${today}+${days})`;
-    sheet[delivery] = row.supplierDeliveryDate
-      ? {t:'n',v:serial(row.supplierDeliveryDate),f:formula,z:'yyyy-mm-dd'}
-      : {t:'s',v:'',f:formula,z:'yyyy-mm-dd'};
+    sheet[today] = {t:'s',v:row.todayDate,f:'TEXT(TODAY(),"yyyy-mm-dd")',z:'@'};
+    // Keep dates as text while retaining editable days and date arithmetic in Excel/WPS.
+    const formula = `IF(${days}="","",TEXT(DATE(VALUE(LEFT(${today},4)),VALUE(MID(${today},6,2)),VALUE(RIGHT(${today},2)))+${days},"yyyy-mm-dd"))`;
+    sheet[delivery] = {t:'s',v:row.supplierDeliveryDate || '',f:formula,z:'@'};
   });
 }
 
@@ -1325,7 +1313,6 @@ async function writeStyledDetailWorkbook(workbook, sheetShapes, fileName) {
 function buildDetailWorkbookStylesXml() {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/></numFmts>
   <fonts count="2">
     <font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font>
     <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/><family val="2"/></font>
@@ -1335,13 +1322,20 @@ function buildDetailWorkbookStylesXml() {
     <fill><patternFill patternType="gray125"/></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FF1F4E78"/><bgColor indexed="64"/></patternFill></fill>
   </fills>
-  <borders count="2">
+  <borders count="3">
     <border><left/><right/><top/><bottom/><diagonal/></border>
     <border>
-      <left style="thin"><color rgb="FFB7C9D6"/></left>
-      <right style="thin"><color rgb="FFB7C9D6"/></right>
-      <top style="thin"><color rgb="FFB7C9D6"/></top>
-      <bottom style="thin"><color rgb="FFB7C9D6"/></bottom>
+      <left style="thin"><color rgb="FF404040"/></left>
+      <right style="thin"><color rgb="FF404040"/></right>
+      <top style="thin"><color rgb="FF404040"/></top>
+      <bottom style="thin"><color rgb="FF404040"/></bottom>
+      <diagonal/>
+    </border>
+    <border>
+      <left style="hair"><color rgb="FF404040"/></left>
+      <right style="hair"><color rgb="FF404040"/></right>
+      <top style="hair"><color rgb="FF404040"/></top>
+      <bottom style="hair"><color rgb="FF404040"/></bottom>
       <diagonal/>
     </border>
   </borders>
@@ -1349,10 +1343,10 @@ function buildDetailWorkbookStylesXml() {
   <cellXfs count="6">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
-    <xf numFmtId="1" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
-    <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="2" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="2" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
+    <xf numFmtId="1" fontId="0" fillId="0" borderId="2" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
+    <xf numFmtId="49" fontId="0" fillId="0" borderId="2" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="0"/></xf>
   </cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
   <dxfs count="0"/>

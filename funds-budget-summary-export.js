@@ -8,7 +8,6 @@
   const S = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
   const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
   const MAIN = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml';
-  const MONTH_FORMAT = 'yyyy"年"m"月"';
   const escape = value => String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
   const cellText = value => escape(String(value).replace(/_x[0-9a-f]{4}_/gi,match=>'_x005F_'+match.slice(1)).replace(/[\u0000-\u0008\u000b-\u001f]/g,char=>'_x'+char.charCodeAt(0).toString(16).padStart(4,'0')+'_'));
   const decode = value => value.replace(/&(amp|lt|gt|quot|apos|#x[0-9a-f]+|#\d+);/gi, (all, key) => key[0] === '#' ? String.fromCodePoint(parseInt(key.slice(key[1].toLowerCase() === 'x' ? 2 : 1), key[1].toLowerCase() === 'x' ? 16 : 10)) : ({amp:'&',lt:'<',gt:'>',quot:'"',apos:"'"}[key] || all));
@@ -47,15 +46,9 @@
     const f = color => `<font><sz val="11"/><color rgb="${color}"/><name val="等线"/></font>`;
     xml=append(xml,'fonts',f('FF172033')+f('FFFFFFFF'));
     xml=append(xml,'fills',['FFFFFFFF','FF315B9D'].map(color=>`<fill><patternFill patternType="solid"><fgColor rgb="${color}"/><bgColor indexed="64"/></patternFill></fill>`).join(''));
-    xml=append(xml,'borders','<border>'+['left','right','top','bottom'].map(side=>`<${side} style="thin"><color rgb="FFD6DEE8"/></${side}>`).join('')+'<diagonal/></border>');
-    let formats=first(xml,'numFmts');
-    if(!formats){const root=xml.match(/<(?:[\w.-]+:)?styleSheet\b[^>]*>/)?.[0];if(!root)throw Error('工作簿样式格式错误');const p=prefix(root);xml=xml.replace(root,root+`<${p}numFmts count="0"></${p}numFmts>`);formats=first(xml,'numFmts');}
-    else if(/\/>$/.test(formats)){const p=prefix(formats);xml=xml.replace(formats,formats.replace(/\/>$/,`></${p}numFmts>`));formats=first(xml,'numFmts');}
-    const existing=tags(formats,'numFmt'), matching=existing.find(node=>attr(node,'formatCode')===MONTH_FORMAT);
-    const monthFormat=matching?Number(attr(matching,'numFmtId')):Math.max(163,...existing.map(node=>Number(attr(node,'numFmtId'))))+1;
-    if(!matching)xml=append(xml,'numFmts',`<numFmt numFmtId="${monthFormat}" formatCode="${escape(MONTH_FORMAT)}"/>`);
-    const xf=(format,header)=>`<xf numFmtId="${format}" fontId="${font+(header?1:0)}" fillId="${fill+(header?1:0)}" borderId="${border}" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="0" shrinkToFit="0"/></xf>`;
-    xml=append(xml,'cellXfs',xf(0,true)+xf(0,false)+xf(monthFormat,false)+xf(4,false));
+    xml=append(xml,'borders',['thin','hair'].map(style=>'<border>'+['left','right','top','bottom'].map(side=>`<${side} style="${style}"><color rgb="FF404040"/></${side}>`).join('')+'<diagonal/></border>').join(''));
+    const xf=(format,header)=>`<xf numFmtId="${format}" fontId="${font+(header?1:0)}" fillId="${fill+(header?1:0)}" borderId="${border+(header?0:1)}" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="0" shrinkToFit="0"/></xf>`;
+    xml=append(xml,'cellXfs',xf(0,true)+xf(0,false)+xf(49,false)+xf(4,false));
     return {xml,header:style,text:style+1,month:style+2,money:style+3};
   }
   function validate(result) {
@@ -73,16 +66,14 @@
     if(Object.keys(totals).some(key=>totals[key]!==result.totals[key]))throw Error('汇总合计与分组金额不一致。');
     if(result.groups.length>1048574)throw Error('汇总行数超过 Excel 上限。');
   }
-  function monthCell(key,date1904) {
+  function monthCell(key) {
     if(!key)return {value:'时间待定'};
     const match=/^(\d{4})-(0[1-9]|1[0-2])$/.exec(key);
     if(!match||Number(match[1])<1900)throw Error('汇总付款月份无效：'+key);
-    const timestamp=Date.UTC(Number(match[1]),Number(match[2])-1,1);
-    const serial=date1904?(timestamp-Date.UTC(1904,0,1))/86400000:(timestamp-Date.UTC(1899,11,31))/86400000+(timestamp>=Date.UTC(1900,2,1)?1:0);
-    return {value:serial,month:true,display:Number(match[1])+'年'+Number(match[2])+'月'};
+    return {value:Number(match[1])+'年'+Number(match[2])+'月',month:true};
   }
-  function sheetXml(result,styles,date1904,namespace) {
-    const rows=[HEADERS.map(value=>({value})),...result.groups.map((g,index)=>[monthCell(g.monthKey,date1904),{value:g.category??''},{value:g.state??''},{value:g.totalCents/100,money:true},{value:g.paidCents/100,money:true},{value:g.remainingCents/100,money:true,formula:`D${index+2}-E${index+2}`},{value:''}])];
+  function sheetXml(result,styles,namespace) {
+    const rows=[HEADERS.map(value=>({value})),...result.groups.map((g,index)=>[monthCell(g.monthKey),{value:g.category??''},{value:g.state??''},{value:g.totalCents/100,money:true},{value:g.paidCents/100,money:true},{value:g.remainingCents/100,money:true,formula:`D${index+2}-E${index+2}`},{value:''}])];
     const end=rows.length,total=result.totals;
     rows.push([{value:'合计'},{value:''},{value:''},...['totalCents','paidCents','remainingCents'].map((key,index)=>({value:total[key]/100,money:true,formula:end>1?`SUM(${String.fromCharCode(68+index)}2:${String.fromCharCode(68+index)}${end})`:'SUM(0)'})),{value:''}]);
     const widths=HEADERS.map((_,col)=>Math.min(255,rows.reduce((size,row)=>Math.max(size,[...String(row[col].display??(row[col].money?X.SSF.format('#,##0.00',row[col].value):row[col].value))].reduce((n,c)=>n+(c.codePointAt(0)>255?2:1),0)),12)+2));
@@ -149,7 +140,7 @@
     const properties=first(workbook,'workbookPr'),date1904=properties&&/^(1|true)$/i.test(attr(properties,'date1904')||'');
     if(result.date1904!==undefined&&Boolean(result.date1904)!==Boolean(date1904))throw Error('汇总结果与原工作簿日期系统不一致，请重新分析原文件。');
     const namespace=workbook.match(/xmlns(?::[\w.-]+)?=["']([^"']*spreadsheetml[^"']*)["']/)?.[1]||S;
-    zip.file(path,sheetXml(result,styles,Boolean(date1904),namespace));zip.remove(relationPath(path));
+    zip.file(path,sheetXml(result,styles,namespace));zip.remove(relationPath(path));
     for(const rel of relationships)if(attr(rel,'Type').endsWith('/calcChain')){rels=rels.replace(rel,'');removed.add(resolve('xl/workbook.xml',attr(rel,'Target')));}
     zip.file('xl/workbook.xml',workbook);zip.file('xl/_rels/workbook.xml.rels',rels);zip.file(stylePath,styles.xml);
     // Remove only parts detached from the replaced summary; retain unrelated native parts.

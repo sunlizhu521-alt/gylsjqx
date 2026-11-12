@@ -18,7 +18,7 @@
     <input id="sourceFile" type="file" accept=".xlsx" aria-describedby="reference" disabled>
     <p id="reference" class="muted">尚未引用文件</p>
     <div class="actions"><button id="download" disabled>下载谈判付款整理</button><button id="clear" class="secondary" hidden>移除文件</button><p id="status" role="status" aria-live="polite">正在加载工具…</p></div>
-    <details><summary>查看整理说明</summary><p class="muted">只读取“谈判付款”工作表中的供应商、是否谈判分批及“年月支付”列。同一供应商合并一行，不区分付款主体；“是”计入谈判付款，“否”计入正常付款。所有月份、已支付及重复明细均参与汇总。</p><p class="muted">空白或异常分类需先选择是或否。只下载一张整理结果，原文件不修改。切换工具保留本次内容，刷新后请重新上传。</p></details>
+    <details><summary>查看整理说明</summary><p class="muted">只读取“谈判付款”工作表中的供应商、是否谈判分批及“年月支付”列。同一供应商合并一行，不区分付款主体；“是”计入谈判付款，“否”计入正常付款。所有月份、已支付及重复明细均参与汇总。</p><p class="muted">空白或异常分类需先选择是或否。只下载一张整理结果，第二行可筛选，原文件不修改。下载名称为“谈判付款整理-日期-V版本.xlsx”，同一天在当前浏览器成功下载后版本递增。切换工具保留本次内容，刷新后请重新上传。</p></details>
     <details id="issue-panel" hidden><summary id="issue-title">需要留意</summary><ul id="issues"></ul></details>
   </section>
   <section id="review-panel" hidden><h2 id="review-title">分类核对</h2><p class="muted">请确认以下记录是否属于谈判付款。本页选择只用于本次汇总，不修改原文件。</p><div id="reviews"></div></section>
@@ -27,7 +27,7 @@
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
 <script src="negotiated-payment-summary-core.js?v=negotiated-summary-20261112"></script>
-<script src="negotiated-payment-summary-export.js?v=negotiated-summary-20261112"></script>
-<script src="negotiated-payment-summary-tool.js?v=negotiated-summary-20261112"></script>
+<script src="negotiated-payment-summary-export.js?v=text-dates-versions-20261112"></script>
+<script src="negotiated-payment-summary-tool.js?v=text-dates-versions-20261112"></script>
 </body>
 </html>

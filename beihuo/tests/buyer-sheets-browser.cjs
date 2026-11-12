@@ -66,6 +66,11 @@ function uploadFile(rows, sheetName, name) {
       const alignments = [...styles.matchAll(/<alignment\b[^>]*\/>/g)].map(match => match[0]);
       assert.equal(alignments.length, 5);
       assert(alignments.every(style => style.includes('wrapText="0"') && style.includes('horizontal="center"') && style.includes('vertical="center"')));
+      assert.equal((styles.match(/style="thin"><color rgb="FF404040"/g)||[]).length,4);
+      assert.equal((styles.match(/style="hair"><color rgb="FF404040"/g)||[]).length,4);
+      const xfs=[...styles.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/)[1].matchAll(/<xf\b[^>]*>/g)].map(match=>match[0]);
+      assert.match(xfs[1],/borderId="1"/);
+      assert(xfs.slice(2).every(xf=>xf.includes('borderId="2"')));
       return { workbook, xmls };
     }
 
@@ -103,9 +108,9 @@ function uploadFile(rows, sheetName, name) {
         assert(row.every(value => typeof value !== 'string' || !/[\r\n\u2028\u2029]/.test(value)));
         assert.equal(row[1], '', 'optional Singapore source is not uploaded');
         const r = index + 2;
-        assert.equal(sheet[`L${r}`].f, 'TODAY()');
-        assert.equal(sheet[`N${r}`].f, `IF(M${r}="","",L${r}+M${r})`);
-        assert.equal(sheet[`N${r}`].z, 'yyyy-mm-dd');
+        assert.equal(sheet[`L${r}`].f, 'TEXT(TODAY(),"yyyy-mm-dd")');
+        assert.equal(sheet[`N${r}`].f, `IF(M${r}="","",TEXT(DATE(VALUE(LEFT(L${r},4)),VALUE(MID(L${r},6,2)),VALUE(RIGHT(L${r},2)))+M${r},"yyyy-mm-dd"))`);
+        assert.equal(sheet[`N${r}`].z, '@');assert.equal(sheet[`N${r}`].t,'s');assert.equal(sheet[`L${r}`].t,'s');
         assert.equal(sheet[`J${r}`].z, '0');
         if (source.quantity !== '') assert.equal(sheet[`J${r}`].t, 'n');
         seen.push(row[6]);

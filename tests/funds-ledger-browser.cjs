@@ -113,6 +113,7 @@ function fixture(replacement=false){
    const bytes=await fs.readFile(await d.path());await fs.writeFile(path.join(out,label+'.xlsx'),bytes);return bytes;
   }
   async function verify(bytes,expected,surface=frame){
+   expected=expected.map(row=>row.map((value,c)=>typeof value==='number'&&[6,11,12].includes(c)?X.SSF.format(c===11?'yyyy"年"mm"月"':'yyyy"年"mm"月"dd"日"',value):value));
    const book=X.read(bytes,{type:'buffer',cellNF:true,cellStyles:true}),name='正常付款',sheet=book.Sheets[name],snap=await preview(surface);
    assert.deepEqual(book.SheetNames,[name]);const range=X.utils.decode_range(sheet['!ref']);
    const matrix=Array.from({length:range.e.r+1},(_,r)=>Array.from({length:range.e.c+1},(_,c)=>sheet[X.utils.encode_cell({r,c})]?.v??''));
@@ -129,11 +130,11 @@ function fixture(replacement=false){
     const cell=sheet[X.utils.encode_cell({r:r+1,c})],v=expected[r][c];assert.equal(cell?.v??'',v);assert(!cell?.f);
     if(v!=='')assert.equal(cell.t,typeof v==='number'?'n':'s');if(c===4&&v!=='')assert.match(cell.z,/0\.00/);
     if(c===6){
-     if(typeof v==='number'){assert.equal(cell.z,'yyyy"年"mm"月"dd"日"');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月\d{2}日$/);}
+     if(/^\d{4}年\d{2}月\d{2}日$/.test(v)){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月\d{2}日$/);}
      else{assert(['未对账待定','待定'].includes(v));assert.equal(cell.t,'s');assert.equal(snap.rows[r][c],v);}
     }
-    if(c===11&&v!==''){assert.equal(cell.z,'yyyy"年"mm"月"');assert.equal(cell.t,'n');assert.equal(X.SSF.parse_date_code(cell.v).d,1);assert.match(snap.rows[r][c],/^\d{4}年\d{2}月$/);}
-    if(c===12&&v!==''){assert.equal(cell.z,'yyyy"年"mm"月"dd"日"');assert.equal(cell.t,'n');assert(Number.isInteger(cell.v));assert.match(snap.rows[r][c],/^\d{4}年\d{2}月\d{2}日$/);}
+    if(c===11&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月$/);}
+    if(c===12&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月\d{2}日$/);}
     assert.equal(snap.rows[r][c],cell?X.utils.format_cell(cell):'');
    }
    const meta=await surface.locator('body').evaluate(async(_,data)=>{
@@ -147,8 +148,8 @@ function fixture(replacement=false){
     for(const cell of all(doc,'c')){
      const xf=xfs[+(cell.getAttribute('s')||0)],font=fonts[+(xf.getAttribute('fontId')||0)],border=borders[+(xf.getAttribute('borderId')||0)];
      names.add(all(font,'name')[0]?.getAttribute('val'));sizes.add(all(font,'sz')[0]?.getAttribute('val'));
-     if(['left','right','top','bottom'].some(edge=>!all(border,edge)[0]?.getAttribute('style')))problems.push('缺少边框 '+cell.getAttribute('r'));
      const row=Number(cell.getAttribute('r').match(/\d+$/)[0]),fill=fills[+(xf.getAttribute('fillId')||0)],expectedFill=row===1?'FF315B9D':data.paid[row-2]?'FFFF9999':'FFFFFFFF';
+     if(['left','right','top','bottom'].some(edge=>{const side=all(border,edge)[0];return side?.getAttribute('style')!==(row===1?'thin':'hair')||all(side,'color')[0]?.getAttribute('rgb')!=='FF404040';}))problems.push('表头/正文边框不符 '+cell.getAttribute('r'));
      if(all(fill,'patternFill')[0]?.getAttribute('patternType')!=='solid'||all(fill,'fgColor')[0]?.getAttribute('rgb')!==expectedFill||xf.getAttribute('applyFill')!=='1')problems.push('原生填充颜色不符 '+cell.getAttribute('r'));
      if((row===1||/^[AML]\d+$/.test(cell.getAttribute('r')))&&all(xf,'alignment')[0]?.getAttribute('wrapText')==='1')problems.push('表头或提交日期换行');
     }

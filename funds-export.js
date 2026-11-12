@@ -72,7 +72,8 @@ window.FundsExport = async function(sourceBytes, result) {
   const fontId=append('fonts',font),headerFont=font.cloneNode(true);first(headerFont,'color').setAttribute('rgb','FFFFFFFF');headerFont.append(create(styles,'b'));
   const headerFontId=append('fonts',headerFont);
   const fill=create(styles,'fill'),pattern=create(styles,'patternFill',{patternType:'solid'});pattern.append(create(styles,'fgColor',{rgb:'FF315B9D'}),create(styles,'bgColor',{indexed:64}));fill.append(pattern);const fillId=append('fills',fill);
-  const border=create(styles,'border');for(const edge of ['left','right','top','bottom']){const side=create(styles,edge,{style:'thin'});side.append(create(styles,'color',{rgb:'FF000000'}));border.append(side);}const borderId=append('borders',border);
+  const border=create(styles,'border');for(const edge of ['left','right','top','bottom']){const side=create(styles,edge,{style:'hair'});side.append(create(styles,'color',{rgb:'FF404040'}));border.append(side);}const borderId=append('borders',border);
+  const headerBorder=border.cloneNode(true);for(const side of headerBorder.children)side.setAttribute('style','thin');const headerBorderId=append('borders',headerBorder);
   let numFmts=first(styles,'numFmts');if(!numFmts){numFmts=create(styles,'numFmts',{count:0});styles.documentElement.insertBefore(numFmts,styles.documentElement.firstChild);}
   const formats=new Map(elements(numFmts,'numFmt').map(e=>[e.getAttribute('formatCode'),Number(e.getAttribute('numFmtId'))]));
   let nextFormat=Math.max(163,...formats.values())+1;
@@ -85,7 +86,7 @@ window.FundsExport = async function(sourceBytes, result) {
   const styleFor=(code='',header=false,applied=false)=>{
     const key=JSON.stringify([code,header,applied]);if(styleIds.has(key))return styleIds.get(key);
     // Native fills follow records when WPS sorts them and remain manually editable.
-    const xf=create(styles,'xf',{numFmtId:formatId(code),fontId:header?headerFontId:fontId,fillId:header?fillId:applied?redFill():0,borderId,xfId:0,applyFont:1,applyFill:1,applyBorder:1,applyAlignment:1,applyNumberFormat:1});xf.append(create(styles,'alignment',{horizontal:'center',vertical:'center',wrapText:1}));const id=append('cellXfs',xf);styleIds.set(key,id);return id;
+    const xf=create(styles,'xf',{numFmtId:formatId(code),fontId:header?headerFontId:fontId,fillId:header?fillId:applied?redFill():0,borderId:header?headerBorderId:borderId,xfId:0,applyFont:1,applyFill:1,applyBorder:1,applyAlignment:1,applyNumberFormat:1});xf.append(create(styles,'alignment',{horizontal:'center',vertical:'center',wrapText:1}));const id=append('cellXfs',xf);styleIds.set(key,id);return id;
   };
   const appliedFormula='N("GYLSJQX_FUNDS_APPLIED_V1")=0',appliedStylePrefix='GYLSJQX_FUNDS_APPLIED_V2_';
   // Remove only our old fixed-address rules; they override manual colors and drift after sorting.
@@ -148,14 +149,25 @@ window.FundsExport = async function(sourceBytes, result) {
     const next=append('cellXfs',xf);wrappedStyles.set(String(id),next);return next;
   };
   const date1904=['1','true'].includes(first(workbook,'workbookPr')?.getAttribute('date1904'));
+  const textDateStyles=new Map();
   const writeCell=(doc,address,cell,styleId,convertDates=false)=>{
+    // Convert only dates this tool writes. Native source cells and monetary columns stay intact.
+    if(typeof cell?.v==='number'&&cell.t!=='s'&&cell.z&&XLSX.SSF.is_date(cell.z)){
+      if(!Number.isFinite(cell.v))throw Error('单元格 '+address+' 的日期不是有效数值');
+      const format=cell.z.replace(/"[^"]*"|\\.|[年月日时分秒]/g,part=>part.length===1?'"'+part+'"':part);
+      cell={t:'s',v:XLSX.SSF.format(format,cell.v,{date1904:convertDates?false:date1904}),z:'@'};
+      if(styleId!==undefined){
+        const key=String(styleId);
+        if(!textDateStyles.has(key)){const xf=xfs.children[Number(styleId)].cloneNode(true);xf.setAttribute('numFmtId','49');xf.setAttribute('applyNumberFormat','1');textDateStyles.set(key,append('cellXfs',xf));}
+        styleId=textDateStyles.get(key);
+      }
+    }
     const c=create(doc,'c',{r:address});if(styleId!==undefined)c.setAttribute('s',styleId);
     if(cell?.f){const f=create(doc,'f');f.textContent=String(cell.f).replace(/^=/,'');c.append(f);}
     if(cell?.v===null||cell?.v===undefined)return c;
     let value=cell.v;
     const numeric=typeof value==='number'&&cell.t!=='s';
     if(numeric&&!Number.isFinite(value))throw Error('单元格 '+address+' 的金额或日期不是有效数值');
-    if(numeric&&convertDates&&date1904&&cell.z&&XLSX.SSF.is_date(cell.z))value-=1462;
     if(numeric||cell.t==='b'||typeof value==='boolean'){
       if(cell.t==='b'||typeof value==='boolean'){c.setAttribute('t','b');value=value?1:0;}
       const v=create(doc,'v');v.textContent=String(value);c.append(v);
@@ -171,13 +183,10 @@ window.FundsExport = async function(sourceBytes, result) {
   const layoutStyles=new Map(),headerFonts=new Map(),borderStyles=new Map();
   const layoutStyle=(id,header,flow,edges=['left','right','top','bottom'])=>{
     const key=[id,header,flow,edges.join(',')].join('|');if(layoutStyles.has(key))return layoutStyles.get(key);
-    const original=xfs.children[Number(id)],xf=original.cloneNode(true),oldBorder=Number(xf.getAttribute('borderId')||0),borderKey=oldBorder+':'+edges.join(',');
+    const original=xfs.children[Number(id)],xf=original.cloneNode(true),oldBorder=Number(xf.getAttribute('borderId')||0),borderKey=[oldBorder,header,edges.join(',')].join(':');
     if(!borderStyles.has(borderKey)){
       const originalBorder=borders.children[oldBorder],next=originalBorder.cloneNode(true);
-      for(const edge of edges){let side=first(next,edge);if(!side||!side.getAttribute('style')||side.getAttribute('style')==='none'){
-        const replacement=first(border,edge).cloneNode(true);if(side)side.replaceWith(replacement);else{const order=['start','end','left','right','top','bottom','diagonal','vertical','horizontal'];next.insertBefore(replacement,[...next.children].find(e=>order.indexOf(e.localName)>order.indexOf(edge))||null);}
-      }else{const color=first(side,'color');if(color?.getAttribute('rgb')!=='FF000000'){const black=create(styles,'color',{rgb:'FF000000'});if(color)color.replaceWith(black);else side.append(black);}
-      }}
+      for(const edge of edges){const side=first(next,edge),replacement=first(header?headerBorder:border,edge).cloneNode(true);if(side)side.replaceWith(replacement);else{const order=['start','end','left','right','top','bottom','diagonal','vertical','horizontal'];next.insertBefore(replacement,[...next.children].find(e=>order.indexOf(e.localName)>order.indexOf(edge))||null);}}
       borderStyles.set(borderKey,next.isEqualNode(originalBorder)?oldBorder:append('borders',next));
     }
     xf.setAttribute('borderId',borderStyles.get(borderKey));xf.setAttribute('applyBorder','1');

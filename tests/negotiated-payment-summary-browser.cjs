@@ -18,16 +18,25 @@ async function upload(scope,bytes=original,name='合成付款节奏.xlsx') {
   await scope.locator('#sourceFile:not([disabled])').setInputFiles({name,mimeType:mime,buffer:bytes});
   await scope.locator('#sourceFile:not([disabled])').waitFor();
 }
-async function download(page,scope) {
+async function download(page,scope,version,date='2026-11-12') {
   const pending=page.waitForEvent('download'); await scope.locator('#download').click();
   const file=await pending,chunks=[]; for await(const chunk of await file.createReadStream()) chunks.push(chunk);
-  assert.match(file.suggestedFilename(),/^谈判付款整理-\d{4}-\d{2}-\d{2}\.xlsx$/);
+  assert.match(file.suggestedFilename(),/^谈判付款整理-\d{4}-\d{2}-\d{2}-V[1-9]\d*\.xlsx$/);
+  if(version)assert.equal(file.suggestedFilename(),`谈判付款整理-${date}-V${version}.xlsx`);
   return Buffer.concat(chunks);
 }
 (async()=>{
   const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH || (process.platform==='darwin'?'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome':undefined)});
   try {
     const context=await browser.newContext({acceptDownloads:true,viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[];
+    await context.addInitScript(()=>{
+      const RealDate=Date;
+      window.Date=class extends RealDate {
+        constructor(...args){super(...(args.length?args:[window.__negotiatedSummaryTestNow || '2026-11-12T02:00:00Z']));}
+        static now(){return new RealDate(window.__negotiatedSummaryTestNow || '2026-11-12T02:00:00Z').getTime();}
+      };
+    });
+    let downloadCount=0;page.on('download',()=>downloadCount++);
     page.on('pageerror',e=>errors.push(e.message));
     await context.route('**/*',route=>{
       const req=route.request(),url=new URL(req.url());
@@ -56,10 +65,10 @@ async function download(page,scope) {
     await page.locator('.tool-tab[data-tool="negotiated-payment-summary"]').click();
     assert.equal(await frame.locator('#preview').innerText(),preview);
     assert.equal(await frame.locator('select[data-address="C5"]').inputValue(),'否');
-    const bytes=await download(page,frame),book=X.read(bytes,{type:'buffer',cellNF:true}),s=book.Sheets.谈判付款整理;
+    const bytes=await download(page,frame,1),book=X.read(bytes,{type:'buffer',cellNF:true}),s=book.Sheets.谈判付款整理;
     assert.deepEqual(book.SheetNames,['谈判付款整理']); assert.equal(s['!ref'],'A1:I4');
     assert.equal(s.B3.v,80); assert.equal(s.B3.f,'SUM(C3:E3)');assert.equal(s.F3.v,5);assert.equal(s.H4.v,180000);
-    assert.equal(X.SSF.format(s.C2.z,s.C2.v),'2026年9月');assert.equal(X.SSF.format(s.E2.z,s.E2.v),'2027年1月');
+    assert.equal(s.C2.t,'s');assert.equal(s.C2.z,'@');assert.equal(s.C2.v,'2026年9月');assert.equal(X.SSF.format(s.E2.z,s.E2.v),'2027年1月');
     await frame.locator('select[data-address="C5"]').selectOption(''); assert(await frame.locator('#download').isDisabled());
     await frame.locator('select[data-address="C5"]').selectOption('是'); assert.match(await frame.locator('#totals').innerText(),/谈判付款 ￥180,080.00/);
     await upload(frame); assert.equal(await frame.locator('select[data-address="C5"]').inputValue(),'','新上传不沿用旧分类');
@@ -88,13 +97,36 @@ async function download(page,scope) {
     await upload(page,fixture([['供应商乙','','否',5,null,null,0]]),'新文件.xlsx');
     await page.locator('#download:not([disabled])').waitFor();
     assert.match(await page.locator('#counts').innerText(),/1 条明细，1 家供应商/);assert(await page.locator('#review-panel').isHidden());
-    const replaced=X.read(await download(page,page),{type:'buffer'}).Sheets.谈判付款整理;
+    const replaced=X.read(await download(page,page,2),{type:'buffer'}).Sheets.谈判付款整理;
     assert.equal(replaced.A3.v,'供应商乙');assert.equal(replaced.F3.v,5);
     // A failed or corrupted export cannot start a download.
-    await page.evaluate(()=>{window.__realExport=window.NegotiatedPaymentSummaryExport;window.NegotiatedPaymentSummaryExport=async()=>new Uint8Array([0]);});
+    const beforeFailure=downloadCount;
+    await page.evaluate(()=>{window.__realExport=window.NegotiatedPaymentSummaryExport;window.NegotiatedPaymentSummaryExport=async()=>{throw Error('测试生成失败');};});
+    await page.locator('#download').click();await page.locator('#status').filter({hasText:'测试生成失败'}).waitFor();
+    assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('negotiated-payment-summary-export-versions'))['2026-11-12']),2,'生成失败不推进版本');
+    assert.equal(downloadCount,beforeFailure,'生成失败不得触发下载');
+    await page.evaluate(()=>window.NegotiatedPaymentSummaryExport=async()=>new Uint8Array([0]));
     await page.locator('#download').click();await page.locator('#status').filter({hasText:'导出失败'}).waitFor();
+    assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('negotiated-payment-summary-export-versions'))['2026-11-12']),2,'回读校验失败不推进版本');
+    assert.equal(downloadCount,beforeFailure,'回读校验失败不得触发下载');
     await page.evaluate(()=>window.NegotiatedPaymentSummaryExport=window.__realExport);
-    await download(page,page);
+    await download(page,page,3);
+    await page.reload({waitUntil:'networkidle'});
+    await page.locator('#sourceFile:not([disabled])').waitFor();
+    assert.equal(await page.locator('#sourceFile').evaluate(input=>input.files.length),0,'刷新不恢复上传文件');
+    assert.equal(await page.locator('#reference').innerText(),'尚未引用文件');
+    assert(await page.locator('#download').isDisabled());assert(await page.locator('#result').isHidden());
+    await upload(page,fixture([['供应商乙','','否',5,null,null,0]]),'刷新后新文件.xlsx');
+    await page.locator('#download:not([disabled])').waitFor();
+    await download(page,page,4);
+    await page.evaluate(()=>window.__negotiatedSummaryTestNow='2026-11-12T15:59:59Z');
+    await download(page,page,5);
+    await page.evaluate(()=>window.__negotiatedSummaryTestNow='2026-11-12T16:00:00Z');
+    await download(page,page,1,'2026-11-13');
+    assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('negotiated-payment-summary-export-versions'))),{'2026-11-12':5,'2026-11-13':1});
+    await page.evaluate(()=>Object.defineProperty(window,'localStorage',{get(){throw new DOMException('测试缓存不可用','SecurityError');}}));
+    await download(page,page,2,'2026-11-13');await download(page,page,3,'2026-11-13');
+    assert.match(await page.locator('#status').innerText(),/本页内仍会递增/);
     if(process.env.QA_SAMPLE_FILE){
       await upload(page,fs.readFileSync(process.env.QA_SAMPLE_FILE),path.basename(process.env.QA_SAMPLE_FILE));
       await page.locator('select[data-address="G40"]').waitFor();
@@ -110,6 +142,6 @@ async function download(page,scope) {
       if(process.env.QA_SAMPLE_OUTPUT)fs.writeFileSync(process.env.QA_SAMPLE_OUTPUT,sample);
     }
     assert.deepEqual(errors,[]);
-    console.log('PASS: 首页与独立页、分类核对、跨年月份、切换保留、替换重置、错误清理、公式缓存保护、预览下载一致、手机布局'+(process.env.QA_SAMPLE_FILE?'、真实样表':'') );
+    console.log('PASS: 首页与独立页、分类核对、跨年月份、切换保留、替换重置、错误清理、公式缓存保护、预览下载一致、手机布局、版本递增/刷新/失败不递增/北京时间跨日/缓存不可用'+(process.env.QA_SAMPLE_FILE?'、真实样表':'') );
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

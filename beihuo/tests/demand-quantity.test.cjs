@@ -17,6 +17,9 @@ function loadApp() {
   });
   const source = fs.readFileSync(path.join(__dirname, '../file-library.js'), 'utf8');
   vm.runInContext(source.replace(/\ninit\(\)\.catch\([\s\S]*$/, ''), context);
+  // Unit checks inspect the workbook passed to the styled writer; browser checks verify the actual ZIP/styles.
+  context.window.JSZip = {};
+  context.writeStyledDetailWorkbook = async (workbook, shapes, filename) => context.window.XLSX.writeFile(workbook, filename);
   return { context, elements, run: (code) => vm.runInContext(code, context) };
 }
 
@@ -266,7 +269,7 @@ test('per-buyer workbooks preserve rows, reasons, formulas and WPS highlight',()
  context.rows=[{buyer:'甲',quantity:0,stockReason:'需要保留',todayDate:'2026-10-21',deliveryDays:2,supplierDeliveryDate:'2026-10-23'},{buyer:'甲',quantity:3,stockReason:'另一个原因'}];
  const output=run('buildDetailWorkbook(rows)');
  const w=XLSX.read(XLSX.write(output.workbook,{type:'buffer',bookType:'xlsx'}),{type:'buffer'});
- assert.equal(w.Custprops.KSOReadingLayout,true);assert.equal(w.Sheets.备货需求分配明细.S2.v,'需要保留');assert.equal(w.Sheets.备货需求分配明细.J2.v,0);assert.equal(w.Sheets.备货需求分配明细.N2.f,'IF(M2="","",L2+M2)');assert.equal(w.Sheets.备货需求分配明细['!ref'],'A1:S3');
+ assert.equal(w.Custprops.KSOReadingLayout,true);assert.equal(w.Sheets.备货需求分配明细.S2.v,'需要保留');assert.equal(w.Sheets.备货需求分配明细.J2.v,0);assert.equal(w.Sheets.备货需求分配明细.N2.f,'IF(M2="","",TEXT(DATE(VALUE(LEFT(L2,4)),VALUE(MID(L2,6,2)),VALUE(RIGHT(L2,2)))+M2,"yyyy-mm-dd"))');assert.equal(w.Sheets.备货需求分配明细['!ref'],'A1:S3');
 });
 
 test('all exported sheets use single-line text, full-text widths and no-wrap centered styles', () => {
@@ -299,6 +302,15 @@ test('all exported sheets use single-line text, full-text widths and no-wrap cen
     assert.match(alignment, /horizontal="center"/);
     assert.match(alignment, /vertical="center"/);
   }
+  const styles=run('buildDetailWorkbookStylesXml()');
+  const borders=[...styles.matchAll(/<border>([\s\S]*?)<\/border>/g)].map(match=>match[1]);
+  assert.equal(borders.length,3);
+  for(const [index,line] of [[1,'thin'],[2,'hair']]) {
+    for(const side of ['left','right','top','bottom']) assert.match(borders[index],new RegExp(`<${side} style="${line}"><color rgb="FF404040"/>`));
+  }
+  const xfs=[...styles.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/)[1].matchAll(/<xf\b[^>]*>/g)].map(match=>match[0]);
+  assert.match(xfs[1],/borderId="1"/);
+  for(const xf of xfs.slice(2)) assert.match(xf,/borderId="2"/);
 });
 
 test('one workbook splits buyers into sheets with complete rows and sheet-local formulas', () => {
@@ -318,11 +330,12 @@ test('one workbook splits buyers into sheets with complete rows and sheet-local 
   assert.equal(li.H2.v, '001');
   assert.deepEqual([li.J2.t, li.J2.v, li.J2.z, xu.J2.v, li.J3.v], ['n', 0, '0', 1.5, '']);
   assert.equal(li.T3.v, '原因三');
-  assert.equal(li.L2.f, 'TODAY()');
-  assert.equal(li.N2.f, 'IF(M2="","",L2+M2)');
-  assert.equal(li.N3.f, 'IF(M3="","",L3+M3)');
-  assert.equal(xu.N2.f, 'IF(M2="","",L2+M2)');
-  assert.equal(xu.N2.z, 'yyyy-mm-dd');
+  assert.equal(li.L2.f, 'TEXT(TODAY(),"yyyy-mm-dd")');
+  assert.equal(li.N2.f, 'IF(M2="","",TEXT(DATE(VALUE(LEFT(L2,4)),VALUE(MID(L2,6,2)),VALUE(RIGHT(L2,2)))+M2,"yyyy-mm-dd"))');
+  assert.equal(li.N3.f, 'IF(M3="","",TEXT(DATE(VALUE(LEFT(L3,4)),VALUE(MID(L3,6,2)),VALUE(RIGHT(L3,2)))+M3,"yyyy-mm-dd"))');
+  assert.equal(xu.N2.f, 'IF(M2="","",TEXT(DATE(VALUE(LEFT(L2,4)),VALUE(MID(L2,6,2)),VALUE(RIGHT(L2,2)))+M2,"yyyy-mm-dd"))');
+  assert.equal(xu.N2.z, '@');
+  assert.equal(xu.N2.t, 's');assert.equal(li.L2.t, 's');
   reopened.SheetNames.forEach((name, index) => {
     const sheet = reopened.Sheets[name];
     assert.equal(sheet['!cols'].length, 20);
@@ -359,6 +372,20 @@ test('combined download exports only filtered rows and guards empty selection', 
   assert.deepEqual(exported.SheetNames, ['李奇']);
   assert.equal(exported.Sheets.李奇.G2.v, '保留');
   assert.match(fileName, /^\d{4}-\d{2}-\d{2}-备货分配分配\.xlsx$/);
+});
+
+test('missing ZIP exporter blocks every download mode instead of emitting an unstyled workbook',async()=>{
+  for(const [combined,buyers] of [[false,['甲']],[true,['甲','乙']],[false,['甲','乙']]]) {
+    const {context,run}=loadApp();let message='',writes=0;
+    delete context.window.JSZip;
+    context.window.alert=text=>{message=text;};
+    context.window.XLSX.writeFile=()=>{writes++;};
+    context.writeStyledDetailWorkbook=async()=>{writes++;};
+    context.rows=buyers.map(buyer=>({buyer,quantityNumber:1}));run('state.filteredRows=rows');
+    await run(`downloadDetailWorkbook(${combined})`);
+    assert.equal(message,'Excel 导出组件未加载，请刷新页面后重试。');
+    assert.equal(writes,0);
+  }
 });
 
 test('quantity exports as numeric cells with zero-decimal formatting and preserves missing values', async () => {
@@ -621,11 +648,11 @@ test('交期按北京时间加自然日，覆盖零、空值、跨月跨年闰�
  for(const v of ['',undefined,-1,1.5,'abc',36501])assert.equal(calculate(v,'2026-10-15T00:00:00Z').supplierDeliveryDate,'');
 });
 
-test('下载日期保留TODAY及加天数公式，空值和0均保留，重开不丢失',()=>{
+test('下载日期为文字且保留TODAY及加天数公式，空值和0均保留，重开不丢失',()=>{
  const {context,run}=loadApp();context.sheet={};context.rows=[{todayDate:'2026-10-15',deliveryDays:20,supplierDeliveryDate:'2026-11-04'},{todayDate:'2026-10-15',deliveryDays:'',supplierDeliveryDate:''},{todayDate:'2026-10-15',deliveryDays:0,supplierDeliveryDate:'2026-10-15'}];
  run('addDeliveryFormulas(sheet,rows)');context.sheet['!ref']='A1:S4';
  const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,context.sheet,'测试');const sheet=XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true}).Sheets.测试;
- assert.equal(sheet.L2.f,'TODAY()');assert.equal(sheet.N2.f,'IF(M2="","",L2+M2)');assert.equal(sheet.N3.f,'IF(M3="","",L3+M3)');assert.equal(sheet.N3.v,'');assert.equal(sheet.N4.v,sheet.L4.v);assert.equal(XLSX.SSF.format(sheet.N2.z,sheet.N2.v),'2026-11-04');
+ assert.equal(sheet.L2.f,'TEXT(TODAY(),"yyyy-mm-dd")');assert.equal(sheet.N2.f,'IF(M2="","",TEXT(DATE(VALUE(LEFT(L2,4)),VALUE(MID(L2,6,2)),VALUE(RIGHT(L2,2)))+M2,"yyyy-mm-dd"))');assert.equal(sheet.N3.f,'IF(M3="","",TEXT(DATE(VALUE(LEFT(L3,4)),VALUE(MID(L3,6,2)),VALUE(RIGHT(L3,2)))+M3,"yyyy-mm-dd"))');assert.equal(sheet.N3.v,'');assert.equal(sheet.N4.v,sheet.L4.v);assert.equal(sheet.N2.v,'2026-11-04');assert.equal(sheet.N2.t,'s');assert.equal(sheet.L2.t,'s');assert.equal(sheet.N2.z,'@');assert.equal(sheet.L2.z,'@');
 });
 
 

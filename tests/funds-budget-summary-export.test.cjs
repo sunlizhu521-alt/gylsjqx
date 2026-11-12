@@ -16,6 +16,7 @@ function result(groups=[group()],changes={}) {
 }
 async function fixture({summaryIndex=-1,date1904=false,formula,calcChain=false}={}) {
   const book=X.utils.book_new(),source=X.utils.aoa_to_sheet([['保留表头','金额','人工说明'],['原始值',123.45,'=字面文本'],['公式',100]]);
+  source.D2={t:'n',v:date1904?44865:46327,z:'yyyy"年"m"月"',f:'DATE(2026,11,1)'};source['!ref']='A1:D4';
   source.B3={t:'n',v:100,f:formula||'B2-23.45'};source.A2.c=[{a:'人工作者',t:'原批注保持'}];
   source['!cols']=[{wch:27},{wch:19,hidden:true},{wch:35}];source['!rows']=[{hpt:31},{hpt:43,hidden:true}];source['!merges']=[{s:{r:3,c:0},e:{r:3,c:2}}];source['!autofilter']={ref:'A1:C3'};
   const names=['明细甲','明细乙'];if(summaryIndex>=0)names.splice(summaryIndex,0,NAME);
@@ -34,18 +35,23 @@ async function unpack(bytes){return {book:X.read(bytes,{type:'array',cellNF:true
 function summaryPath(zip){return zip.file('xl/workbook.xml').async('string').then(async workbook=>{const id=workbook.match(/<(?:[\w.-]+:)?sheet\b[^>]*name="付款预算汇总"[^>]*r:id="([^"]+)"/)[1],rels=await zip.file('xl/_rels/workbook.xml.rels').async('string'),rel=(rels.match(/<Relationship\b[^>]*\/>/g)||[]).find(r=>r.includes(`Id="${id}"`));return 'xl/'+rel.match(/Target="([^"]+)"/)[1];});}
 const section=(xml,name)=>xml.match(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)</${name}>`))[1];
 
-test('新增第一张汇总，固定7列、真实日期、金额和公式缓存可回读',async()=>{
+test('新增第一张汇总，固定7列、年月文本、金额和公式缓存可回读',async()=>{
   const source=await fixture(),{book,zip}=await unpack(await Export(source,result()));
   assert.deepEqual(book.SheetNames,[NAME,'明细甲','明细乙']);
   const sheet=book.Sheets[NAME];assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1})[0],headers);
-  assert.equal(sheet.A2.v,46327);assert.equal(sheet.A2.t,'n');assert.equal(sheet.A2.z,'yyyy"年"m"月"');assert.equal(sheet.A2.w,'2026年11月');
+  assert.equal(sheet.A2.v,'2026年11月');assert.equal(sheet.A2.t,'s');assert.equal(sheet.A2.z,'@');assert.equal(sheet.A2.w,'2026年11月');assert.equal(sheet.A2.f,undefined);
   assert.equal(sheet.D2.v,123.45);assert.equal(sheet.E2.v,23.45);assert.equal(sheet.F2.v,100);assert.equal(sheet.F2.f,'D2-E2');
   for(const [c,value] of [['D',123.45],['E',23.45],['F',100]]){assert.equal(sheet[c+'3'].v,value);assert.equal(sheet[c+'3'].f,`SUM(${c}2:${c}2)`);}
   assert.equal(sheet.G2.v,'');assert.equal(sheet.G3.v,'');assert.equal(sheet['!autofilter'].ref,'A1:G2');
   const xml=await zip.file(await summaryPath(zip)).async('string');assert.match(xml,/<pane ySplit="1" topLeftCell="A2"[^>]*state="frozen"/);assert.doesNotMatch(xml,/<tableParts|<filterColumn|hidden="/);
   const styles=await zip.file('xl/styles.xml').async('string'),xfs=section(styles,'cellXfs').match(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g),originalStyles=await (await Zip.loadAsync(source)).file('xl/styles.xml').async('string');
   for(const name of ['fonts','fills','borders','cellXfs'])assert(section(styles,name).startsWith(section(originalStyles,name)),name+' preserves every original style');
-  for(const c of xml.match(/<c\b[^>]+>/g)){const style=xfs[Number(c.match(/s="(\d+)"/)[1])];assert.match(style,/horizontal="center" vertical="center" wrapText="0"/);assert.match(style,/applyBorder="1"/);}
+  const borders=section(styles,'borders').match(/<border\b[^>]*(?:\/>|>[\s\S]*?<\/border>)/g);
+  for(const c of xml.match(/<c\b[^>]+>/g)){
+    const style=xfs[Number(c.match(/s="(\d+)"/)[1])];assert.match(style,/horizontal="center" vertical="center" wrapText="0"/);assert.match(style,/applyBorder="1"/);
+    const address=c.match(/\br="([A-Z]+\d+)"/)[1],row=Number(address.match(/\d+$/)[0]),border=borders[Number(style.match(/\bborderId="(\d+)"/)[1])];
+    for(const side of ['left','right','top','bottom'])assert.match(border,new RegExp(`<${side} style="${row===1?'thin':'hair'}"><color rgb="FF404040"/></${side}>`),address);
+  }
   assert.equal(sheet.A1.s.fgColor.rgb,'315B9D');assert.equal(sheet.A2.s.fgColor.rgb,'FFFFFF');assert(sheet['!cols'][3].width>=14);
 });
 
@@ -75,15 +81,16 @@ test('空记录、零、负数和未知月份都有正确的公式缓存，不�
   const sheet=(await unpack(await Export(source,data))).book.Sheets[NAME];assert.equal(sheet.A2.v,'时间待定');assert.equal(sheet.D2.v,0);assert.equal(sheet.D3.v,-1.23);assert.equal(sheet.F3.v,-1.23);assert.equal(sheet.B3.t,'s');assert.equal(sheet.B3.v,'=字面分类');assert.equal(sheet.B3.f,undefined);assert.equal(sheet.C3.v,'<未支付>&');assert.equal(sheet.F4.v,-1.23);
 });
 
-for(const date1904 of [false,true])test(`${date1904?'1904':'1900'}日期系统遵守原工作簿`,async()=>{
+for(const date1904 of [false,true])test(`${date1904?'1904':'1900'}日期系统的汇总月份同为文本，原表日期及公式不变`,async()=>{
   const {book}=await unpack(await Export(await fixture({date1904}),result(undefined,{date1904})));
-  assert.equal(book.Sheets[NAME].A2.v,date1904?44865:46327);assert.equal(Boolean(book.Workbook.WBProps.date1904),date1904);
-  const parsed=X.SSF.parse_date_code(book.Sheets[NAME].A2.v,{date1904});assert.deepEqual([parsed.y,parsed.m,parsed.d],[2026,11,1]);
+  assert.equal(book.Sheets[NAME].A2.v,'2026年11月');assert.equal(book.Sheets[NAME].A2.t,'s');assert.equal(Boolean(book.Workbook.WBProps.date1904),date1904);
+  assert.equal(book.Sheets.明细甲.D2.v,date1904?44865:46327);assert.equal(book.Sheets.明细甲.D2.t,'n');assert.equal(book.Sheets.明细甲.D2.f,'DATE(2026,11,1)');
+  assert.equal([book.Sheets[NAME].A2,book.Sheets[NAME].D2].filter(c=>c.t==='n').reduce((sum,c)=>sum+c.v,0),123.45);
 });
 
 test('1900年闰年兼容及最早月份不偏移',async()=>{
   const groups=['1900-01','1900-02','1900-03'].map(monthKey=>group({monthKey}));
-  const sheet=(await unpack(await Export(await fixture(),result(groups)))).book.Sheets[NAME];assert.deepEqual([sheet.A2.v,sheet.A3.v,sheet.A4.v],[1,32,61]);
+  const sheet=(await unpack(await Export(await fixture(),result(groups)))).book.Sheets[NAME];assert.deepEqual([sheet.A2.v,sheet.A3.v,sheet.A4.v],['1900年1月','1900年2月','1900年3月']);
 });
 
 test('受重排影响的三维公式拒绝，保持范围的三维公式及字面值允许',async()=>{

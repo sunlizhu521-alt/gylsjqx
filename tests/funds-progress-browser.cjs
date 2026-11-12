@@ -2,6 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),X=requ
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const {fixture,append,set,ID,PAID40}=require('./funds-progress-fixtures.cjs');
 const MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const exportedCell=cell=>cell.t==='n'&&cell.z&&X.SSF.is_date(cell.z)?{...cell,t:'s',v:X.SSF.format(cell.z,cell.v),z:'@'}:cell;
 const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
 (async()=>{
  const base=process.env.QA_URL||'http://127.0.0.1:8940/',browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
@@ -29,9 +30,9 @@ const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
    assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1})[0],C.PROGRESS_HEADERS);assert.equal(X.utils.decode_range(sheet['!ref']).e.r,expectedStates.length);
    const rows=X.utils.sheet_to_json(sheet,{header:1}).slice(1);assert.deepEqual(rows.map(row=>row[11]),expectedStates);assert.deepEqual(rows.map(row=>row[5]),expectedAmounts);
    for(let r=0;r<core.progressRows.length;r++)for(let c=0;c<12;c++){
-    const actual=sheet[X.utils.encode_cell({r:r+1,c})],expected=core.progressRows[r][c];assert.equal(actual.v,expected.v);assert.equal(actual.t,expected.t);if(expected.z)assert.equal(actual.z,expected.z);
+    const actual=sheet[X.utils.encode_cell({r:r+1,c})],expected=exportedCell(core.progressRows[r][c]);assert.equal(actual.v,expected.v);assert.equal(actual.t,expected.t);if(expected.z)assert.equal(actual.z,expected.z);
    }
-   assert.equal(sheet.A2.t,'n');assert.equal(sheet.G2.t,'n');assert.equal(sheet.F2.t,'n');assert.equal(sheet.E2.t,'s');assert.equal(sheet.F5.v,0);assert.equal(sheet['!autofilter'].ref,'A1:L'+(expectedStates.length+1));
+   assert.equal(sheet.A2.t,'s');assert.equal(sheet.G2.t,'s');assert.equal(sheet.A2.z,'@');assert.equal(sheet.G2.z,'@');assert.equal(sheet.F2.t,'n');assert.equal(sheet.E2.t,'s');assert.equal(sheet.F5.v,0);assert.equal(sheet['!autofilter'].ref,'A1:L'+(expectedStates.length+1));
    assert.equal(X.SSF.format(sheet.G2.z,sheet.G2.v),'2026年11月6日');assert.equal(X.SSF.format(sheet.G3.z,sheet.G3.v),'2026年11月9日');
    const snap=await preview();assert.deepEqual(snap.headers,C.PROGRESS_HEADERS);assert.equal(snap.rows.length,expectedStates.length);
    for(let r=0;r<expectedStates.length;r++)for(let c=0;c<12;c++){
@@ -42,8 +43,8 @@ const write=b=>Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));
    const n=saved.Sheets.谈判付款;assert.equal(n.F2.f,'D2-E2');assert.equal(n.F2.v,100);assert.equal(n.E2.v,0);assert.equal(n.K2.f,'SUM(M2:N2)');assert.equal(n.I2.c[0].t,'保留原批注');assert.equal(n.M2.c[0].t,'申请日期（付款节奏跟进）：2026年11月1日；2026年11月3日');
    const normal=saved.Sheets.正常付款,normalRows=X.utils.sheet_to_json(normal);assert.deepEqual(normalRows.map(r=>r['供应商名称']),['合成供应商2','合成供应商3']);assert.deepEqual(normalRows.map(r=>r['申请付款的日期']),['2026/11/02周','2026/11/09周']);
    const normalHeaders=X.utils.sheet_to_json(normal,{header:1})[0];assert.deepEqual(normalHeaders.slice(1,8),['跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间']);assert.deepEqual(await frame.locator('#normalPreview th').allTextContents(),normalHeaders);
-   for(let r=0;r<core.normalRows.length;r++)for(let c=0;c<normalHeaders.length;c++){const actual=normal[X.utils.encode_cell({r:r+1,c})],expected=core.normalRows[r][c];assert.equal(actual.v,expected.v);assert.equal(actual.t,expected.t);if(expected.f)assert.equal(actual.f,expected.f);}
-   assert.equal(normal.G2.v,200);assert.equal(normal.G2.z,'#,##0.00');assert.equal(normal.H2.t,'n');assert.equal(X.SSF.format(normal.H2.z,normal.H2.v),'2026年11月9日');assert.equal(normal.O2.f,'G2-M2');assert.equal(normal.O2.v,normal.G2.v-normal.M2.v);
+   for(let r=0;r<core.normalRows.length;r++)for(let c=0;c<normalHeaders.length;c++){const actual=normal[X.utils.encode_cell({r:r+1,c})],expected=exportedCell(core.normalRows[r][c]);assert.equal(actual.v,expected.v);assert.equal(actual.t,expected.t);if(expected.f)assert.equal(actual.f,expected.f);}
+   assert.equal(normal.G2.v,200);assert.equal(normal.G2.z,'#,##0.00');assert.equal(normal.H2.t,'s');assert.equal(normal.H2.z,'@');assert.equal(X.SSF.format(normal.H2.z,normal.H2.v),'2026年11月9日');assert.equal(normal.O2.f,'G2-M2');assert.equal(normal.O2.v,normal.G2.v-normal.M2.v);
    const meta=await frame.locator('body').evaluate(async(_,bytes)=>{
     const z=await JSZip.loadAsync(Uint8Array.from(bytes)),parse=s=>new DOMParser().parseFromString(s,'application/xml'),all=(d,n)=>[...d.getElementsByTagNameNS('*',n)];
     const wb=parse(await z.file('xl/workbook.xml').async('string')),rels=all(parse(await z.file('xl/_rels/workbook.xml.rels').async('string')),'Relationship'),entry=all(wb,'sheet').find(e=>e.getAttribute('name')==='付款进度整理'),id=entry.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id'),target=rels.find(e=>e.getAttribute('Id')===id).getAttribute('Target'),path=new URL(target,'https://x.invalid/xl/workbook.xml').pathname.slice(1),doc=parse(await z.file(path).async('string')),styles=parse(await z.file('xl/styles.xml').async('string')),xfs=all(styles,'cellXfs')[0].children,app=parse(await z.file('docProps/app.xml').async('string'));

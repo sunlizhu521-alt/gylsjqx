@@ -6,15 +6,28 @@
   const width = text => [...String(text)].reduce((n, c) => n + (c.codePointAt(0) > 255 ? 2 : 1), 0);
   return async function(result) {
     const book = Core.workbook(result);
+    const dateHeaders = new Set(['应付款时间','申请付款月份','需要提交付款审单的日期']);
+    for (const [index,name] of book.SheetNames.entries()) {
+      const sheet = book.Sheets[name], source = result.sheets[index];
+      source.headers.forEach((header,c) => {
+        if (!dateHeaders.has(header)) return;
+        for (let r=1;r<=source.rows.length;r++) {
+          const address = X.utils.encode_cell({r,c}), cell = sheet[address];
+          if (cell?.t !== 'n' || !cell.z || !X.SSF.is_date(cell.z)) continue;
+          sheet[address] = {...cell,t:'s',v:X.SSF.format(cell.z,cell.v),z:'@'};
+          delete sheet[address].f; delete sheet[address].w;
+        }
+      });
+    }
     const zip = await Zip.loadAsync(X.write(book, {type:'array', bookType:'xlsx'}));
     let styles = await zip.file('xl/styles.xml').async('string');
     const original = styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*(?:\/>|>[\s\S]*?<\/xf>)/g);
     const count = original.length;
-    const xf = (format, wrap, header = false, paid = false) => `<xf numFmtId="${format}" fontId="${header ? 1 : 0}" fillId="${header ? 3 : paid ? 4 : 2}" borderId="1" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="${wrap ? 1 : 0}" shrinkToFit="0"/></xf>`;
+    const xf = (format, wrap, header = false, paid = false) => `<xf numFmtId="${format}" fontId="${header ? 1 : 0}" fillId="${header ? 3 : paid ? 4 : 2}" borderId="${header ? 1 : 2}" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="${wrap ? 1 : 0}" shrinkToFit="0"/></xf>`;
     const formats = original.map(s => s.match(/\bnumFmtId="(\d+)"/)?.[1] || '0');
     const fonts = '<fonts count="2"><font><sz val="11"/><color rgb="FF172033"/><name val="等线"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="等线"/></font></fonts>';
     const fills = '<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFFFF"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF315B9D"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFF9999"/><bgColor indexed="64"/></patternFill></fill></fills>';
-    const borders = '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border>' + ['left', 'right', 'top', 'bottom'].map(side => `<${side} style="thin"><color rgb="FFD6DEE8"/></${side}>`).join('') + '<diagonal/></border></borders>';
+    const borders = '<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border>' + ['thin','hair'].map(style => '<border>' + ['left','right','top','bottom'].map(side => `<${side} style="${style}"><color rgb="FF404040"/></${side}>`).join('') + '<diagonal/></border>').join('') + '</borders>';
     styles = styles.replace(/<fonts\b[^>]*>[\s\S]*?<\/fonts>/, fonts).replace(/<fills\b[^>]*>[\s\S]*?<\/fills>/, fills).replace(/<borders\b[^>]*>[\s\S]*?<\/borders>/, borders).replace(/<cellXfs\b[^>]*>[\s\S]*?<\/cellXfs>/, `<cellXfs count="${count * 4 + 1}">${formats.map(f => xf(f, false)).join('')}${formats.map(f => xf(f, true)).join('')}${formats.map(f => xf(f, false, false, true)).join('')}${formats.map(f => xf(f, true, false, true)).join('')}${xf(0, false, true)}</cellXfs>`);
     zip.file('xl/styles.xml', styles);
     for (let index = 0; index < book.SheetNames.length; index++) {
