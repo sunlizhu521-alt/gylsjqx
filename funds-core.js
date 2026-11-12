@@ -1,8 +1,8 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FundsCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间','开票时间','开票金额','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','申请日期','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
-const ADDED_HEADERS=['提交付款申请单日期','提交时间汇总','是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号','付款自然周'];
+const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间','开票时间','开票金额','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','申请日期','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
+const ADDED_HEADERS=['是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号'];
 const SUPPLEMENT_HEADERS=['对公付款0A流程号','付款主体','单据号【财务应付单】'];
 const NORMAL_HIDDEN_HEADERS=['OA合同编号','合同总金额','是否对账'];
 const REVIEW_HEADERS=['付款类别','供应商名称','付款主体','申请付款金额','是否提交付款申请单','核对说明','来源文件','来源工作表','来源行号','跟单员'];
@@ -75,21 +75,6 @@ function paymentWeek(c,date1904,weeksBefore=0){
  start.setUTCDate(start.getUTCDate()-(start.getUTCDay()+6)%7-weeksBefore*7);
  return cell(String(start.getUTCFullYear()).padStart(4,'0')+'/'+String(start.getUTCMonth()+1).padStart(2,'0')+'/'+String(start.getUTCDate()).padStart(2,'0')+'周');
 }
-function plannedPaymentWeeks(t,row){
- const weeks=new Set();let invalid=false;
- for(let c=0;c<=t.range.e.c;c++){
-  const header=t.sheet[X.utils.encode_cell({r:t.headerRow,c})],parsed=date(header,t.date1904);
-  const valid=parsed.v!==''&&!parsed.invalid&&header?.t!=='e';
-  // Incomplete date headings must not inherit a year from today or a neighbouring plan.
-  if(!valid&&!/^(?:\d{4}[年./-]\d{1,2}(?:[月./-]\d{1,2}日?)?|\d{1,2}月\d{1,2}日?)$/.test(str(header?.v)))continue;
-  const amount=money(t.sheet[X.utils.encode_cell({r:row,c})]);
-  if(amount.blank||amount.cents===0n)continue;
-  if(amount.invalid||amount.cents<0n||!valid){invalid=true;continue;}
-  weeks.add(paymentWeek(header,t.date1904).v);
- }
- const labels=[...weeks].sort();if(invalid)labels.push('付款计划待确认');
- return cell(labels.join('；')||'日期待确认');
-}
 function submissionDates(c,date1904){
  if(c?.t==='e'||(c?.f&&(c.v==null||c.v==='')))return null;
  if(!c||c.v==null||c.v==='')return [];
@@ -109,13 +94,6 @@ function applicationDateCell(matched){
  const dates=[...valid].sort((a,b)=>a[0]-b[0]);
  if(dates.length===1&&!other.size)return dates[0][1];
  return cell([...dates.map(([,d])=>X.SSF.format(DATE_FORMAT,d.v)),...other].join('；'));
-}
-function submissionSummary(matched){
- return cell(matched.map((r,i)=>{
-  const d=date(r.values['申请日期'],r.date1904),valid=!d.invalid&&d.v!=='';
-  const label=valid?X.SSF.format('yyyy-mm-dd',d.v):str(r.values['申请日期']?.w??r.values['申请日期']?.v)||'日期为空';
-  return {sort:valid?label:'\uffff',i,text:label+'-'+amountText(r.values['申请付款金额'])};
- }).sort((a,b)=>a.sort.localeCompare(b.sort)||a.i-b.i).map(r=>r.text).join('\n'));
 }
 function applicationBatch(text){
  const match=norm(text).match(/第([0-9零〇一二两三四五六七八九十百]+)批/);
@@ -224,8 +202,7 @@ function build(inputs,decisions={}){
  if(absentFlow.length)issue('headers:'+flow.sheetName,'missing-header','缺少字段，无法据此自动匹配或更新：'+absentFlow.join('、'),headerRecord(flow));
  const targetCols={...negotiated.map},negHeaders=[...negotiated.headers];
  const batchLayout=BATCH_HEADERS.every(h=>targetCols[h]!==undefined);
- const addedHeaders=batchLayout?ADDED_HEADERS.filter(h=>!['提交付款申请单日期','提交时间汇总','付款自然周'].includes(h)):ADDED_HEADERS;
- for(const h of [...SUPPLEMENT_HEADERS.filter(h=>h!=='单据号【财务应付单】'),'应付款时间',...addedHeaders])if(targetCols[h]===undefined){targetCols[h]=negHeaders.length;negHeaders.push(h);updateMap.set(X.utils.encode_cell({r:negotiated.headerRow,c:targetCols[h]}),cell(h));}
+ for(const h of [...SUPPLEMENT_HEADERS.filter(h=>h!=='单据号【财务应付单】'),'应付款时间',...ADDED_HEADERS])if(targetCols[h]===undefined){targetCols[h]=negHeaders.length;negHeaders.push(h);updateMap.set(X.utils.encode_cell({r:negotiated.headerRow,c:targetCols[h]}),cell(h));}
  const classification=r=>{
   const supplier=r.values['供应商名称'],amount=money(r.values['申请付款金额']);
   const name=supplier?.t==='e'||(supplier?.f&&(supplier.v==null||supplier.v===''))?'':norm(supplier?.v);
@@ -352,17 +329,13 @@ function build(inputs,decisions={}){
   const {matched,ambiguous,peers}=normalApplications(target);
   if(matched.length)highlightedNormal.add(target.index+2);
   set(target,'是否提交付款申请单',cell(matched.length?'已提交':'未申请'));
-  set(target,'提交时间汇总',submissionSummary(matched));
   set(target,'申请日期',applicationDateCell(matched));
   const reviewable=ambiguous.filter(r=>!isReapplication(r));
   if(reviewable.length)reviewApplication(target,'付款申请归属核对：同一供应商、同一申请金额对应多笔正常付款，缺少有效 OA 号，无法区分。\n当前付款 OA 号：'+(str(target.values['对公付款0A流程号']?.v)||'空白')+'。\n候选付款 OA 号：'+[...new Set(peers.map(t=>str(t.values['对公付款0A流程号']?.v)||'空白'))].join('、')+'。\n申请来源：'+reviewable.map(r=>r.source.file+' / '+r.source.sheet+' 第 '+r.source.row+' 行').join('；')+'。\n需要处理：核实并补充付款申请汇总的流程编码及台账的对公付款0A流程号，再重新上传；本次未将这些申请计入提交状态或标红。',reviewable);
  }
- function applySubmissionDetails(target,matched){
-  const dates=[],invalid=[];
-  for(const a of matched){const d=date(a.values['申请日期'],a.date1904);if(d.invalid||d.v===''){invalid.push(a);continue;}dates.push(X.SSF.format('yyyy-mm-dd',d.v));}
-  const historical=submissionDates(target.values['提交付款申请单日期'],target.record.date1904);
-  if(invalid.length||historical===null){reviewApplication(target,'申请或提交日期为空/异常，请核对。',historical===null?matched:invalid);return;}
-  set(target,'提交付款申请单日期',cell([...new Set([...dates,...historical])].sort().join('\n')));
+ function checkApplicationDates(target,matched){
+  const invalid=matched.filter(a=>{const d=date(a.values['申请日期'],a.date1904);return d.invalid||d.v==='';});
+  if(invalid.length)reviewApplication(target,'申请日期为空/异常，请核对。',invalid);
  }
  function submissionKey(r){
   const ids=applicationIds(r),info=classification(r);return ids.length&&info.key?JSON.stringify([[...new Set(ids)].sort(),info.key]):null;
@@ -646,13 +619,11 @@ function build(inputs,decisions={}){
  }
  for(const target of negotiatedObjects){
   const group=submissions.get(target),matched=group.rows,info=classification(target.record);
-  if(!batchLayout)set(target,'付款自然周',plannedPaymentWeeks(negotiated,target.record.r));
   if(supplierConflicts.has(target))continue;
   if(group.ambiguous.length){
    confirmSubmissionStatus(target,[...new Set(group.reasons)].join(' '));
    reviewApplication(target,[...new Set(group.reasons)].join('\n'),group.ambiguous);highlightBatches(target,matched,group.ambiguous);continue;
   }
-  set(target,'提交时间汇总',submissionSummary(matched));
   if(!matched.length){
    set(target,'是否提交付款申请单',cell('未提交'));
    continue;
@@ -668,7 +639,7 @@ function build(inputs,decisions={}){
    set(target,'是否提交付款申请单',cell(total>=info.cents?'已经提交全部':'已经提交部分'));
    if(total>info.cents)reviewApplication(target,'申请超额：累计 '+centsText(total)+'，应申请 '+amountText(target.values['申请付款金额'])+'。',matched);
   }
-  applySubmissionDetails(target,matched);
+  checkApplicationDates(target,matched);
   highlightBatches(target,matched);
  }
  // Scan the full application source once, independently of payment targets and their review exclusions.

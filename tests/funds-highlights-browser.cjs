@@ -142,7 +142,7 @@ function fixture({ removeFirstApplication = false } = {}) {
       }
       assert.deepEqual([normal.G2.v, normal.M2.v, normal.O2.v, normal.G3.v, normal.M3.v, normal.O3.v], [123.45, 23.45, 100, 123.45, 0, 123.45]);
       assert.deepEqual([normal.E2.v,normal.E3.v],[records[2].id,records[3].id]);assert.deepEqual([normal.Q2.v,normal.Q3.v],['已提交','未申请']);
-      assert.deepEqual([normal.X2.v,normal.X3.v],[records[2].id,records[3].id]);assert.deepEqual([normal.T2.v,normal.T3.v],['财务审核','复核']);assert.deepEqual([normal.W2.v,normal.W3.v],['李奇','徐英']);
+      assert.deepEqual([normal.W2.v,normal.W3.v],[records[2].id,records[3].id]);assert.deepEqual([normal.S2.v,normal.S3.v],['财务审核','复核']);assert.deepEqual([normal.V2.v,normal.V3.v],['李奇','徐英']);
       assert.equal(normal.O2.f, 'G2-M2'); assert.equal(normal.O3.f, 'G3-M3');
       for (const header of C.NORMAL_HIDDEN_HEADERS) assert.equal(normal['!cols'][C.NORMAL_HEADERS.indexOf(header)].hidden, true);
       const metadata = await frame.locator('body').evaluate(async (_, { bytes, marker }) => {
@@ -219,7 +219,7 @@ function fixture({ removeFirstApplication = false } = {}) {
     assert(switchedPreview.rows[0].every(c=>c.applied));assert(switchedPreview.rows[1].every(c=>!c.applied));
     const switchedBook=X.read(await download(4),{cellNF:true,cellStyles:true}),switchedNormal=switchedBook.Sheets.正常付款;
     assert.deepEqual([switchedNormal.E2.v,switchedNormal.E3.v],[records[3].id,records[2].id]);assert.deepEqual([switchedNormal.Q2.v,switchedNormal.Q3.v],['已提交','未申请']);
-    assert.equal(switchedNormal.R2.v,46322);assert.equal(switchedNormal.R3.v??'','');assert.match(switchedNormal.S2.v,/2026-10-27-123.45/);assert.equal(switchedNormal.S3.v??'','');
+    assert.equal(switchedNormal.R2.v,46322);assert.equal(switchedNormal.R3.v??'','');assert.equal(C.NORMAL_HEADERS.includes('提交时间汇总'),false);assert.equal(switchedNormal.S1.v,'当前节点');
     for(const r of [2,3])for(let c=0;c<C.NORMAL_HEADERS.length;c++)assert.equal(/^(?:FF)?FF0000$/i.test(switchedNormal[X.utils.encode_cell({r:r-1,c})].s?.fgColor?.rgb||''),r===2);
     assert.deepEqual(errors, []);
     console.log('PASS: ascending application payment dates with matching formulas and highlights; native application-date notes and normal date column; homepage upload, first/re-read preview, earliest equal-amount installment and full normal-row red fill, no unnecessary review, original formulas, hidden columns, fresh-input CF replacement');
