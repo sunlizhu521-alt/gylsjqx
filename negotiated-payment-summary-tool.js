@@ -31,7 +31,7 @@
     for (const item of reviews) {
       const card = document.createElement('div'); card.className = 'review';
       const line = document.createElement('p');
-      line.textContent = `${item.supplier}\n${item.source}\n原分类：${item.classification || '空白'}；各月金额合计：${item.amountCents == null ? '金额异常，需核对源表' : '￥'+money(item.amountCents)}`;
+      line.textContent = `${item.supplier}\n${item.source}\n原分类：${item.classification || '空白'}；谈判明细金额合计：${item.amountCents == null ? '金额异常，需核对源表' : '￥'+money(item.amountCents)}`;
       const label = document.createElement('label'); label.textContent = '是否谈判分批';
       const select = document.createElement('select'); select.id = 'classification-' + item.id; label.htmlFor = select.id;
       select.dataset.address = item.address;
@@ -48,16 +48,16 @@
     }
   }
   function preview() {
-    $('preview').replaceChildren(); $('result').hidden = !result.months.length || !result.rows.length;
+    $('preview').replaceChildren(); $('result').hidden = !result.dates.length || !result.rows.length;
     if ($('result').hidden) return;
     const table = document.createElement('table'), head = table.createTHead(), first = head.insertRow(), second = head.insertRow(), body = table.createTBody();
     const add = (row,label,rowSpan=1,colSpan=1) => {
       const th = document.createElement('th'); th.textContent = label; th.rowSpan = rowSpan; th.colSpan = colSpan;
       th.scope = colSpan > 1 ? 'colgroup' : 'col'; row.append(th);
     };
-    add(first,'供应商',2); add(first,'谈判总金额',2); add(first,'谈判付款节奏',1,result.months.length);
-    add(first,'正常付款总金额',2); add(first,'正常付款',1,result.months.length);
-    for (let block=0;block<2;block++) for (const month of result.months) add(second,month.label);
+    add(first,'供应商',2); add(first,'谈判总金额',2); add(first,'谈判付款节奏',1,result.dates.length);
+    add(first,'正常付款总金额',2); add(first,'正常付款',1,result.dates.length);
+    for (let block=0;block<2;block++) for (const date of result.dates) add(second,date.label);
     for (const item of result.rows) {
       const row = body.insertRow(); row.insertCell().textContent = item.supplier;
       for (const value of [item.negotiatedTotalCents,...item.negotiatedCents,item.normalTotalCents,...item.normalCents]) row.insertCell().textContent = money(value);
@@ -84,7 +84,7 @@
       });
       if (next !== xml) zip.file(name,next);
     }
-    return XLSX.read(changed ? await zip.generateAsync({type:'uint8array'}) : bytes,{type:'array',sheets:'谈判付款',cellFormula:true,sheetStubs:true});
+    return XLSX.read(changed ? await zip.generateAsync({type:'uint8array'}) : bytes,{type:'array',sheets:'谈判付款',cellFormula:true,cellNF:true,sheetStubs:true});
   }
   $('sourceFile').addEventListener('change',async () => {
     const file = $('sourceFile').files[0]; reset();
@@ -106,12 +106,12 @@
     $('clear').hidden = true; $('status').textContent = '请上传文件。';
   });
   function verify(bytes) {
-    const book = XLSX.read(bytes,{type:'array',cellNF:true}), sheet = book.Sheets['谈判付款整理'], n = result.months.length;
+    const book = XLSX.read(bytes,{type:'array',cellNF:true}), sheet = book.Sheets['谈判付款整理'], n = result.dates.length;
     if (book.SheetNames.length !== 1 || !sheet || sheet['!ref'] !== `A1:${XLSX.utils.encode_col(2+2*n)}${result.rows.length+2}`) throw Error('导出结构校验未通过');
     if (sheet.A1?.v !== '供应商' || sheet.B1?.v !== '谈判总金额' || sheet[XLSX.utils.encode_cell({r:0,c:n+2})]?.v !== '正常付款总金额') throw Error('导出表头校验未通过');
     for (let i=0;i<n;i++) for (const col of [i+2,i+n+3]) {
       const cell = sheet[XLSX.utils.encode_cell({r:1,c:col})];
-      if (cell?.t !== 's' || cell.v !== result.months[i].label || cell.z !== '@') throw Error('导出月份校验未通过');
+      if (cell?.t !== 's' || cell.v !== result.dates[i].label || cell.z !== '@') throw Error('导出付款日期校验未通过');
     }
     result.rows.forEach((row,index) => {
       const r = index+3, values = [row.negotiatedTotalCents,...row.negotiatedCents,row.normalTotalCents,...row.normalCents];

@@ -5,14 +5,16 @@ const X = require('../vendor/xlsx.full.min.js'), Zip = require('../vendor/jszip.
 const root = path.resolve(__dirname,'..'), base = new URL(process.env.QA_URL || 'https://negotiated-summary.test/');
 const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 function fixture(rows) {
-  const headers = ['供应商','付款主体','是否谈判分批','2027年1月支付','2026年11月支付','2026年9月支付','OA-申请付款金额'];
+  const headers = ['供应商','付款主体','是否谈判分批','谈判明细','2027年1月支付','2026年11月支付','2026年9月支付','OA-申请付款金额'];
   const book = X.utils.book_new(); X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([headers,...rows]),'谈判付款');
   X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([['其他工作表不读取'],[999999]]),'正常付款');
   return Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
 }
 const original = fixture([
-  ['供应商甲','主体甲','是',30,20,10,999999],['供应商甲','主体乙','是',null,20,0,999999],
-  ['供应商甲','主体甲','否',5,null,null,999999],['供应商乙','主体甲','',null,180000,null,999999]
+  ['供应商甲','主体甲','是','1、9月30日－10\n2、11月25日－20\n3、1月25日－30',999,999,999,999999],
+  ['供应商甲','主体乙','是','1、9月30日－0\n2、11月26日－20',999,999,999,999999],
+  ['供应商甲','主体甲','否','1月25日－5',999,999,999,999999],
+  ['供应商乙','主体甲','','11月25日－180000',999,999,999,999999]
 ]);
 async function upload(scope,bytes=original,name='合成付款节奏.xlsx') {
   await scope.locator('#sourceFile:not([disabled])').setInputFiles({name,mimeType:mime,buffer:bytes});
@@ -66,24 +68,31 @@ async function download(page,scope,version,date='2026-11-12') {
     assert.equal(await frame.locator('#preview').innerText(),preview);
     assert.equal(await frame.locator('select[data-address="C5"]').inputValue(),'否');
     const bytes=await download(page,frame,1),book=X.read(bytes,{type:'buffer',cellNF:true}),s=book.Sheets.谈判付款整理;
-    assert.deepEqual(book.SheetNames,['谈判付款整理']); assert.equal(s['!ref'],'A1:I4');
-    assert.equal(s.B3.v,80); assert.equal(s.B3.f,'SUM(C3:E3)');assert.equal(s.F3.v,5);assert.equal(s.H4.v,180000);
-    assert.equal(s.C2.t,'s');assert.equal(s.C2.z,'@');assert.equal(s.C2.v,'2026年9月');assert.equal(X.SSF.format(s.E2.z,s.E2.v),'2027年1月');
+    assert.deepEqual(book.SheetNames,['谈判付款整理']); assert.equal(s['!ref'],'A1:K4');
+    assert.equal(s.B3.v,80); assert.equal(s.B3.f,'SUM(C3:F3)');assert.equal(s.G3.v,5);assert.equal(s.I4.v,180000);
+    assert.equal(s.C2.t,'s');assert.equal(s.C2.z,'@');assert.equal(s.C2.v,'2026年9月30日');assert.equal(X.SSF.format(s.F2.z,s.F2.v),'2027年1月25日');
+    assert.deepEqual(['C','D','E','F'].map(c=>s[c+'2'].v),['2026年9月30日','2026年11月25日','2026年11月26日','2027年1月25日']);
+    assert.deepEqual(['C','D','E','F'].map(c=>s[c+'3'].v),[10,20,20,30]);
+    assert.equal(s['!autofilter'].ref,'A2:K4');
+    for(const date of ['2026年11月25日','2026年11月26日'])assert(preview.includes(date));
     await frame.locator('select[data-address="C5"]').selectOption(''); assert(await frame.locator('#download').isDisabled());
     await frame.locator('select[data-address="C5"]').selectOption('是'); assert.match(await frame.locator('#totals').innerText(),/谈判付款 ￥180,080.00/);
     await upload(frame); assert.equal(await frame.locator('select[data-address="C5"]').inputValue(),'','新上传不沿用旧分类');
     assert(await frame.locator('#download').isDisabled());
-    await upload(frame,fixture([['<img src=x onerror=alert(1)>','','是',0,'坏金额',null,0]]),'异常.xlsx');
+    await upload(frame,fixture([['<img src=x onerror=alert(1)>','','是','11月25日－坏金额']]),'异常.xlsx');
     await frame.locator('#status').filter({hasText:'修正来源问题'}).waitFor();assert(await frame.locator('#download').isDisabled());
-    assert.match(await frame.locator('#issues').innerText(),/异常.xlsx.*E2/);assert.equal(await frame.locator('#preview img').count(),0);
+    assert.match(await frame.locator('#issues').innerText(),/异常.xlsx.*D2/);assert.equal(await frame.locator('#preview img').count(),0);
     // An uncached string formula must not disappear into a blank/zero on browser import.
-    const brokenFormula=await Zip.loadAsync(fixture([['供应商甲','','是',null,10,null,0]]));
+    const brokenFormula=await Zip.loadAsync(fixture([['供应商甲','','是','11月25日－10']]));
     let xml=await brokenFormula.file('xl/worksheets/sheet1.xml').async('string');
-    xml=xml.replace(/<c\b[^>]*\br="E2"[^>]*>[\s\S]*?<\/c>/,'<c r="E2" t="str"><f>1+1</f></c>');
+    xml=xml.replace(/<c\b[^>]*\br="D2"[^>]*>[\s\S]*?<\/c>/,'<c r="D2" t="str"><f>1+1</f></c>');
     brokenFormula.file('xl/worksheets/sheet1.xml',xml);
     await upload(frame,await brokenFormula.generateAsync({type:'nodebuffer'}),'缺公式结果.xlsx');
     await frame.locator('#status').filter({hasText:'修正来源问题'}).waitFor();assert(await frame.locator('#download').isDisabled());
-    assert.match(await frame.locator('#issues').innerText(),/E2.*公式/);
+    assert.match(await frame.locator('#issues').innerText(),/D2.*公式/);
+    await upload(frame,fixture([['供应商甲','','是','11月25日－10\n11月26日－20'],['供应商乙','','否','']]),'缺明细.xlsx');
+    await frame.locator('#status').filter({hasText:'修正来源问题'}).waitFor();assert(await frame.locator('#download').isDisabled());
+    assert.match(await frame.locator('#issues').innerText(),/D3.*(?:空|缺)/);
     await upload(frame,Buffer.from('broken'),'损坏.xlsx'); await frame.locator('#status').filter({hasText:'读取失败'}).waitFor();
     assert(await frame.locator('#download').isDisabled()); assert(await frame.locator('#result').isHidden());assert(await frame.locator('#review-panel').isHidden());
     await upload(frame);await frame.locator('select[data-address="C5"]').selectOption('否');
@@ -93,12 +102,24 @@ async function download(page,scope,version,date='2026-11-12') {
     assert(dimensions.scroll<=dimensions.width+2,'窄屏仅表格区域横向滚动');
     if(process.env.QA_MOBILE_SCREENSHOT)await page.screenshot({path:process.env.QA_MOBILE_SCREENSHOT,fullPage:true});
     await frame.locator('#clear').click();assert(await frame.locator('#download').isDisabled());assert(await frame.locator('#result').isHidden());
+    // A real date format must survive browser import; a plain numeric header is not year evidence.
+    const dateBook=X.utils.book_new(),dateSheet=X.utils.aoa_to_sheet([
+      ['供应商','付款主体','是否谈判分批','谈判明细',46356],['日期供应商','','是','11月25日－100']
+    ]);
+    dateSheet.E1.z='yyyy"年"m"月"d"日"';X.utils.book_append_sheet(dateBook,dateSheet,'谈判付款');
+    await upload(frame,Buffer.from(X.write(dateBook,{type:'buffer',bookType:'xlsx'})),'日期表头.xlsx');
+    await frame.locator('#download:not([disabled])').waitFor();
+    assert.match(await frame.locator('#preview').innerText(),/2026年11月25日/);
+    dateSheet.E1.z='General';
+    await upload(frame,Buffer.from(X.write(dateBook,{type:'buffer',bookType:'xlsx'})),'普通数字表头.xlsx');
+    await frame.locator('#status').filter({hasText:'修正来源问题'}).waitFor();assert(await frame.locator('#download').isDisabled());
+    assert.match(await frame.locator('#issues').innerText(),/D2.*年份/);
     await page.goto(new URL('negotiated-payment-summary.html',base).href,{waitUntil:'networkidle'});
-    await upload(page,fixture([['供应商乙','','否',5,null,null,0]]),'新文件.xlsx');
+    await upload(page,fixture([['供应商乙','','否','1月25日－5']]),'新文件.xlsx');
     await page.locator('#download:not([disabled])').waitFor();
     assert.match(await page.locator('#counts').innerText(),/1 条明细，1 家供应商/);assert(await page.locator('#review-panel').isHidden());
     const replaced=X.read(await download(page,page,2),{type:'buffer'}).Sheets.谈判付款整理;
-    assert.equal(replaced.A3.v,'供应商乙');assert.equal(replaced.F3.v,5);
+    assert.equal(replaced.A3.v,'供应商乙');assert.equal(replaced.D3.v,5);assert.equal(replaced.E2.v,'2027年1月25日');
     // A failed or corrupted export cannot start a download.
     const beforeFailure=downloadCount;
     await page.evaluate(()=>{window.__realExport=window.NegotiatedPaymentSummaryExport;window.NegotiatedPaymentSummaryExport=async()=>{throw Error('测试生成失败');};});
@@ -116,7 +137,7 @@ async function download(page,scope,version,date='2026-11-12') {
     assert.equal(await page.locator('#sourceFile').evaluate(input=>input.files.length),0,'刷新不恢复上传文件');
     assert.equal(await page.locator('#reference').innerText(),'尚未引用文件');
     assert(await page.locator('#download').isDisabled());assert(await page.locator('#result').isHidden());
-    await upload(page,fixture([['供应商乙','','否',5,null,null,0]]),'刷新后新文件.xlsx');
+    await upload(page,fixture([['供应商乙','','否','1月25日－5']]),'刷新后新文件.xlsx');
     await page.locator('#download:not([disabled])').waitFor();
     await download(page,page,4);
     await page.evaluate(()=>window.__negotiatedSummaryTestNow='2026-11-12T15:59:59Z');
@@ -129,19 +150,14 @@ async function download(page,scope,version,date='2026-11-12') {
     assert.match(await page.locator('#status').innerText(),/本页内仍会递增/);
     if(process.env.QA_SAMPLE_FILE){
       await upload(page,fs.readFileSync(process.env.QA_SAMPLE_FILE),path.basename(process.env.QA_SAMPLE_FILE));
-      await page.locator('select[data-address="G40"]').waitFor();
+      await page.locator('#status').filter({hasText:'修正来源问题'}).waitFor();
       assert.match(await page.locator('#counts').innerText(),/119 条明细，47 家供应商/);
-      assert.match(await page.locator('#totals').innerText(),/34,628,537.65.*10,636,995.03.*180,000.00/);
       assert(await page.locator('#download').isDisabled());
-      // A temporary test choice exercises export; it is never saved into the user's source workbook.
-      await page.locator('select[data-address="G40"]').selectOption('否');
-      const sample=await download(page,page),out=X.read(sample,{type:'buffer',cellNF:true}).Sheets.谈判付款整理;
-      assert.equal(out['!ref'],'A1:S49');
-      let negotiated=0,normal=0;for(let r=3;r<=49;r++){negotiated+=Math.round(out['B'+r].v*100);normal+=Math.round(out['K'+r].v*100);}
-      assert.equal(negotiated,3462853765);assert.equal(normal,1081699503);
-      if(process.env.QA_SAMPLE_OUTPUT)fs.writeFileSync(process.env.QA_SAMPLE_OUTPUT,sample);
+      const issues=await page.locator('#issues').innerText();
+      for(const address of ['L25','L44','L78'])assert(issues.includes(address),address+' 缺明细必须提示');
+      assert.match(await page.locator('#preview').innerText(),/2027年4月25日/);
     }
     assert.deepEqual(errors,[]);
-    console.log('PASS: 首页与独立页、分类核对、跨年月份、切换保留、替换重置、错误清理、公式缓存保护、预览下载一致、手机布局、版本递增/刷新/失败不递增/北京时间跨日/缓存不可用'+(process.env.QA_SAMPLE_FILE?'、真实样表':'') );
+    console.log('PASS: 首页与独立页、具体日分列/同月多日/跨年、明细金额/忽略月度金额、分类核对、缺明细保护、切换保留、替换重置、错误清理、公式缓存保护、预览下载一致、手机布局、版本递增/刷新/失败不递增/北京时间跨日/缓存不可用'+(process.env.QA_SAMPLE_FILE?'、真实样表':'') );
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

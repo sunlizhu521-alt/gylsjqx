@@ -14,30 +14,32 @@
     if (Math.round(value * 100) !== cents) throw Error('金额超过可精确保存到分的范围，请核对金额。');
     return {t:'n',v:value,z:AMOUNT_FORMAT};
   }
-  function month(key) {
-    const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(key);
-    if (!match || Number(match[1]) < 1900) throw Error('付款月份无效，请重新整理。');
-    return {t:'s',v:`${Number(match[1])}年${Number(match[2])}月`,z:'@'};
+  function dateCell(key) {
+    const match = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.exec(key);
+    if (!match || Number(match[1]) < 1900) throw Error('付款日期无效，请重新整理。');
+    const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]), date = new Date(Date.UTC(year,month-1,day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month-1 || date.getUTCDate() !== day) throw Error('付款日期无效，请重新整理。');
+    return {t:'s',v:`${year}年${month}月${day}日`,z:'@'};
   }
   function checkAmounts(values, total, count) {
-    if (!Array.isArray(values) || values.length !== count || !Number.isSafeInteger(total)) throw Error('月份金额或合计不完整，请重新整理。');
+    if (!Array.isArray(values) || values.length !== count || !Number.isSafeInteger(total)) throw Error('日期金额或合计不完整，请重新整理。');
     let sum = 0n;
     for (const value of values) {
       if (value === null) continue;
       if (!Number.isSafeInteger(value)) throw Error('金额不是有效的整数分，请重新整理。');
       sum += BigInt(value);
     }
-    if (sum !== BigInt(total)) throw Error('月份金额与合计不一致，请重新整理。');
+    if (sum !== BigInt(total)) throw Error('日期金额与合计不一致，请重新整理。');
   }
 
   return async function(result) {
     if (!result?.canExport || result.errors?.length || result.unresolved?.length) throw Error('请先完成分类核对并修正金额问题，再下载。');
-    if (!Array.isArray(result.months) || !result.months.length || !Array.isArray(result.rows) || !result.rows.length) throw Error('缺少谈判付款整理结果。');
-    const count = result.months.length, normalTotal = count + 2, normalStart = count + 3, columns = count * 2 + 3;
+    if (!Array.isArray(result.dates) || !result.dates.length || !Array.isArray(result.rows) || !result.rows.length) throw Error('缺少谈判付款整理结果。');
+    const count = result.dates.length, normalTotal = count + 2, normalStart = count + 3, columns = count * 2 + 3;
     if (columns > 16384 || result.rows.length + 2 > 1048576) throw Error('结果超过 Excel 的行列数量限制。');
-    const keys = result.months.map(item => item?.key);
-    if (keys.some((key, index) => typeof key !== 'string' || index > 0 && key <= keys[index-1])) throw Error('付款月份重复或未按年月排序。');
-    const dates = keys.map(month);
+    const keys = result.dates.map(item => item?.key);
+    if (keys.some((key, index) => typeof key !== 'string' || index > 0 && key <= keys[index-1])) throw Error('付款日期重复或未按日期升序排列。');
+    const dates = keys.map(dateCell);
     const top = Array.from({length:columns},() => cell(''));
     const second = Array.from({length:columns},() => cell(''));
     top[0] = cell('供应商'); top[1] = cell('谈判总金额'); top[2] = cell('谈判付款节奏');
