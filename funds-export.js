@@ -151,7 +151,7 @@ window.FundsExport = async function(sourceBytes, result) {
   const date1904=['1','true'].includes(first(workbook,'workbookPr')?.getAttribute('date1904'));
   const textDateStyles=new Map();
   const writeCell=(doc,address,cell,styleId,convertDates=false)=>{
-    // Convert only dates this tool writes. Native source cells and monetary columns stay intact.
+    // Store generated dates and schedule date labels as text, leaving monetary values numeric.
     if(typeof cell?.v==='number'&&cell.t!=='s'&&cell.z&&XLSX.SSF.is_date(cell.z)){
       if(!Number.isFinite(cell.v))throw Error('单元格 '+address+' 的日期不是有效数值');
       const format=cell.z.replace(/"[^"]*"|\\.|[年月日时分秒]/g,part=>part.length===1?'"'+part+'"':part);
@@ -228,7 +228,24 @@ window.FundsExport = async function(sourceBytes, result) {
       const address=c.getAttribute('r'),point=XLSX.utils.decode_cell(address),header=point.r===headerRow,flow=singleLineColumns.has(point.c);
       if(point.c>end.c||point.r>end.r||!scoped(point.c))continue;
       if(doc!==sheet&&flow&&!header&&!first(c,'f')&&/[\r\n]/.test(cellText(c))){const text=cellText(c).replace(/\r\n|[\r\n]/g,'；');for(const child of [...c.children])if(['v','is'].includes(child.localName))child.remove();const is=create(doc,'is'),t=create(doc,'t');t.textContent=text;is.append(t);c.setAttribute('t','inlineStr');c.insertBefore(is,c.firstChild);}
-      if(header&&['',null,'n'].includes(c.getAttribute('t'))&&Number(xfs.children[styleId(c)].getAttribute('numFmtId'))===31)c.setAttribute('s',dateDisplayStyle(styleId(c)));
+      if(header&&['',null,'n'].includes(c.getAttribute('t'))){
+        const id=Number(xfs.children[styleId(c)].getAttribute('numFmtId')||0),raw=first(c,'v')?.textContent;
+        const sourceFormat=id===31?FundsCore.DATE_FORMAT:[...formats].find(([,n])=>n===id)?.[0]??XLSX.SSF.get_table()[id];
+        if((raw?.trim()||first(c,'f'))&&sourceFormat&&XLSX.SSF.is_date(sourceFormat)){
+          const formula=first(c,'f');
+          if(!raw?.trim())throw Error('日期表头 '+address+' 缺少公式计算结果，请在 Excel/WPS 重算并保存后重新上传');
+          if(formula&&(formula.getAttribute('t')&&formula.getAttribute('t')!=='normal'||!formula.textContent.trim()))throw Error('日期表头 '+address+' 含共享或数组公式，请在源表改为普通日期公式后重新上传');
+          // Keep the full date so re-uploading month-only labels does not lose the original day.
+          const format=FundsCore.DATE_FORMAT;
+          const next=writeCell(doc,address,{t:'n',v:Number(raw),z:format},styleId(c));
+          for(const child of [...c.children])if(['v','is'].includes(child.localName))child.remove();
+          c.setAttribute('s',next.getAttribute('s'));
+          if(formula){
+            formula.textContent='TEXT('+formula.textContent+',"'+format.replace(/"/g,'""')+'")';
+            c.setAttribute('t','str');const value=create(doc,'v');value.textContent=cellText(next);formula.after(value);
+          }else{c.setAttribute('t','inlineStr');c.insertBefore(first(next,'is'),c.firstChild);}
+        }
+      }
       if(header||flow||populatedColumns.has(point.c))c.setAttribute('s',layoutStyle(styleId(c),header,flow));
       if(!header&&(!populatedRows.has(point.r)||!populatedColumns.has(point.c)))c.setAttribute('s',withoutBorder(styleId(c)));
       const xf=xfs.children[styleId(c)];

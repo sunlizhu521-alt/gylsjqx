@@ -8,6 +8,7 @@
     "test:quality-seal-browser": "node tests/quality-seal-browser.cjs",
     "test:funds-ledger-browser": "node tests/funds-ledger-browser.cjs",
     "test:funds-browser": "node tests/funds-browser.cjs",
+    "test:funds-date-headers-browser": "node tests/funds-date-headers-browser.cjs",
     "test:browser": "node tests/payment-browser.cjs",
     "test:payment-layout-browser": "node tests/payment-layout-browser.cjs",
     "test:contract-browser": "node tests/contract-browser.cjs",
