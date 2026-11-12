@@ -1,6 +1,7 @@
 const tools = [
   { id: 'internal-statement', icon: '对', title: '内部交易对账单', status: '可用', desc: '按采购组织整理内部交易，填充内置模板，分别下载 Excel 和 PDF。', href: 'internal-statement.html' },
   { id: 'funds', icon: '账', title: '付款节奏跟进', status: '可用', desc: '整理谈判付款、正常付款及申请核对记录，补充 OA 审批进度。', href: 'funds.html' },
+  { id: 'negotiated-payment-summary', icon: '谈', title: '谈判付款整理', status: '可用', desc: '按供应商汇总每月支付金额，分别展示谈判付款和正常付款。', href: 'negotiated-payment-summary.html' },
   { id: 'funds-ledger', icon: '台', title: '资金台账整理', status: '可用', desc: '汇总全部月份的正常付款，匹配 OA 流程进度，已结清记录也保留。', href: 'funds-ledger.html' },
   { id: 'quarter-budget', icon: '季', title: '季度预算整理', status: '可用', desc: '合并付款预算、核对分期付款状态，按月份和分类汇总并下载 Excel。', href: 'quarter-budget.html' },
   { id: 'funds-budget-summary', icon: '预', title: '资金预算汇总', status: '可用', desc: '按月份、分类和状态汇总付款预算，更新汇总并保留原工作表。', href: 'funds-budget-summary.html' },
