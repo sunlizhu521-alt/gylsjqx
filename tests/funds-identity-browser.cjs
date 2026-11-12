@@ -1,6 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs/promises');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const X=require('../vendor/xlsx.full.min.js'),C=require('../funds-core.js'),{fixtures}=require('./funds-fixtures.cjs');
+const exportedValue=cell=>cell.t==='n'&&cell.z&&X.SSF.is_date(cell.z)?X.SSF.format(cell.z,cell.v):cell.v;
 function fields(sheet){return Object.fromEntries(X.utils.sheet_to_json(sheet,{header:1})[0].map((name,i)=>[name,i]));}
 function assign(sheet,row,values){const headers=fields(sheet);for(const [key,value] of Object.entries(values)){let col=headers[key];if(col===undefined){col=X.utils.decode_range(sheet['!ref']).e.c+1;headers[key]=col;X.utils.sheet_add_aoa(sheet,[[key]],{origin:{r:0,c:col}});}X.utils.sheet_add_aoa(sheet,[[value]],{origin:{r:row-1,c:col}});}}
 (async()=>{
@@ -26,7 +27,7 @@ function assign(sheet,row,values){const headers=fields(sheet);for(const [key,val
   assert.equal(normalFields['提交时间汇总'],18);assert.equal(normalFields['提交付款申请单日期'],undefined);assert.equal(normalFields['付款自然周'],undefined);
   for(const [sheetName,sheet,headers,expectedRows,expectedHeaders] of [['正常付款',normal,normalFields,result.normalRows,result.normalHeaders],['付款申请核对',review,fields(review),result.reviewRows,result.reviewHeaders]]){
    assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1})[0],expectedHeaders);
-   for(let r=0;r<expectedRows.length;r++)for(let c=0;c<expectedHeaders.length;c++)assert.equal(sheet[X.utils.encode_cell({r:r+1,c})]?.v??'',sheetName==='付款申请核对'&&c===5?C.formatReviewText(expectedRows[r][c].v):expectedRows[r][c].v);
+   for(let r=0;r<expectedRows.length;r++)for(let c=0;c<expectedHeaders.length;c++)assert.equal(sheet[X.utils.encode_cell({r:r+1,c})]?.v??'',sheetName==='付款申请核对'&&c===5?C.formatReviewText(expectedRows[r][c].v):exportedValue(expectedRows[r][c]));
   }
   for(const [sheet,headers,preview,oldId,state] of [[normal,normalFields,'normalPreview',oldNormal,'已提交'],[neg,negFields,'negotiatedPreview',oldNegotiated,'已经提交部分']]){
    const cell=key=>sheet[X.utils.encode_cell({r:1,c:headers[key]})]?.v??'';
@@ -44,6 +45,26 @@ function assign(sheet,row,values){const headers=fields(sheet);for(const [key,val
   const before=input.negotiated.book.Sheets[data.sheetName];assert.deepEqual(neg['!merges'],before['!merges']);assert.equal(X.utils.decode_range(neg['!ref']).e.r,X.utils.decode_range(before['!ref']).e.r);
   for(const address of ['D2','E2','G2','K2','N2','Q2','O2']){assert.equal(neg[address].v,before[address].v,'原谈判内容保留 '+address);assert.equal(neg[address].f,before[address].f,'原谈判公式保留 '+address);}
   assert.equal(normal.O2.f,'G2-M2');assert.equal(normal.O2.v,100);assert.deepEqual(errors,[]);
-  console.log('PASS: negotiated and normal cross-supplier OA conflicts preserve original OA, flow and application fields; both identities, amounts, flow IDs and source rows appear in review; preview equals four-sheet download; negotiated records, merges and financial formulas preserved.');
+  const repeated=await fixtures(),repeatedInputs={};
+  for(const kind of ['ledger','applications','negotiated','oa'])repeatedInputs[kind]={name:kind+'.xlsx',book:X.read(repeated[kind],{cellNF:true,cellStyles:true})};
+  repeatedInputs.negotiated.sheetName=repeated.sheetName;
+  const ns=repeatedInputs.negotiated.book.Sheets[repeated.sheetName],ls=repeatedInputs.ledger.book.Sheets['对账明细-李奇'];
+  const another=X.utils.sheet_to_json(ns,{header:1})[1].slice();another[2]='MDST-DGFK20261024010';
+  X.utils.sheet_add_aoa(ns,[another],{origin:-1});assign(ns,2,{'对公付款0A流程号':'未提交OA'});
+  X.utils.sheet_add_aoa(ls,[X.utils.sheet_to_json(ls,{header:1})[1]],{origin:-1});assign(ls,2,{'对公付款0A流程号':'未提交OA'});
+  X.utils.sheet_add_aoa(repeatedInputs.oa.book.Sheets.Sheet0,[['MDST-DGFK20261024999','财务审核','测试人员','未归档','李奇','谈判甲公司',300]],{origin:-1});
+  const expected=C.build(repeatedInputs);assert.equal(expected.stats.pending,0);
+  assert(!expected.reviewRows.some(row=>row[5].v.startsWith('OA号复核：')&&row[5].v.includes('未提交OA')));
+  for(const kind of ['ledger','applications','oa','negotiated'])await frame.locator('#'+kind+'File:not([disabled])').setInputFiles({name:kind+'.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(X.write(repeatedInputs[kind].book,{type:'buffer',bookType:'xlsx'}))});
+  await frame.locator('#negotiatedSheet').selectOption(repeated.sheetName);await frame.locator('#analyze:not([disabled])').click();await frame.locator('#download:not([disabled])').waitFor({timeout:60000});
+  const again=page.waitForEvent('download');await frame.locator('#download').click();const file=await again,reopened=X.read(await fs.readFile(await file.path()),{cellNF:true,cellStyles:true});
+  const reviewsAfter=X.utils.sheet_to_json(reopened.Sheets.付款申请核对);
+  assert.equal(reviewsAfter.length,expected.reviewRows.length);
+  assert(!reviewsAfter.some(row=>/OA号复核：.*未提交OA/.test(row['核对说明'])));
+  assert.doesNotMatch(await frame.locator('#reviewPreview').innerText(),/OA号复核：.*未提交OA/);
+  assert.equal(reopened.Sheets.谈判付款.C2.v,'未提交OA');assert.equal(reopened.Sheets.正常付款.E2.v,'未提交OA');
+  assert.equal(reopened.Sheets.谈判付款.E2.v,0);assert.equal(reopened.Sheets.谈判付款.N2.v,300);assert.equal(reopened.Sheets.谈判付款.N2.f,'G2-E2');
+  assert.equal(reopened.Sheets.正常付款.G2.v,100);assert.equal(reopened.Sheets.正常付款.M2.v,0);assert.deepEqual(errors,[]);
+  console.log('PASS: OA identity conflicts still reviewed; repeated supplier/amount with 未提交OA omits only the ordinary OA notice in preview/export, preserves OA and financial values/formulas for negotiated and normal rows.');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1);});

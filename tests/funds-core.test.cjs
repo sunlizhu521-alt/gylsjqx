@@ -929,6 +929,39 @@ test('原OA已准确对应候选时不因同名同额其他流程误改或重复
  set(i,'negotiated','对公付款0A流程号',2,' mdst-dgfk20261001001 ');assert.equal(applicationAndOAReviews(C.build(i)).length,0);
 });
 
+test('未提交OA的同名同额多笔付款仅取消普通OA复核，保留原值和其他冲突核对',()=>{
+ function input(old='未提交OA'){
+  const i=classifiedFixture(),s=i.negotiated.book.Sheets['10月谈判付款主表'];
+  const row=X.utils.sheet_to_json(s,{header:1})[1].slice();
+  row[2]='MDST-DGFK20261001999';X.utils.sheet_add_aoa(s,[row],{origin:-1});
+  set(i,'negotiated','对公付款0A流程号',2,old);
+  X.utils.sheet_add_aoa(i.oa.book.Sheets.Sheet0,[[row[2],'财务审核','另一人员','未归档','徐英','测试供应商甲',100]],{origin:-1});
+  return i;
+ }
+ const review=r=>legacyReviews(r).filter(row=>row[5].v.startsWith('OA号复核：')&&row[8].v===2);
+ for(const old of ['未提交OA',' 未提交 oa ']){
+  const i=input(old),before=JSON.stringify(i),r=C.build(i);
+  assert.equal(review(r).length,0);assert.equal(negotiatedValue(r,'对公付款0A流程号'),old);
+  assert.deepEqual(['已付金额','剩余付款金额','是否结清'].map(h=>negotiatedValue(r,h)),[0,100,'否']);
+  assert.equal(JSON.stringify(i),before);assert.equal(r.stats.pending,0);
+ }
+ for(const old of ['未交OA','MDST-DGFK20990101999'])assert.equal(review(C.build(input(old))).length,1);
+ const merged=input();merged.negotiated.book.Sheets['10月谈判付款主表']['!merges']=[X.utils.decode_range('C2:D2')];
+ assert.equal(review(C.build(merged)).length,1);
+ const conflicting=input();X.utils.sheet_add_aoa(conflicting.oa.book.Sheets.Sheet0,[['MDST-DGFK20261001001','财务审核','测试人员','未归档','李奇','另一收款单位',100]],{origin:-1});
+ assert.equal(review(C.build(conflicting)).length,1);
+ const duplicate=input(),s=duplicate.applications.book.Sheets.付款申请汇总;
+ X.utils.sheet_add_aoa(s,[X.utils.sheet_to_json(s,{header:1})[1]],{origin:-1});
+ assert.equal(duplicateReviews(C.build(duplicate)).length,1);
+ const normal=classifiedFixture(),ledger=normal.ledger.book.Sheets['对账明细-李奇'];
+ X.utils.sheet_add_aoa(ledger,[X.utils.sheet_to_json(ledger,{header:1})[2]],{origin:-1});
+ set(normal,'ledger','对公付款0A流程号',3,'未提交OA');
+ const r=C.build(normal);
+ assert.equal(r.normalRows.length,2);assert.equal(r.normalRows[0][4].v,'未提交OA');
+ assert(!legacyReviews(r).some(row=>row[0].v==='正常付款'&&row[5].v.startsWith('OA号复核：')));
+ assert.deepEqual(r.normalRows.map(row=>row[12].v),[100,100]);
+});
+
 function plannedOAFixture(){
  const i=classifiedFixture();set(i,'negotiated','对公付款0A流程号',2,'未申请OA');set(i,'negotiated','申请付款金额',2,10);
  X.utils.sheet_add_aoa(i.ledger.book.Sheets['对账明细-李奇'],[['2026-11-25'],[10]],{origin:'R1'});return i;

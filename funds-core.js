@@ -504,6 +504,8 @@ function build(inputs,decisions={}){
    message+='按收款单位＋付款金额唯一匹配，已更新为“'+ids[0]+'”。';
   }else{paidOAConflicts.add(target);message+=(merged?'OA号位于合并单元格':repeatedTarget?'同一供应商和金额对应多笔付款':conflicting?'OA来源编号或匹配信息异常、不一致':'匹配到多个流程编号')+'，保留当前 OA 值“'+(str(target.values['对公付款0A流程号']?.v)||'空白')+'”，请核对。';}
   const evidence=conflicting?flow.records.filter(r=>ids.includes(flowId(r))):matches;
+  // Keep ambiguous OA values and financial guards; this placeholder-only notice is not actionable.
+  if(repeatedTarget&&!merged&&!conflicting&&norm(old).toUpperCase()==='未提交OA'&&norm(target.values['对公付款0A流程号']?.v).toUpperCase()==='未提交OA')continue;
   oaReviews.push({target,message,evidence:evidence.map(r=>r.source.file+'/'+r.source.sheet+'!'+r.source.row).join('；')});
  }
  // Check identifier coverage independently of supplier/amount matching and application status.
