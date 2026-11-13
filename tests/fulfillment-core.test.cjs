@@ -38,6 +38,11 @@ test('导出名称使用上传名称和日期，更新版替换为汇总版',()=
  assert.equal(C.exportFilename('订单2026.11.1更新版.XLS'),'订单2026.11.1汇总版.xlsx');
  assert.equal(C.exportFilename('订单2026.10.8.xlsx'),'订单2026.10.8汇总版.xlsx');
  assert.equal(C.exportFilename('订单汇总版.xlsx'),'订单汇总版.xlsx');
+ for(const input of ['订单汇总版_V5.xlsx','订单汇总版-v12.XLSX','订单更新版_V0.xls',' 订单更新版_V2.xlsx '])assert.equal(C.exportFilename(input),'订单汇总版.xlsx');
+ assert.equal(C.exportFilename('订单_V3.xlsx'),'订单汇总版.xlsx');
+ assert.equal(C.exportFilename('订单V3.xlsx'),'订单V3汇总版.xlsx');
+ assert.equal(C.exportFilename('订单_V3备注.xlsx'),'订单_V3备注汇总版.xlsx');
+ assert.equal(C.exportFilename(''),'订单履约表汇总版.xlsx');
 });
 function snapshot(items){return {rows:items.map(([code,qty,owner='采购员',supplier='供应商'])=>C.COLUMNS.map(k=>({t:k==='未交付数量'&&typeof qty==='number'?'n':'s',v:({'物料编码':code,'未交付数量':qty,'采购下单人':owner,'供应商简称':supplier,'SKU':'SKU-'+code,'物料名称':'物料'+code})[k]??''}))),counts:[],sources:[],warnings:[]};}
 test('差异按物料汇总，保留多采购员及供应商，精确小数、新增、删除和零',()=>{

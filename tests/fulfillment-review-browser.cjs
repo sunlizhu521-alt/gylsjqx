@@ -79,7 +79,7 @@ function fixture({delta = 0, badQuantity = false, badFormula = false} = {}) {
     assert.equal(full.book.Sheets.合并核对['J' + totals].t, 'n');
     assert.equal(full.book.Sheets.合并核对['J' + totals].z, '0.0'); // 1.25 + 1.25 = 2.5
     const standalone = await download('#download-review', '合并核对.xlsx');
-    assert.equal(standalone.name, '核对2026.10.29更新版－合并核对.xlsx');
+    assert.equal(standalone.name, '核对2026.10.29更新版－合并核对_V1.xlsx');
     assert.deepEqual(standalone.book.SheetNames, ['合并核对']);
     assert.deepEqual(X.utils.sheet_to_json(standalone.book.Sheets.合并核对, {header: 1, defval: ''}), audit);
     const preview = await tool().locator('#review-preview tbody tr').evaluateAll(rows => rows.map(row => [...row.cells].map(cell => cell.textContent)));

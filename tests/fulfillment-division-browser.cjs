@@ -22,7 +22,7 @@ function fixture(departments){
   await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);
   for(const d of divisions){
    const event=page.waitForEvent('download');await page.locator('[data-download-division="'+d+'"]').click();const dl=await event;
-   assert.equal(dl.suggestedFilename(),'订单2026.10.23汇总版-'+d+'.xlsx');
+   assert.equal(dl.suggestedFilename(),'订单2026.10.23汇总版-'+d+'_V1.xlsx');
    const w=X.read(await fs.readFile(await dl.path()),{type:'buffer',cellNF:true,cellStyles:true});
    assert.deepEqual(w.SheetNames,['汇总表']);
    const rows=X.utils.sheet_to_json(w.Sheets.汇总表,{header:1,defval:''});

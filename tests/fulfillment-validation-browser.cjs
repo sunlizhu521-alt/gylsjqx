@@ -125,7 +125,7 @@ function staleFormula(field, formula = 'SUM(AA2:AA3)') {
     const downloaded = page.waitForEvent('download');
     await page.locator('#download').click();
     const download = await downloaded;
-    assert.equal(download.suggestedFilename(), '合成订单2026.10.23汇总版.xlsx');
+    assert.equal(download.suggestedFilename(), '合成订单2026.10.23汇总版_V1.xlsx');
     const output = await fs.readFile(await download.path());
     const exported = X.read(output, { type: 'buffer', cellNF: true });
     assert.deepEqual(exported.SheetNames, ['汇总表', '合并核对', '系列对比', ...sheetNames, '孙立柱', '说明']);

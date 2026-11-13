@@ -1,6 +1,24 @@
 (()=>{'use strict';const C=FulfillmentCore,V=FulfillmentValidation,$=id=>document.getElementById(id);let result=null,filename='',sourceBytes=null,validation=null,formulaInfo=null,busy=false;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const divisionButtons=[...document.querySelectorAll('[data-download-division]')];
+const versionKey='gylsjqx-fulfillment-export-versions',memoryVersions=Object.create(null);
+function savedVersions(){
+ const raw=localStorage.getItem(versionKey);
+ try{const value=JSON.parse(raw||'{}');return value&&typeof value==='object'&&!Array.isArray(value)?value:{};}catch(_){return {};}
+}
+function nextDownload(base){
+ const valid=value=>Number.isSafeInteger(value)&&value>=0?value:0;
+ let versions={};try{versions=savedVersions();}catch(_){}
+ const source=/^(.*)[_-]V(\d+)\.xlsx?$/i.exec(filename.trim());
+ const inherited=source&&source[1]+'.xlsx'===base?valid(Number(source[2])):0;
+ const previous=Math.max(valid(versions[base]),memoryVersions[base]||0,inherited);
+ if(previous===Number.MAX_SAFE_INTEGER)throw Error('版本号已达到安全上限，请更换文件名');
+ const version=previous+1;return {base,version,name:base.replace(/\.xlsx$/i,`_V${version}.xlsx`)};
+}
+function rememberDownload({base,version}){
+ memoryVersions[base]=version;
+ try{localStorage.setItem(versionKey,JSON.stringify({...savedVersions(),[base]:version}));return true;}catch(_){return false;}
+}
 const divisionResult=division=>{const rows=[],sources=[];for(const [i,row]of(result?.rows||[]).entries())if(String(row[C.COLUMNS.indexOf('事业部')]?.v??'').trim()===division){rows.push(row);sources.push(result.sources?.[i]);}return {rows,sources};};
 function updateDownloads(){
  const blocked=busy||$('file').disabled||!validation?.passed;
@@ -76,9 +94,11 @@ async function download(division='',reviewOnly=false){
  busy=true;$('file').disabled=true;updateDownloads();
  try{
   const blob=reviewOnly?await styledBytes(result,true):division?await styledBytes(subset):await FulfillmentExport(await styledBytes(result),sourceBytes);
-  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;
-  a.download=reviewOnly?filename.replace(/\.xlsx?$/i,'')+'－合并核对.xlsx':division?C.exportFilename(filename).replace(/\.xlsx$/, '-'+division+'.xlsx'):C.exportFilename(filename);
-  a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  const base=reviewOnly?filename.trim().replace(/\.xlsx?$/i,'').trim().replace(/[_-]V\d+$/i,'')+'－合并核对.xlsx':division?C.exportFilename(filename).replace(/\.xlsx$/, '-'+division+'.xlsx'):C.exportFilename(filename);
+  const next=nextDownload(base),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=next.name;
+  try{a.click();}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}
+  const saved=rememberDownload(next);
+  $('status').textContent='已生成：'+next.name+(saved?'':'。浏览器无法保存版本记录，版本号仅在本页递增，刷新后可能重新计数。');
  }catch(e){$('status').textContent='导出失败：'+e.message;}
  finally{busy=false;$('file').disabled=false;updateDownloads();}
 }
