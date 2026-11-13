@@ -98,7 +98,7 @@ function currentScope(result){
  return {...result,rows,sources:(result.sources||[]).filter((_,i)=>keep[i]),counts:(result.counts||[]).filter(x=>!excluded(x.sheet)),warnings:(result.warnings||[]).filter(w=>{if(excluded(w.split('!')[0]))return false;const value=w.match(/：日期“(.+)”无法识别，保留原文$/s)?.[1];return value==null||dateCell({v:value}).invalid;})};
 }
 const DIFF_COLUMNS=['采购下单人','供应商','物料编码','SKU','物料名称','未交付数量'];
-const SERIES_COLUMNS=['采购下单人','事业部','销售分渠道','系列','上期未交付数据','本期未交付数据','差异数量','备注','判断'];
+const SERIES_COLUMNS=['采购下单人','事业部','销售分渠道','供应商简称','系列','上期未交付数据','本期未交付数据','差异数量','备注','判断'];
 function seriesComparison(previous,current){
  const year=currentYear();
  const orderMonth=row=>{
@@ -142,7 +142,7 @@ function seriesComparison(previous,current){
   for(const [i,row] of (result?.rows||[]).entries()){
    const source=result.sources?.[i];
    if(source?.sheet&&!SHEETS.some(name=>new RegExp('^'+name+'(?:[0-9]{4}|[0-9]{8})?$').test(norm(source.sheet))))continue;
-   const labels=[0,1,2,6].map(c=>String(row[c]?.v??'').trim()),key=JSON.stringify(labels),cell=row[10];
+   const labels=[0,1,2,4,6].map(c=>String(row[c]?.v??'').trim()),key=JSON.stringify(labels),cell=row[10];
    const where=source?`${source.sheet}第 ${source.row} 行`:`第 ${i+1} 条`;
    const raw=typeof cell?.v==='number'?quantityText(cell.v):String(cell?.v??'').trim(),value=raw||'0';
    if(cell?.t==='e'||cell?.f&&(cell.v==null||raw==='')||!/^[+-]?\d+(?:\.\d+)?$/.test(value))throw Error(`${where}：系列对比的未交付数量“${raw}”不是有效数字，未更新历史数据`);
@@ -208,10 +208,17 @@ function advance(history,current){
   if(next&&(!old||old.byteLength!==next.byteLength||new Uint8Array(next).some((v,i)=>v!==oldView[i])))return {...history,current};
   return history;
  }
- const previous=history?.current||null;
+ const previous=history?.previous||history?.current||null;
  difference(previous?.result,current.result);
  seriesComparison(previous?.result,current.result);
  return {version:1,previous,current};
+}
+function replacePrevious(history,previous){
+ if(!history?.current)throw Error('请先上传本次文件，再替换上一版');
+ if(!previous?.result?.rows?.length)throw Error('上一版没有可合并的数据');
+ difference(previous.result,history.current.result);
+ seriesComparison(previous.result,history.current.result);
+ return {...history,previous};
 }
 
 const REVIEW_COLUMNS=['核对类型','来源工作表','来源位置','物料编码','运营','下单时间','核对字段','原值','建议值','原表合计','汇总合计','差额','结果','需要处理'];
@@ -282,5 +289,5 @@ function workbook(result){const rows=summaryRows(result.rows,result.sources);con
  }
  return w;
 }
-return {REVIEW_COLUMNS,reviewRows,reviewSheet,SUMMARY_COLUMNS,summaryRows,formatCell,currentScope,DIFF_COLUMNS,aggregate,difference,SERIES_COLUMNS,seriesComparison,advance,SHEETS,COLUMNS,QUANTITY_FIELDS,quantityCell,refreshQuantities,DATE_FORMAT,columnWidth,dateCell,merge,workbook,exportFilename};
+return {REVIEW_COLUMNS,reviewRows,reviewSheet,SUMMARY_COLUMNS,summaryRows,formatCell,currentScope,DIFF_COLUMNS,aggregate,difference,SERIES_COLUMNS,seriesComparison,advance,replacePrevious,SHEETS,COLUMNS,QUANTITY_FIELDS,quantityCell,refreshQuantities,DATE_FORMAT,columnWidth,dateCell,merge,workbook,exportFilename};
 });

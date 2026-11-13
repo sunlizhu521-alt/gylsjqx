@@ -19,12 +19,12 @@ function file(items){const w=X.utils.book_new();for(const [i,name] of C.SHEETS.e
  const book=X.read(await fs.readFile(out),{type:'buffer',cellStyles:true});assert.deepEqual(book.SheetNames,['汇总表','合并核对','系列对比',...C.SHEETS]);
  const rows=await page.locator('#diff-preview tbody tr').evaluateAll(rows=>rows.map(row=>[...row.cells].map(cell=>cell.textContent)));
  assert.deepEqual(await page.locator('#diff-preview thead th').allTextContents(),C.DIFF_COLUMNS);assert.deepEqual(rows.map(r=>[r[2],Number(r[5])]),[['004',-5],['005',4],['002',-5]]);assert.equal(rows[0][0],'甲 / 乙');
- const series=X.utils.sheet_to_json(book.Sheets.系列对比,{header:1,defval:''});assert.deepEqual(series[0],C.SERIES_COLUMNS);assert.deepEqual(series.slice(1).map(r=>[r[0],r[4],r[5],r[6],r[7],r[8]]),[['采购员',15.3,4.3,-11,'',''],['甲',0,2,2,'',''],['乙',0,3,3,'','']]);assert.equal(book.Sheets.系列对比.A1.s.fgColor.rgb,'315B9D');
+ const series=X.utils.sheet_to_json(book.Sheets.系列对比,{header:1,defval:''});assert.deepEqual(series[0],C.SERIES_COLUMNS);assert.deepEqual(series.slice(1).map(r=>[r[0],r[3],r[5],r[6],r[7],r[8],r[9]]),[['采购员','供应商',15.3,4.3,-11,'',''],['甲','供应商',0,2,2,'',''],['乙','供应商',0,3,3,'','']]);assert.equal(book.Sheets.系列对比.A1.s.fgColor.rgb,'315B9D');
  await page.screenshot({path:path.join(output,'desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});await page.screenshot({path:path.join(output,'mobile.png'),fullPage:true});assert.deepEqual(errors,[]);
  if(process.env.QA_FAIL_SCRIPT){
  const blocked=await browser.newPage();await blocked.route('**/fulfillment-core.js*',route=>route.abort());await blocked.goto(url);await blocked.locator('#retry-load').waitFor({state:'visible'});assert.equal(await blocked.locator('#file').isDisabled(),true);assert.match(await blocked.locator('#status').innerText(),/加载失败：fulfillment-core.js/);await blocked.unroute('**/fulfillment-core.js*');await blocked.locator('#retry-load').click();await blocked.waitForFunction(()=>!document.getElementById('file').disabled);await blocked.close();
  }
- // A subsequent successful upload advances exactly one snapshot.
- await upload(file([['005',1]]),'第三版.xlsx');assert.equal((await history()).previous.filename,h.current.filename);
+ // Later uploads update current while keeping the established previous snapshot fixed.
+ await upload(file([['005',1]]),'第三版.xlsx');assert.deepEqual((await history()).previous,h.previous);assert.equal((await history()).current.filename,'第三版.xlsx');
  console.log(JSON.stringify({url,sheets:book.SheetNames,differencePreview:rows.length,seriesComparison:series.length-1,persistence:'passed',duplicate:'passed',failureRollback:'passed',output}));
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

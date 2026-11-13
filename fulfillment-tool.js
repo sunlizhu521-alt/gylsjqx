@@ -23,6 +23,8 @@ const divisionResult=division=>{const rows=[],sources=[];for(const [i,row]of(res
 function updateDownloads(){
  const blocked=busy||$('file').disabled||!validation?.passed;
  $('download').disabled=blocked||!result||!sourceBytes;
+ $('replace-previous').disabled=blocked||!result||!sourceBytes;
+ $('previous-file').disabled=$('replace-previous').disabled;
  for(const button of divisionButtons){const hasRows=divisionResult(button.dataset.downloadDivision).rows.length>0;button.disabled=blocked||!hasRows;button.title=hasRows?'仅下载该事业部的汇总表':'暂无该事业部数据';}
 }
 const conversionInfo=p=>({formulaCount:p.formulaCount,correctedCount:p.correctedCount,preservedAuxiliaryCount:p.preservedAuxiliaryCount||0,imageCount:p.imageCount,converted:p.converted,clearedFilterCount:p.clearedFilterCount||0,normalizedSheetCount:p.normalizedSheetCount||0,failed:p.issues.length>0});
@@ -49,7 +51,7 @@ function render(){
  $('result').hidden=false;updateDownloads();
 }
 async function show(history){
- if(!history){$('status').textContent='等待首次上传';$('history').textContent='尚无历史数据。首次上传保存为基准，暂无上期对比数据。';return;}
+ if(!history){$('status').textContent='等待首次上传';$('history').textContent='尚无历史数据。可先上传上周版本，再上传本次文件；建立上一版后将固定不变。';return;}
  filename=history.current.filename;sourceBytes=history.current.sourceBytes||null;formulaInfo=history.current.formulaInfo||null;
  if(sourceBytes){
   const prepared=await FulfillmentValues.prepare(sourceBytes),converted=prepared.formulaCount||prepared.clearedFilterCount||prepared.normalizedSheetCount,rebuilt=converted||history.current.result.sources?.length!==history.current.result.rows.length||history.current.result.sources?.some(source=>!source?.sheet||!Number.isInteger(source.row)),merged=rebuilt?C.merge(prepared.book,filename):C.refreshQuantities(history.current.result,prepared.book),quantityChanged=JSON.stringify(merged.rows)!==JSON.stringify(history.current.result.rows);
@@ -63,7 +65,7 @@ async function show(history){
  }else validation=null;
  result={...history.current.result,differences:validation?.passed?C.difference(history.previous?.result,history.current.result):[],seriesComparison:validation?.passed?C.seriesComparison(history.previous?.result,history.current.result):[]};
  const describe=s=>`${s.filename}（${new Date(s.savedAt).toLocaleString('zh-CN')}）`;
- $('history').textContent=`本次：${describe(history.current)}\n上次：${history.previous?describe(history.previous):'尚无，当前数据作为首次基准'}\n${validation?.passed?`差异：${result.differences.length} 个物料；数量为本次减上次。`:'缓存数据需通过数量校验后才能继续使用。'}`;
+ $('history').textContent=`本次：${describe(history.current)}\n上次：${history.previous?describe(history.previous)+'【已固定】':'尚无，可点击“替换上一版”选择上周文件；或继续上传本次文件，将当前版本设为固定基准'}\n${validation?.passed?`差异：${result.differences.length} 个物料；数量为本次减上次。`:'缓存数据需通过数量校验后才能继续使用。'}`;
  $('status').textContent=result.counts.map(x=>`${x.sheet}：${x.count} 条`).join('　');
  render();
 }
@@ -84,6 +86,22 @@ $('file').onchange=async()=>{
   await show(history);
  }catch(e){resetCurrent();$('status').textContent='处理失败：'+e.message+'。保留原有历史，请重新上传。';}
  finally{$('file').disabled=false;$('file').value='';updateDownloads();}
+};
+$('replace-previous').onclick=()=>{if(!$('replace-previous').disabled)$('previous-file').click();};
+$('previous-file').onchange=async()=>{
+ await ready;const input=$('previous-file'),file=input.files[0];if(!file)return;
+ if(busy||$('replace-previous').disabled){input.value='';return;}
+ if(file.size>60*1024*1024){$('status').textContent='上一版文件超过60MB，请缩小后重试。原上一版和本次保持不变。';input.value='';return;}
+ busy=true;$('file').disabled=true;updateDownloads();$('status').textContent='正在校验要替换的上一版…';let saved=false;
+ try{
+  const prepared=await FulfillmentValues.prepare(await file.arrayBuffer()),merged=C.merge(prepared.book,file.name);
+  if(!merged.rows.length)throw Error('没有可合并的数据');
+  const check=checkPrepared(prepared,merged);
+  if(!check.passed){const issue=check.issues[0];throw Error('数量或公式校验未通过'+(issue?`：${issue.sheet||''}${issue.cell?'!'+issue.cell:''} ${issue.message}`:'，请核对源文件数量'));}
+  const history=await FulfillmentCache.replacePrevious({filename:file.name,savedAt:new Date().toISOString(),result:merged,sourceBytes:prepared.bytes,formulaInfo:conversionInfo(prepared)});
+  saved=true;await show(history);$('status').textContent='已替换上一版：'+file.name+'。之后普通上传只更新本次，上次保持固定。';
+ }catch(e){$('status').textContent=saved?'上一版已替换，但页面恢复失败：'+e.message+'。请刷新重试。':'上一版替换失败：'+e.message+'。原上一版和本次保持不变。';}
+ finally{busy=false;$('file').disabled=false;input.value='';updateDownloads();}
 };
 async function styledBytes(result){const book=C.workbook(result);const zip=await JSZip.loadAsync(XLSX.write(book,{type:'array',bookType:'xlsx'}));const parser=new DOMParser(),serializer=new XMLSerializer(),ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main';const styles=parser.parseFromString(await zip.file('xl/styles.xml').async('string'),'application/xml');const el=(name,attrs)=>{const e=styles.createElementNS(ns,name);for(const [k,v] of Object.entries(attrs||{}))e.setAttribute(k,v);return e;};const borders=styles.getElementsByTagName('borders')[0],headerBorderId=borders.children.length,borderId=headerBorderId+1;for(const style of ['thin','hair']){const b=el('border');for(const side of ['left','right','top','bottom']){const e=el(side,{style});e.append(el('color',{rgb:'FF404040'}));b.append(e);}borders.append(b);}borders.setAttribute('count',borders.children.length);const xfs=styles.getElementsByTagName('cellXfs')[0],existing=[...xfs.children],offset=existing.length;for(const outlined of [true,false])for(const old of existing){const xf=old.cloneNode(true);xf.setAttribute('borderId',outlined?borderId:0);xf.setAttribute('applyBorder','1');xf.setAttribute('applyAlignment','1');xf.setAttribute('fillId','0');for(const a of [...xf.getElementsByTagName('alignment')])a.remove();xf.append(el('alignment',{horizontal:'center',vertical:'center',wrapText:'0',shrinkToFit:'0'}));xfs.append(xf);}const fills=styles.getElementsByTagName('fills')[0],fillId=fills.children.length,fill=el('fill'),pattern=el('patternFill',{patternType:'solid'});pattern.append(el('fgColor',{rgb:'FF315B9D'}),el('bgColor',{indexed:'64'}));fill.append(pattern);fills.append(fill);fills.setAttribute('count',fills.children.length);const fonts=styles.getElementsByTagName('fonts')[0];for(const f of fonts.children){let size=f.getElementsByTagName('sz')[0];if(!size){size=el('sz');f.append(size);}size.setAttribute('val','11');}const fontId=fonts.children.length,font=fonts.children[0].cloneNode(true);for(const c of [...font.getElementsByTagName('color')])c.remove();font.append(el('b'),el('color',{rgb:'FFFFFFFF'}));fonts.append(font);fonts.setAttribute('count',fonts.children.length);const headerStyle=xfs.children.length,header=xfs.children[offset].cloneNode(true);header.setAttribute('borderId',headerBorderId);header.setAttribute('fillId',fillId);header.setAttribute('fontId',fontId);header.setAttribute('applyFill','1');header.setAttribute('applyFont','1');xfs.append(header);xfs.setAttribute('count',xfs.children.length);zip.file('xl/styles.xml',serializer.serializeToString(styles));for(const [index,name] of book.SheetNames.entries()){const path='xl/worksheets/sheet'+(index+1)+'.xml',sheet=parser.parseFromString(await zip.file(path).async('string'),'application/xml');const activeRows=new Set(),activeColumns=new Set();for(const [address,cell] of Object.entries(book.Sheets[name])){const point=/^([A-Z]+)(\d+)$/.exec(address),value=cell?.v;if(point&&value!=null&&(typeof value!=='string'||value.trim())){activeRows.add(point[2]);activeColumns.add(point[1]);}}for(const c of sheet.getElementsByTagName('c')){const address=c.getAttribute('r'),point=/^([A-Z]+)(\d+)$/.exec(address),framed=activeRows.has(point[2])&&activeColumns.has(point[1]);c.setAttribute('s',point[2]==='1'?headerStyle:offset*(framed?1:2)+Number(c.getAttribute('s')||0));}for(const r of sheet.getElementsByTagName('row')){r.setAttribute('ht',r.getAttribute('r')==='1'?'22':'18');r.setAttribute('customHeight','1');}zip.file(path,serializer.serializeToString(sheet));}return zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});}
 async function download(division=''){

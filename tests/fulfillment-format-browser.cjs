@@ -200,9 +200,10 @@ async function checkGeneratedBorders(bytes, sheetPaths) {
     assert.deepEqual(full.book.SheetNames, ['汇总表', '合并核对', '系列对比', '徐英', '操思敏', '邢芳芳1017', '李奇']);
     const series = full.book.Sheets.系列对比;
     assert.deepEqual(X.utils.sheet_to_json(series, { header: 1 })[0], C.SERIES_COLUMNS);
-    assert.equal(series.G2.v, 1);
-    assert.equal(series.G2.t, 'n');assert.equal(series.G2.z, '0', '系列差异使用明确的数量格式');
-    assert.equal(series.H2?.v ?? '', '');assert.equal(series.I1.v, '判断');assert.equal(series.I2.t, 's');assert.equal(series.I2.z, '@');
+    assert.equal(series.D1.v, '供应商简称');assert.equal(series.D2.v, '合成供应商0');
+    assert.equal(series.H2.v, 1);
+    assert.equal(series.H2.t, 'n');assert.equal(series.H2.z, '0', '系列差异使用明确的数量格式');
+    assert.equal(series.I2?.v ?? '', '');assert.equal(series.J1.v, '判断');assert.equal(series.J2.t, 's');assert.equal(series.J2.z, '@');
     assert.equal(series.A1.s.fgColor.rgb, '315B9D');
     assert.equal(await page.locator('#diff-preview tbody tr td:nth-child(6)').first().innerText(), '1', '物料差异预览不因去掉下载sheet而改变');
     checkSourceSheets(current.bytes, full.book, current.expected);

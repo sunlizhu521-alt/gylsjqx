@@ -58,10 +58,25 @@ test('首次基准、重复上传、历史推进及异常不修改旧快照',()=
  const first=C.advance(null,a);assert.equal(first.previous,null);
  assert.equal(C.advance(first,{...a,filename:'副本.xlsx'}),first);
  const second=C.advance(first,b);assert.equal(second.previous,a);assert.equal(C.advance(second,b),second);
+ const c={filename:'第三次',result:snapshot([['001',8]])},third=C.advance(second,c);assert.equal(third.current,c);assert.equal(third.previous,a,'普通上传只能更新本次，上一版固定');
+ const fourth=C.advance(third,{filename:'第四次',result:snapshot([['001',10]])});assert.equal(fourth.previous,a);assert.equal(C.difference(fourth.previous.result,fourth.current.result)[0][5].v,5);
  assert.throws(()=>C.advance(second,{result:snapshot([['001','待定']])}),/不是有效数字/);
  assert.throws(()=>C.advance(second,{result:snapshot([['',2]])}),/物料编码为空/);
  assert.equal(second.current,b);assert.equal(second.previous,a);
  assert.deepEqual(C.difference(snapshot([['001',1]]),snapshot([['001','']])).map(r=>r[5].v),[-1]);
+});
+test('明确替换上一版只改变固定基准，保留本次；无效替换不改变两期',()=>{
+ const current={filename:'本次.xlsx',savedAt:'2026-11-13T02:00:00Z',result:snapshot([['001',10]]),sourceBytes:new Uint8Array([1,2]).buffer};
+ const previous={filename:'上周.xlsx',result:snapshot([['001',8]])},history={version:1,previous,current},original=structuredClone(history);
+ const replacement={filename:'指定上一版.xlsx',result:snapshot([['001',0]])};
+ const next=C.replacePrevious(history,replacement);
+ assert.equal(next.current,current);assert.equal(next.previous,replacement);assert.deepEqual(history,original);
+ assert.equal(C.difference(next.previous.result,next.current.result)[0][5].v,10);
+ assert.equal(C.advance(next,{filename:'新的本次.xlsx',result:snapshot([['001',12]])}).previous,replacement);
+ assert.equal(C.replacePrevious({version:1,previous:null,current},replacement).current,current);
+ assert.throws(()=>C.replacePrevious(null,replacement),/先上传本次文件/);
+ for(const rows of [[],[['001','待定']],[['',2]],[['001',Number.MAX_SAFE_INTEGER+1]]])assert.throws(()=>C.replacePrevious(history,{filename:'错误.xlsx',result:snapshot(rows)}),/数据|数字|物料编码|范围/);
+ assert.deepEqual(history,original);
 });
 
 test('姓名日期后缀、三列映射、缺列留空及旧历史兼容',()=>{

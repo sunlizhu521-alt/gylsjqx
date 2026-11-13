@@ -55,7 +55,7 @@ function fixture() {
     assert.deepEqual(X.utils.sheet_to_json(book.Sheets.系列对比, {header: 1})[0], C.SERIES_COLUMNS);
     const firstSeries = X.utils.sheet_to_json(book.Sheets.系列对比, {header: 1, defval: ''}).slice(1);
     assert.equal(firstSeries.length, 4, '无上期时含零数量的全部分组保留');
-    assert(firstSeries.every(row => row[7] === '' && row[8] === ''), '无上期时备注和判断均为空');
+    assert(firstSeries.every(row => row[8] === '' && row[9] === ''), '无上期时备注和判断均为空');
     for (const sheet of book.SheetNames) assert.deepEqual(X.utils.sheet_to_json(read(second).Sheets[sheet], {header: 1}), X.utils.sheet_to_json(book.Sheets[sheet], {header: 1}));
     await download(page, '版本测试汇总版-国内事业部_V1.xlsx', '[data-download-division="国内事业部"]');
     await download(page, '版本测试汇总版-国内事业部_V2.xlsx', '[data-download-division="国内事业部"]');
