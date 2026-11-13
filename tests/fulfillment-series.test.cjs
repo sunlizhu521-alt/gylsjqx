@@ -106,7 +106,7 @@ test('系列对比按指定八列导出，保留数字、空白上期与差异�
  const current=snapshot([['甲','国内事业部','渠道','系列',0.3],['乙','','','',0]]);
  const result={...current,review:[],differences:[],seriesComparison:C.seriesComparison(null,current)};
  const bytes=X.write(C.workbook(result),{type:'buffer',bookType:'xlsx'}),saved=X.read(bytes,{cellNF:true,sheetStubs:true});
- assert.deepEqual(saved.SheetNames,['汇总表','合并核对','差异','系列对比']);
+ assert.deepEqual(saved.SheetNames,['汇总表','合并核对','系列对比']);
  const sheet=saved.Sheets.系列对比;
  assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1,defval:''}),[HEADERS,['甲','国内事业部','渠道','系列','',0.3,'',''],['乙','','','','',0,'','']]);
  assert.equal(sheet['!autofilter'].ref,'A1:H3');

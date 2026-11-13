@@ -43,7 +43,7 @@ function fixture(stage){
    ['采购员乙','国内事业部','国内事业部*TEMU业务部','旧系列',5,0,-5,'']
   ];
   let saved=await download('#download');assert.deepEqual(rows(saved.book),expected);
-  assert.deepEqual(saved.book.SheetNames,['汇总表','合并核对','差异','系列对比',...C.SHEETS,'孙立柱']);
+  assert.deepEqual(saved.book.SheetNames,['汇总表','合并核对','系列对比',...C.SHEETS,'孙立柱']);
   const baseline=await history();assert.equal(baseline.previous.filename,'上期更新版.xlsx');
   await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);
   assert.deepEqual(rows((await download('#download')).book),expected);
@@ -63,10 +63,12 @@ function fixture(stage){
   },[...saved.bytes]);
   assert.deepEqual(style,{formulaCount:0,hiddenRows:0,filterCount:0,protected:false,aligned:true,bordered:true});
   const manualNote='合成人工备注：等待供应商反馈',manual=X.read(saved.bytes,{cellNF:true,cellStyles:true});manual.Sheets.系列对比.H2={t:'s',v:manualNote,z:'@'};
+  for(const name of ['差异','差异（本次）'])X.utils.book_append_sheet(manual,X.utils.aoa_to_sheet([['旧差异'],[999]]),name);
   const beforeNote=await history();await upload(Buffer.from(X.write(manual,{type:'buffer',bookType:'xlsx'})),'已填写备注.xlsx');
   const afterNote=await history();assert.deepEqual(afterNote.previous,beforeNote.previous);assert.deepEqual(afterNote.current.result.rows,beforeNote.current.result.rows,'只填写备注不推进历史');
   const noteOutput=await download('#download');assert.deepEqual(rows(noteOutput.book),expected,'本次生成备注仍留空');
-  assert.equal(noteOutput.book.Sheets['系列对比（原表）'].H2.v,manualNote,'原系列对比表的人工备注保留在备份表');assert.deepEqual(errors,[]);
+  assert.equal(noteOutput.book.Sheets['系列对比（原表）'].H2.v,manualNote,'原系列对比表的人工备注保留在备份表');
+  for(const name of ['差异','差异（本次）'])assert(!noteOutput.book.SheetNames.includes(name),'再上传时去掉旧独立差异表：'+name);assert.deepEqual(errors,[]);
   const out=process.env.QA_OUTPUT||'/private/tmp/fulfillment-series-qa';await fs.mkdir(out,{recursive:true});await fs.writeFile(path.join(out,'系列对比-合成验收.xlsx'),saved.bytes);
   console.log('PASS: eight-column series comparison, exact current-minus-previous differences, blank editable remarks, manual remark backup preservation, four sources, first-period blanks, new/removed/zero groups, cache reload/duplicate/failure, division/review exports, numeric types/filter/styles and no formulas');
  }finally{await browser.close();}

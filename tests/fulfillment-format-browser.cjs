@@ -196,17 +196,18 @@ async function checkGeneratedBorders(bytes, sheetPaths) {
     }
     const full = await download('#download', '完整汇总.xlsx');
     checkSummary(full.book.Sheets.汇总表, current.expected);
-    assert.deepEqual(full.book.SheetNames, ['汇总表', '合并核对', '差异', '徐英', '操思敏', '邢芳芳1017', '李奇']);
-    const diff = full.book.Sheets.差异;
-    assert.deepEqual(X.utils.sheet_to_json(diff, { header: 1 })[0], C.DIFF_COLUMNS);
-    assert.equal(diff.F2.v, 1);
-    assert.equal(diff.F2.z, 'General', '差异表不套用汇总数字格式');
-    assert.equal(diff.A1.s.fgColor.rgb, '315B9D');
+    assert.deepEqual(full.book.SheetNames, ['汇总表', '合并核对', '系列对比', '徐英', '操思敏', '邢芳芳1017', '李奇']);
+    const series = full.book.Sheets.系列对比;
+    assert.deepEqual(X.utils.sheet_to_json(series, { header: 1 })[0], C.SERIES_COLUMNS);
+    assert.equal(series.G2.v, 1);
+    assert.equal(series.G2.t, 'n');assert.equal(series.G2.z, '0', '系列差异使用明确的数量格式');
+    assert.equal(series.A1.s.fgColor.rgb, '315B9D');
+    assert.equal(await page.locator('#diff-preview tbody tr td:nth-child(6)').first().innerText(), '1', '物料差异预览不因去掉下载sheet而改变');
     checkSourceSheets(current.bytes, full.book, current.expected);
     const outputZip = await Zip.loadAsync(full.bytes);
-    const diffXml = await outputZip.file('xl/worksheets/fulfillment3.xml').async('string');
-    assert.match(diffXml, /ht="22"/);
-    assert.match(diffXml, /ht="18"/);
+    const seriesXml = await outputZip.file('xl/worksheets/fulfillment3.xml').async('string');
+    assert.match(seriesXml, /ht="22"/);
+    assert.match(seriesXml, /ht="18"/);
     await checkGeneratedBorders(full.bytes, [1, 2, 3].map(n => `xl/worksheets/fulfillment${n}.xml`));
     const review = await download('#download-review', '合并核对.xlsx');
     assert.deepEqual(review.book.SheetNames, ['合并核对']);
@@ -237,10 +238,10 @@ async function checkGeneratedBorders(bytes, sheetPaths) {
     assert.deepEqual(await page.locator('#preview tbody tr td:nth-child(5)').allTextContents(), current.expected.map(r => r.month));
     const restored = await download('#download', '缓存恢复汇总.xlsx');
     checkSummary(restored.book.Sheets.汇总表, current.expected);
-    assert.equal(await (await Zip.loadAsync(restored.bytes)).file('xl/worksheets/fulfillment3.xml').async('string'), diffXml, '缓存格式升级不改变差异表内容和样式');
+    assert.equal(await (await Zip.loadAsync(restored.bytes)).file('xl/worksheets/fulfillment3.xml').async('string'), seriesXml, '缓存格式升级不改变系列对比内容和样式');
     await page.screenshot({ path: path.join(out, 'preview.png'), fullPage: true });
     assert.deepEqual(errors, []);
     checkSourceSheets(current.bytes, restored.book, current.expected);
-    console.log(JSON.stringify({ status: 'PASS', url, rows: current.expected.length, summaryColumns: 22, downloads: 4, monthDates: 'passed', quantityFormats: 'passed', sourceFormatting: 'passed', sourceLayout: 'unchanged', differences: 'unchanged', previousSnapshot: 'unchanged', output: out }));
+    console.log(JSON.stringify({ status: 'PASS', url, rows: current.expected.length, summaryColumns: 22, downloads: 4, monthDates: 'passed', quantityFormats: 'passed', sourceFormatting: 'passed', sourceLayout: 'unchanged', seriesComparison: 'unchanged', differencePreview: 'preserved', previousSnapshot: 'unchanged', output: out }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

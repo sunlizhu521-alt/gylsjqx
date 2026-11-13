@@ -46,7 +46,7 @@ test('差异按物料汇总，保留多采购员及供应商，精确小数、�
  const diff=C.difference(old,now);assert.deepEqual(diff.map(r=>[r[2].v,r[5].v]),[['004',-5],['005',4],['002',-5]]);
  assert.equal(diff[0][0].v,'甲 / 乙');assert.equal(diff[0][1].v,'厂甲 / 厂乙');
  assert.deepEqual(C.difference(null,now),[]);
- const book=C.workbook({...now,differences:diff});assert.deepEqual(book.SheetNames,['汇总表','差异']);assert.equal(book.Sheets.差异.F2.v,-5);assert.equal(book.Sheets.差异['!autofilter'].ref,'A1:F4');
+ const book=C.workbook({...now,differences:diff});assert.deepEqual(book.SheetNames,['汇总表']);assert.equal(book.Sheets.差异,undefined,'物料差异保留计算但不再生成独立sheet');assert.deepEqual(C.difference(old,now),diff);
 });
 test('首次基准、重复上传、历史推进及异常不修改旧快照',()=>{
  const a={filename:'a.xlsx',result:snapshot([['001',5]])},b={filename:'b.xlsx',result:snapshot([['001',3]])};
@@ -149,10 +149,10 @@ test('汇总数量用真实数值格式显示整数、负数和实际小数位�
 
 test('旧缓存月份在显示时规范化，不改记录、数量、差异或历史基准',()=>{
  const current={filename:'本次.xlsx',result:snapshot([['MAT',5]])},previous={filename:'上次.xlsx',result:snapshot([['MAT',7]])},history={version:1,current,previous};
- current.result.differences=C.difference(previous.result,current.result);const diffBefore=structuredClone(C.workbook(current.result).Sheets.差异);
+ current.result.differences=C.difference(previous.result,current.result);const diffBefore=structuredClone(current.result.differences);
  for(const [value,expected] of [[46275,'2026年9月'],['2026-10-23','2026年10月'],['2025-11','2025年11月'],['历史订单','2025年1月'],['/','2026年4月'],['',''],['2026-13','2026-13']]){
   current.result.rows[0][20]={t:typeof value==='number'?'n':'s',v:value,z:'General'};const before=structuredClone(history),preview=C.summaryRows(current.result.rows),cell=preview[0][4],book=C.workbook(current.result);
-  assert.equal(cell.z?X.SSF.format(cell.z,cell.v):cell.v,expected);assert.deepEqual(history,before);assert.equal(C.advance(history,{...current}),history);assert.deepEqual(book.Sheets.差异,diffBefore);
+  assert.equal(cell.z?X.SSF.format(cell.z,cell.v):cell.v,expected);assert.deepEqual(history,before);assert.equal(C.advance(history,{...current}),history);assert.equal(book.Sheets.差异,undefined);assert.deepEqual(C.difference(previous.result,current.result),diffBefore);
  }
  const source=fixture();source.Sheets.徐英.C3={t:'s',v:'2026-13'};source.Sheets.徐英.C4={t:'s',v:''};const result=C.merge(source);
  assert.equal(C.summaryRows(result.rows,result.sources)[0][4].v,'2026-13');assert.equal(C.summaryRows(result.rows,result.sources)[1][4].v,'');assert.ok(result.warnings.some(w=>w.includes('徐英!C3')&&w.includes('2026-13')));
@@ -220,7 +220,7 @@ test('数量合计和单元格异常写入同一核对表，导出重读数字�
  const objects=reviewObjects(result.review),totals=objects.filter(row=>row.核对类型==='数量合计');assert.equal(totals.length,30);assert.equal(totals.filter(row=>row.来源工作表==='合计').length,6);
  assert(totals.some(row=>row.原表合计===1.25&&row.汇总合计===9&&row.差额===7.75&&row.结果==='不一致'));
  const issue=objects.find(row=>row.核对类型==='数量／转换异常');assert.equal(issue.来源工作表,'徐英');assert.equal(issue.来源位置,'K2');assert.match(issue.需要处理,/修正后重新上传/);
- const output=X.read(X.write(C.workbook(result),{type:'buffer',bookType:'xlsx'}),{cellNF:true});assert.deepEqual(output.SheetNames,['汇总表','合并核对','差异']);
+ const output=X.read(X.write(C.workbook(result),{type:'buffer',bookType:'xlsx'}),{cellNF:true});assert.deepEqual(output.SheetNames,['汇总表','合并核对']);
  const sheet=output.Sheets.合并核对;assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1})[0],C.REVIEW_COLUMNS);assert.equal(sheet['!autofilter'].ref,'A1:N'+(result.review.length+1));
  const index=objects.findIndex(row=>row.原表合计===1.25&&row.差额===7.75)+2;assert.equal(sheet['J'+index].t,'n');assert.equal(sheet['J'+index].z,'0.00');assert.equal(sheet['L'+index].v,7.75);
  assert.deepEqual(X.utils.sheet_to_json(sheet,{header:1,defval:''}).slice(1),result.review.map(row=>row.map(cell=>cell.v)));

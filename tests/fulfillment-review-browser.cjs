@@ -61,11 +61,12 @@ function fixture({delta = 0, badQuantity = false, badFormula = false} = {}) {
     const before = await history();
     assert(!before.current.result.review, '核对结果只在显示时生成，不写入历史数据');
     const full = await download('#download', '完整汇总.xlsx');
-    assert.deepEqual(full.book.SheetNames, ['汇总表', '合并核对', '差异', '系列对比', ...names, '孙立柱']);
+    assert.deepEqual(full.book.SheetNames, ['汇总表', '合并核对', '系列对比', ...names, '孙立柱']);
     const summary = X.utils.sheet_to_json(full.book.Sheets.汇总表, {header: 1, defval: ''});
     assert.deepEqual(summary[0], C.SUMMARY_COLUMNS); assert.deepEqual(summary.slice(1).map(row => row[0]), owners);
     assert(summary.slice(1).every(row => row[2] === '原渠道' || row[2] === ''), '仅提示，不自动修改渠道');
-    assert.equal(full.book.Sheets.差异.F2.v, 1, '新增输出列不影响数量差异');
+    assert.equal(full.book.Sheets.系列对比.G2.v, 1, '系列对比继续保留正确的数量差异');
+    assert.equal(await tool().locator('#diff-preview tbody tr td:nth-child(6)').first().innerText(), '1', '页面物料差异预览保留');
     const audit = X.utils.sheet_to_json(full.book.Sheets.合并核对, {header: 1, defval: ''});
     assert.deepEqual(audit[0], C.REVIEW_COLUMNS); assert.equal(audit.filter(row => row[0] === '数量合计').length, 30);
     assert(audit.some(row => row[8] === '海外事业一部*欧洲部*亚马逊英国组'));

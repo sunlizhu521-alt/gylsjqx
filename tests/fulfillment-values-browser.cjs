@@ -245,7 +245,7 @@ function mergedTextFixture() {
     const exported = X.read(download.bytes, { type: 'buffer', cellNF: true });
     assertNoFormulas(exported);
     assert.deepEqual([exported.Sheets.辅助.E2.v, exported.Sheets.辅助.F2.v, exported.Sheets.辅助.G2.v], ['一致', '', 11]);
-    assert.deepEqual(exported.SheetNames, ['汇总表', '合并核对', '差异', '徐英', '操思敏', '邢芳芳1017', '李奇', '孙立柱', '辅助']);
+    assert.deepEqual(exported.SheetNames, ['汇总表', '合并核对', '系列对比', '徐英', '操思敏', '邢芳芳1017', '李奇', '孙立柱', '辅助']);
     const rows = X.utils.sheet_to_json(exported.Sheets.汇总表, { header: 1, defval: '' });
     assert.deepEqual(rows[0], C.SUMMARY_COLUMNS);
     assert.equal(rows.length - 1, 8, '保留全部明细，不因公式删行或合并物料');

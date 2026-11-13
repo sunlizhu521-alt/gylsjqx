@@ -15,6 +15,37 @@ window.FulfillmentExport = async function(generatedBlob, sourceBytes) {
  const generated=await JSZip.loadAsync(await generatedBlob.arrayBuffer());
  const workbook=await parse(original,'xl/workbook.xml'),rels=await parse(original,'xl/_rels/workbook.xml.rels');
  const types=await parse(original,'[Content_Types].xml');
+ const sourceSheets=elements(workbook,'sheet'),removedSheets=sourceSheets.filter(sheet=>/^差异(?:（本次(?:[2-9]|[1-9]\d+)?）)?$/.test(sheet.getAttribute('name')));
+ const removedNames=new Set(removedSheets.map(sheet=>sheet.getAttribute('name')));
+ if(removedSheets.length){
+  const retainedSheets=sourceSheets.filter(sheet=>!removedSheets.includes(sheet));
+  for(const name of elements(workbook,'definedName'))if(name.hasAttribute('localSheetId')){
+   const sheet=sourceSheets[Number(name.getAttribute('localSheetId'))],index=retainedSheets.indexOf(sheet);
+   if(index<0)name.remove();else name.setAttribute('localSheetId',index);
+  }
+  const removePart=path=>{original.remove(path);original.remove(path.replace(/([^/]+)$/,'_rels/$1.rels'));for(const type of elements(types,'Override'))if(type.getAttribute('PartName').replace(/^\//,'')===path)type.remove();};
+  for(const sheet of removedSheets){
+   const relation=elements(rels,'Relationship').find(e=>e.getAttribute('Id')===sheet.getAttributeNS(R,'id'));
+   if(!relation)throw Error('差异工作表关系缺失，无法安全移除');
+   removePart(new URL(relation.getAttribute('Target'),'https://workbook.local/xl/workbook.xml').pathname.slice(1));relation.remove();sheet.remove();
+  }
+  // All retained cells are values-only, so a saved calculation chain is obsolete.
+  for(const relation of elements(rels,'Relationship').filter(e=>e.getAttribute('Type')===R+'/calcChain')){removePart(new URL(relation.getAttribute('Target'),'https://workbook.local/xl/workbook.xml').pathname.slice(1));relation.remove();}
+  const pointsToRemoved=text=>text.split(/("(?:[^"]|"")*")/g).some((part,index)=>index%2===0&&[...part.matchAll(/(?<![\w\u0080-\uFFFF.\]'])('(?:[^']|'')+'|[A-Z0-9_.\u0080-\uFFFF]+(?::[A-Z0-9_.\u0080-\uFFFF]+)?)!/gi)].some(match=>{const name=match[1].replace(/^'|'$/g,'').replace(/''/g,"'");return !name.includes('[')&&name.split(':').some(end=>removedNames.has(end));}));
+  const inspectReferences=(doc,path)=>{
+   const reference=[...['definedName','f','formula','formula1','formula2','calculatedColumnFormula','totalsRowFormula'].flatMap(tag=>elements(doc,tag).map(node=>node.textContent)),...elements(doc,'hyperlink').map(node=>node.getAttribute('location')||'')].find(pointsToRemoved);
+   if(reference||elements(doc,'worksheetSource').some(node=>removedNames.has(node.getAttribute('sheet'))&&!node.hasAttributeNS(R,'id')))throw Error('保留内容 '+path+' 仍引用已移除的差异表，请先调整引用后重新上传');
+  };
+  inspectReferences(workbook,'工作簿命名范围');
+  const visited=new Set();
+  const inspectPart=async path=>{
+   if(visited.has(path)||!original.file(path)||path.startsWith('xl/externalLinks/'))return;visited.add(path);
+   if(path.endsWith('.xml'))inspectReferences(await parse(original,path),path);
+   const relations=path.replace(/([^/]+)$/,'_rels/$1.rels');if(!original.file(relations))return;
+   for(const relation of elements(await parse(original,relations),'Relationship'))if(relation.getAttribute('TargetMode')!=='External')await inspectPart(new URL(relation.getAttribute('Target'),'https://workbook.local/'+path).pathname.slice(1));
+  };
+  for(const relation of elements(rels,'Relationship'))if(relation.getAttribute('TargetMode')!=='External')await inspectPart(new URL(relation.getAttribute('Target'),'https://workbook.local/xl/workbook.xml').pathname.slice(1));
+ }
  for(const relation of elements(rels,'Relationship').filter(e=>e.getAttribute('Type')===R+'/worksheet')){
   const path=new URL(relation.getAttribute('Target'),'https://workbook.local/xl/workbook.xml').pathname.slice(1);
   if(elements(await parse(original,path),'f').length)throw Error('原工作表仍含公式，请重新上传并完成公式转数值后下载');
@@ -101,6 +132,12 @@ window.FulfillmentExport = async function(generatedBlob, sourceBytes) {
  }
  for(const name of elements(workbook,'definedName'))if(name.hasAttribute('localSheetId'))name.setAttribute('localSheetId',Number(name.getAttribute('localSheetId'))+addedSheets.length);
  for(const view of elements(workbook,'workbookView')){view.setAttribute('activeTab','0');view.setAttribute('firstSheet','0');}
+ if(removedSheets.length&&original.file('docProps/app.xml')){
+  const app=await parse(original,'docProps/app.xml'),pairs=elements(elements(app,'HeadingPairs')[0]||app,'vector')[0],titles=elements(elements(app,'TitlesOfParts')[0]||app,'vector')[0];
+  if(pairs&&titles){let offset=0;for(let i=0;i+1<pairs.children.length;i+=2){const count=elements(pairs.children[i+1],'i4')[0],size=Number(count?.textContent||0);if(elements(pairs.children[i],'lpstr')[0]?.textContent==='Worksheets'){
+   const remaining=[...titles.children],next=elements(workbook,'sheet').map(sheet=>{const title=app.createElementNS(titles.namespaceURI,'vt:lpstr');title.textContent=sheet.getAttribute('name');return title;});remaining.splice(offset,size,...next);titles.replaceChildren(...remaining);titles.setAttribute('size',remaining.length);count.textContent=next.length;break;
+  }offset+=size;}save(original,'docProps/app.xml',app);}
+ }
  save(original,'xl/workbook.xml',workbook);save(original,'xl/_rels/workbook.xml.rels',rels);save(original,'[Content_Types].xml',types);save(original,stylePath,styles);
  return original.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 };

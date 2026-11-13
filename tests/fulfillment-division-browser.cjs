@@ -39,7 +39,7 @@ function fixture(departments){
    if(d===divisions[0])assert.equal(rows[1][12],0);
   }
   const full=page.waitForEvent('download');await page.locator('#download').click();const w=X.read(await fs.readFile(await(await full).path()),{type:'buffer',cellNF:true});
-  assert.deepEqual(w.SheetNames,['汇总表','合并核对','差异','系列对比',...C.SHEETS,'孙立柱']);
+  assert.deepEqual(w.SheetNames,['汇总表','合并核对','系列对比',...C.SHEETS,'孙立柱']);
   assert.equal(X.utils.sheet_to_json(w.Sheets.汇总表).length,departments.length);
   for(let r=1;r<=departments.length;r++)for(const [c,field]of C.COLUMNS.entries()){
    const cell=w.Sheets.徐英[X.utils.encode_cell({r,c})];

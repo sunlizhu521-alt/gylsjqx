@@ -128,7 +128,7 @@ function staleFormula(field, formula = 'SUM(AA2:AA3)') {
     assert.equal(download.suggestedFilename(), '合成订单2026.10.23汇总版.xlsx');
     const output = await fs.readFile(await download.path());
     const exported = X.read(output, { type: 'buffer', cellNF: true });
-    assert.deepEqual(exported.SheetNames, ['汇总表', '合并核对', '差异', ...sheetNames, '孙立柱', '说明']);
+    assert.deepEqual(exported.SheetNames, ['汇总表', '合并核对', '系列对比', ...sheetNames, '孙立柱', '说明']);
     const summary = X.utils.sheet_to_json(exported.Sheets.汇总表, { header: 1, defval: '' });
     assert.deepEqual(summary[0], C.SUMMARY_COLUMNS);
     assert.equal(summary[0].length, 22);
