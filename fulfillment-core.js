@@ -98,8 +98,45 @@ function currentScope(result){
  return {...result,rows,sources:(result.sources||[]).filter((_,i)=>keep[i]),counts:(result.counts||[]).filter(x=>!excluded(x.sheet)),warnings:(result.warnings||[]).filter(w=>{if(excluded(w.split('!')[0]))return false;const value=w.match(/：日期“(.+)”无法识别，保留原文$/s)?.[1];return value==null||dateCell({v:value}).invalid;})};
 }
 const DIFF_COLUMNS=['采购下单人','供应商','物料编码','SKU','物料名称','未交付数量'];
-const SERIES_COLUMNS=['采购下单人','事业部','销售分渠道','系列','上期未交付数据','本期未交付数据','差异数量','备注'];
+const SERIES_COLUMNS=['采购下单人','事业部','销售分渠道','系列','上期未交付数据','本期未交付数据','差异数量','备注','判断'];
 function seriesComparison(previous,current){
+ const year=currentYear();
+ const orderMonth=row=>{
+  const cell=defaultCell('下单月份',row[20]);
+  if(cell.t==='e'||cell.f&&cell.v==null)return null;
+  const date=dateCell(cell,false,year),parts=date.t==='n'?X.SSF.parse_date_code(date.v):null;
+  return parts?parts.y*100+parts.m:null;
+ };
+ const identity=row=>{
+  const value=col=>{const text=String(row[col]?.v??'').trim();return ['','无','/','-'].includes(text)?'':text;};
+  const order=value(22),oa=value(21),material=[value(7),value(8)];
+  return (order||oa)&&material.some(Boolean)?JSON.stringify([order?'采购订单':'OA',order||oa,...material]):null;
+ };
+ const references=entries=>{
+  const sheets=new Map();
+  for(const entry of entries){
+   const located=entry.source?.sheet&&Number.isInteger(entry.source.row)&&entry.source.row>0;
+   const sheet=located?entry.source.sheet:'汇总表',row=located?entry.source.row:entry.index+2;
+   if(!sheets.has(sheet))sheets.set(sheet,new Set());sheets.get(sheet).add(row);
+  }
+  return [...sheets].map(([sheet,rows])=>{
+   const sorted=[...rows].sort((a,b)=>a-b),ranges=[];
+   for(let i=0;i<sorted.length;i++){const start=sorted[i];let end=start;while(sorted[i+1]===end+1)end=sorted[++i];ranges.push(start===end?String(start):start+'-'+end);}
+   return sheet+'第'+ranges.join('、')+'行';
+  }).join('；');
+ };
+ const judgment=(before,after)=>{
+  const latest=(after?.entries||[]).reduce((month,entry)=>Math.max(month,entry.month||0),0);
+  if(!latest)return '';
+  const old=(before?.entries||[]).filter(entry=>entry.month===latest),now=after.entries.filter(entry=>entry.month===latest),increase=now.length-old.length;
+  if(increase<=0)return '';
+  const oldKeys=old.map(entry=>identity(entry.row)),newKeys=now.map(entry=>identity(entry.row)),oldSet=new Set(oldKeys);
+  const added=now.filter((entry,i)=>!oldSet.has(newKeys[i]));
+  const allOldKeys=new Set((before?.entries||[]).map(entry=>identity(entry.row)));
+  const located=oldKeys.every(Boolean)&&newKeys.every(Boolean)&&oldSet.size===old.length&&new Set(newKeys).size===now.length&&added.length===increase&&added.every(entry=>!allOldKeys.has(identity(entry.row)));
+  return `${Math.floor(latest/100)}年${latest%100}月净增${increase}行（上期${old.length}行，本期${now.length}行）；`+
+   (located?'涉及行：'+references(added):'本期相关行（新增行待确认）：'+references(now));
+ };
  const collect=result=>{
   const groups=new Map();
   for(const [i,row] of (result?.rows||[]).entries()){
@@ -110,9 +147,10 @@ function seriesComparison(previous,current){
    const raw=typeof cell?.v==='number'?quantityText(cell.v):String(cell?.v??'').trim(),value=raw||'0';
    if(cell?.t==='e'||cell?.f&&(cell.v==null||raw==='')||!/^[+-]?\d+(?:\.\d+)?$/.test(value))throw Error(`${where}：系列对比的未交付数量“${raw}”不是有效数字，未更新历史数据`);
    const parts=value.replace(/^[+-]/,'').split('.'),scale=(parts[1]||'').length,units=BigInt(parts.join(''))*(value.startsWith('-')?-1n:1n);
-   if(!groups.has(key))groups.set(key,{labels,units:0n,scale:0});
+   if(!groups.has(key))groups.set(key,{labels,units:0n,scale:0,entries:[]});
    const group=groups.get(key),nextScale=Math.max(group.scale,scale);
    group.units=group.units*10n**BigInt(nextScale-group.scale)+units*10n**BigInt(nextScale-scale);group.scale=nextScale;
+   group.entries.push({row,source,index:i,month:orderMonth(row)});
   }
   return groups;
  };
@@ -123,12 +161,13 @@ function seriesComparison(previous,current){
   return {t:'n',v:Number(units.toString()+'e-'+scale),z:scale>250?'0.0000000000000000E+00':scale?'0.'+'0'.repeat(scale):'0'};
  };
  const before=collect(previous),after=collect(current);
- return [...new Set([...after.keys(),...before.keys()])].map(key=>{
+ return [...new Set([...after.keys(),...before.keys()])].flatMap(key=>{
   const a=before.get(key),b=after.get(key),scale=Math.max(a?.scale||0,b?.scale||0);
   const units=(b?b.units*10n**BigInt(scale-b.scale):0n)-(a?a.units*10n**BigInt(scale-a.scale):0n);
-  return [...(b||a).labels.map(v=>({t:'s',v,z:'@'})),
-   previous?numeric(a):{t:'s',v:'',z:'@'},numeric(b),
-   previous?numeric({units,scale}):{t:'s',v:'',z:'@'},{t:'s',v:'',z:'@'}];
+  const previousQuantity=previous?numeric(a):{t:'s',v:'',z:'@'},currentQuantity=numeric(b),difference=previous?numeric({units,scale}):{t:'s',v:'',z:'@'};
+  if(previous&&units===0n)return [];
+  return [[...(b||a).labels.map(v=>({t:'s',v,z:'@'})),previousQuantity,currentQuantity,difference,
+   {t:'s',v:'',z:'@'},{t:'s',v:previous&&units>0n?judgment(a,b):'',z:'@'}]];
  });
 }
 function aggregate(result){

@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const X=require('../vendor/xlsx.full.min.js'),C=require('../fulfillment-core.js');
-const HEADERS=['采购下单人','事业部','销售分渠道','系列','上期未交付数据','本期未交付数据','差异数量','备注'];
+const HEADERS=['采购下单人','事业部','销售分渠道','系列','上期未交付数据','本期未交付数据','差异数量','备注','判断'];
 function fixture(stage){
  const book=X.utils.book_new();
  for(const [index,name]of [...C.SHEETS,'孙立柱'].entries()){
@@ -18,6 +18,31 @@ function fixture(stage){
  }
  return Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
 }
+function identityFixture(stage){
+ const current=stage===2,book=X.utils.book_new();
+ const records=[
+  [
+   {order:'旧月份订单',code:'OLD',month:'2025年12月',qty:current?70:50},
+   {order:'采购订单1',code:'A',month:'2026年11月',qty:current?10:5},
+   {order:'采购订单2',code:'B',month:'2026年11月',qty:6},
+   ...(current?[{order:'采购订单4',code:'D',month:'2026年11月',qty:4},{order:'采购订单5',code:'E',month:'2026年11月',qty:5}]:[])
+  ],
+  [{order:'采购订单3',code:'C',month:'2026年11月',qty:current?8:7}],
+  [{order:'其他采购员订单',code:'OTHER-OWNER',month:'2027年1月',qty:current?2:1,buyer:'其他采购员'}],
+  [{order:'另一系列订单',code:'OTHER-SERIES',month:'2026年12月',qty:current?3:2,series:'另一系列'}]
+ ];
+ if(current)[records[0][1],records[0][2]]=[records[0][2],records[0][1]]; // Existing orders can move without becoming new lines.
+ C.SHEETS.forEach((name,index)=>{
+  const data=records[index].map(record=>C.COLUMNS.map(key=>({
+   '采购下单人':record.buyer||'判断采购员','事业部':'国内事业部','销售分渠道':'国内事业部*TEMU业务部',
+   '系列':record.series||'新增定位系列','采购订单号':record.order,'物料编码':record.code,'SKU':'SKU-'+record.code,
+   '下单月份':record.month,'下单日期':record.month+'1日','未交付数量':record.qty,
+   '合同约定交期':current?'2026年12月31日':'2026年11月30日','是否正常履约':current?'已变更':'原状态'
+  })[key]??''));
+  X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([C.COLUMNS,...data]),name);
+ });
+ return Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
+}
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
  try{
@@ -32,16 +57,14 @@ function fixture(stage){
   const rows=book=>X.utils.sheet_to_json(book.Sheets.系列对比,{header:1,defval:''});
   await upload(fixture(1),'上期更新版.xlsx');assert.equal((await history()).previous,null);
   const first=await download('#download');assert.deepEqual(rows(first.book),[
-   HEADERS,['采购员甲','国内事业部','国内事业部*TEMU业务部','共用系列','',10,'',''],
-   ['采购员乙','国内事业部','国内事业部*TEMU业务部','旧系列','',5,'',''],
-   ['小数采购员','国内事业部','国内事业部*TEMU业务部','小数系列','',0.3,'','']
+   HEADERS,['采购员甲','国内事业部','国内事业部*TEMU业务部','共用系列','',10,'','',''],
+   ['采购员乙','国内事业部','国内事业部*TEMU业务部','旧系列','',5,'','',''],
+   ['小数采购员','国内事业部','国内事业部*TEMU业务部','小数系列','',0.3,'','','']
   ]);
   await upload(fixture(2),'本期更新版.xlsx');const expected=[
-   HEADERS,['采购员甲','国内事业部','国内事业部*TEMU业务部','共用系列',10,14,4,''],
-   ['采购员乙','国内事业部','国内事业部*TEMU业务部','新系列',0,7,7,''],
-   ['小数采购员','国内事业部','国内事业部*TEMU业务部','小数系列',0.3,0.3,0,''],
-   ['零值采购员','国内事业部','国内事业部*TEMU业务部','零值系列',0,0,0,''],
-   ['采购员乙','国内事业部','国内事业部*TEMU业务部','旧系列',5,0,-5,'']
+   HEADERS,['采购员甲','国内事业部','国内事业部*TEMU业务部','共用系列',10,14,4,'',''],
+   ['采购员乙','国内事业部','国内事业部*TEMU业务部','新系列',0,7,7,'','2026年11月净增1行（上期0行，本期1行）；本期相关行（新增行待确认）：徐英第3行'],
+   ['采购员乙','国内事业部','国内事业部*TEMU业务部','旧系列',5,0,-5,'','']
   ];
   let saved=await download('#download');assert.deepEqual(rows(saved.book),expected);
   assert.deepEqual(saved.book.SheetNames,['汇总表','合并核对','系列对比',...C.SHEETS,'孙立柱']);
@@ -53,8 +76,8 @@ function fixture(stage){
   await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);saved=await download('#download');assert.deepEqual(rows(saved.book),expected);
   const division=await download('[data-download-division="国内事业部"]');assert.deepEqual(division.book.SheetNames,['汇总表']);
   assert.deepEqual(X.utils.sheet_to_json(saved.book.Sheets.合并核对,{header:1})[0],C.REVIEW_COLUMNS);
-  const sheet=saved.book.Sheets.系列对比;assert.equal(sheet['!autofilter'].ref,'A1:H6');assert.equal(sheet.A1.s.fgColor.rgb,'315B9D');
-  for(let r=2;r<=6;r++){for(const col of ['E','F','G'])assert.equal(sheet[col+r].t,'n');assert.equal(sheet['H'+r]?.v??'','');}
+  const sheet=saved.book.Sheets.系列对比;assert.equal(sheet['!autofilter'].ref,'A1:I4');assert.equal(sheet.A1.s.fgColor.rgb,'315B9D');
+  for(let r=2;r<=4;r++){for(const col of ['E','F','G'])assert.equal(sheet[col+r].t,'n');assert.equal(sheet['H'+r]?.v??'','');assert.equal(sheet['I'+r].t,'s');assert.equal(sheet['I'+r].z,'@');}
   const style=await page.evaluate(async bytes=>{
    const z=await JSZip.loadAsync(Uint8Array.from(bytes)),p=new DOMParser(),all=(d,n)=>[...d.getElementsByTagNameNS('*',n)],parse=x=>p.parseFromString(x,'application/xml');
    const wb=parse(await z.file('xl/workbook.xml').async('string')),rels=parse(await z.file('xl/_rels/workbook.xml.rels').async('string')),entry=all(wb,'sheet').find(e=>e.getAttribute('name')==='系列对比');
@@ -69,8 +92,21 @@ function fixture(stage){
   const afterNote=await history();assert.deepEqual(afterNote.previous,beforeNote.previous);assert.deepEqual(afterNote.current.result.rows,beforeNote.current.result.rows,'只填写备注不推进历史');
   const noteOutput=await download('#download');assert.deepEqual(rows(noteOutput.book),expected,'本次生成备注仍留空');
   assert.equal(noteOutput.book.Sheets['系列对比（原表）'].H2.v,manualNote,'原系列对比表的人工备注保留在备份表');
-  for(const name of ['差异','差异（本次）'])assert(!noteOutput.book.SheetNames.includes(name),'再上传时去掉旧独立差异表：'+name);assert.deepEqual(errors,[]);
+  for(const name of ['差异','差异（本次）'])assert(!noteOutput.book.SheetNames.includes(name),'再上传时去掉旧独立差异表：'+name);
+  await upload(identityFixture(1),'上期判断更新版.xlsx');
+  await upload(identityFixture(2),'本期判断更新版.xlsx');
+  const judgmentExpected=[HEADERS,
+   ['判断采购员','国内事业部','国内事业部*TEMU业务部','新增定位系列',68,103,35,'','2026年11月净增2行（上期3行，本期5行）；涉及行：徐英第5-6行'],
+   ['其他采购员','国内事业部','国内事业部*TEMU业务部','新增定位系列',1,2,1,'',''],
+   ['判断采购员','国内事业部','国内事业部*TEMU业务部','另一系列',2,3,1,'','']
+  ];
+  const judgmentOutput=await download('#download');assert.deepEqual(rows(judgmentOutput.book),judgmentExpected,'仅同组最近月份新增订单行进入判断，其他月份和数量/交期/状态变化不算新增');
+  for(let r=2;r<=4;r++){assert.equal(judgmentOutput.book.Sheets.系列对比['H'+r]?.v??'','');assert.equal(judgmentOutput.book.Sheets.系列对比['I'+r].t,'s');assert.equal(judgmentOutput.book.Sheets.系列对比['I'+r].z,'@');}
+  const judgmentHistory=await history();assert.equal(judgmentHistory.previous.filename,'上期判断更新版.xlsx');
+  await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);assert.deepEqual(rows((await download('#download')).book),judgmentExpected,'刷新后仍使用同一上期判断');
+  await upload(identityFixture(2),'判断重复副本.xlsx');const judgmentDuplicate=await history();assert.deepEqual(judgmentDuplicate.previous,judgmentHistory.previous);assert.deepEqual(judgmentDuplicate.current.result.rows,judgmentHistory.current.result.rows);assert.deepEqual(rows((await download('#download')).book),judgmentExpected,'重复上传不推进判断基准');
+  assert.deepEqual(errors,[]);
   const out=process.env.QA_OUTPUT||'/private/tmp/fulfillment-series-qa';await fs.mkdir(out,{recursive:true});await fs.writeFile(path.join(out,'系列对比-合成验收.xlsx'),saved.bytes);
-  console.log('PASS: eight-column series comparison, exact current-minus-previous differences, blank editable remarks, manual remark backup preservation, four sources, first-period blanks, new/removed/zero groups, cache reload/duplicate/failure, division export and review sheet in full workbook, numeric types/filter/styles and no formulas');
+  console.log('PASS: nine-column series comparison, zero differences omitted, exact current-minus-previous differences, latest-month net row growth with identity/source references and uncertain fallback, blank editable remarks, manual remark backup preservation, four sources, first-period blanks, cache reload/duplicate/failure, division export and review sheet in full workbook, numeric/text types/filter/styles and no formulas');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

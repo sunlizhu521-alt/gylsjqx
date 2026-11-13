@@ -202,6 +202,7 @@ async function checkGeneratedBorders(bytes, sheetPaths) {
     assert.deepEqual(X.utils.sheet_to_json(series, { header: 1 })[0], C.SERIES_COLUMNS);
     assert.equal(series.G2.v, 1);
     assert.equal(series.G2.t, 'n');assert.equal(series.G2.z, '0', '系列差异使用明确的数量格式');
+    assert.equal(series.H2?.v ?? '', '');assert.equal(series.I1.v, '判断');assert.equal(series.I2.t, 's');assert.equal(series.I2.z, '@');
     assert.equal(series.A1.s.fgColor.rgb, '315B9D');
     assert.equal(await page.locator('#diff-preview tbody tr td:nth-child(6)').first().innerText(), '1', '物料差异预览不因去掉下载sheet而改变');
     checkSourceSheets(current.bytes, full.book, current.expected);
