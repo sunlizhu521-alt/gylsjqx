@@ -61,7 +61,7 @@ function fixture({delta = 0, badQuantity = false, badFormula = false} = {}) {
     const before = await history();
     assert(!before.current.result.review, '核对结果只在显示时生成，不写入历史数据');
     const full = await download('#download', '完整汇总.xlsx');
-    assert.deepEqual(full.book.SheetNames, ['汇总表', '合并核对', '差异', ...names, '孙立柱']);
+    assert.deepEqual(full.book.SheetNames, ['汇总表', '合并核对', '差异', '系列对比', ...names, '孙立柱']);
     const summary = X.utils.sheet_to_json(full.book.Sheets.汇总表, {header: 1, defval: ''});
     assert.deepEqual(summary[0], C.SUMMARY_COLUMNS); assert.deepEqual(summary.slice(1).map(row => row[0]), owners);
     assert(summary.slice(1).every(row => row[2] === '原渠道' || row[2] === ''), '仅提示，不自动修改渠道');

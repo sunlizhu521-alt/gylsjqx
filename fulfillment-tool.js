@@ -25,7 +25,7 @@ function render(){
  $('quantityChecks').innerHTML='<table><thead><tr>'+['来源工作表','数量字段','原表核算合计','汇总合计','差额（汇总－原表）','结果'].map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+(validation?.checks||[]).map(c=>'<tr>'+[c.sheet,c.field,number(c.sourceTotal),number(c.summaryTotal),number(c.difference),c.status].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
  $('quantityIssues').innerHTML=[...groupedIssues.values()].map(i=>'<li><strong>'+esc(i.sheet+(i.cell?'!'+i.cell:'')+' · '+i.field)+'</strong><br>'+i.messages.map(esc).join('<br>')+'</li>').join('');
  $('warnings').textContent=result.warnings.join('\n');
- $('count').textContent=`共 ${result.rows.length} 条，预览前 ${Math.min(100,result.rows.length)} 条；下载将汇总表放在首位，并保留合并核对、差异表和全部原工作表，所有单元格公式均转为值。`;
+ $('count').textContent=`共 ${result.rows.length} 条，预览前 ${Math.min(100,result.rows.length)} 条；下载将汇总表放在首位，并保留合并核对、差异、系列对比和全部原工作表，所有单元格公式均转为值。`;
  const table=(columns,rows)=>'<table><thead><tr>'+columns.map(v=>'<th>'+esc(v)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(0,100).map(row=>'<tr>'+row.map(c=>'<td>'+esc(C.formatCell(c))+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
  $('preview').innerHTML=table(C.SUMMARY_COLUMNS,C.summaryRows(result.rows,result.sources));$('diff-preview').innerHTML=validation?.passed?table(C.DIFF_COLUMNS,result.differences):'<p>本次数量未通过校验，未更新历史和差异。</p>';
  $('mergeReview').hidden=false;$('reviewStatus').textContent=`事业部、渠道及日期范围需核对 ${result.review.filter(row=>['事业部／渠道','日期范围'].includes(row[0].v)).length} 项；原值未修改。核对表包含全部数量校验结果，页面预览前 100 条。`;$('review-preview').innerHTML=table(C.REVIEW_COLUMNS,result.review);
@@ -44,7 +44,7 @@ async function show(history){
    if(validation.passed)await FulfillmentCache.replace(history);
   }
  }else validation=null;
- result={...history.current.result,differences:validation?.passed?C.difference(history.previous?.result,history.current.result):[]};
+ result={...history.current.result,differences:validation?.passed?C.difference(history.previous?.result,history.current.result):[],seriesComparison:validation?.passed?C.seriesComparison(history.previous?.result,history.current.result):[]};
  const describe=s=>`${s.filename}（${new Date(s.savedAt).toLocaleString('zh-CN')}）`;
  $('history').textContent=`本次：${describe(history.current)}\n上次：${history.previous?describe(history.previous):'尚无，当前数据作为首次基准'}\n${validation?.passed?`差异：${result.differences.length} 个物料；数量为本次减上次。`:'缓存数据需通过数量校验后才能继续使用。'}`;
  $('status').textContent=result.counts.map(x=>`${x.sheet}：${x.count} 条`).join('　');

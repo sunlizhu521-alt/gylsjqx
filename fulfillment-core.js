@@ -98,6 +98,36 @@ function currentScope(result){
  return {...result,rows,sources:(result.sources||[]).filter((_,i)=>keep[i]),counts:(result.counts||[]).filter(x=>!excluded(x.sheet)),warnings:(result.warnings||[]).filter(w=>{if(excluded(w.split('!')[0]))return false;const value=w.match(/：日期“(.+)”无法识别，保留原文$/s)?.[1];return value==null||dateCell({v:value}).invalid;})};
 }
 const DIFF_COLUMNS=['采购下单人','供应商','物料编码','SKU','物料名称','未交付数量'];
+const SERIES_COLUMNS=['采购下单人','事业部','销售分渠道','系列','上期未交付数据','本期未交付数据'];
+function seriesComparison(previous,current){
+ const collect=result=>{
+  const groups=new Map();
+  for(const [i,row] of (result?.rows||[]).entries()){
+   const source=result.sources?.[i];
+   if(source?.sheet&&!SHEETS.some(name=>new RegExp('^'+name+'(?:[0-9]{4}|[0-9]{8})?$').test(norm(source.sheet))))continue;
+   const labels=[0,1,2,6].map(c=>String(row[c]?.v??'').trim()),key=JSON.stringify(labels),cell=row[10];
+   const where=source?`${source.sheet}第 ${source.row} 行`:`第 ${i+1} 条`;
+   const raw=typeof cell?.v==='number'?quantityText(cell.v):String(cell?.v??'').trim(),value=raw||'0';
+   if(cell?.t==='e'||cell?.f&&(cell.v==null||raw==='')||!/^[+-]?\d+(?:\.\d+)?$/.test(value))throw Error(`${where}：系列对比的未交付数量“${raw}”不是有效数字，未更新历史数据`);
+   const parts=value.replace(/^[+-]/,'').split('.'),scale=(parts[1]||'').length,units=BigInt(parts.join(''))*(value.startsWith('-')?-1n:1n);
+   if(!groups.has(key))groups.set(key,{labels,units:0n,scale:0});
+   const group=groups.get(key),nextScale=Math.max(group.scale,scale);
+   group.units=group.units*10n**BigInt(nextScale-group.scale)+units*10n**BigInt(nextScale-scale);group.scale=nextScale;
+  }
+  return groups;
+ };
+ const numeric=group=>{
+  let units=group?.units||0n,scale=group?.scale||0;
+  while(scale&&units%10n===0n){units/=10n;scale--;}
+  if(units>BigInt(Number.MAX_SAFE_INTEGER)||units< -BigInt(Number.MAX_SAFE_INTEGER))throw Error('系列对比数量超出精确计算范围，未更新历史数据');
+  return {t:'n',v:Number(units.toString()+'e-'+scale),z:scale>250?'0.0000000000000000E+00':scale?'0.'+'0'.repeat(scale):'0'};
+ };
+ const before=collect(previous),after=collect(current);
+ return [...new Set([...after.keys(),...before.keys()])].map(key=>[
+  ...(after.get(key)||before.get(key)).labels.map(v=>({t:'s',v,z:'@'})),
+  previous?numeric(before.get(key)):{t:'s',v:'',z:'@'},numeric(after.get(key))
+ ]);
+}
 function aggregate(result){
  const groups=new Map();
  for(const [i,row] of result.rows.entries()){
@@ -138,6 +168,7 @@ function advance(history,current){
  }
  const previous=history?.current||null;
  difference(previous?.result,current.result);
+ seriesComparison(previous?.result,current.result);
  return {version:1,previous,current};
 }
 
@@ -198,6 +229,15 @@ function reviewSheet(rows){
 }
 function columnWidth(key){return key==='物料名称'?42:['下单日期','合同约定交期','生产中交付时间','未生产预计交付时间'].includes(key)?23:key==='SKU'?26:20;}
 function exportFilename(input){const base=String(input??'').trim().replace(/\.xlsx?$/i,'').trim()||'订单履约表';return (/更新版$/.test(base)?base.replace(/更新版$/,'汇总版'):/汇总版$/.test(base)?base:base+'汇总版')+'.xlsx';}
-function workbook(result){const rows=summaryRows(result.rows,result.sources);const s=X.utils.aoa_to_sheet([SUMMARY_COLUMNS]);rows.forEach((row,r)=>row.forEach((cell,c)=>s[X.utils.encode_cell({r:r+1,c})]={...cell}));s['!ref']=`A1:${X.utils.encode_col(SUMMARY_COLUMNS.length-1)}${rows.length+1}`;s['!autofilter']={ref:s['!ref']};s['!cols']=SUMMARY_COLUMNS.map((key,col)=>({wch:[key,...rows.map(row=>formatCell(row[col]))].reduce((max,text)=>Math.max(max,[...text].reduce((width,ch)=>width+(ch.charCodeAt(0)>255?2:1),0)+4),columnWidth(key))}));const w=X.utils.book_new();X.utils.book_append_sheet(w,s,'汇总表');if(result.review)X.utils.book_append_sheet(w,reviewSheet(result.review),'合并核对');if(result.differences){const d=X.utils.aoa_to_sheet([DIFF_COLUMNS]);result.differences.forEach((row,r)=>row.forEach((cell,c)=>d[X.utils.encode_cell({r:r+1,c})]={...cell}));d['!ref']=`A1:F${result.differences.length+1}`;d['!autofilter']={ref:d['!ref']};d['!cols']=DIFF_COLUMNS.map((key,col)=>({wch:Math.max(20,...[key,...result.differences.map(r=>String(r[col].v))].map(v=>[...v].reduce((n,c)=>n+(c.charCodeAt(0)>255?2:1),4)))}));X.utils.book_append_sheet(w,d,'差异');}return w;}
-return {REVIEW_COLUMNS,reviewRows,reviewSheet,SUMMARY_COLUMNS,summaryRows,formatCell,currentScope,DIFF_COLUMNS,aggregate,difference,advance,SHEETS,COLUMNS,QUANTITY_FIELDS,quantityCell,refreshQuantities,DATE_FORMAT,columnWidth,dateCell,merge,workbook,exportFilename};
+function workbook(result){const rows=summaryRows(result.rows,result.sources);const s=X.utils.aoa_to_sheet([SUMMARY_COLUMNS]);rows.forEach((row,r)=>row.forEach((cell,c)=>s[X.utils.encode_cell({r:r+1,c})]={...cell}));s['!ref']=`A1:${X.utils.encode_col(SUMMARY_COLUMNS.length-1)}${rows.length+1}`;s['!autofilter']={ref:s['!ref']};s['!cols']=SUMMARY_COLUMNS.map((key,col)=>({wch:[key,...rows.map(row=>formatCell(row[col]))].reduce((max,text)=>Math.max(max,[...text].reduce((width,ch)=>width+(ch.charCodeAt(0)>255?2:1),0)+4),columnWidth(key))}));const w=X.utils.book_new();X.utils.book_append_sheet(w,s,'汇总表');if(result.review)X.utils.book_append_sheet(w,reviewSheet(result.review),'合并核对');if(result.differences){const d=X.utils.aoa_to_sheet([DIFF_COLUMNS]);result.differences.forEach((row,r)=>row.forEach((cell,c)=>d[X.utils.encode_cell({r:r+1,c})]={...cell}));d['!ref']=`A1:F${result.differences.length+1}`;d['!autofilter']={ref:d['!ref']};d['!cols']=DIFF_COLUMNS.map((key,col)=>({wch:Math.max(20,...[key,...result.differences.map(r=>String(r[col].v))].map(v=>[...v].reduce((n,c)=>n+(c.charCodeAt(0)>255?2:1),4)))}));X.utils.book_append_sheet(w,d,'差异');}
+ if(result.seriesComparison){
+  const series=X.utils.aoa_to_sheet([SERIES_COLUMNS]);
+  result.seriesComparison.forEach((row,r)=>row.forEach((cell,c)=>series[X.utils.encode_cell({r:r+1,c})]={...cell}));
+  series['!ref']=`A1:F${result.seriesComparison.length+1}`;series['!autofilter']={ref:series['!ref']};
+  series['!cols']=SERIES_COLUMNS.map((key,col)=>({wch:[key,...result.seriesComparison.map(row=>formatCell(row[col]))].reduce((width,text)=>Math.max(width,[...text].reduce((n,ch)=>n+(ch.charCodeAt(0)>255?2:1),4)),20)}));
+  X.utils.book_append_sheet(w,series,'系列对比');
+ }
+ return w;
+}
+return {REVIEW_COLUMNS,reviewRows,reviewSheet,SUMMARY_COLUMNS,summaryRows,formatCell,currentScope,DIFF_COLUMNS,aggregate,difference,SERIES_COLUMNS,seriesComparison,advance,SHEETS,COLUMNS,QUANTITY_FIELDS,quantityCell,refreshQuantities,DATE_FORMAT,columnWidth,dateCell,merge,workbook,exportFilename};
 });

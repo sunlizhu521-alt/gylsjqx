@@ -1,4 +1,4 @@
-/* Add generated sheets to the values-only source package without rewriting its worksheets. */
+/* Add generated sheets while preserving the values-only source package and native parts. */
 window.FulfillmentExport = async function(generatedBlob, sourceBytes) {
  const S='http://schemas.openxmlformats.org/spreadsheetml/2006/main', R='http://schemas.openxmlformats.org/officeDocument/2006/relationships';
  const parser=new DOMParser(),serializer=new XMLSerializer();
@@ -49,6 +49,33 @@ window.FulfillmentExport = async function(generatedBlob, sourceBytes) {
  const ids=new Set(elements(rels,'Relationship').map(e=>e.getAttribute('Id')));
  let nextSheet=Math.max(0,...elements(workbook,'sheet').map(e=>Number(e.getAttribute('sheetId'))))+1;
  const addedSheets=elements(generatedBook,'sheet');
+ const previousSeries=elements(workbook,'sheet').find(sheet=>sheet.getAttribute('name')==='系列对比');
+ if(previousSeries&&addedSheets.some(sheet=>sheet.getAttribute('name')==='系列对比')){
+  let backup='系列对比（原表）',suffix=2;while(names.has(backup.toLowerCase()))backup='系列对比（原表'+suffix+++'）';
+  previousSeries.setAttribute('name',backup);names.delete('系列对比');names.add(backup.toLowerCase());
+  const rename=text=>text.split(/("(?:[^"]|"")*")/g).map((part,index)=>index%2?part:part.replace(/(?<![\w\u0080-\uFFFF.\]'])('(?:[^']|'')+'|[A-Z0-9_.\u0080-\uFFFF]+(?::[A-Z0-9_.\u0080-\uFFFF]+)?)!/gi,(match,token)=>{
+   const name=token.replace(/^'|'$/g,'').replace(/''/g,"'");if(name.includes('['))return match;
+   const ends=name.split(':');if(!ends.includes('系列对比'))return match;
+   return "'"+ends.map(end=>end==='系列对比'?backup:end).join(':').replace(/'/g,"''")+"'!";
+  })).join('');
+  const updateReferences=doc=>{
+   let changed=false;
+   for(const tag of ['definedName','f','formula','formula1','formula2','calculatedColumnFormula','totalsRowFormula'])for(const node of elements(doc,tag)){
+    const value=rename(node.textContent);if(value!==node.textContent){node.textContent=value;changed=true;}
+   }
+   for(const link of elements(doc,'hyperlink'))if(link.hasAttribute('location')){
+    const value=rename(link.getAttribute('location'));if(value!==link.getAttribute('location')){link.setAttribute('location',value);changed=true;}
+   }
+   for(const source of elements(doc,'worksheetSource'))if(source.getAttribute('sheet')==='系列对比'&&!source.hasAttributeNS(R,'id')){source.setAttribute('sheet',backup);changed=true;}
+   return changed;
+  };
+  updateReferences(workbook);
+  // Keep old references attached to the preserved sheet, not the newly generated comparison.
+  for(const path of Object.keys(original.files))if(/^xl\/.*\.xml$/.test(path)&&!path.startsWith('xl/externalLinks/')&&path!=='xl/workbook.xml'&&path!==stylePath){
+   const text=await original.file(path).async('string');if(!text.includes('系列对比'))continue;
+   const doc=await parse(original,path);if(updateReferences(doc))save(original,path,doc);
+  }
+ }
  const date1904=['1','true'].includes(elements(workbook,'workbookPr')[0]?.getAttribute('date1904'));
  for(const [i,sheet] of addedSheets.entries()){
   let name=sheet.getAttribute('name'),suffix=1;const base=name;
