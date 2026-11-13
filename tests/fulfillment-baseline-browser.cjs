@@ -71,13 +71,17 @@ function fixture(items, {supplierB = 5, badQuantity = false, badFormula = false}
       const file = await pending, book = X.read(await fs.readFile(await file.path()), {type: 'buffer', cellNF: true});
       assert.match(file.suggestedFilename(), /_V\d+\.xlsx$/);
       assert.deepEqual(X.utils.sheet_to_json(book.Sheets.系列对比, {header: 1})[0], C.SERIES_COLUMNS);
-      return X.utils.sheet_to_json(book.Sheets.系列对比);
+      const rows = X.utils.sheet_to_json(book.Sheets.系列对比);
+      assert.deepEqual(rows.map(row => row.差异数量), rows.map(row => row.差异数量).sort((a, b) => b - a));
+      assert(rows.filter(row => row.差异数量 > 0).every(row => String(row.判断 || '').trim()), '正差异判断不留空');
+      return rows;
     }
     const bySupplier = (rows, supplier) => rows.find(row => row.采购下单人 === '共同采购员' && row.供应商简称 === supplier);
     function checkTotals(rows, supplier, before, current, difference, judgment) {
       const row = bySupplier(rows, supplier); assert(row, supplier + '应有对比记录');
       assert.deepEqual([row.上期未交付数据, row.本期未交付数据, row.差异数量], [before, current, difference]);
-      assert.equal(row.备注 ?? '', ''); assert.equal(row.判断 ?? '', judgment);
+      assert.equal(row.备注 ?? '', '');
+      if (judgment instanceof RegExp) assert.match(row.判断 ?? '', judgment); else assert.equal(row.判断 ?? '', judgment);
     }
 
     const page = await open(), week = fixture([['A', 10]]);
@@ -159,7 +163,7 @@ function fixture(items, {supplierB = 5, badQuantity = false, badFormula = false}
     const singleAfter = await history(single);
     assert.equal(singleAfter.previous.filename, '直接指定上周.xlsx');
     assert.deepEqual(singleAfter.current, singleBefore.current, '首次本次文件可直接指定上一版');
-    checkTotals(await exportSeries(single), '供应商甲', 10, 20, 10, '');
+    checkTotals(await exportSeries(single), '供应商甲', 10, 20, 10, /(?=.*数量调增1行)(?=.*数量影响\+10)(?=.*徐英第2行)/);
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({status: 'PASS', url, ordinaryUploads: 'fixed baseline', replacement: 'explicit picker only; current unchanged', persistence: 'reload/duplicate/download', comparison: 'supplier totals and new-row judgment recalculated', failures: 'invalid quantity/formula/file, oversized file and IndexedDB rollback', firstCurrent: 'can explicitly choose baseline', busyControls: 'disabled'}));
   } finally {await browser.close(); await fs.rm(temporary, {recursive: true, force: true});}

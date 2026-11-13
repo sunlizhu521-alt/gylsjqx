@@ -16,7 +16,7 @@ function orders(items){
  return {rows:items.map(item=>C.COLUMNS.map(key=>{const value=({...defaults,...item})[key]??'';return typeof value==='object'?{...value}:{t:typeof value==='number'?'n':'s',v:value};})),sources:items.map(item=>item.source),counts:[],warnings:[]};
 }
 
-test('系列对比按五维联合键精确汇总，两期并集按本期优先排序，不改输入',()=>{
+test('系列对比按五维联合键精确汇总并按差异降序排序，不改输入',()=>{
  assert.deepEqual(C.SERIES_COLUMNS,HEADERS);
  const before=snapshot([
   ['甲','国内事业部','店铺','S',0.1],['甲','国内事业部','店铺','S',0.2],
@@ -29,14 +29,14 @@ test('系列对比按五维联合键精确汇总，两期并集按本期优先�
   ['','','','',0]
  ]);
  const original=structuredClone({before,current}),rows=C.seriesComparison(before,current);
- assert.deepEqual(values(rows),[
-  ['甲','国内事业部','店铺','','S',0.3,0.5,0.2,'',''],
-  ['甲','海外事业一部','店铺','','S',0,2,2,'',''],['甲','国内事业部','新渠道','','S',0,3,3,'',''],
-  ['甲','国内事业部','店铺','','新系列',0,4,4,'',''],['丙','国内事业部','店铺','','S',0,5,5,'',''],
-  ['甲','国内事业部','店铺','','旧系列',7,0,-7,'',''],['乙','国内事业部','店铺','','S',5,0,-5,'','']
+ assert.deepEqual(values(rows).map(row=>row.slice(0,9)),[
+  ['丙','国内事业部','店铺','','S',0,5,5,''],['甲','国内事业部','店铺','','新系列',0,4,4,''],
+  ['甲','国内事业部','新渠道','','S',0,3,3,''],['甲','海外事业一部','店铺','','S',0,2,2,''],
+  ['甲','国内事业部','店铺','','S',0.3,0.5,0.2,''],
+  ['乙','国内事业部','店铺','','S',5,0,-5,''],['甲','国内事业部','店铺','','旧系列',7,0,-7,'']
  ]);
  assert.deepEqual({before,current},original);
- for(const row of rows){assert(row.slice(0,5).every(c=>c.t==='s'));assert(row.slice(5,8).every(c=>c.t==='n'));assert.equal(row[8].t,'s');assert.equal(row[8].v,'');assert.equal(row[9].t,'s');assert.equal(row[9].v,'');}
+ for(const row of rows){assert(row.slice(0,5).every(c=>c.t==='s'));assert(row.slice(5,8).every(c=>c.t==='n'));assert.equal(row[8].t,'s');assert.equal(row[8].v,'');assert.equal(row[9].t,'s');if(row[7].v>0)assert(row[9].v.trim());else assert.equal(row[9].v,'');}
 });
 
 test('首次没有上期保留零和空数量，有上期时零差异整行不输出',()=>{
@@ -59,11 +59,12 @@ test('同人同渠道同系列按供应商分别核算，正负不抵消，简�
   {'未交付数量':6}
  ]);
  const input=structuredClone({before,current}),rows=C.seriesComparison(before,current);
- assert.deepEqual(values(rows),[
-  ['甲','部','渠','供应商甲','S',10,15,5,'',''],
-  ['甲','部','渠','供应商乙','S',20,15,-5,'',''],
-  ['甲','部','渠','','S',5,6,1,'','']
+ assert.deepEqual(values(rows).map(row=>row.slice(0,9)),[
+  ['甲','部','渠','供应商甲','S',10,15,5,''],
+  ['甲','部','渠','','S',5,6,1,''],
+  ['甲','部','渠','供应商乙','S',20,15,-5,'']
  ]);
+ assert(rows.slice(0,2).every(row=>row[9].v.trim()));assert.equal(rows[2][9].v,'');
  assert.deepEqual({before,current},input);
 });
 
@@ -82,7 +83,8 @@ test('最新月份和新增行按供应商独立判断，相同订单物料在�
  const input=structuredClone({before,current}),rows=C.seriesComparison(before,current);
  assert.deepEqual(rows.map(row=>[row[3].v,row[5].v,row[6].v,row[7].v]),[['甲厂',1,2,1],['乙厂',2,3,1]]);
  assert.equal(rows[0][9].v,'2026年11月净增1行（上期1行，本期2行）；涉及行：徐英第12行');
- assert.equal(rows[1][9].v,'','乙厂最新12月只有数量增加，不能借甲厂11月新增行生成判断');
+ assert.match(rows[1][9].v,/数量|调增|增加/);assert.match(rows[1][9].v,/李奇第21行/);
+ assert.doesNotMatch(rows[1][9].v,/2026年11月净增|徐英第12行/,'乙厂数量增加不能借甲厂新增行生成判断');
  assert.deepEqual({before,current},input);
 });
 
@@ -91,7 +93,8 @@ test('只使用四个人员来源，兼容日期后缀，采购下单人取字�
  const current=snapshot(sourceNames.map((_,i)=>['真实采购员','部门','渠道','S',i<4?i+1:999]),sourceNames);
  assert.deepEqual(values(C.seriesComparison(null,current)),[['真实采购员','部门','渠道','','S','',10,'','','']]);
  const previous=snapshot([['真实采购员','部门','渠道','S',2],['真实采购员','部门','渠道','S',999]],['徐英','孙立柱']);
- assert.deepEqual(values(C.seriesComparison(previous,current)),[['真实采购员','部门','渠道','','S',2,10,8,'','']]);
+ const rows=C.seriesComparison(previous,current);
+ assert.deepEqual(values(rows).map(row=>row.slice(0,9)),[['真实采购员','部门','渠道','','S',2,10,8,'']]);assert(rows[0][9].v.trim());
 });
 
 test('微小数量、精确小数和负数保持精度，联合键不以简单分隔符拼接',()=>{
@@ -110,7 +113,7 @@ test('差异按本期减上期精确计算，零差异过滤且备注始终留�
  const previous=snapshot([['甲','部','渠','增加',0.1],['甲','部','渠','减少',0.3],['甲','部','渠','不变',0.3],['甲','部','渠','微小',1e-7]]);
  const current=snapshot([['甲','部','渠','增加',0.3],['甲','部','渠','减少',0.1],['甲','部','渠','不变',0.3],['甲','部','渠','微小',3e-7]]);
  const rows=C.seriesComparison(previous,current);
- assert.deepEqual(rows.map(row=>[row[4].v,row[7].v,row[8].v]),[['增加',0.2,''],['减少',-0.2,''],['微小',2e-7,'']]);
+ assert.deepEqual(rows.map(row=>[row[4].v,row[7].v,row[8].v]),[['增加',0.2,''],['微小',2e-7,''],['减少',-0.2,'']]);
  assert(rows.every(row=>row[7].t==='n'&&row[8].t==='s'&&!row[7].f&&!row[8].f));
 });
 
@@ -197,15 +200,19 @@ test('有有效OA号时回退匹配，采购单物料联合键可区分同单不
  assert.equal(C.seriesComparison(before,current)[0][9].v,'2026年11月净增2行（上期2行，本期4行）；涉及行：操思敏第12行；徐英第19行');
 });
 
-test('仅数量增加或最新月份行数未增加时不推断新增单，旧月份新增行也不计入',()=>{
+test('最新月份行数未增加时解释旧月份新增明细和已有明细调量，不把净行数变化当作全部原因',()=>{
  const before=orders([{'采购订单号':'A','物料编码':'M','未交付数量':1}]);
  const current=orders([
   {'采购订单号':'A','物料编码':'M','未交付数量':2},
   {'采购订单号':'OLD','物料编码':'OLD','下单月份':'2026-10','未交付数量':10}
  ]);
- const rows=C.seriesComparison(before,current);assert.equal(rows[0][7].v,11);assert.equal(rows[0][9].v,'');
+ const input=structuredClone({before,current}),rows=C.seriesComparison(before,current);assert.equal(rows[0][7].v,11);
+ assert.match(rows[0][9].v,/2026年10月/);assert.match(rows[0][9].v,/新增|移入/);assert.match(rows[0][9].v,/数量|调增/);assert.match(rows[0][9].v,/汇总表第3行/);
+ assert.doesNotMatch(rows[0][9].v,/2026年11月净增|新下单|新增订单/);
+ assert.deepEqual({before,current},input);
  const replacement=orders([{'采购订单号':'B','物料编码':'N','未交付数量':20}]);
- assert.equal(C.seriesComparison(before,replacement)[0][9].v,'','行数不变时更换订单编码也不能报新增');
+ const reason=C.seriesComparison(before,replacement)[0][9].v;
+ assert(reason.trim());assert.match(reason,/新增|移入/);assert.match(reason,/移出|消失|不再|减少|未见/);assert.doesNotMatch(reason,/新下单|新增订单/);
 });
 
 test('缺编号、重复标识或同时新增删除时仅给本期相关行，不能认定唯一新增行',()=>{
@@ -230,7 +237,8 @@ test('缺编号、重复标识或同时新增删除时仅给本期相关行，�
 test('月份为空或无效不借下单日期推断，斜杠和历史订单沿用已有月份口径',()=>{
  for(const month of ['', '-', ' - ', '月份待定','2026-13']){
   const current=orders([{'采购订单号':'A','物料编码':'M','下单月份':month,'下单日期':'2026-11-01'}]);
-  assert.equal(C.seriesComparison(orders([]),current)[0][9].v,'');
+  const reason=C.seriesComparison(orders([]),current)[0][9].v;
+  assert(reason.trim());assert.match(reason,/月份|新增|移入/);assert.doesNotMatch(reason,/2026年11月/,'无效月份不能用下单日期补猜');
  }
  for(const [month,label]of [['/','2026年4月'],['历史订单','2025年1月']]){
   const current=orders([{'采购订单号':'A','物料编码':'M','下单月份':month}]);
@@ -246,6 +254,77 @@ test('负差异和首期判断留空，零差异整行删除仍先验证两期�
  assert.deepEqual(C.seriesComparison(current,structuredClone(current)),[]);
  const unsafe=orders([{'物料编码':'M','未交付数量':6000000000000000},{'物料编码':'N','未交付数量':6000000000000000}]);
  assert.throws(()=>C.seriesComparison(unsafe,structuredClone(unsafe)),/范围|精确|数量/);
+});
+
+test('正差异说明同时保留已有明细的调增和调减，数量净差精确且源行可定位',()=>{
+ const before=orders([
+  {'采购订单号':'A','物料编码':'M1','未交付数量':10},
+  {'采购订单号':'B','物料编码':'M2','未交付数量':7}
+ ]);
+ const current=orders([
+  {'采购订单号':'A','物料编码':'M1','未交付数量':15,source:{sheet:'徐英',row:12}},
+  {'采购订单号':'B','物料编码':'M2','未交付数量':5,source:{sheet:'徐英',row:15}}
+ ]);
+ const input=structuredClone({before,current}),rows=C.seriesComparison(before,current),reason=rows[0][9].v;
+ assert.equal(rows[0][7].v,3);
+ assert.match(reason,/数量调增1行，数量影响\+5/);assert.match(reason,/数量调减1行，数量影响-2/);assert.match(reason,/未交付数量净增3/);
+ assert.match(reason,/徐英第12行/);assert.match(reason,/徐英第15行/);
+ assert.doesNotMatch(reason,/新下单|新增订单/);
+ assert.deepEqual({before,current},input);
+ const decimalBefore=orders([{'采购订单号':'A','物料编码':'M1','未交付数量':0.1},{'采购订单号':'B','物料编码':'M2','未交付数量':0.4}]);
+ const decimalNow=orders([{'采购订单号':'A','物料编码':'M1','未交付数量':0.3},{'采购订单号':'B','物料编码':'M2','未交付数量':0.3}]);
+ const decimal=C.seriesComparison(decimalBefore,decimalNow)[0];
+ assert.equal(decimal[7].v,0.1);assert.match(decimal[9].v,/0\.2/);assert.match(decimal[9].v,/0\.1/);assert.doesNotMatch(decimal[9].v,/199999|1000000000/);
+});
+
+test('最新未来月行数不变时仍解释较早月份新增和上期明细消失，不能断言为新下单',()=>{
+ const before=orders([
+  {'采购订单号':'F','物料编码':'F','未交付数量':0,'下单月份':'2027-01'},
+  {'采购订单号':'OLD','物料编码':'OLD','未交付数量':4,'下单月份':'2026-09',source:{sheet:'李奇',row:23}}
+ ]);
+ const current=orders([
+  {'采购订单号':'F','物料编码':'F','未交付数量':0,'下单月份':'2027-01'},
+  {'采购订单号':'NEW','物料编码':'NEW','未交付数量':8,'下单月份':'2026-10',source:{sheet:'徐英',row:12}}
+ ]);
+ const input=structuredClone({before,current}),row=C.seriesComparison(before,current)[0],reason=row[9].v;
+ assert.equal(row[7].v,4);assert.match(reason,/2026年10月本组新增\/移入1行，数量影响\+8/);assert.match(reason,/本期未见上期明细1行，数量影响-4/);
+ assert.match(reason,/移出|消失|不再|减少|未见/);assert.match(reason,/上期/);assert.match(reason,/李奇第23行/);assert.match(reason,/徐英第12行/);
+ assert.doesNotMatch(reason,/2027年1月净增|新下单|新增订单/);
+ assert.deepEqual({before,current},input);
+});
+
+test('缺编号或重复标识时行数不增的正差异仍给月份数量变化和待核对原因',()=>{
+ for(const identifying of [{},{'采购订单号':'A','物料编码':'M'}]){
+  const before=orders([{...identifying,'未交付数量':1},{...identifying,'未交付数量':2}]);
+  const current=orders([{...identifying,'未交付数量':3,source:{sheet:'徐英',row:12}},{...identifying,'未交付数量':5,source:{sheet:'徐英',row:15}}]);
+  const input=structuredClone({before,current}),row=C.seriesComparison(before,current)[0],reason=row[9].v;
+  assert.equal(row[7].v,5);assert.match(reason,/2026年11月/);assert.match(reason,/待核对|待确认/);assert.match(reason,/数量/);assert.match(reason,/行/);assert.match(reason,/徐英第12、15行/);
+  assert.doesNotMatch(reason,/新下单|新增订单/);assert.deepEqual({before,current},input);
+ }
+ const before=orders([{'下单月份':'-','未交付数量':1}]),current=orders([{'下单月份':'','未交付数量':2}]);
+ const reason=C.seriesComparison(before,current)[0][9].v;
+ assert(reason.trim());assert.match(reason,/月份/);assert.match(reason,/待核对|待确认/);
+});
+
+test('差异按正负和小数值降序，同值顺序稳定，无上期仍保留本期原顺序',()=>{
+ const previous=snapshot([
+  ['甲','部','渠','同值先',1],['甲','部','渠','小数',0.1],['甲','部','渠','负二',3],
+  ['甲','部','渠','同值后',4],['甲','部','渠','负一',3],['甲','部','渠','零',2]
+ ]);
+ const current=snapshot([
+  ['甲','部','渠','同值先',3],['甲','部','渠','小数',0.3],['甲','部','渠','负二',1],
+  ['甲','部','渠','同值后',6],['甲','部','渠','负一',2],['甲','部','渠','零',2]
+ ]);
+ const input=structuredClone({previous,current}),rows=C.seriesComparison(previous,current);
+ assert.deepEqual(rows.map(row=>[row[4].v,row[7].v]),[['同值先',2],['同值后',2],['小数',0.2],['负一',-1],['负二',-2]]);
+ assert(rows.slice(0,3).every(row=>row[9].v.trim()));assert(rows.slice(3).every(row=>row[9].v===''));
+ const first=C.seriesComparison(null,current);
+ assert.deepEqual(first.map(row=>row[4].v),['同值先','小数','负二','同值后','负一','零']);assert(first.every(row=>row[7].v===''&&row[9].v===''));
+ assert.deepEqual({previous,current},input);
+ const saved=X.read(X.write(C.workbook({...current,seriesComparison:rows}),{type:'buffer',bookType:'xlsx'}));
+ assert.deepEqual(X.utils.sheet_to_json(saved.Sheets.系列对比,{header:1,defval:''}).slice(1).map(row=>row[7]),[2,2,0.2,-1,-2]);
+ const close=snapshot([['甲','部','渠','较小','900719925474090.2'],['甲','部','渠','较大','900719925474090.3']]);
+ assert.deepEqual(C.seriesComparison(snapshot([]),close).map(row=>row[4].v),['较大','较小'],'相邻十进制值即使Number结果相同，也按原精确差值排序');
 });
 
 test('系列对比按指定十列导出，供应商在渠道后，保留数字、空白上期与差异、I备注和J判断及普通筛选',()=>{

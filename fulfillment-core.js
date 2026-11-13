@@ -125,7 +125,7 @@ function seriesComparison(previous,current){
    return sheet+'第'+ranges.join('、')+'行';
   }).join('；');
  };
- const judgment=(before,after)=>{
+ const latestJudgment=(before,after)=>{
   const latest=(after?.entries||[]).reduce((month,entry)=>Math.max(month,entry.month||0),0);
   if(!latest)return '';
   const old=(before?.entries||[]).filter(entry=>entry.month===latest),now=after.entries.filter(entry=>entry.month===latest),increase=now.length-old.length;
@@ -136,6 +136,40 @@ function seriesComparison(previous,current){
   const located=oldKeys.every(Boolean)&&newKeys.every(Boolean)&&oldSet.size===old.length&&new Set(newKeys).size===now.length&&added.length===increase&&added.every(entry=>!allOldKeys.has(identity(entry.row)));
   return `${Math.floor(latest/100)}年${latest%100}月净增${increase}行（上期${old.length}行，本期${now.length}行）；`+
    (located?'涉及行：'+references(added):'本期相关行（新增行待确认）：'+references(now));
+ };
+ const quantity=(units,scale)=>{
+  const sign=units<0n?'-':'',digits=(units<0n?-units:units).toString().padStart(scale+1,'0');
+  return sign+(scale?(digits.slice(0,-scale)+'.'+digits.slice(-scale)).replace(/0+$/,'').replace(/\.$/,''):digits);
+ };
+ const monthLabel=month=>month?`${Math.floor(month/100)}年${month%100}月`:'下单月份缺失或无效';
+ const judgment=(before,after,scale,delta)=>{
+  const latest=latestJudgment(before,after);if(latest)return latest;
+  const old=before?.entries||[],now=after?.entries||[],oldKeys=old.map(e=>identity(e.row)),newKeys=now.map(e=>identity(e.row));
+  const value=entry=>entry.units*10n**BigInt(scale-entry.scale),sum=entries=>entries.reduce((total,e)=>total+value(e),0n);
+  const signed=units=>(units>0n?'+':'')+quantity(units,scale),parts=[];
+  if(oldKeys.every(Boolean)&&newKeys.every(Boolean)&&new Set(oldKeys).size===old.length&&new Set(newKeys).size===now.length){
+   const oldByKey=new Map(oldKeys.map((key,i)=>[key,old[i]])),newSet=new Set(newKeys),changes=new Map();
+   const add=(kind,entry,impact,period)=>{
+    if(impact===0n)return;const key=JSON.stringify([entry.month,kind]);
+    if(!changes.has(key))changes.set(key,{kind,month:entry.month,entries:[],impact:0n,period});
+    const change=changes.get(key);change.entries.push(entry);change.impact+=impact;
+   };
+   now.forEach((entry,i)=>{const prior=oldByKey.get(newKeys[i]);
+    if(!prior)add('本组新增/移入',entry,value(entry),'本期');
+    else {const impact=value(entry)-value(prior);add(impact>0n?'原有明细数量调增':'原有明细数量调减',entry,impact,'本期');}
+   });
+   old.forEach((entry,i)=>{if(!newSet.has(oldKeys[i]))add('本期未见上期明细',entry,-value(entry),'上期');});
+   for(const change of changes.values())if(change.impact!==0n)parts.push(`${monthLabel(change.month)}${change.kind}${change.entries.length}行，数量影响${signed(change.impact)}；${change.period}涉及行：${references(change.entries)}`);
+  }else{
+   const months=[...new Set([...now,...old].map(e=>e.month))].sort((a,b)=>(b||0)-(a||0));
+   for(const month of months){
+    const a=old.filter(e=>e.month===month),b=now.filter(e=>e.month===month),was=sum(a),current=sum(b),impact=current-was;
+    if(impact===0n)continue;
+    parts.push(`${monthLabel(month)}未交付数量${quantity(was,scale)}→${quantity(current,scale)}（差异${signed(impact)}），明细行数${a.length}→${b.length}；`+(b.length?'本期相关行：'+references(b):'上期相关行：'+references(a)));
+   }
+   parts.push('订单标识缺失或重复，具体原因待核对');
+  }
+  return `未交付数量净增${quantity(delta,scale)}；`+(parts.join('；')||'明细变化原因待核对');
  };
  const collect=result=>{
   const groups=new Map();
@@ -150,7 +184,7 @@ function seriesComparison(previous,current){
    if(!groups.has(key))groups.set(key,{labels,units:0n,scale:0,entries:[]});
    const group=groups.get(key),nextScale=Math.max(group.scale,scale);
    group.units=group.units*10n**BigInt(nextScale-group.scale)+units*10n**BigInt(nextScale-scale);group.scale=nextScale;
-   group.entries.push({row,source,index:i,month:orderMonth(row)});
+   group.entries.push({row,source,index:i,month:orderMonth(row),units,scale});
   }
   return groups;
  };
@@ -161,14 +195,16 @@ function seriesComparison(previous,current){
   return {t:'n',v:Number(units.toString()+'e-'+scale),z:scale>250?'0.0000000000000000E+00':scale?'0.'+'0'.repeat(scale):'0'};
  };
  const before=collect(previous),after=collect(current);
- return [...new Set([...after.keys(),...before.keys()])].flatMap(key=>{
+ const comparisons=[...new Set([...after.keys(),...before.keys()])].flatMap(key=>{
   const a=before.get(key),b=after.get(key),scale=Math.max(a?.scale||0,b?.scale||0);
   const units=(b?b.units*10n**BigInt(scale-b.scale):0n)-(a?a.units*10n**BigInt(scale-a.scale):0n);
   const previousQuantity=previous?numeric(a):{t:'s',v:'',z:'@'},currentQuantity=numeric(b),difference=previous?numeric({units,scale}):{t:'s',v:'',z:'@'};
   if(previous&&units===0n)return [];
-  return [[...(b||a).labels.map(v=>({t:'s',v,z:'@'})),previousQuantity,currentQuantity,difference,
-   {t:'s',v:'',z:'@'},{t:'s',v:previous&&units>0n?judgment(a,b):'',z:'@'}]];
+  return [{units,scale,row:[...(b||a).labels.map(v=>({t:'s',v,z:'@'})),previousQuantity,currentQuantity,difference,
+   {t:'s',v:'',z:'@'},{t:'s',v:previous&&units>0n?judgment(a,b,scale,units):'',z:'@'}]}];
  });
+ if(previous)comparisons.sort((a,b)=>{const scale=Math.max(a.scale,b.scale),left=a.units*10n**BigInt(scale-a.scale),right=b.units*10n**BigInt(scale-b.scale);return left>right?-1:left<right?1:0;});
+ return comparisons.map(item=>item.row);
 }
 function aggregate(result){
  const groups=new Map();

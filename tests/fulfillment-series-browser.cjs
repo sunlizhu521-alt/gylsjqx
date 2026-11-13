@@ -2,6 +2,10 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=r
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const X=require('../vendor/xlsx.full.min.js'),C=require('../fulfillment-core.js');
 const HEADERS=['采购下单人','事业部','销售分渠道','供应商简称','系列','上期未交付数据','本期未交付数据','差异数量','备注','判断'];
+function checkSeries(actual,expected,message){
+ assert.deepEqual(actual.map(row=>row.slice(0,9)),expected.map(row=>row.slice(0,9)),message);
+ for(const [index,row]of expected.entries()){if(row[9] instanceof RegExp)assert.match(actual[index][9],row[9],message);else assert.equal(actual[index][9],row[9],message);}
+}
 function fixture(stage){
  const book=X.utils.book_new();
  for(const [index,name]of [...C.SHEETS,'孙立柱'].entries()){
@@ -48,6 +52,25 @@ function identityFixture(stage){
  });
  return Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
 }
+function fallbackFixture(stage){
+ const current=stage===2,book=X.utils.book_new(),records=[
+  [
+   {code:'OCT-UP',month:'2026年10月',qty:current?14:10},
+   {code:'NOV-SAME',month:'2026年11月',qty:20},
+   {code:'OCT-DOWN',month:'2026年10月',qty:current?5:8},
+   ...(current?[{code:'OCT-NEW',month:'2026年10月',qty:7}]:[])
+  ],
+  [{code:'NEG',series:'减少组',month:'2026年11月',qty:current?4:9}],
+  [{code:'TIE-A',series:'同差异甲',month:'2026年11月',qty:current?4:1},{code:'TIE-B',series:'同差异乙',month:'2026年11月',qty:current?4:1}],
+  [{code:'ZERO',series:'零差异组',month:'2026年11月',qty:2}]
+ ];
+ C.SHEETS.forEach((name,index)=>X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([C.COLUMNS,...records[index].map(record=>C.COLUMNS.map(key=>({
+  '采购下单人':'回溯采购员','事业部':'国内事业部','销售分渠道':'国内事业部*TEMU业务部','供应商简称':'回溯供应商',
+  '系列':record.series||'较早月份新增组','采购订单号':'PO-'+record.code,'物料编码':record.code,'SKU':'SKU-'+record.code,
+  '下单月份':record.month,'下单日期':record.month+'1日','未交付数量':record.qty
+ })[key]??''))]),name));
+ return Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
+}
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
  try{
@@ -67,18 +90,18 @@ function identityFixture(stage){
    ['小数采购员','国内事业部','国内事业部*TEMU业务部','合成供应商','小数系列','',0.3,'','','']
   ]);
   await upload(fixture(2),'本期更新版.xlsx');const expected=[
-   HEADERS,['采购员甲','国内事业部','国内事业部*TEMU业务部','合成供应商','共用系列',10,14,4,'',''],
-   ['采购员乙','国内事业部','国内事业部*TEMU业务部','合成供应商','新系列',0,7,7,'','2026年11月净增1行（上期0行，本期1行）；本期相关行（新增行待确认）：徐英第3行'],
+   HEADERS,['采购员乙','国内事业部','国内事业部*TEMU业务部','合成供应商','新系列',0,7,7,'','2026年11月净增1行（上期0行，本期1行）；本期相关行（新增行待确认）：徐英第3行'],
+   ['采购员甲','国内事业部','国内事业部*TEMU业务部','合成供应商','共用系列',10,14,4,'',/(?=.*未交付数量10→14（差异\+4）)(?=.*明细行数4→4)(?=.*订单标识缺失或重复，具体原因待核对)/],
    ['采购员乙','国内事业部','国内事业部*TEMU业务部','合成供应商','旧系列',5,0,-5,'','']
   ];
-  let saved=await download('#download');assert.deepEqual(rows(saved.book),expected);
+  let saved=await download('#download');checkSeries(rows(saved.book),expected);
   assert.deepEqual(saved.book.SheetNames,['汇总表','合并核对','系列对比',...C.SHEETS,'孙立柱']);
   const baseline=await history();assert.equal(baseline.previous.filename,'上期更新版.xlsx');
   await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);
-  assert.deepEqual(rows((await download('#download')).book),expected);
+  checkSeries(rows((await download('#download')).book),expected);
   await upload(fixture(2),'重复副本.xlsx');const duplicate=await history();assert.deepEqual(duplicate.previous,baseline.previous);assert.deepEqual(duplicate.current.result.rows,baseline.current.result.rows);
   await upload(fixture(3),'异常更新版.xlsx');assert(await page.locator('#download').isDisabled());for(const button of await page.locator('[data-download-division]').all())assert(await button.isDisabled());assert.match(await page.locator('#status').innerText(),/数量校验未通过/);assert.match(await page.locator('#review-preview').textContent(),/数量／转换异常/);assert.deepEqual(await history(),duplicate);
-  await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);saved=await download('#download');assert.deepEqual(rows(saved.book),expected);
+  await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);saved=await download('#download');checkSeries(rows(saved.book),expected);
   const division=await download('[data-download-division="国内事业部"]');assert.deepEqual(division.book.SheetNames,['汇总表']);
   assert.deepEqual(X.utils.sheet_to_json(saved.book.Sheets.合并核对,{header:1})[0],C.REVIEW_COLUMNS);
   const sheet=saved.book.Sheets.系列对比;assert.equal(sheet['!autofilter'].ref,'A1:J4');assert.equal(sheet.A1.s.fgColor.rgb,'315B9D');
@@ -95,7 +118,7 @@ function identityFixture(stage){
   for(const name of ['差异','差异（本次）'])X.utils.book_append_sheet(manual,X.utils.aoa_to_sheet([['旧差异'],[999]]),name);
   const beforeNote=await history();await upload(Buffer.from(X.write(manual,{type:'buffer',bookType:'xlsx'})),'已填写备注.xlsx');
   const afterNote=await history();assert.deepEqual(afterNote.previous,beforeNote.previous);assert.deepEqual(afterNote.current.result.rows,beforeNote.current.result.rows,'只填写备注不推进历史');
-  const noteOutput=await download('#download');assert.deepEqual(rows(noteOutput.book),expected,'本次生成备注仍留空');
+  const noteOutput=await download('#download');checkSeries(rows(noteOutput.book),expected,'本次生成备注仍留空');
   assert.equal(noteOutput.book.Sheets['系列对比（原表）'].I2.v,manualNote,'原系列对比表的人工备注保留在备份表');
   for(const name of ['差异','差异（本次）'])assert(!noteOutput.book.SheetNames.includes(name),'再上传时去掉旧独立差异表：'+name);
   const legacyNote='合成旧版9列备注',legacy=X.read(saved.bytes,{cellNF:true,cellStyles:true});
@@ -103,25 +126,36 @@ function identityFixture(stage){
   legacy.Sheets.系列对比=X.utils.aoa_to_sheet(legacyRows);
   await upload(Buffer.from(X.write(legacy,{type:'buffer',bookType:'xlsx'})),'旧9列填写备注.xlsx');
   const legacyHistory=await history();assert.deepEqual(legacyHistory.previous,beforeNote.previous);assert.deepEqual(legacyHistory.current.result.rows,beforeNote.current.result.rows,'旧9列备注表不推进历史');
-  const legacyOutput=await download('#download');assert.deepEqual(rows(legacyOutput.book),expected);
+  const legacyOutput=await download('#download');checkSeries(rows(legacyOutput.book),expected);
   assert.deepEqual(X.utils.sheet_to_json(legacyOutput.book.Sheets['系列对比（原表）'],{header:1,defval:''}),legacyRows,'旧9列原表及H列人工备注完整保留在备份表');
   await upload(identityFixture(2),'本期判断更新版.xlsx');
   const previousChooser=page.waitForEvent('filechooser');await page.locator('#replace-previous').click();await(await previousChooser).setFiles({name:'上期判断更新版.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:identityFixture(1)});
   await page.waitForFunction(()=>!document.getElementById('previous-file').disabled&&!document.getElementById('previous-file').value);
   const judgmentExpected=[HEADERS,
    ['判断采购员','国内事业部','国内事业部*TEMU业务部','供应商甲','新增定位系列',68,103,35,'','2026年11月净增2行（上期3行，本期5行）；涉及行：徐英第5-6行'],
-   ['其他采购员','国内事业部','国内事业部*TEMU业务部','供应商甲','新增定位系列',1,2,1,'',''],
-   ['判断采购员','国内事业部','国内事业部*TEMU业务部','供应商甲','另一系列',2,3,1,'',''],
-   ['判断采购员','国内事业部','国内事业部*TEMU业务部','供应商乙','新增定位系列',7,15,8,'','2026年12月净增1行（上期2行，本期3行）；涉及行：李奇第5行']
+   ['判断采购员','国内事业部','国内事业部*TEMU业务部','供应商乙','新增定位系列',7,15,8,'','2026年12月净增1行（上期2行，本期3行）；涉及行：李奇第5行'],
+   ['其他采购员','国内事业部','国内事业部*TEMU业务部','供应商甲','新增定位系列',1,2,1,'',/(?=.*数量调增1行)(?=.*数量影响\+1)(?=.*邢芳芳第2行)/],
+   ['判断采购员','国内事业部','国内事业部*TEMU业务部','供应商甲','另一系列',2,3,1,'',/(?=.*数量调增1行)(?=.*数量影响\+1)(?=.*李奇第2行)/]
   ];
-  const judgmentOutput=await download('#download');assert.deepEqual(rows(judgmentOutput.book),judgmentExpected,'同五维组的数量、最新月份和新增来源行不串供应商，其他月份及数量/交期/状态变化不算新增');
+  const judgmentOutput=await download('#download');checkSeries(rows(judgmentOutput.book),judgmentExpected,'同五维组的数量、最新月份和新增来源行不串供应商，原行数量变化有独立说明');
   assert.equal(judgmentOutput.book.Sheets.系列对比['!autofilter'].ref,'A1:J5');
   for(let r=2;r<=5;r++){assert.equal(judgmentOutput.book.Sheets.系列对比['I'+r]?.v??'','');assert.equal(judgmentOutput.book.Sheets.系列对比['J'+r].t,'s');assert.equal(judgmentOutput.book.Sheets.系列对比['J'+r].z,'@');}
   const judgmentHistory=await history();assert.equal(judgmentHistory.previous.filename,'上期判断更新版.xlsx');
-  await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);assert.deepEqual(rows((await download('#download')).book),judgmentExpected,'刷新后仍使用同一上期判断');
-  await upload(identityFixture(2),'判断重复副本.xlsx');const judgmentDuplicate=await history();assert.deepEqual(judgmentDuplicate.previous,judgmentHistory.previous);assert.deepEqual(judgmentDuplicate.current.result.rows,judgmentHistory.current.result.rows);assert.deepEqual(rows((await download('#download')).book),judgmentExpected,'重复上传不推进判断基准');
+  await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);checkSeries(rows((await download('#download')).book),judgmentExpected,'刷新后仍使用同一上期判断');
+  await upload(identityFixture(2),'判断重复副本.xlsx');const judgmentDuplicate=await history();assert.deepEqual(judgmentDuplicate.previous,judgmentHistory.previous);assert.deepEqual(judgmentDuplicate.current.result.rows,judgmentHistory.current.result.rows);checkSeries(rows((await download('#download')).book),judgmentExpected,'重复上传不推进判断基准');
+  await upload(fallbackFixture(2),'回溯本期.xlsx');
+  const fallbackChooser=page.waitForEvent('filechooser');await page.locator('#replace-previous').click();await(await fallbackChooser).setFiles({name:'回溯上期.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:fallbackFixture(1)});
+  await page.waitForFunction(()=>!document.getElementById('previous-file').disabled&&!document.getElementById('previous-file').value);
+  const fallbackOutput=await download('#download'),fallbackRows=rows(fallbackOutput.book).slice(1);
+  assert.deepEqual(fallbackRows.map(row=>[row[4],row[5],row[6],row[7]]),[['较早月份新增组',38,46,8],['同差异甲',1,4,3],['同差异乙',1,4,3],['减少组',9,4,-5]],'H差异降序，同差异维持源顺序，零差异不输出');
+  assert(fallbackRows.every(row=>row[8]===''),'I备注保持空白');
+  assert(fallbackRows.filter(row=>row[7]>0).every(row=>row[9].trim()),'所有正差异都有J判断');
+  assert(fallbackRows.filter(row=>row[7]<0).every(row=>row[9]===''),'负差异判断为空');
+  assert.match(fallbackRows[0][9],/(?=.*2026年10月本组新增\/移入1行，数量影响\+7)(?=.*徐英第5行)(?=.*数量调增1行，数量影响\+4)(?=.*数量调减1行，数量影响-3)/,'最新11月无增行时仍解释10月新增7与原行调增4/调减3');
+  assert(!fallbackRows[0][9].includes('2026年11月净增'),'不能把较早月份新增算到最新月份');
+  assert.match(fallbackRows[1][9],/(?=.*数量调增1行)(?=.*数量影响\+3)(?=.*邢芳芳第2行)/);assert.match(fallbackRows[2][9],/(?=.*数量调增1行)(?=.*数量影响\+3)(?=.*邢芳芳第3行)/);
   assert.deepEqual(errors,[]);
   const out=process.env.QA_OUTPUT||'/private/tmp/fulfillment-series-qa';await fs.mkdir(out,{recursive:true});await fs.writeFile(path.join(out,'系列对比-合成验收.xlsx'),saved.bytes);
-  console.log('PASS: ten-column supplier-separated series comparison, zero differences omitted, exact current-minus-previous differences, latest-month net row growth with identity/source references and uncertain fallback, blank editable remarks, current and legacy nine-column manual remark backups, four sources, first-period blanks, cache reload/duplicate/failure, division export and review sheet in full workbook, numeric/text types/filter/styles and no formulas');
+  console.log('PASS: ten-column supplier-separated series comparison, differences descending with stable ties, zero differences omitted, all positive differences explained by latest-month growth or earlier additions/quantity changes/uncertain fallback, negative/first-period judgments blank, editable remarks and current/legacy backups preserved, fixed baseline and cache reload/duplicate/failure, division/full exports and styles');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

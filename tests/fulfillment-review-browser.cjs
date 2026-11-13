@@ -71,7 +71,10 @@ function fixture({delta = 0, badQuantity = false, badFormula = false, placeholde
     const summary = X.utils.sheet_to_json(full.book.Sheets.汇总表, {header: 1, defval: ''});
     assert.deepEqual(summary[0], C.SUMMARY_COLUMNS); assert.deepEqual(summary.slice(1).map(row => row[0]), owners);
     assert(summary.slice(1).every(row => row[2] === '原渠道' || row[2] === ''), '仅提示，不自动修改渠道');
-    assert.equal(full.book.Sheets.系列对比.H2.v, 1, '系列对比继续保留正确的数量差异');
+    const seriesRows = X.utils.sheet_to_json(full.book.Sheets.系列对比);
+    const changedSeries = seriesRows.find(row => row.采购下单人 === '表内其他人' && row.事业部 === '海外事业一部' && row.销售分渠道 === '原渠道');
+    assert.equal(changedSeries.差异数量, 1, '按分组定位后仍保留正确数量差异');
+    assert(seriesRows.filter(row => row.差异数量 > 0).every(row => String(row.判断 || '').trim()), '正差异判断不为空');
     assert.equal(await tool().locator('#diff-preview tbody tr td:nth-child(6)').first().innerText(), '1', '页面物料差异预览保留');
     const audit = X.utils.sheet_to_json(full.book.Sheets.合并核对, {header: 1, defval: ''});
     assert.deepEqual(audit[0], C.REVIEW_COLUMNS); assert.equal(audit.filter(row => row[0] === '数量合计').length, 30);
