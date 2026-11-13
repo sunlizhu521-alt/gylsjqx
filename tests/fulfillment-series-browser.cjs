@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const X=require('../vendor/xlsx.full.min.js'),C=require('../fulfillment-core.js');
-const HEADERS=['采购下单人','事业部','销售分渠道','系列','上期未交付数据','本期未交付数据'];
+const HEADERS=['采购下单人','事业部','销售分渠道','系列','上期未交付数据','本期未交付数据','差异数量','备注'];
 function fixture(stage){
  const book=X.utils.book_new();
  for(const [index,name]of [...C.SHEETS,'孙立柱'].entries()){
@@ -31,16 +31,16 @@ function fixture(stage){
   const rows=book=>X.utils.sheet_to_json(book.Sheets.系列对比,{header:1,defval:''});
   await upload(fixture(1),'上期更新版.xlsx');assert.equal((await history()).previous,null);
   const first=await download('#download');assert.deepEqual(rows(first.book),[
-   HEADERS,['采购员甲','国内事业部','国内事业部*TEMU业务部','共用系列','',10],
-   ['采购员乙','国内事业部','国内事业部*TEMU业务部','旧系列','',5],
-   ['小数采购员','国内事业部','国内事业部*TEMU业务部','小数系列','',0.3]
+   HEADERS,['采购员甲','国内事业部','国内事业部*TEMU业务部','共用系列','',10,'',''],
+   ['采购员乙','国内事业部','国内事业部*TEMU业务部','旧系列','',5,'',''],
+   ['小数采购员','国内事业部','国内事业部*TEMU业务部','小数系列','',0.3,'','']
   ]);
   await upload(fixture(2),'本期更新版.xlsx');const expected=[
-   HEADERS,['采购员甲','国内事业部','国内事业部*TEMU业务部','共用系列',10,14],
-   ['采购员乙','国内事业部','国内事业部*TEMU业务部','新系列',0,7],
-   ['小数采购员','国内事业部','国内事业部*TEMU业务部','小数系列',0.3,0.3],
-   ['零值采购员','国内事业部','国内事业部*TEMU业务部','零值系列',0,0],
-   ['采购员乙','国内事业部','国内事业部*TEMU业务部','旧系列',5,0]
+   HEADERS,['采购员甲','国内事业部','国内事业部*TEMU业务部','共用系列',10,14,4,''],
+   ['采购员乙','国内事业部','国内事业部*TEMU业务部','新系列',0,7,7,''],
+   ['小数采购员','国内事业部','国内事业部*TEMU业务部','小数系列',0.3,0.3,0,''],
+   ['零值采购员','国内事业部','国内事业部*TEMU业务部','零值系列',0,0,0,''],
+   ['采购员乙','国内事业部','国内事业部*TEMU业务部','旧系列',5,0,-5,'']
   ];
   let saved=await download('#download');assert.deepEqual(rows(saved.book),expected);
   assert.deepEqual(saved.book.SheetNames,['汇总表','合并核对','差异','系列对比',...C.SHEETS,'孙立柱']);
@@ -52,17 +52,22 @@ function fixture(stage){
   await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);saved=await download('#download');assert.deepEqual(rows(saved.book),expected);
   const division=await download('[data-download-division="国内事业部"]');assert.deepEqual(division.book.SheetNames,['汇总表']);
   const review=await download('#download-review');assert.deepEqual(review.book.SheetNames,['合并核对']);
-  const sheet=saved.book.Sheets.系列对比;assert.equal(sheet['!autofilter'].ref,'A1:F6');assert.equal(sheet.A1.s.fgColor.rgb,'315B9D');
-  for(let r=2;r<=6;r++)for(const col of ['E','F'])assert.equal(sheet[col+r].t,'n');
+  const sheet=saved.book.Sheets.系列对比;assert.equal(sheet['!autofilter'].ref,'A1:H6');assert.equal(sheet.A1.s.fgColor.rgb,'315B9D');
+  for(let r=2;r<=6;r++){for(const col of ['E','F','G'])assert.equal(sheet[col+r].t,'n');assert.equal(sheet['H'+r]?.v??'','');}
   const style=await page.evaluate(async bytes=>{
    const z=await JSZip.loadAsync(Uint8Array.from(bytes)),p=new DOMParser(),all=(d,n)=>[...d.getElementsByTagNameNS('*',n)],parse=x=>p.parseFromString(x,'application/xml');
    const wb=parse(await z.file('xl/workbook.xml').async('string')),rels=parse(await z.file('xl/_rels/workbook.xml.rels').async('string')),entry=all(wb,'sheet').find(e=>e.getAttribute('name')==='系列对比');
    const rel=all(rels,'Relationship').find(e=>e.getAttribute('Id')===entry.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id'));
    const doc=parse(await z.file(new URL(rel.getAttribute('Target'),'https://xlsx.invalid/xl/workbook.xml').pathname.slice(1)).async('string')),styles=parse(await z.file('xl/styles.xml').async('string')),xfs=all(styles,'cellXfs')[0],borders=all(styles,'borders')[0];
-   return {formulaCount:all(doc,'f').length,hiddenRows:all(doc,'row').filter(r=>r.getAttribute('hidden')==='1').length,filterCount:all(doc,'filterColumn').length,aligned:all(doc,'c').every(c=>{const xf=xfs.children[Number(c.getAttribute('s')||0)],a=all(xf,'alignment')[0];return a?.getAttribute('horizontal')==='center'&&a.getAttribute('vertical')==='center';}),bordered:all(doc,'c').filter(c=>all(c,'v').length||all(c,'t').length).every(c=>{const xf=xfs.children[Number(c.getAttribute('s')||0)],border=borders.children[Number(xf.getAttribute('borderId')||0)];return ['left','right','top','bottom'].every(edge=>!!all(border,edge)[0]?.getAttribute('style'));})};
+   return {formulaCount:all(doc,'f').length,hiddenRows:all(doc,'row').filter(r=>r.getAttribute('hidden')==='1').length,filterCount:all(doc,'filterColumn').length,protected:all(doc,'sheetProtection').length>0,aligned:all(doc,'c').every(c=>{const xf=xfs.children[Number(c.getAttribute('s')||0)],a=all(xf,'alignment')[0];return a?.getAttribute('horizontal')==='center'&&a.getAttribute('vertical')==='center';}),bordered:all(doc,'c').filter(c=>all(c,'v').length||all(c,'t').length).every(c=>{const xf=xfs.children[Number(c.getAttribute('s')||0)],border=borders.children[Number(xf.getAttribute('borderId')||0)];return ['left','right','top','bottom'].every(edge=>!!all(border,edge)[0]?.getAttribute('style'));})};
   },[...saved.bytes]);
-  assert.deepEqual(style,{formulaCount:0,hiddenRows:0,filterCount:0,aligned:true,bordered:true});assert.deepEqual(errors,[]);
+  assert.deepEqual(style,{formulaCount:0,hiddenRows:0,filterCount:0,protected:false,aligned:true,bordered:true});
+  const manualNote='合成人工备注：等待供应商反馈',manual=X.read(saved.bytes,{cellNF:true,cellStyles:true});manual.Sheets.系列对比.H2={t:'s',v:manualNote,z:'@'};
+  const beforeNote=await history();await upload(Buffer.from(X.write(manual,{type:'buffer',bookType:'xlsx'})),'已填写备注.xlsx');
+  const afterNote=await history();assert.deepEqual(afterNote.previous,beforeNote.previous);assert.deepEqual(afterNote.current.result.rows,beforeNote.current.result.rows,'只填写备注不推进历史');
+  const noteOutput=await download('#download');assert.deepEqual(rows(noteOutput.book),expected,'本次生成备注仍留空');
+  assert.equal(noteOutput.book.Sheets['系列对比（原表）'].H2.v,manualNote,'原系列对比表的人工备注保留在备份表');assert.deepEqual(errors,[]);
   const out=process.env.QA_OUTPUT||'/private/tmp/fulfillment-series-qa';await fs.mkdir(out,{recursive:true});await fs.writeFile(path.join(out,'系列对比-合成验收.xlsx'),saved.bytes);
-  console.log('PASS: series comparison from four sources, original purchaser fields, first/prior/current totals, exact decimals, new/removed/zero groups, cache reload/duplicate/failure, division-only/review-only exports, numeric types/filter/styles and no formulas');
+  console.log('PASS: eight-column series comparison, exact current-minus-previous differences, blank editable remarks, manual remark backup preservation, four sources, first-period blanks, new/removed/zero groups, cache reload/duplicate/failure, division/review exports, numeric types/filter/styles and no formulas');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

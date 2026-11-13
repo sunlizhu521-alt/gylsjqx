@@ -98,7 +98,7 @@ function currentScope(result){
  return {...result,rows,sources:(result.sources||[]).filter((_,i)=>keep[i]),counts:(result.counts||[]).filter(x=>!excluded(x.sheet)),warnings:(result.warnings||[]).filter(w=>{if(excluded(w.split('!')[0]))return false;const value=w.match(/：日期“(.+)”无法识别，保留原文$/s)?.[1];return value==null||dateCell({v:value}).invalid;})};
 }
 const DIFF_COLUMNS=['采购下单人','供应商','物料编码','SKU','物料名称','未交付数量'];
-const SERIES_COLUMNS=['采购下单人','事业部','销售分渠道','系列','上期未交付数据','本期未交付数据'];
+const SERIES_COLUMNS=['采购下单人','事业部','销售分渠道','系列','上期未交付数据','本期未交付数据','差异数量','备注'];
 function seriesComparison(previous,current){
  const collect=result=>{
   const groups=new Map();
@@ -123,10 +123,13 @@ function seriesComparison(previous,current){
   return {t:'n',v:Number(units.toString()+'e-'+scale),z:scale>250?'0.0000000000000000E+00':scale?'0.'+'0'.repeat(scale):'0'};
  };
  const before=collect(previous),after=collect(current);
- return [...new Set([...after.keys(),...before.keys()])].map(key=>[
-  ...(after.get(key)||before.get(key)).labels.map(v=>({t:'s',v,z:'@'})),
-  previous?numeric(before.get(key)):{t:'s',v:'',z:'@'},numeric(after.get(key))
- ]);
+ return [...new Set([...after.keys(),...before.keys()])].map(key=>{
+  const a=before.get(key),b=after.get(key),scale=Math.max(a?.scale||0,b?.scale||0);
+  const units=(b?b.units*10n**BigInt(scale-b.scale):0n)-(a?a.units*10n**BigInt(scale-a.scale):0n);
+  return [...(b||a).labels.map(v=>({t:'s',v,z:'@'})),
+   previous?numeric(a):{t:'s',v:'',z:'@'},numeric(b),
+   previous?numeric({units,scale}):{t:'s',v:'',z:'@'},{t:'s',v:'',z:'@'}];
+ });
 }
 function aggregate(result){
  const groups=new Map();
@@ -233,7 +236,7 @@ function workbook(result){const rows=summaryRows(result.rows,result.sources);con
  if(result.seriesComparison){
   const series=X.utils.aoa_to_sheet([SERIES_COLUMNS]);
   result.seriesComparison.forEach((row,r)=>row.forEach((cell,c)=>series[X.utils.encode_cell({r:r+1,c})]={...cell}));
-  series['!ref']=`A1:F${result.seriesComparison.length+1}`;series['!autofilter']={ref:series['!ref']};
+  series['!ref']=`A1:${X.utils.encode_col(SERIES_COLUMNS.length-1)}${result.seriesComparison.length+1}`;series['!autofilter']={ref:series['!ref']};
   series['!cols']=SERIES_COLUMNS.map((key,col)=>({wch:[key,...result.seriesComparison.map(row=>formatCell(row[col]))].reduce((width,text)=>Math.max(width,[...text].reduce((n,ch)=>n+(ch.charCodeAt(0)>255?2:1),4)),20)}));
   X.utils.book_append_sheet(w,series,'系列对比');
  }
