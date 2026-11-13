@@ -55,18 +55,14 @@ async function preserved(before,after) {
       if(!fs.existsSync(file)||!fs.statSync(file).isFile())return route.fulfill({status:404,body:''});
       return route.fulfill({contentType:file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.css')?'text/css':'application/javascript',body:fs.readFileSync(file)});
     });
-    await page.goto(new URL('index.html',base).href,{waitUntil:'networkidle'});
-    await page.locator('.tool-tab[data-tool="funds-budget-summary"]').click();
-    const frame = page.frameLocator('iframe[data-tool="funds-budget-summary"]');
+    await page.goto(new URL('funds-budget-summary.html',base).href,{waitUntil:'networkidle'});
+    const frame = page;
     await upload(frame); await ready(frame);
     assert.match(await frame.locator('#counts').innerText(),/4 条明细，3 个分组/);
     assert.equal(await frame.locator('#preview tr').count(),5);
     assert.match(await frame.locator('#reference').innerText(),/合成预算.xlsx\n引用时间：/);
     const preview=await frame.locator('#preview').innerText();
     assert.match(preview,/175\.00\s+100\.00\s+75\.00/);
-    await page.locator('.tool-tab[data-tool="quarter-budget"]').click();
-    await page.locator('.tool-tab[data-tool="funds-budget-summary"]').click();
-    assert.equal(await frame.locator('#preview').innerText(),preview,'切换工具保留结果');
     const bytes=await download(page,frame,1),book=X.read(bytes,{type:'buffer',cellNF:true});
     assert.deepEqual(book.SheetNames,['付款预算汇总','付款汇总明细','原始记录']);
     assert.equal(book.Sheets.付款预算汇总.A2.t,'s');assert.equal(book.Sheets.付款预算汇总.A2.v,'2026年11月');assert.equal(book.Sheets.付款预算汇总.A2.z,'@');
@@ -112,6 +108,6 @@ async function preserved(before,after) {
       assert.deepEqual([s.D21.v,s.E21.v,s.F21.v],[56608023.24,15233313.66,41374709.58]);
       if(process.env.QA_SAMPLE_OUTPUT)fs.writeFileSync(process.env.QA_SAMPLE_OUTPUT,sample);
     }
-    assert.deepEqual(errors,[]);console.log('PASS: 首页/独立页、预览、下载、源表保留、切换、重复上传、错误清理、手机布局、版本递增/刷新/失败不递增/北京时间跨日/缓存不可用'+(process.env.QA_SAMPLE_FILE?'、真实样表金额':''));
+    assert.deepEqual(errors,[]);console.log('PASS: 独立页、预览、下载、源表保留、重复上传、错误清理、手机布局、版本递增/刷新/失败不递增/北京时间跨日/缓存不可用'+(process.env.QA_SAMPLE_FILE?'、真实样表金额':''));
   } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

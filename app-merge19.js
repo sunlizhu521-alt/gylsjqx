@@ -1,10 +1,9 @@
 const tools = [
   { id: 'internal-statement', icon: '对', title: '内部交易对账单', status: '可用', desc: '按采购组织整理内部交易，填充内置模板，分别下载 Excel 和 PDF。', href: 'internal-statement.html' },
-  { id: 'funds', icon: '账', title: '付款节奏跟进', status: '可用', desc: '整理谈判付款、正常付款及申请核对记录，补充 OA 审批进度。', href: 'funds.html' },
-  { id: 'negotiated-payment-summary', icon: '谈', title: '谈判付款整理', status: '可用', desc: '按供应商和具体付款日期汇总谈判明细，分别展示谈判付款和正常付款。', href: 'negotiated-payment-summary.html' },
-  { id: 'funds-ledger', icon: '台', title: '资金台账整理', status: '可用', desc: '汇总全部月份的正常付款，匹配 OA 流程进度，已结清记录也保留。', href: 'funds-ledger.html' },
-  { id: 'quarter-budget', icon: '季', title: '季度预算整理', status: '可用', desc: '合并付款预算、核对分期付款状态，按月份和分类汇总并下载 Excel。', href: 'quarter-budget.html' },
-  { id: 'funds-budget-summary', icon: '预', title: '资金预算汇总', status: '可用', desc: '按月份、分类和状态汇总付款预算，更新汇总并保留原工作表。', href: 'funds-budget-summary.html' },
+  { id: 'funds', icon: '账', title: '付款节奏跟进', navLabel: '付款节奏跟进（可用）-柱', status: '可用', desc: '整理谈判付款、正常付款及申请核对记录，补充 OA 审批进度。', href: 'funds.html' },
+  { id: 'negotiated-payment-summary', icon: '谈', title: '谈判付款整理', navLabel: '谈判付款整理（可用）-颉', status: '可用', desc: '按供应商和具体付款日期汇总谈判明细，分别展示谈判付款和正常付款。', href: 'negotiated-payment-summary.html' },
+  { id: 'funds-ledger', icon: '台', title: '资金台账整理', navLabel: '资金台账整理-是否已付&申请纸质单', status: '可用', desc: '汇总全部月份的正常付款，匹配 OA 流程进度，已结清记录也保留。', href: 'funds-ledger.html' },
+  { id: 'quarter-budget', icon: '季', title: '季度预算整理', navLabel: '季度预算整理-每月底一次', status: '可用', desc: '合并付款预算、核对分期付款状态，按月份和分类汇总并下载 Excel。', href: 'quarter-budget.html' },
   { id: 'receipt-sign', icon: '签', title: '采购入库单签字', status: '可用', desc: '上传采购入库单后自动签字，合并下载 A4 竖向 PDF。', href: 'receipt-sign.html' },
   { id: 'seal', icon: '章', title: '检验报告单-电子章', status: '可用-品质', desc: '旋正检验报告图片，加盖内置质检合格章，下载 JPG。', href: 'quality-seal.html' },
   { id: 'beihuo', icon: '备', title: '备货分配', status: '可用', desc: '上传备货需求和维度表，匹配采购分工、汇总数量并导出分配明细。', href: 'beihuo/index.html' },
@@ -43,7 +42,7 @@ function renderToolList() {
   $('toolList').innerHTML = tools.map(tool => `
     <button class="tool-tab" data-tool="${tool.id}" ${tool.href ? `data-href="${tool.href}"` : ''}>
       <span class="tab-icon">${tool.icon}</span>
-      <span class="tab-text">${tool.title}（${tool.status}）</span>
+      <span class="tab-text">${tool.navLabel || `${tool.title}（${tool.status}）`}</span>
     </button>
   `).join('');
   document.querySelectorAll('.tool-tab').forEach(button => {
