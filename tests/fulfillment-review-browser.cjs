@@ -54,7 +54,7 @@ function fixture({delta = 0, badQuantity = false, badFormula = false} = {}) {
     await upload(fixture({delta: -1}), '基准更新版.xlsx');
     await upload(fixture());
     assert.equal(await tool().locator('#download').isDisabled(), false);
-    assert.equal(await tool().locator('#download-review').isDisabled(), false);
+    assert.equal(await tool().locator('#download-review').count(), 0);
     assert.equal(await tool().locator('#preview thead th').count(), 22);
     const owners = names.flatMap(name => [name, name]);
     assert.deepEqual(await tool().locator('#preview tbody tr td:first-child').allTextContents(), owners);
@@ -78,12 +78,8 @@ function fixture({delta = 0, badQuantity = false, badFormula = false} = {}) {
     const totals = audit.findIndex(row => row[0] === '数量合计') + 1;
     assert.equal(full.book.Sheets.合并核对['J' + totals].t, 'n');
     assert.equal(full.book.Sheets.合并核对['J' + totals].z, '0.0'); // 1.25 + 1.25 = 2.5
-    const standalone = await download('#download-review', '合并核对.xlsx');
-    assert.equal(standalone.name, '核对2026.10.29更新版－合并核对_V1.xlsx');
-    assert.deepEqual(standalone.book.SheetNames, ['合并核对']);
-    assert.deepEqual(X.utils.sheet_to_json(standalone.book.Sheets.合并核对, {header: 1, defval: ''}), audit);
     const preview = await tool().locator('#review-preview tbody tr').evaluateAll(rows => rows.map(row => [...row.cells].map(cell => cell.textContent)));
-    assert.deepEqual(preview, audit.slice(1).map(row => row.map(String)), '预览和两种下载一致');
+    assert.deepEqual(preview, audit.slice(1).map(row => row.map(String)), '预览和完整汇总中的核对工作表一致');
     for (const division of divisions) {
       const split = await download('[data-download-division="' + division + '"]');
       assert.deepEqual(split.book.SheetNames, ['汇总表']);
@@ -109,20 +105,22 @@ function fixture({delta = 0, badQuantity = false, badFormula = false} = {}) {
     assert.deepEqual(restored.current.result.rows, before.current.result.rows);
     assert.deepEqual(restored.current.result.sources, before.current.result.sources);
     assert.deepEqual(await tool().locator('#preview tbody tr td:first-child').allTextContents(), owners);
-    assert.deepEqual((await download('#download-review')).book.Sheets.合并核对['!ref'], standalone.book.Sheets.合并核对['!ref']);
+    const restoredFull = await download('#download');
+    assert.deepEqual(X.utils.sheet_to_json(restoredFull.book.Sheets.合并核对, {header: 1, defval: ''}), audit);
     await upload(fixture()); const stable = await history(); assert.deepEqual(stable.previous, restored.previous, '相同内容重传不推进历史'); assert.deepEqual(stable.current.result.rows, restored.current.result.rows);
     for (const options of [{badQuantity: true}, {badFormula: true}]) {
       await upload(fixture(options), options.badQuantity ? '数量异常.xlsx' : '必要公式异常.xlsx');
       assert.equal(await tool().locator('#download').isDisabled(), true);
       for (const division of divisions) assert.equal(await tool().locator('[data-download-division="' + division + '"]').isDisabled(), true);
-      assert.equal(await tool().locator('#download-review').isDisabled(), false);
-      const check = await download('#download-review', options.badQuantity ? '数量异常核对.xlsx' : '公式异常核对.xlsx');
-      assert.deepEqual(check.book.SheetNames, ['合并核对']);
-      const problems = X.utils.sheet_to_json(check.book.Sheets.合并核对);
+      assert.equal(await tool().locator('#download-review').count(), 0);
+      assert.equal(await tool().locator('#mergeReview').isVisible(), true);
+      assert.match(await tool().locator('#quantityStatus').innerText(), /汇总下载已暂停，请查看下方核对明细/);
+      const problemRows = await tool().locator('#review-preview tbody tr').evaluateAll(rows => rows.map(row => [...row.cells].map(cell => cell.textContent)));
+      const problems = problemRows.map(row => Object.fromEntries(C.REVIEW_COLUMNS.map((column, index) => [column, row[index]])));
       assert(problems.some(row => row.核对类型 === '数量／转换异常' && row.需要处理.includes(options.badQuantity ? '多个数字' : '#REF!')));
       assert.deepEqual(await history(), stable, '失败不覆盖历史');
     }
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({status: 'PASS', url: page.url(), summaryColumns: 22, quantityChecks: 30, downloads: 'full + 3 divisions + review', sourcePreserved: true, cache: 'rebuilt without advancing baseline', blockedQuantityAndFormula: true, output: out}));
+    console.log(JSON.stringify({status: 'PASS', url: page.url(), summaryColumns: 22, quantityChecks: 30, downloads: 'full + 3 divisions', review: 'full workbook and page preview retained; standalone download removed', sourcePreserved: true, cache: 'rebuilt without advancing baseline', blockedQuantityAndFormula: true, output: out}));
   } finally {await browser.close();}
 })().catch(error => {console.error(error); process.exitCode = 1;});

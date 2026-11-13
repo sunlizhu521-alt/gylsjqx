@@ -172,6 +172,7 @@ async function checkGeneratedBorders(bytes, sheetPaths) {
     await page.goto(url);
     const ready = () => page.waitForFunction(() => window.FulfillmentToolReady && !document.getElementById('file').disabled);
     await ready();
+    assert.equal(await page.locator('#download-review').count(), 0);
     async function upload(bytes, name) {
       await page.locator('#file').setInputFiles({ name, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: bytes });
       await page.waitForFunction(() => !document.getElementById('file').disabled && !document.getElementById('file').value);
@@ -209,9 +210,8 @@ async function checkGeneratedBorders(bytes, sheetPaths) {
     assert.match(seriesXml, /ht="22"/);
     assert.match(seriesXml, /ht="18"/);
     await checkGeneratedBorders(full.bytes, [1, 2, 3].map(n => `xl/worksheets/fulfillment${n}.xml`));
-    const review = await download('#download-review', '合并核对.xlsx');
-    assert.deepEqual(review.book.SheetNames, ['合并核对']);
-    await checkGeneratedBorders(review.bytes, ['xl/worksheets/sheet1.xml']);
+    assert.deepEqual(X.utils.sheet_to_json(full.book.Sheets.合并核对, {header: 1})[0], C.REVIEW_COLUMNS);
+    assert.equal(full.book.Sheets.合并核对.A1.s.fgColor.rgb, '315B9D');
     for (const division of divisions) {
       const divided = await download('[data-download-division="' + division + '"]', division + '.xlsx');
       assert.deepEqual(divided.book.SheetNames, ['汇总表']);

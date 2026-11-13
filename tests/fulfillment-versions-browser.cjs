@@ -26,7 +26,9 @@ function fixture() {
       await page.goto(url);
       await page.waitForFunction(() => window.FulfillmentToolReady && !document.getElementById('file').disabled);
       assert.equal(await page.locator('main > section').last().getAttribute('id'), 'usage-notes');
-      assert.equal(await page.locator('#usage-notes #history, #usage-notes #status').count(), 2);
+      assert.equal(await page.locator('#usage-notes #status').count(), 1);
+      assert.equal(await page.locator('#history').evaluate(node => node.nextElementSibling?.id), 'quantityValidation');
+      assert.equal(await page.locator('#download-review').count(), 0);
       return page;
     }
     async function upload(page, name = '版本测试更新版.xlsx', buffer = fixture()) {
@@ -52,13 +54,8 @@ function fixture() {
     assert.equal(X.utils.sheet_to_json(book.Sheets.汇总表).length, 4);
     assert.deepEqual(X.utils.sheet_to_json(book.Sheets.系列对比, {header: 1})[0], C.SERIES_COLUMNS);
     for (const sheet of book.SheetNames) assert.deepEqual(X.utils.sheet_to_json(read(second).Sheets[sheet], {header: 1}), X.utils.sheet_to_json(book.Sheets[sheet], {header: 1}));
-    for (const [selector, base] of [
-      ['[data-download-division="国内事业部"]', '版本测试汇总版-国内事业部'],
-      ['#download-review', '版本测试更新版－合并核对']
-    ]) {
-      await download(page, base + '_V1.xlsx', selector);
-      await download(page, base + '_V2.xlsx', selector);
-    }
+    await download(page, '版本测试汇总版-国内事业部_V1.xlsx', '[data-download-division="国内事业部"]');
+    await download(page, '版本测试汇总版-国内事业部_V2.xlsx', '[data-download-division="国内事业部"]');
     await page.evaluate(key => localStorage.setItem(key, '{broken again'), key);
     await download(page, '版本测试汇总版_V3.xlsx');
     await page.evaluate(key => localStorage.removeItem(key), key);
@@ -86,7 +83,6 @@ function fixture() {
     await download(inherited, '继承汇总版_V6.xlsx');
     await download(inherited, '继承汇总版_V7.xlsx');
     await download(inherited, '继承汇总版-国内事业部_V1.xlsx', '[data-download-division="国内事业部"]');
-    await download(inherited, '继承汇总版－合并核对_V1.xlsx', '#download-review');
     await upload(inherited, '其他更新版_V50.xlsx');
     await download(inherited, '其他汇总版_V1.xlsx');
 
@@ -126,6 +122,6 @@ function fixture() {
     assert.equal(unsafeDownloads, 0);
     assert.equal(await invalid.evaluate(key => JSON.parse(localStorage.getItem(key))['上限汇总版.xlsx'], key), Number.MAX_SAFE_INTEGER);
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({status: 'PASS', url, downloads: 'full, division and review independently versioned', persistence: 'reload, malformed/cleared/unavailable storage', failedExport: 'no number consumed', sourceVersion: 'same final base only', invalidCounters: 'ignored', safeIntegerLimit: 'blocked', workbookContents: 'unchanged'}));
+    console.log(JSON.stringify({status: 'PASS', url, downloads: 'full and division independently versioned', reviewDownload: 'removed', persistence: 'reload, malformed/cleared/unavailable storage', failedExport: 'no number consumed', sourceVersion: 'same final base only', invalidCounters: 'ignored', safeIntegerLimit: 'blocked', workbookContents: 'unchanged'}));
   } finally {await browser.close();}
 })().catch(error => {console.error(error); process.exitCode = 1;});

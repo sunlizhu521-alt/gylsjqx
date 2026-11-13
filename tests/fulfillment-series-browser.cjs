@@ -25,6 +25,7 @@ function fixture(stage){
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',route=>new URL(route.request().url()).origin===new URL(base).origin?route.continue():route.abort());
   await page.goto(new URL('fulfillment.html',base).href);await page.waitForFunction(()=>!document.getElementById('file').disabled);
+  assert.equal(await page.locator('#download-review').count(),0);
   const upload=async(bytes,name)=>{await page.locator('#file').setInputFiles({name,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:bytes});await page.waitForFunction(()=>!document.getElementById('file').disabled);};
   const history=()=>page.evaluate(()=>FulfillmentCache.get());
   const download=async selector=>{const pending=page.waitForEvent('download');await page.locator(selector).click();const file=await pending,bytes=await fs.readFile(await file.path());return {bytes,book:X.read(bytes,{cellNF:true,cellStyles:true}),name:file.suggestedFilename()};};
@@ -48,10 +49,10 @@ function fixture(stage){
   await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);
   assert.deepEqual(rows((await download('#download')).book),expected);
   await upload(fixture(2),'重复副本.xlsx');const duplicate=await history();assert.deepEqual(duplicate.previous,baseline.previous);assert.deepEqual(duplicate.current.result.rows,baseline.current.result.rows);
-  await upload(fixture(3),'异常更新版.xlsx');assert(await page.locator('#download').isDisabled());assert.match(await page.locator('#status').innerText(),/数量校验未通过/);assert.deepEqual(await history(),duplicate);
+  await upload(fixture(3),'异常更新版.xlsx');assert(await page.locator('#download').isDisabled());for(const button of await page.locator('[data-download-division]').all())assert(await button.isDisabled());assert.match(await page.locator('#status').innerText(),/数量校验未通过/);assert.match(await page.locator('#review-preview').textContent(),/数量／转换异常/);assert.deepEqual(await history(),duplicate);
   await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);saved=await download('#download');assert.deepEqual(rows(saved.book),expected);
   const division=await download('[data-download-division="国内事业部"]');assert.deepEqual(division.book.SheetNames,['汇总表']);
-  const review=await download('#download-review');assert.deepEqual(review.book.SheetNames,['合并核对']);
+  assert.deepEqual(X.utils.sheet_to_json(saved.book.Sheets.合并核对,{header:1})[0],C.REVIEW_COLUMNS);
   const sheet=saved.book.Sheets.系列对比;assert.equal(sheet['!autofilter'].ref,'A1:H6');assert.equal(sheet.A1.s.fgColor.rgb,'315B9D');
   for(let r=2;r<=6;r++){for(const col of ['E','F','G'])assert.equal(sheet[col+r].t,'n');assert.equal(sheet['H'+r]?.v??'','');}
   const style=await page.evaluate(async bytes=>{
@@ -70,6 +71,6 @@ function fixture(stage){
   assert.equal(noteOutput.book.Sheets['系列对比（原表）'].H2.v,manualNote,'原系列对比表的人工备注保留在备份表');
   for(const name of ['差异','差异（本次）'])assert(!noteOutput.book.SheetNames.includes(name),'再上传时去掉旧独立差异表：'+name);assert.deepEqual(errors,[]);
   const out=process.env.QA_OUTPUT||'/private/tmp/fulfillment-series-qa';await fs.mkdir(out,{recursive:true});await fs.writeFile(path.join(out,'系列对比-合成验收.xlsx'),saved.bytes);
-  console.log('PASS: eight-column series comparison, exact current-minus-previous differences, blank editable remarks, manual remark backup preservation, four sources, first-period blanks, new/removed/zero groups, cache reload/duplicate/failure, division/review exports, numeric types/filter/styles and no formulas');
+  console.log('PASS: eight-column series comparison, exact current-minus-previous differences, blank editable remarks, manual remark backup preservation, four sources, first-period blanks, new/removed/zero groups, cache reload/duplicate/failure, division export and review sheet in full workbook, numeric types/filter/styles and no formulas');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
