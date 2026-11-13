@@ -7,7 +7,7 @@ const names = ['徐英', '操思敏', '邢芳芳1017', '李奇'];
 const divisions = ['海外事业一部', '海外事业二部', '国内事业部'];
 const mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const out = process.env.QA_OUT || '/private/tmp/fulfillment-review-qa';
-function fixture({delta = 0, badQuantity = false, badFormula = false} = {}) {
+function fixture({delta = 0, badQuantity = false, badFormula = false, placeholderDateCases = false} = {}) {
   const book = X.utils.book_new();
   for (const [person, name] of names.entries()) {
     const columns = C.COLUMNS.slice(person * 4).concat(C.COLUMNS.slice(0, person * 4));
@@ -15,10 +15,16 @@ function fixture({delta = 0, badQuantity = false, badFormula = false} = {}) {
       '采购下单人': '表内其他人', '事业部': divisions[person % 3], '销售分渠道': '原渠道',
       '运营': ['倪芷涵', '王志豪', '王志豪', '薛文乐'][person],
       '下单日期': index ? '2026-09-30' : '2026-10-01', '下单月份': index ? '2026-09' : '2026-10',
+      ...(index === 0 && person === 0 ? {'下单月份': '-'} : {}),
+      ...(index === 0 && person === 2 ? {'下单月份': ' - '} : {}),
       '物料编码': '000' + person + index, 'SKU': 'SKU-' + person + index, 'OA备货单号': '000' + person,
       '未交付数量': 1.25 + (person === 0 && index === 0 ? delta : 0), '已下单未备料未生产': 0,
       '已备料未生产': '', '生产中产品': 2.5, '完工未发产品': 3, '已发货数量': 4,
-      ...(person === 1 && index === 1 ? {'事业部': ' ', '销售分渠道': ''} : {})
+      ...(person === 1 && index === 1 ? {'事业部': ' ', '销售分渠道': ''} : {}),
+      ...(placeholderDateCases && person === 0 && index === 0 ? {'下单日期': ''} : {}),
+      ...(placeholderDateCases && person === 1 && index === 1 ? {'下单日期': '', '下单月份': ' - '} : {}),
+      ...(placeholderDateCases && person === 2 && index === 0 ? {'下单日期': '错误日期'} : {}),
+      ...(placeholderDateCases && person === 3 && index === 0 ? {'下单月份': '月份待确认'} : {})
     }));
     const sheet = X.utils.aoa_to_sheet([columns.map(h => h === '销售分渠道' ? '销售分渠道部' : h), ...records.map(row => columns.map(key => row[key] ?? ''))]);
     if (person === 0 && badQuantity) sheet[X.utils.encode_cell({r: 1, c: columns.indexOf('未交付数量')})] = {t: 's', v: '100或200'};
@@ -69,6 +75,17 @@ function fixture({delta = 0, badQuantity = false, badFormula = false} = {}) {
     assert.equal(await tool().locator('#diff-preview tbody tr td:nth-child(6)').first().innerText(), '1', '页面物料差异预览保留');
     const audit = X.utils.sheet_to_json(full.book.Sheets.合并核对, {header: 1, defval: ''});
     assert.deepEqual(audit[0], C.REVIEW_COLUMNS); assert.equal(audit.filter(row => row[0] === '数量合计').length, 30);
+    assert(!audit.some(row => row.some(value => /下单月份：\s*-/.test(String(value)))), '占位月份不在导出核对中体现');
+    assert(!audit.some(row => row[0] === '日期范围' && ['00000', '00020'].includes(row[3])), '单个横杠月份不产生日期异常');
+    assert(audit.some(row => row[0] === '事业部／渠道' && row[3] === '00000' && row[8] === '海外事业一部*欧洲部*亚马逊英国组'), '有效下单日期仍触发运营归属核对');
+    assert(audit.some(row => row[0] === '事业部／渠道' && row[3] === '00020' && row[8] === '国内事业部*TEMU业务部'), '带空格的占位月份不影响有效日期后的业务核对');
+    for (const [sheetName, code, month] of [['徐英', '00000', '-'], ['邢芳芳1017', '00020', ' - ']]) {
+      const sourceRows = X.utils.sheet_to_json(full.book.Sheets[sheetName], {header: 1, defval: ''});
+      const sourceCell = full.book.Sheets[sheetName][X.utils.encode_cell({r: 1, c: sourceRows[0].indexOf('下单月份')})];
+      assert.equal(sourceCell.t, 's');
+      assert.equal(sourceCell.v, month, '原表占位月份不变');
+      assert.equal(summary.find(row => row[C.SUMMARY_COLUMNS.indexOf('物料编码')] === code)[C.SUMMARY_COLUMNS.indexOf('下单月份')], month, '汇总表占位月份不变');
+    }
     assert(audit.some(row => row[8] === '海外事业一部*欧洲部*亚马逊英国组'));
     assert(audit.some(row => row[8] === '国内事业部*TEMU业务部'));
     assert(audit.some(row => row[0] === '事业部／渠道' && row[1] === '操思敏' && row[2] === '第 3 行'));
@@ -80,6 +97,7 @@ function fixture({delta = 0, badQuantity = false, badFormula = false} = {}) {
     assert.equal(full.book.Sheets.合并核对['J' + totals].z, '0.0'); // 1.25 + 1.25 = 2.5
     const preview = await tool().locator('#review-preview tbody tr').evaluateAll(rows => rows.map(row => [...row.cells].map(cell => cell.textContent)));
     assert.deepEqual(preview, audit.slice(1).map(row => row.map(String)), '预览和完整汇总中的核对工作表一致');
+    assert(!preview.some(row => row.some(value => /下单月份：\s*-/.test(value))), '页面核对不展示占位月份');
     for (const division of divisions) {
       const split = await download('[data-download-division="' + division + '"]');
       assert.deepEqual(split.book.SheetNames, ['汇总表']);
@@ -120,7 +138,20 @@ function fixture({delta = 0, badQuantity = false, badFormula = false} = {}) {
       assert(problems.some(row => row.核对类型 === '数量／转换异常' && row.需要处理.includes(options.badQuantity ? '多个数字' : '#REF!')));
       assert.deepEqual(await history(), stable, '失败不覆盖历史');
     }
+    await upload(fixture({placeholderDateCases: true}), '占位月份边界.xlsx');
+    assert.equal(await tool().locator('#download').isDisabled(), false);
+    const boundary = await download('#download', '占位月份边界核对.xlsx');
+    const boundaryAudit = X.utils.sheet_to_json(boundary.book.Sheets.合并核对, {header: 1, defval: ''});
+    const boundaryPreview = await tool().locator('#review-preview tbody tr').evaluateAll(rows => rows.map(row => [...row.cells].map(cell => cell.textContent)));
+    assert.deepEqual(boundaryPreview, boundaryAudit.slice(1).map(row => row.map(String)), '边界日期的页面核对与导出一致');
+    assert(!boundaryAudit.some(row => row.some(value => /下单月份：\s*-/.test(String(value)))), '空日期和异常日期均不带出占位月份');
+    assert(!boundaryAudit.some(row => row[0] === '日期范围' && ['00000', '00011'].includes(row[3])), '日期为空且月份为占位符时不新增日期核对');
+    assert(boundaryAudit.some(row => row[0] === '事业部／渠道' && row[3] === '00011' && row[13].includes('为空')), '占位月份不隐藏空事业部或渠道');
+    assert(boundaryAudit.some(row => row[0] === '日期范围' && row[3] === '00020' && row[13].includes('下单日期无法识别') && !row[13].includes('下单月份无法识别')), '真实下单日期异常继续核对');
+    assert(boundaryAudit.some(row => row[0] === '日期范围' && row[3] === '00030' && row[13].includes('下单月份无法识别')), '其他无效月份继续核对');
+    const boundarySummary = X.utils.sheet_to_json(boundary.book.Sheets.汇总表);
+    for (const [code, month] of [['00000', '-'], ['00011', ' - '], ['00020', ' - ']]) assert.equal(boundarySummary.find(row => row.物料编码 === code).下单月份, month);
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({status: 'PASS', url: page.url(), summaryColumns: 22, quantityChecks: 30, downloads: 'full + 3 divisions', review: 'full workbook and page preview retained; standalone download removed', sourcePreserved: true, cache: 'rebuilt without advancing baseline', blockedQuantityAndFormula: true, output: out}));
+    console.log(JSON.stringify({status: 'PASS', url: page.url(), summaryColumns: 22, quantityChecks: 30, downloads: 'full + 3 divisions', review: 'full workbook and page preview retained; standalone download removed', placeholderMonth: 'omitted from review; source and summary preserved; other checks retained', sourcePreserved: true, cache: 'rebuilt without advancing baseline', blockedQuantityAndFormula: true, output: out}));
   } finally {await browser.close();}
 })().catch(error => {console.error(error); process.exitCode = 1;});

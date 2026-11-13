@@ -189,12 +189,13 @@ function reviewRows(result,validation){
  const text=(row,key)=>formatCell(row[COLUMNS.indexOf(key)]);
  for(const [index,row] of result.rows.entries()){
   const source=result.sources?.[index]||{},date=row[COLUMNS.indexOf('下单日期')],month=defaultCell('下单月份',row[COLUMNS.indexOf('下单月份')]);
-  const hasDate=norm(date?.v)!=='',hasMonth=norm(month?.v)!=='',parsedDate=hasDate?dateCell(date):null,parsedMonth=hasMonth?dateCell(month):null;
+  const placeholderMonth=norm(month?.v)==='-';
+  const hasDate=norm(date?.v)!=='',hasMonth=!placeholderMonth&&norm(month?.v)!=='',parsedDate=hasDate?dateCell(date):null,parsedMonth=hasMonth?dateCell(month):null;
   const time=[hasDate?'下单日期：'+formatCell(date):'',hasMonth?'下单月份：'+formatCell(month):''].filter(Boolean).join('；');
   const context={'来源工作表':source.sheet||'汇总表','来源位置':source.row?'第 '+source.row+' 行':'汇总第 '+(index+2)+' 行','物料编码':text(row,'物料编码'),'运营':text(row,'运营'),'下单时间':time};
   contexts.set(source.sheet+'\0'+source.row,{context,row});
   const dateProblems=[];
-  if(!hasDate&&!hasMonth)dateProblems.push('下单日期和下单月份均为空');
+  if(!hasDate&&!hasMonth&&!placeholderMonth)dateProblems.push('下单日期和下单月份均为空');
   if(hasDate&&parsedDate?.t!=='n')dateProblems.push('下单日期无法识别');
   if(hasMonth&&parsedMonth?.t!=='n')dateProblems.push('下单月份无法识别');
   if(parsedDate?.t==='n'&&parsedMonth?.t==='n'&&(parsedDate.v>=cutoff)!==(parsedMonth.v>=cutoff))dateProblems.push('下单日期和下单月份对2026年10月起的范围判断不一致');

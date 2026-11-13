@@ -219,6 +219,32 @@ test('日期优先、月份回退、无效日期和范围冲突都明确报告�
  for(const code of ['conflict','badDate','badMonth','empty']){const issues=rows.filter(row=>row.物料编码===code);assert.equal(issues.length,1);assert.equal(issues[0].核对类型,'日期范围');assert.equal(issues[0].建议值,'');}
  for(const code of ['old','slash'])assert(!rows.some(row=>row.物料编码===code));assert.deepEqual(result,before);
 });
+test('下单月份单个短横线不进入核对时间或日期提示，其他核对及原值保留',()=>{
+ const inputs=[
+  {'物料编码':'dash','下单日期':'','下单月份':'-'},
+  {'物料编码':'dated','下单日期':'2026-10-01','下单月份':'-','运营':'王程'},
+  {'物料编码':'padded','下单日期':'','下单月份':' - ','事业部':'','销售分渠道':''},
+  {'物料编码':'badDate','下单日期':'待定','下单月份':'-'},
+  {'物料编码':'empty','下单日期':'','下单月份':''},
+  {'物料编码':'badMonth','下单日期':'2026-10-01','下单月份':'2026-13'},
+  {'物料编码':'dashDate','下单日期':'-','下单月份':'2026-10'},
+  {'物料编码':'longDash','下单日期':'','下单月份':'—'}
+ ];
+ const book=reviewFixture(inputs),result=C.merge(book),before=structuredClone(result);
+ const audit=C.reviewRows(result,{checks:[{sheet:'合计',field:'未交付数量',sourceTotal:10,summaryTotal:10,difference:0,status:'通过'}],issues:[{sheet:'徐英',cell:'K2',field:'未交付数量',message:'测试数量异常'}]}),rows=reviewObjects(audit);
+ for(const code of ['dash','dated','padded'])assert(!rows.some(row=>row.物料编码===code&&row.核对类型==='日期范围'));
+ assert(rows.some(row=>row.物料编码==='dated'&&row.建议值==='海外事业一部*欧洲部*亚马逊英国组'));
+ assert.equal(rows.filter(row=>row.物料编码==='padded'&&row.核对类型==='事业部／渠道').length,2);
+ for(const code of ['badDate','empty','badMonth','dashDate','longDash'])assert(rows.some(row=>row.物料编码===code&&row.核对类型==='日期范围'));
+ assert.match(rows.find(row=>row.物料编码==='badDate').需要处理,/下单日期无法识别/);
+ assert(!rows.some(row=>/下单月份：\s*-/.test(row.下单时间)));
+ assert(rows.some(row=>row.物料编码==='dash'&&row.核对类型==='数量／转换异常'));
+ assert(rows.some(row=>row.核对类型==='数量合计'&&row.汇总合计===10));
+ assert.deepEqual(result,before);
+ const output=X.read(X.write(C.workbook({...result,review:audit}),{type:'buffer',bookType:'xlsx'}));
+ for(const [code,value]of [['dash','-'],['dated','-'],['padded',' - ']]){const index=result.rows.findIndex(row=>row[7].v===code);assert.equal(output.Sheets.汇总表['E'+(index+2)].v,value);}
+ assert.deepEqual(X.utils.sheet_to_json(output.Sheets.合并核对,{header:1,defval:''}).slice(1),audit.map(row=>row.map(cell=>cell.v)));
+});
 test('数量合计和单元格异常写入同一核对表，导出重读数字格式、筛选和顺序',()=>{
  const V=require('../fulfillment-validation.js'),book=reviewFixture([{}, {}, {}, {}]),result=C.merge(book);result.rows[0][C.COLUMNS.indexOf('未交付数量')].v=9;
  const check=V.validate(book,result,C);assert.equal(check.passed,false);result.review=C.reviewRows(result,check);result.differences=[];
