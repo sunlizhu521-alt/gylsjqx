@@ -31,6 +31,28 @@
     }
     if (sum !== BigInt(total)) throw Error('日期金额与合计不一致，请重新整理。');
   }
+  function formatSheet(rows, columns, skipMeasure = () => false, allowLongText = false) {
+    const widths = Array.from({length:columns},() => 12), heights = [];
+    const activeRows = new Set(), activeColumns = new Set();
+    rows.forEach((row,r) => {
+      let lines = 1;
+      row.forEach((value,c) => {
+        if (value.v != null && (typeof value.v !== 'string' || value.v.trim())) { activeRows.add(r); activeColumns.add(c); }
+        if (skipMeasure(r,c)) return;
+        const text = value.z ? X.SSF.format(value.z,value.v) : value.v;
+        const parts = String(text).split(/\r\n|\r|\n/);
+        lines = Math.max(lines,parts.length);
+        for (const part of parts) widths[c] = Math.max(widths[c],width(part)+4);
+      });
+      const height = Math.max(26,lines*16+10);
+      if (!allowLongText && height > 409) throw Error(`第${r+1}行内容超过 Excel 行高限制，请核对内容。`);
+      heights.push({hpt:Math.min(height,409)});
+    });
+    if (!allowLongText && widths.some(value => value > 255)) throw Error('内容超过 Excel 列宽限制，请核对内容。');
+    const sheet = X.utils.aoa_to_sheet(rows);
+    sheet['!cols'] = widths.map(wch => ({wch:Math.min(wch,255)})); sheet['!rows'] = heights;
+    return {sheet,activeRows,activeColumns};
+  }
 
   return async function(result) {
     if (!result?.canExport || result.errors?.length || result.unresolved?.length) throw Error('请先完成分类核对并修正金额问题，再下载。');
@@ -53,64 +75,55 @@
     if (normalDates.length) top[normalStart] = cell('正常付款');
     negotiatedDates.forEach((source,index) => { second[index+2] = {...dates[source]}; });
     normalDates.forEach((source,index) => { second[index+normalStart] = {...dates[source]}; });
-    const rows = [top,second], paidCells = new Set();
+    const rows = [top,second];
     result.rows.forEach((entry,index) => {
       const row = index + 3;
       const negotiated = {...amount(entry.negotiatedTotalCents),f:negotiatedDates.length?`SUM(C${row}:${X.utils.encode_col(normalTotal-1)}${row})`:'SUM(0)'};
       const normal = {...amount(entry.normalTotalCents),f:normalDates.length?`SUM(${X.utils.encode_col(normalStart)}${row}:${X.utils.encode_col(columns-1)}${row})`:'SUM(0)'};
       rows.push([cell(entry.supplier),negotiated,...negotiatedDates.map(source=>amount(entry.negotiatedCents[source])),normal,...normalDates.map(source=>amount(entry.normalCents[source]))]);
-      negotiatedDates.forEach((source,c) => { if (entry.negotiatedCents[source] !== null && result.paid?.negotiated?.[index]?.[source] === true) paidCells.add(X.utils.encode_col(c+2)+row); });
-      normalDates.forEach((source,c) => { if (entry.normalCents[source] !== null && result.paid?.normal?.[index]?.[source] === true) paidCells.add(X.utils.encode_col(c+normalStart)+row); });
     });
-    const widths = Array.from({length:columns},() => 12);
-    const heights = [];
-    rows.forEach((row,r) => {
-      let lines = 1;
-      row.forEach((value,c) => {
-        if (r === 0 && (c === 2 && negotiatedDates.length > 1 || c === normalStart && normalDates.length > 1)) return;
-        const text = value.z ? X.SSF.format(value.z,value.v) : value.v;
-        const parts = String(text).split(/\r\n|\r|\n/);
-        lines = Math.max(lines,parts.length);
-        for (const part of parts) widths[c] = Math.max(widths[c],width(part)+4);
-      });
-      const height = Math.max(26,lines*16+10);
-      if (height > 409) throw Error(`第${r+1}行内容超过 Excel 行高限制，请核对供应商名称。`);
-      heights.push({hpt:height});
-    });
-    if (widths.some(value => value > 255)) throw Error('内容超过 Excel 列宽限制，请核对供应商名称或金额。');
-    const sheet = X.utils.aoa_to_sheet(rows), book = X.utils.book_new();
-    const activeRows = new Set(), activeColumns = new Set();
-    rows.forEach((row,r) => row.forEach((item,c) => {
-      if (item.v != null && (typeof item.v !== 'string' || item.v.trim())) { activeRows.add(r); activeColumns.add(c); }
-    }));
-    sheet['!cols'] = widths.map(wch => ({wch})); sheet['!rows'] = heights;
+    const summary = formatSheet(rows,columns,(r,c) => r === 0 && (c === 2 && negotiatedDates.length > 1 || c === normalStart && normalDates.length > 1));
+    const sheet = summary.sheet, book = X.utils.book_new();
     sheet['!autofilter'] = {ref:X.utils.encode_range({s:{r:1,c:0},e:{r:rows.length-1,c:columns-1}})};
     sheet['!merges'] = [0,1,normalTotal].map(c => ({s:{r:0,c},e:{r:1,c}}));
     if (negotiatedDates.length > 1) sheet['!merges'].push({s:{r:0,c:2},e:{r:0,c:normalTotal-1}});
     if (normalDates.length > 1) sheet['!merges'].push({s:{r:0,c:normalStart},e:{r:0,c:columns-1}});
     X.utils.book_append_sheet(book,sheet,'谈判付款整理');
+    const validationRows = [Core.VALIDATION_HEADERS.map(cell),...(result.validationRows || []).map(row => Core.VALIDATION_HEADERS.map((_,c) => {
+      if (Core.VALIDATION_MONEY_COLUMNS.includes(c)) return amount(row[c] == null ? null : row[c]);
+      if (c === 2 && Number.isInteger(row[c])) return {t:'n',v:row[c],z:'0'};
+      return cell(row[c]);
+    }))];
+    const validation = formatSheet(validationRows,Core.VALIDATION_HEADERS.length,undefined,true);
+    const lastValidationRow = validationRows.length - 1 - (validationRows.at(-1)[3].v === '合计' ? 1 : 0);
+    validation.sheet['!autofilter'] = {ref:X.utils.encode_range({s:{r:0,c:0},e:{r:Math.max(0,lastValidationRow),c:Core.VALIDATION_HEADERS.length-1}})};
+    X.utils.book_append_sheet(book,validation.sheet,'校验');
     const zip = await Zip.loadAsync(X.write(book,{type:'array',bookType:'xlsx'}));
     let styles = await zip.file('xl/styles.xml').async('string');
     const original = styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*(?:\/>|>[\s\S]*?<\/xf>)/g);
     const formats = original.map(xf => xf.match(/\bnumFmtId="(\d+)"/)?.[1] || '0'), styleCount = formats.length;
     const fonts = '<fonts count="2"><font><sz val="11"/><color rgb="FF172033"/><name val="宋体"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="宋体"/></font></fonts>';
-    const fills = '<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFFFF"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF315B9D"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"/><bgColor indexed="64"/></patternFill></fill></fills>';
+    const fills = '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFFFF"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF315B9D"/><bgColor indexed="64"/></patternFill></fill></fills>';
     const borders = '<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border>' + ['thin','hair'].map(style => '<border>' + ['left','right','top','bottom'].map(side => `<${side} style="${style}"><color rgb="FF404040"/></${side}>`).join('') + '<diagonal/></border>').join('') + '</borders>';
-    const xf = (format,header,unframed=false,paid=false) => `<xf numFmtId="${format}" fontId="${header?1:0}" fillId="${header?3:paid?4:2}" borderId="${header?1:unframed?0:2}" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="0" shrinkToFit="0"/></xf>`;
+    const xf = (format,header,unframed=false) => `<xf numFmtId="${format}" fontId="${header?1:0}" fillId="${header?3:2}" borderId="${header?1:unframed?0:2}" xfId="0" applyNumberFormat="1" applyAlignment="1" applyBorder="1" applyFill="1" applyFont="1"><alignment horizontal="center" vertical="center" wrapText="0" shrinkToFit="0"/></xf>`;
     styles = styles.replace(/<fonts\b[^>]*>[\s\S]*?<\/fonts>/,fonts).replace(/<fills\b[^>]*>[\s\S]*?<\/fills>/,fills).replace(/<borders\b[^>]*>[\s\S]*?<\/borders>/,borders)
-      .replace(/<cellXfs\b[^>]*>[\s\S]*?<\/cellXfs>/,`<cellXfs count="${styleCount*4}">${formats.map(format => xf(format,false)).join('')}${formats.map(format => xf(format,true)).join('')}${formats.map(format => xf(format,false,true)).join('')}${formats.map(format => xf(format,false,false,true)).join('')}</cellXfs>`);
+      .replace(/<cellXfs\b[^>]*>[\s\S]*?<\/cellXfs>/,`<cellXfs count="${styleCount*3}">${formats.map(format => xf(format,false)).join('')}${formats.map(format => xf(format,true)).join('')}${formats.map(format => xf(format,false,true)).join('')}</cellXfs>`);
     zip.file('xl/styles.xml',styles);
-    let xml = await zip.file('xl/worksheets/sheet1.xml').async('string');
-    xml = xml.replace(/<c\b([^>]*?)(\/?)>/g,(tag,attrs,end) => {
-      const address = attrs.match(/\br="([A-Z]+(\d+))"/);
-      if (!address) return tag;
-      const point = X.utils.decode_cell(address[1]), framed = activeRows.has(point.r) && activeColumns.has(point.c);
-      const style = Number(attrs.match(/\bs="(\d+)"/)?.[1] || 0) + (Number(address[2]) <= 2 ? styleCount : paidCells.has(address[1]) ? styleCount*3 : framed ? 0 : styleCount*2);
-      return '<c' + attrs.replace(/\s+s="\d+"/,'') + ` s="${style}"${end}>`;
-    });
-    const views = '<sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A3" sqref="A3"/></sheetView></sheetViews>';
-    xml = /<sheetViews\b/.test(xml) ? xml.replace(/<sheetViews\b[^>]*>[\s\S]*?<\/sheetViews>/,views) : xml.replace(/<(?:sheetFormatPr|cols|sheetData)\b/,match => views+match);
-    zip.file('xl/worksheets/sheet1.xml',xml);
+    for (const [index,layout] of [summary,validation].entries()) {
+      const part = `xl/worksheets/sheet${index+1}.xml`, headerRows = index === 0 ? 2 : 1;
+      let xml = await zip.file(part).async('string');
+      xml = xml.replace(/<c\b([^>]*?)(\/?)>/g,(tag,attrs,end) => {
+        const address = attrs.match(/\br="([A-Z]+(\d+))"/);
+        if (!address) return tag;
+        const point = X.utils.decode_cell(address[1]), framed = layout.activeRows.has(point.r) && layout.activeColumns.has(point.c);
+        const style = Number(attrs.match(/\bs="(\d+)"/)?.[1] || 0) + (Number(address[2]) <= headerRows ? styleCount : framed ? 0 : styleCount*2);
+        return '<c' + attrs.replace(/\s+s="\d+"/,'') + ` s="${style}"${end}>`;
+      });
+      const firstCell = `A${headerRows+1}`;
+      const views = `<sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="${headerRows}" topLeftCell="${firstCell}" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="${firstCell}" sqref="${firstCell}"/></sheetView></sheetViews>`;
+      xml = /<sheetViews\b/.test(xml) ? xml.replace(/<sheetViews\b[^>]*>[\s\S]*?<\/sheetViews>/,views) : xml.replace(/<(?:sheetFormatPr|cols|sheetData)\b/,match => views+match);
+      zip.file(part,xml);
+    }
     return zip.generateAsync({type:'uint8array',compression:'DEFLATE'});
   };
 });

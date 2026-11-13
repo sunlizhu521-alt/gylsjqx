@@ -11,9 +11,9 @@
   }
   function reset() {
     source = result = null; decisions = {}; reviews = [];
-    $('result').hidden = $('review-panel').hidden = $('issue-panel').hidden = true;
-    for (const id of ['preview','issues','reviews']) $(id).replaceChildren();
-    $('counts').textContent = $('totals').textContent = '';
+    $('result').hidden = $('review-panel').hidden = $('issue-panel').hidden = $('validation-panel').hidden = true;
+    for (const id of ['preview','issues','reviews','validation-preview']) $(id).replaceChildren();
+    $('counts').textContent = $('totals').textContent = $('validation-counts').textContent = '';
     controls();
   }
   function showIssues() {
@@ -61,21 +61,34 @@
     add(first,'正常付款总金额',2);
     if (columns.normal.length) add(first,'正常付款',1,columns.normal.length);
     for (const type of ['negotiated','normal']) for (const index of columns[type]) add(second,result.dates[index].label);
-    for (const [rowIndex,item] of result.rows.entries()) {
+    for (const item of result.rows) {
       const row = body.insertRow(); row.insertCell().textContent = item.supplier;
-      const dateCells = type => columns[type].map(i=>({value:item[type+'Cents'][i],paid:result.paid?.[type]?.[rowIndex]?.[i]===true}));
-      for (const display of [{value:item.negotiatedTotalCents},...dateCells('negotiated'),{value:item.normalTotalCents},...dateCells('normal')]) {
-        const cell = row.insertCell(); cell.textContent = money(display.value);
-        if (display.paid && Number.isFinite(display.value)) { cell.classList.add('is-paid'); cell.title = '已支付（源表批注确认）'; }
-      }
+      const dateCells = type => columns[type].map(i=>item[type+'Cents'][i]);
+      for (const cents of [item.negotiatedTotalCents,...dateCells('negotiated'),item.normalTotalCents,...dateCells('normal')]) row.insertCell().textContent = money(cents);
     }
     $('preview').append(table);
     $('counts').textContent = `（${result.recordCount} 条明细，${result.rows.length} 家供应商）`;
     $('totals').textContent = `${result.canExport ? '' : '已识别金额：'}谈判付款 ￥${money(result.totals.negotiatedCents)}；正常付款 ￥${money(result.totals.normalCents)}` + (result.unresolved.length ? `；待分类 ￥${money(result.totals.unresolvedCents)}` : '');
   }
+  function validationPreview() {
+    $('validation-preview').replaceChildren();
+    $('validation-panel').hidden = !result.validationRows?.length;
+    if ($('validation-panel').hidden) return;
+    const table = document.createElement('table'), header = table.createTHead().insertRow(), body = table.createTBody();
+    for (const label of C.VALIDATION_HEADERS) {
+      const cell = document.createElement('th'); cell.scope = 'col'; cell.textContent = label; header.append(cell);
+    }
+    for (const values of result.validationRows) {
+      const row = body.insertRow();
+      values.forEach((value,column)=>{row.insertCell().textContent = C.VALIDATION_MONEY_COLUMNS.includes(column) ? money(value) : value ?? '';});
+    }
+    $('validation-preview').append(table);
+    const counts = result.validationCounts;
+    $('validation-counts').textContent = `一致 ${counts.consistent} 条；不一致 ${counts.inconsistent} 条；待核对 ${counts.unverified} 条。差额＝对应金额合计－OA申请金额；校验差异不阻止下载。`;
+  }
   function calculate() {
     result = C.build(source,decisions);
-    showIssues(); showReviews(); preview(); controls();
+    showIssues(); showReviews(); preview(); validationPreview(); controls();
     $('status').textContent = result.errors.length ? '整理未完成，请修正来源问题后重新上传。' : result.unresolved.length ? '请先确认下方分类，再下载完整汇总。' : '汇总完成，可下载。';
   }
   async function readBook(bytes) {
@@ -115,7 +128,7 @@
   function verify(bytes) {
     const book = XLSX.read(bytes,{type:'array',cellNF:true}), sheet = book.Sheets['谈判付款整理'], columns = C.dateColumns(result);
     const n = columns.negotiated.length, m = columns.normal.length, last = 2+n+m;
-    if (book.SheetNames.length !== 1 || !sheet || sheet['!ref'] !== `A1:${XLSX.utils.encode_col(last)}${result.rows.length+2}`) throw Error('导出结构校验未通过');
+    if (book.SheetNames.join('|') !== '谈判付款整理|校验' || !sheet || sheet['!ref'] !== `A1:${XLSX.utils.encode_col(last)}${result.rows.length+2}`) throw Error('导出结构校验未通过');
     if (sheet.A1?.v !== '供应商' || sheet.B1?.v !== '谈判总金额' || sheet[XLSX.utils.encode_cell({r:0,c:n+2})]?.v !== '正常付款总金额') throw Error('导出表头校验未通过');
     for (const [type,start] of [['negotiated',2],['normal',n+3]]) columns[type].forEach((dateIndex,index) => {
       const cell = sheet[XLSX.utils.encode_cell({r:1,c:start+index})];
@@ -132,6 +145,16 @@
       const normalFormula = m ? `SUM(${XLSX.utils.encode_col(n+3)}${r}:${XLSX.utils.encode_col(last)}${r})` : 'SUM(0)';
       if (sheet['B'+r]?.f !== negotiatedFormula || sheet[XLSX.utils.encode_col(n+2)+r]?.f !== normalFormula) throw Error('导出合计公式校验未通过');
     });
+    const audit = book.Sheets['校验'];
+    if (!audit || audit['!ref'] !== `A1:P${result.validationRows.length+1}`) throw Error('导出校验表结构未通过');
+    C.VALIDATION_HEADERS.forEach((label,c)=>{if (audit[XLSX.utils.encode_cell({r:0,c})]?.v !== label) throw Error('导出校验表表头未通过');});
+    result.validationRows.forEach((values,r)=>values.forEach((value,c)=>{
+      const cell = audit[XLSX.utils.encode_cell({r:r+1,c})];
+      const numeric = C.VALIDATION_MONEY_COLUMNS.includes(c);
+      if (value == null || value === '') {
+        if (cell?.v != null && cell.v !== '') throw Error('导出校验表空值未通过');
+      } else if (numeric ? cell?.t !== 'n' || Math.round(cell.v*100) !== value : cell?.v !== value) throw Error('导出校验表内容未通过：第'+(r+2)+'行');
+    }));
   }
   function nextDownload() {
     const date = new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());

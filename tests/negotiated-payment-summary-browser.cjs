@@ -68,7 +68,12 @@ async function download(page,scope,version,date='2026-11-12') {
     assert.equal(await frame.locator('#preview').innerText(),preview);
     assert.equal(await frame.locator('select[data-address="C5"]').inputValue(),'否');
     const bytes=await download(page,frame,1),book=X.read(bytes,{type:'buffer',cellNF:true}),s=book.Sheets.谈判付款整理;
-    assert.deepEqual(book.SheetNames,['谈判付款整理']); assert.equal(s['!ref'],'A1:I4');
+    assert.deepEqual(book.SheetNames,['谈判付款整理','校验']);
+    assert.equal(book.Sheets.校验['!ref'],'A1:P6');
+    assert.equal(book.Sheets.校验.D2.v,'供应商甲');
+    assert.equal(book.Sheets.校验.O2.v,'待核对');
+    assert.equal(await frame.locator('#validation-preview tbody tr').count(),5);
+    assert.match(await frame.locator('#validation-counts').innerText(),/差异不阻止下载/); assert.equal(s['!ref'],'A1:I4');
     assert.equal(s.B3.v,80); assert.equal(s.B3.f,'SUM(C3:F3)');assert.equal(s.G3.v,5);assert.equal(s.H4.v,180000);
     assert.equal(s.C2.t,'s');assert.equal(s.C2.z,'@');assert.equal(s.C2.v,'2026年9月30日');assert.equal(X.SSF.format(s.F2.z,s.F2.v),'2027年1月25日');
     assert.deepEqual(['C','D','E','F'].map(c=>s[c+'2'].v),['2026年9月30日','2026年11月25日','2026年11月26日','2027年1月25日']);
@@ -97,7 +102,7 @@ async function download(page,scope,version,date='2026-11-12') {
     await frame.locator('#status').filter({hasText:'修正来源问题'}).waitFor();assert(await frame.locator('#download').isDisabled());
     assert.match(await frame.locator('#issues').innerText(),/D3.*(?:空|缺)/);
     await upload(frame,Buffer.from('broken'),'损坏.xlsx'); await frame.locator('#status').filter({hasText:'读取失败'}).waitFor();
-    assert(await frame.locator('#download').isDisabled()); assert(await frame.locator('#result').isHidden());assert(await frame.locator('#review-panel').isHidden());
+    assert(await frame.locator('#download').isDisabled()); assert(await frame.locator('#result').isHidden());assert(await frame.locator('#review-panel').isHidden());assert(await frame.locator('#validation-panel').isHidden());
     await upload(frame);await frame.locator('select[data-address="C5"]').selectOption('否');
     if(process.env.QA_SCREENSHOT)await page.screenshot({path:process.env.QA_SCREENSHOT,fullPage:true});
     await page.setViewportSize({width:390,height:844});
@@ -178,16 +183,39 @@ async function download(page,scope,version,date='2026-11-12') {
     paidSheet['!ref']='A1:J6';
     await upload(page,Buffer.from(X.write(paidBook,{type:'buffer',bookType:'xlsx'})),'批注已支付验收.xlsx');
     await page.locator('#download:not([disabled])').waitFor();
-    assert.equal(await page.locator('#preview td.is-paid').count(),2,'只有全部组成款项已付的金额标红');
+    assert.equal(await page.locator('#preview td.is-paid').count(),0,'有已支付批注也不标红');
     assert.equal(await page.locator('#preview tbody tr:nth-child(1) td:nth-child(3)').getAttribute('class'),null,'同日混合款项不红');
-    assert.equal(await page.locator('#preview tbody tr:nth-child(2) td:nth-child(3)').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 0, 0)');
+    assert.equal(await page.locator('#preview tbody tr:nth-child(2) td:nth-child(3)').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)');
     const paidBytes=await download(page,page),paidOutput=X.read(paidBytes,{type:'buffer',cellStyles:true}).Sheets.谈判付款整理;
     const redAddresses=Object.entries(paidOutput).filter(([address,c])=>/^[A-Z]+\d+$/.test(address)&&/^(?:FF)?FF0000$/i.test(c.s?.fgColor?.rgb||'')).map(([address])=>address).sort();
-    assert.deepEqual(redAddresses,['C4','F5']);
+    assert.deepEqual(redAddresses,[]);
     assert.equal(paidOutput.C3.v,150);assert.equal(paidOutput.D4.v,100);assert.equal(paidOutput.F6.v,25);
     assert.equal(paidOutput['!ref'],'A1:F6');
     const paidZip=await Zip.loadAsync(paidBytes);assert.doesNotMatch(await paidZip.file('xl/worksheets/sheet1.xml').async('string'),/<conditionalFormatting\b/);
     if(process.env.QA_PAID_SCREENSHOT)await page.screenshot({path:process.env.QA_PAID_SCREENSHOT,fullPage:true});
+    // Four-way checks keep source records separate and remain downloadable on mismatch.
+    const auditBook=X.utils.book_new(),auditHeaders=Array(42).fill('');
+    Object.assign(auditHeaders,{0:'供应商',1:'付款主体',2:'是否谈判分批',3:'谈判明细',4:'OA-申请付款金额',5:'对公付款0A流程号'});
+    for(let c=16;c<=27;c++)auditHeaders[c]=`2026年11月${c-15}日`;
+    for(let c=34;c<=41;c++)auditHeaders[c]=`${2026+Math.floor((c-24)/12)}年${(c-24)%12+1}月支付`;
+    const auditRows=[auditHeaders];
+    for(const [i,total] of [10,12].entries()){
+      const row=Array(42).fill('');
+      Object.assign(row,{0:'重复供应商',1:'主体甲',2:'是',3:'11月1日－10',4:10,5:'OA00'+i,16:total,34:10});auditRows.push(row);
+    }
+    X.utils.book_append_sheet(auditBook,X.utils.aoa_to_sheet(auditRows),'谈判付款');
+    await upload(page,Buffer.from(X.write(auditBook,{type:'buffer',bookType:'xlsx'})),'四组金额校验.xlsx');
+    await page.locator('#download:not([disabled])').waitFor();
+    assert.match(await page.locator('#validation-counts').innerText(),/一致 1 条；不一致 1 条；待核对 0 条/);
+    assert.equal(await page.locator('#validation-preview tbody tr').count(),3);
+    const auditOutput=X.read(await download(page,page),{type:'buffer',cellNF:true});
+    assert.deepEqual(auditOutput.SheetNames,['谈判付款整理','校验']);
+    const auditSheet=auditOutput.Sheets.校验;
+    assert.equal(auditSheet.O2.v,'一致');assert.equal(auditSheet.O3.v,'不一致');
+    assert.equal(auditSheet.M3.v,2);assert.equal(auditSheet.J4.v,22);assert.equal(auditSheet.C3.v,3);
+    assert.equal(auditSheet.F2.t,'s');assert.equal(auditSheet.F2.v,'OA000');
+    assert.equal(auditSheet['!autofilter'].ref,'A1:P3');
+    assert.equal(auditOutput.Sheets.谈判付款整理.B3.v,20);
     if(process.env.QA_SAMPLE_FILE){
       const sourceBytes=fs.readFileSync(process.env.QA_SAMPLE_FILE),Core=require('../negotiated-payment-summary-core.js');
       const source={filename:path.basename(process.env.QA_SAMPLE_FILE),book:X.read(sourceBytes,{type:'buffer',cellNF:true,cellFormula:true,sheetStubs:true,sheets:'谈判付款'})};
@@ -201,23 +229,31 @@ async function download(page,scope,version,date='2026-11-12') {
       }else{
         await page.locator('#download:not([disabled])').waitFor();
         const sampleBytes=await download(page,page),output=X.read(sampleBytes,{type:'buffer',cellNF:true,cellStyles:true}).Sheets.谈判付款整理;
-        const columns=Core.dateColumns(expected),n=columns.negotiated.length,m=columns.normal.length,expectedRed=[];
+        const columns=Core.dateColumns(expected),n=columns.negotiated.length,m=columns.normal.length;
         assert.equal(output['!ref'],`A1:${X.utils.encode_col(n+m+2)}${expected.rows.length+2}`);
         for(const [r,row] of expected.rows.entries()){
           assert.equal(output['A'+(r+3)].v,row.supplier);
           for(const [type,start] of [['negotiated',2],['normal',n+3]])columns[type].forEach((index,c)=>{
             const address=X.utils.encode_col(start+c)+(r+3),value=output[address];
             if(row[type+'Cents'][index]!==null)assert.equal(Math.round(value.v*100),row[type+'Cents'][index]);
-            if(expected.paid[type][r][index])expectedRed.push(address);
           });
         }
         const actualRed=Object.entries(output).filter(([address,c])=>/^[A-Z]+\d+$/.test(address)&&/^(?:FF)?FF0000$/i.test(c.s?.fgColor?.rgb||'')).map(([address])=>address).sort();
-        assert.deepEqual(actualRed,expectedRed.sort());
-        assert.equal(await page.locator('#preview td.is-paid').count(),expectedRed.length);
+        assert.deepEqual(actualRed,[]);
+        assert.equal(await page.locator('#preview td.is-paid').count(),0);
+        const validation=X.read(sampleBytes,{type:'buffer',cellNF:true}).Sheets.校验;
+        assert.equal(validation['!ref'],`A1:P${expected.validationRows.length+1}`);
+        assert.equal(await page.locator('#validation-preview tbody tr').count(),expected.validationRows.length);
+        expected.validationRows.forEach((values,r)=>values.forEach((value,c)=>{
+          const actual=validation[X.utils.encode_cell({r:r+1,c})]?.v;
+          if(value==null||value==='')assert(actual==null||actual==='');
+          else assert.equal(Core.VALIDATION_MONEY_COLUMNS.includes(c)?Math.round(actual*100):actual,value);
+        }));
+        console.log('真实样表校验',JSON.stringify({records:expected.recordCount,counts:expected.validationCounts}));
         if(process.env.QA_SAMPLE_OUTPUT)fs.writeFileSync(process.env.QA_SAMPLE_OUTPUT,sampleBytes);
       }
     }
     assert.deepEqual(errors,[]);
-    console.log('PASS: 首页与独立页、各区删除空日期列/零值负值/单侧空区、批注已支付标红/同额批次/同日混合不红/普通可改填色、具体日分列/跨年、分类核对、缺明细保护、切换及替换、公式缓存保护、预览下载一致、手机布局、版本递增'+(process.env.QA_SAMPLE_FILE?'、真实样表':'') );
+    console.log('PASS: 首页与独立页、各区删除空日期列/零值负值/单侧空区、取消标红/原批注不影响白底/校验表与预览一致、具体日分列/跨年、分类核对、缺明细保护、切换及替换、公式缓存保护、预览下载一致、手机布局、版本递增'+(process.env.QA_SAMPLE_FILE?'、真实样表':'') );
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

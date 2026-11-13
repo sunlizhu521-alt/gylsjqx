@@ -20,12 +20,12 @@ function fixture(count = 8) {
 }
 async function read(result) {
   const bytes=await Export(result),zip=await Zip.loadAsync(bytes),book=X.read(bytes,{type:'array',cellNF:true,cellStyles:true});
-  return {bytes,zip,book,sheet:book.Sheets['谈判付款整理'],xml:await zip.file('xl/worksheets/sheet1.xml').async('string'),styles:await zip.file('xl/styles.xml').async('string')};
+  return {bytes,zip,book,sheet:book.Sheets['谈判付款整理'],validation:book.Sheets['校验'],xml:await zip.file('xl/worksheets/sheet1.xml').async('string'),validationXml:await zip.file('xl/worksheets/sheet2.xml').async('string'),styles:await zip.file('xl/styles.xml').async('string')};
 }
 
-test('八个日期生成单张19列表，双层表头合并及年月日文本正确',async () => {
+test('八个日期生成19列整理表并附加校验表，双层表头合并及年月日文本正确',async () => {
   const result=fixture(),before=JSON.stringify(result),{book,sheet}=await read(result);
-  assert.deepEqual(book.SheetNames,['谈判付款整理']);
+  assert.deepEqual(book.SheetNames,['谈判付款整理','校验']);
   assert.equal(sheet['!ref'],'A1:S3');
   assert.deepEqual(['A1','B1','C1','K1','L1'].map(a=>sheet[a].v),['供应商','谈判总金额','谈判付款节奏','正常付款总金额','正常付款']);
   assert.deepEqual(sheet['!merges'].map(X.utils.encode_range),['A1:A2','B1:B2','K1:K2','C1:J1','L1:S1']);
@@ -87,7 +87,7 @@ test('不对称日期保留明确零、负数及整列相抵为零，其他供�
   }
 });
 
-test('已付款标记按原日期索引映射删除空列后的两侧，仅日期金额格普通填充红色',async () => {
+test('取消标红后旧已付标记不影响导出，两侧日期金额与全部正文均保持白底',async () => {
   const data=fixture(5);
   data.rows=[
     {supplier:'汇总已付和部分已付',negotiatedCents:[null,10000,null,20000,0],normalCents:[5000,null,null,null,6000],negotiatedTotalCents:30000,normalTotalCents:11000},
@@ -99,14 +99,14 @@ test('已付款标记按原日期索引映射删除空列后的两侧，仅日�
   assert.deepEqual(['C2','D2','E2','G2','H2'].map(a=>sheet[a].v),[data.dates[1].label,data.dates[3].label,data.dates[4].label,data.dates[0].label,data.dates[4].label]);
   const xfs=styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*(?:\/>|>[\s\S]*?<\/xf>)/g);
   const fills=styles.match(/<fills\b[^>]*>([\s\S]*?)<\/fills>/)[1].match(/<fill\b[^>]*>[\s\S]*?<\/fill>/g);
-  const red=new Set(['C3','E3','H3']);
   for(let row=1;row<=4;row++)for(let col=0;col<8;col++){
     const address=X.utils.encode_col(col)+row,attrs=xml.match(new RegExp(`<c\\b(?=[^>]*\\br="${address}")[^>]*>`))[0];
     const xf=xfs[Number(attrs.match(/\bs="(\d+)"/)[1])],fill=fills[Number(xf.match(/\bfillId="(\d+)"/)[1])];
-    assert.match(fill,new RegExp(`fgColor rgb="${row<=2?'FF315B9D':red.has(address)?'FFFF0000':'FFFFFFFF'}"`),address);
+    assert.match(fill,new RegExp(`fgColor rgb="${row<=2?'FF315B9D':'FFFFFFFF'}"`),address);
     assert.match(xf,new RegExp(`borderId="${row<=2?1:2}"`));
   }
-  assert.doesNotMatch(xml,/<conditionalFormatting\b/,'普通填充可在WPS/Excel手动改色');
+  assert.doesNotMatch(xml,/<conditionalFormatting\b/);
+  assert.doesNotMatch(styles,/FFFF0000/,'不再输出已付专用红色样式');
   assert.equal(sheet.C3.v,100);assert.equal(sheet.E3.v,0);assert.equal(sheet.H3.v,60);
   assert.equal(sheet.C3.z,'#,##0.00');assert.equal(sheet.D3.z,'#,##0.00');
   assert.equal(sheet.B3.f,'SUM(C3:E3)');assert.equal(sheet.B3.v,300);assert.equal(sheet.F3.f,'SUM(G3:H3)');assert.equal(sheet.F3.v,110);
@@ -114,8 +114,8 @@ test('已付款标记按原日期索引映射删除空列后的两侧，仅日�
   assert.equal(JSON.stringify(data),before);
 });
 
-test('未提供已付款矩阵或部分已付标记false时日期金额仍白底',async () => {
-  for(const paid of [undefined,{negotiated:[[false]],normal:[[false]]}]){
+test('未提供或提供任意旧已付款矩阵时日期金额都保持白底',async () => {
+  for(const paid of [undefined,{negotiated:[[false]],normal:[[false]]},{negotiated:[[true]],normal:[[true]]}]){
     const data=fixture(1);if(paid)data.paid=paid;
     const {sheet,xml}=await read(data);
     for(const address of ['A3','B3','C3','D3','E3'])assert.equal(sheet[address].s.fgColor.rgb,'FFFFFF',address);
@@ -276,5 +276,63 @@ test('浏览器UMD接口使用现有本地XLSX与JSZip',async () => {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../negotiated-payment-summary-export.js'),'utf8'),context);
   assert.equal(typeof context.NegotiatedPaymentSummaryExport,'function');
   const bytes=await context.NegotiatedPaymentSummaryExport(fixture());
-  assert.deepEqual(X.read(bytes,{type:'array'}).SheetNames,['谈判付款整理']);
+  assert.deepEqual(X.read(bytes,{type:'array'}).SheetNames,['谈判付款整理','校验']);
+});
+
+test('校验逐行保留来源、编号文本与分精确金额，差异允许下载且合计不参与筛选',async () => {
+  const data=fixture(1);
+  data.validationRows=[
+    ['付款节奏.xlsx','谈判付款',8,'供应商甲','国源','00123','是',12345,12345,12345,12345,0,0,0,'一致',''],
+    ['付款节奏.xlsx','谈判付款',9,'供应商甲','国源','00124','否',5000,4000,null,0,-1000,null,-5000,'不一致','核对 Q-AB 日期金额；核对月度支付金额。'],
+    ['','','','合计','','','',17345,16345,12345,12345,-1000,null,-5000,'不一致','请处理上述差异。']
+  ];
+  const before=JSON.stringify(data),{book,validation,validationXml,styles}=await read(data);
+  assert.deepEqual(book.SheetNames,['谈判付款整理','校验']);
+  assert.equal(validation['!ref'],'A1:P4');
+  assert.deepEqual(Array.from({length:16},(_,c)=>validation[X.utils.encode_col(c)+'1'].v),Core.VALIDATION_HEADERS);
+  assert.equal(validation.C2.t,'n');assert.equal(validation.C2.v,8);
+  assert.equal(validation.F2.t,'s');assert.equal(validation.F2.v,'00123');assert.equal(validation.F2.f,undefined);
+  assert.equal(validation.H2.t,'n');assert.equal(validation.H2.v,123.45);assert.equal(validation.H2.z,'#,##0.00');
+  assert.equal(validation.J3.v,'');assert.equal(validation.K3.v,0);assert.equal(validation.K3.t,'n');
+  assert.equal(validation.L3.v,-10);assert.equal(validation.N3.v,-50);
+  assert.equal(validation.D4.v,'合计');assert.equal(validation.H4.v,173.45);
+  assert.equal(validation['!autofilter'].ref,'A1:P3');
+  assert.match(validationXml,/<pane ySplit="1" topLeftCell="A2"[^>]*state="frozen"/);
+  assert.match(validationXml,/<autoFilter ref="A1:P3"\/>/);
+  assert.doesNotMatch(validationXml,/<mergeCells\b|<conditionalFormatting\b|<tableParts\b/);
+  const xfs=styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*(?:\/>|>[\s\S]*?<\/xf>)/g);
+  for(let row=1;row<=4;row++)for(let c=0;c<16;c++){
+    const address=X.utils.encode_col(c)+row,attrs=validationXml.match(new RegExp(`<c\\b(?=[^>]*\\br="${address}")[^>]*>`))[0];
+    const xf=xfs[Number(attrs.match(/\bs="(\d+)"/)[1])];
+    assert.match(xf,new RegExp(`fillId="${row===1?3:2}"`),address);
+    assert.match(xf,new RegExp(`borderId="${row===1?1:2}"`),address);
+    assert.match(xf,/horizontal="center" vertical="center" wrapText="0" shrinkToFit="0"/);
+  }
+  assert.doesNotMatch(styles,/FFFF0000/);
+  for(let c=0;c<16;c++)assert(validation['!cols'][c].wch>=Core.VALIDATION_HEADERS[c].split('').reduce((sum,ch)=>sum+(ch.charCodeAt(0)>255?2:1),4));
+  assert.equal(JSON.stringify(data),before);
+});
+
+test('长校验说明保持原值和不自动换行，超过Excel列宽或行高限制仍允许下载',async () => {
+  const data=fixture(1),message='需要核实谈判明细和分批日期金额是否遗漏。'.repeat(20);
+  data.validationRows=[['输入.xlsx','谈判付款',2,'供应商甲','','MDST-0001','是',12345,12345,12345,null,0,0,null,'待核对',message]];
+  const {validation}=await read(data);
+  assert.equal(validation.P2.v,message);
+  assert.equal(validation['!cols'][15].wch,255);
+  assert.equal(validation['!autofilter'].ref,'A1:P2');
+  const multiline=Array(30).fill('请核实来源金额。').join('\n');
+  data.validationRows[0][15]=multiline;
+  const next=await read(data);
+  assert.equal(next.validation.P2.v,multiline);
+  const row=next.validationXml.match(/<row\b(?=[^>]*\br="2")[^>]*>/)[0];
+  assert.equal(Number(row.match(/\bht="([\d.]+)"/)[1]),409);
+});
+
+test('旧调用缺少校验记录时仍生成校验表头，异常金额不被静默转换为零',async () => {
+  const {validation}=await read(fixture(1));
+  assert.equal(validation['!ref'],'A1:P1');assert.equal(validation['!autofilter'].ref,'A1:P1');
+  for(const value of [NaN,Infinity,'1.00',1.5]){
+    const data=fixture(1);data.validationRows=[['','','','供应商','','','',value]];
+    await assert.rejects(Export(data),/金额不是有效的整数分/);
+  }
 });

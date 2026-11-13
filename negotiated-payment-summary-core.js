@@ -4,6 +4,8 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
   const LIMIT = BigInt(Number.MAX_SAFE_INTEGER);
+  const VALIDATION_HEADERS = ['来源文件','来源工作表','来源行号','供应商','付款主体','对公付款OA流程号','是否谈判分批','OA-申请付款金额','谈判明细金额合计','Q-AB列金额合计','AI-AP列金额合计','谈判明细差额','Q-AB差额','AI-AP差额','校验结果','需要处理'];
+  const VALIDATION_MONEY_COLUMNS = [7,8,9,10,11,12,13];
   const text = value => String(value ?? '').trim();
   const header = value => text(value).replace(/\s/g, '');
   const hasValue = cell => cell && (cell.f || cell.t === 'e' || cell.v != null && text(cell.v) !== '');
@@ -55,27 +57,15 @@
   function columnIndex(column) {
     return [...column].reduce((sum,char) => sum*26+char.charCodeAt(0)-64,0)-1;
   }
-  function paymentComment(cell, cents) {
-    const lines = [...new Set((Array.isArray(cell?.c) ? cell.c : []).flatMap(c => text(c.t).normalize('NFKC').split(/[\r\n]+/)).map(text).filter(Boolean))];
-    let confirmed = false, unclear = false, relevant = false;
-    for (const line of lines) {
-      const normalized = line.replace(/\s/g,'');
-      if (/^申请日期\((?:付款节奏跟进|资金整理)\):/.test(normalized)) continue;
-      if (!/支付|付款|付清|到账|退汇|撤回|退款|退回|冲正|作废/.test(normalized)) continue;
-      relevant = true;
-      const value = normalized.replace(/^(?:(?:\d{4}[年/.-])?\d{1,2}[月/.-]\d{1,2}日?)[-—:：,，]*/,'').replace(/^(?:经)?(?:财务|出纳)?(?:核实|确认)[-—:：,，]*/,'');
-      if (/未支付|未付款|未付清|未到账|支付失败|付款失败|退汇|撤回|退款|退回|冲正|作废|部分(?:已)?(?:支付|付款)/.test(value)) { unclear = true; continue; }
-      const match = /^(?:本批|本次)?(?:已支付|已付款|已付清)(?:完成|成功)?(?:[:：]?(?:人民币|[￥¥])?(-?[\d,]+(?:\.\d+)?)元?)?[。.!！]*$/.exec(value);
-      const paidAmount = match?.[1] ? amount(match[1]) : null;
-      if (!match || match[1] && (!paidAmount || paidAmount.precision || paidAmount.cents !== cents)) unclear = true;
-      else confirmed = true;
-    }
-    return {paid:confirmed && !unclear,relevant};
+  function columnName(index) {
+    let name = '';
+    for (let n=index+1;n>0;n=Math.floor((n-1)/26)) name=String.fromCharCode(65+(n-1)%26)+name;
+    return name;
   }
 
   function build(source, decisions = {}) {
     const sheetName = '谈判付款', filename = source?.filename || '来源文件', sheet = source?.book?.Sheets?.[sheetName];
-    const result = {dates:[],rows:[],paid:{negotiated:[],normal:[]},recordCount:0,counts:{negotiated:0,normal:0,unresolved:0},unresolved:[],
+    const result = {dates:[],rows:[],validationRows:[],validationCounts:{consistent:0,inconsistent:0,unverified:0},recordCount:0,counts:{negotiated:0,normal:0,unresolved:0},unresolved:[],
       totals:{negotiatedCents:0,normalCents:0,unresolvedCents:0},errors:[],warnings:[],canExport:false};
     const at = address => `${filename} / ${sheetName}${address ? ' / ' + address : ''}`;
     if (!sheet) { result.errors.push(at('') + '：没有找到“谈判付款”工作表'); return result; }
@@ -105,7 +95,7 @@
     }
     if (!headerRow) { result.errors.push(at('') + '：找不到表头，需要“供应商／供应商名称”“是否谈判分批”和“谈判明细”'); return result; }
     if (result.errors.length) return result;
-    const monthlyYears = new Map(), datedYears = new Map(), scheduleColumns = [];
+    const monthlyYears = new Map(), datedYears = new Map();
     const remember = (map,year,month,address) => {
       if (!map.has(month)) map.set(month,new Map());
       const years = map.get(month);
@@ -119,7 +109,6 @@
       const d = headerDay(entry.cell,!!source.book.Workbook?.WBProps?.date1904);
       if (d) {
         remember(datedYears,+d.key.slice(0,4),+d.key.slice(5,7),entry.address);
-        scheduleColumns.push({column:entry.column,date:d.key});
       }
     }
     const parseDetail = (value,address) => {
@@ -166,46 +155,92 @@
       const affected = recordRows.filter(row => row >= merge.s.r+1 && row <= merge.e.r+1);
       if (affected.length > 1) for (const row of affected) mergedRecords.add(row);
     }
-    const paidParts = (row, parts) => {
-      const paid = parts.map(() => false), batches = [], warned = new Set();
-      const warn = (address,reason) => {
-        if (warned.has(address)) return;
-        warned.add(address);
-        result.warnings.push(at(address)+'：支付批注未用于标红，'+reason+'；请核对本行谈判明细的日期、金额及对应支付批注');
-      };
-      for (const item of scheduleColumns) {
-        const address = item.column+row, cell = sheet[address];
-        const parsed = invalidResult(cell) ? null : amount(cell?.v), payment = paymentComment(cell,parsed?.cents);
-        if (!parsed) {
-          if (payment.relevant) warn(address,'批次金额为空、异常或公式结果不可用');
-          continue;
+    const fieldEntries = names => rowMap.get(headerRow).filter(e => names.includes(header(e.cell.v).replace(/0A/gi,'OA')));
+    const validationFields = {
+      amount:fieldEntries(['OA-申请付款金额','申请付款金额']),
+      subject:fieldEntries(['付款主体']),
+      oa:fieldEntries(['对公付款OA流程号','对公付款OA号','付款OA号'])
+    };
+    const ranges = [{start:16,end:27,label:'Q-AB'},{start:34,end:41,label:'AI-AP'}];
+    for (const range of ranges) {
+      range.headerIssues = [];
+      for (let c=range.start;c<=range.end;c++) {
+        const address=columnName(c)+headerRow, cell=sheet[address];
+        if (!hasValue(cell)) continue;
+        const monthly=/^(\d{4})年(\d{1,2})月支付$/.exec(header(cell.v));
+        if (invalidResult(cell) || !(monthly && day(+monthly[1],+monthly[2],1)) && !headerDay(cell,!!source.book.Workbook?.WBProps?.date1904)) {
+          range.headerIssues.push(address+'表头“'+text(cell.v)+'”不是付款日期或年月支付；请核实'+range.label+'固定列范围是否移位');
         }
-        const column = columnIndex(item.column);
-        const merged = (sheet['!merges'] || []).some(m => m.s.c <= column && m.e.c >= column && m.s.r < m.e.r && row >= m.s.r+1 && row <= m.e.r+1 && recordRows.filter(r => r >= m.s.r+1 && r <= m.e.r+1).length > 1);
-        if (merged && payment.relevant) warn(address,'金额单元格跨多条记录合并，不能据此确认本批已支付');
-        else if (payment.relevant && !payment.paid) warn(address,'批注未明确全额已支付，或含疑问、否定、部分支付、相互矛盾或支付金额不一致');
-        batches.push({...item,address,cents:parsed.cents,payment:{...payment,paid:payment.paid && !merged},used:false});
       }
-      const matched = new Set();
-      const match = (indices,candidates) => {
-        indices.forEach(index => { paid[index] = candidates.every(batch => batch.payment.paid); matched.add(index); });
-        candidates.forEach(batch => { batch.used = true; });
-      };
-      const exactKeys = new Set(parts.map(part => part.key+'|'+part.cents));
-      for (const key of exactKeys) {
-        const indices = parts.map((part,index) => part.key+'|'+part.cents === key ? index : -1).filter(index => index !== -1);
-        const candidates = batches.filter(batch => batch.date+'|'+batch.cents === key);
-        if (indices.length === 1 && candidates.length === 1) match(indices,candidates);
+    }
+    const ambiguousMerge = (column,row) => (sheet['!merges'] || []).find(merge => {
+      if (column<merge.s.c || column>merge.e.c || row<merge.s.r+1 || row>merge.e.r+1) return false;
+      const anchor=sheet[columnName(merge.s.c)+(merge.s.r+1)];
+      return hasValue(anchor) && (merge.s.c!==merge.e.c || recordRows.filter(r => r>=merge.s.r+1 && r<=merge.e.r+1).length>1);
+    });
+    const readMoney = (column,row,issues) => {
+      const address=columnName(column)+row, cell=sheet[address], merge=ambiguousMerge(column,row);
+      if (merge) { issues.push(address+'属于合并单元格'+columnName(merge.s.c)+(merge.s.r+1)+':'+columnName(merge.e.c)+(merge.e.r+1)+'，金额归属不清；请明确每条记录、每个日期的金额'); return null; }
+      if (invalidResult(cell)) { issues.push(address+'公式结果错误或缺失；请核实公式、重新计算并保存源表'); return null; }
+      if (!hasValue(cell)) return null;
+      const parsed=amount(cell.v);
+      if (!parsed) { issues.push(address+'金额“'+text(cell.v)+'”无效或超出安全整数分范围；请核实并填写有效金额'); return null; }
+      return parsed.cents;
+    };
+    const validationNumber = (value,label,issues) => {
+      if (value===null) return null;
+      if (value>LIMIT || value< -LIMIT) { issues.push(label+'超出安全整数分范围，未输出近似金额；请核实该金额'); return null; }
+      return Number(value);
+    };
+    const validateRow = (row,supplier,classification,parts) => {
+      const issues=[], values=[];
+      const amountEntries=validationFields.amount;
+      if (amountEntries.length!==1) {
+        values.push(null); issues.push(amountEntries.length ? 'OA申请金额表头重复（'+amountEntries.map(e=>e.address).join('、')+'）；请保留唯一金额来源列' : '未找到OA-申请付款金额／申请付款金额表头；请补充对应列');
+      } else {
+        const entry=amountEntries[0], before=issues.length;
+        if (invalidResult(entry.cell)) { issues.push(entry.address+'金额表头公式无有效结果；请核实表头'); values.push(null); }
+        else {
+          const value=readMoney(columnIndex(entry.column),row,issues); values.push(value);
+          if (value===null && before===issues.length) issues.push(entry.column+row+'申请付款金额为空；请补充金额，空白不按零处理');
+        }
       }
-      const remainingKeys = new Set(parts.filter((_,index) => !matched.has(index)).map(part => part.key.slice(0,7)+'|'+part.cents));
-      for (const key of remainingKeys) {
-        const indices = parts.map((part,index) => !matched.has(index) && part.key.slice(0,7)+'|'+part.cents === key ? index : -1).filter(index => index !== -1);
-        const candidates = batches.filter(batch => !batch.used && batch.date.slice(0,7)+'|'+batch.cents === key);
-        if (indices.length === 1 && candidates.length === 1 || indices.length === candidates.length && candidates.every(batch => batch.payment.paid)) match(indices,candidates);
-        else for (const batch of candidates) if (batch.payment.relevant) warn(batch.address,'同月同金额的多批归属不唯一，不能将一个支付批注用于其他批次');
+      values.push(parts ? parts.reduce((sum,part)=>sum+part.cents,0n) : null);
+      if (!parts) issues.push(detailColumn+row+'谈判明细金额无法完整核验；请处理该单元格的日期、金额或公式问题');
+      for (const range of ranges) {
+        const before=issues.length; issues.push(...range.headerIssues);
+        let total=0n, populated=false;
+        for (let c=range.start;c<=range.end;c++) {
+          const column=columnName(c), value=readMoney(c,row,issues);
+          if (value!==null) {
+            populated=true; total+=value;
+            if (!hasValue(sheet[column+headerRow])) issues.push(column+row+'有金额但'+column+headerRow+'表头为空；请核实'+range.label+'固定列范围');
+          }
+        }
+        values.push(issues.length===before && populated ? total : null);
+        if (issues.length===before && !populated) issues.push(range.label+'第'+row+'行金额全空；请补充分批／月度金额，空白不按零处理');
       }
-      for (const batch of batches) if (!batch.used && batch.payment.relevant) warn(batch.address,'未找到同源行、同年月及同金额的唯一谈判明细，不跨月配对');
-      return paid;
+      const numbers=values.map((value,i)=>validationNumber(value,VALIDATION_HEADERS[i+7]+'（第'+row+'行）',issues));
+      const differences=values.slice(1).map((value,i)=>value===null || values[0]===null ? null : validationNumber(value-values[0],VALIDATION_HEADERS[i+11]+'（第'+row+'行）',issues));
+      const incomplete=numbers.includes(null) || differences.includes(null), mismatch=differences.some(value=>value!==null && value!==0);
+      if (mismatch) issues.push('请核对本行OA申请金额与谈判明细、Q-AB分批金额、AI-AP月度金额；差额为对应组金额减OA申请金额，确认并修正不一致的来源值');
+      const status=incomplete ? '待核对' : mismatch ? '不一致' : '一致';
+      result.validationCounts[incomplete ? 'unverified' : mismatch ? 'inconsistent' : 'consistent']++;
+      const sourceField = entries => entries.length===1 && !invalidResult(sheet[entries[0].column+row]) ? text(sheet[entries[0].column+row]?.v) : '';
+      result.validationRows.push([filename,sheetName,row,supplier,sourceField(validationFields.subject),sourceField(validationFields.oa),classification,...numbers,...differences,status,[...new Set(issues)].join('\n')]);
+    };
+    const finishValidation = () => {
+      if (!result.validationRows.length) return;
+      const total=Array(VALIDATION_HEADERS.length).fill(''), issues=[];
+      total[0]=filename; total[1]=sheetName; total[3]='合计';
+      for (const c of VALIDATION_MONEY_COLUMNS) {
+        if (result.validationRows.some(row=>row[c]===null)) { total[c]=null; issues.push(VALIDATION_HEADERS[c]+'存在未核验记录，合计留空，不以部分金额代替总额'); }
+        else total[c]=validationNumber(result.validationRows.reduce((sum,row)=>sum+BigInt(row[c]),0n),VALIDATION_HEADERS[c]+'合计',issues);
+      }
+      const counts=result.validationCounts;
+      total[14]=issues.length || counts.unverified ? '待核对' : counts.inconsistent ? '不一致' : '一致';
+      total[15]='逐行结果：一致'+counts.consistent+'条，不一致'+counts.inconsistent+'条，待核对'+counts.unverified+'条。'+(counts.inconsistent || counts.unverified ? '请按各来源行处理，合计抵消不代表逐行一致。' : '')+issues.join('\n');
+      result.validationRows.push(total);
     };
     const groups = new Map(), dates = new Map(), totals = {negotiated:0n,normal:0n,unresolved:0n};
     const checked = (value,label) => {
@@ -222,7 +257,7 @@
       }
       const supplier = text(supplierCell?.v);
       if (!supplier || !['s','str','inlineStr'].includes(supplierCell?.t)) { result.errors.push(at(supplierAddress) + '：供应商名称为空或不是文本，无法汇总'); invalid = true; }
-      if (supplier && !groups.has(supplier)) groups.set(supplier,{supplier,negotiated:new Map(),normal:new Map(),paid:{negotiated:new Map(),normal:new Map()}});
+      if (supplier && !groups.has(supplier)) groups.set(supplier,{supplier,negotiated:new Map(),normal:new Map()});
       let parts = null;
       if (mergedRecords.has(row)) { result.errors.push(at(detailAddress)+'：谈判明细纵向合并跨多条记录，不能重复分配金额；请明确各记录的日期和金额'); invalid = true; }
       else if (!invalidResult(detailCell)) parts = parseDetail(detailCell?.v,detailAddress);
@@ -231,6 +266,7 @@
       const originalClass = text(classCell?.v);
       const override = Object.prototype.hasOwnProperty.call(decisions || {},classAddress) ? decisions[classAddress] : '';
       const classification = ['是','否'].includes(originalClass) ? originalClass : ['是','否'].includes(override) ? override : '';
+      validateRow(row,supplier,classification || originalClass,parts);
       if (!classification) {
         result.counts.unresolved++;
         const rowTotal = (parts || []).reduce((sum,v) => sum+v.cents,0n);
@@ -243,10 +279,8 @@
       result.counts[type]++;
       if (invalid) continue;
       const group = groups.get(supplier);
-      const confirmed = paidParts(row,parts);
-      for (const [index,part] of parts.entries()) {
+      for (const part of parts) {
         group[type].set(part.key,(group[type].get(part.key) ?? 0n)+part.cents);
-        group.paid[type].set(part.key,(group.paid[type].get(part.key) ?? true) && confirmed[index]);
         totals[type] += part.cents;
       }
     }
@@ -257,8 +291,8 @@
       return {supplier:group.supplier,negotiatedCents:cells('negotiated'),normalCents:cells('normal'),
         negotiatedTotalCents:total('negotiated'),normalTotalCents:total('normal')};
     });
-    for (const type of ['negotiated','normal']) result.paid[type] = [...groups.values()].map(group => result.dates.map(date => group.paid[type].get(date.key) === true));
     for (const type of ['negotiated','normal','unresolved']) result.totals[type+'Cents'] = checked(totals[type],type === 'unresolved' ? '待分类合计' : type === 'negotiated' ? '谈判总金额' : '正常付款总金额');
+    finishValidation();
     if (!result.recordCount) result.errors.push(at('') + '：没有可整理的付款记录');
     result.canExport = result.errors.length === 0 && result.unresolved.length === 0;
     return result;
@@ -271,5 +305,5 @@
     }
     return columns;
   }
-  return {build,dateColumns};
+  return {build,dateColumns,VALIDATION_HEADERS,VALIDATION_MONEY_COLUMNS};
 });
