@@ -1203,7 +1203,7 @@ test('李奇合同口径保留原付款情况，不按申请金额判断结清�
  }
 });
 test('李奇原付款零值、空白及负数保留，不以本次申请金额覆盖',()=>{
- for(const [paid,balance,status] of [[0,1000,'否'],[100,900,'否'],['','',''],[-10,1010,'否'],[1000,0,'是]]){
+ for(const [paid,balance,status] of [[0,1000,'否'],[100,900,'否'],['','',''],[-10,1010,'否'],[1000,0,'是']]){
   const i=fixture();set(i,'ledger','申请付款金额',3,100);set(i,'ledger','已付款金额',3,paid);set(i,'ledger','剩余付款金额',3,balance);set(i,'ledger','是否结清',3,status);
   const r=C.build(i);assert.deepEqual(r.normalRows[0].slice(12,15).map(c=>c.v),[paid,status,balance]);assert(!r.issues.some(q=>['amount','settlement'].includes(q.kind)));
  }
