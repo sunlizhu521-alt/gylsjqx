@@ -15,7 +15,7 @@ function row(name,amount,flag,oa,due,extra={}) {
 }
 function fixture() {
   const records = {
-    李奇: [row('空OA唯一候选',100,'否','','2026-11-20'),row('空白分类多候选',101,'　\n','　','2026-11-21'),row('谈判无OA排除',201,'是','','2026-11-05'),row('谈判有OA排除',202,'是',flowCode(202),'2026-11-06')],
+    李奇: [row('空OA唯一候选',100,'否','','2026-11-20',{'合同总金额':1000,'已付金额':300,'剩余金额':700,'是否结清':'否'}),row('空白分类多候选',101,'　\n','　','2026-11-21'),row('谈判无OA排除',201,'是','','2026-11-05'),row('谈判有OA排除',202,'是',flowCode(202),'2026-11-06')],
     徐英: [row('有OA已结清',102,'否',flowCode(102),'2026-11-22',{'已付金额':102,'剩余金额':0,'是否结清':'是'}),row('零额缺日期',0,'','','')],
     邢芳芳: [row('台账否命中谈判表',103,'否','','月底协商')],
     操思敏: [row('台账空申请分类谈判',104,'',flowCode(104),'2026-11-24')],
@@ -55,9 +55,12 @@ function fixture() {
     const blankNames=['空OA唯一候选','空白分类多候选','零额缺日期','台账否命中谈判表','别名表头本行日期'];
     for(const [name,expected] of Object.entries(expectedDates)){
       const record=find(name);assert(record,name+'应纳入');assert.equal(record[col('应付时间')],expected,name+'应付时间取台账本行');assert.equal(record[col('本次申请付款金额')],originalAmounts[name]);
-      const excelRow=rows.indexOf(record)+2;assert.equal(sheet['O'+excelRow].f,`G${excelRow}-M${excelRow}`,'余额公式跟随实际行');
+      const excelRow=rows.indexOf(record)+2;
+      if(record[col('跟单员')]==='李奇')assert.equal(sheet['O'+excelRow].f,undefined,'李奇保留原余额值，不使用申请金额重算');
+      else assert.equal(sheet['O'+excelRow].f,`G${excelRow}-M${excelRow}`,'其他人余额公式跟随实际行');
       if(blankNames.includes(name)){assert.equal(record[col('对公付款0A流程号')],'未提交OA');assert.equal(record[col('是否对账')],'未对账');for(const field of FLOW)assert.equal(record[col(field)],'',name+'不填'+field);}
     }
+    assert.deepEqual(['合同总金额','已付金额','剩余金额','是否结清'].map(h=>find('空OA唯一候选')[col(h)]),[1000,300,700,'否']);
     assert.equal(find('有OA已结清')[col('对公付款0A流程号')],flowCode(102));assert.equal(find('有OA已结清')[col('流程编号')],flowCode(102));assert.equal(find('有OA已结清')[col('已付金额')],102);assert.equal(find('有OA已结清')[col('剩余金额')],0);
     assert.equal(find('零额缺日期')[col('本次申请付款金额')],0);assert.equal(find('零额缺日期')[col('是否结清')],'是');assert.equal(find('零额缺日期')[col('申请付款的日期')],'日期待确认');
     assert.equal(find('空OA唯一候选')[col('是否提交付款申请单')],'已提交','纸质申请与OA号独立');
@@ -85,6 +88,6 @@ function fixture() {
     const refreshed=await download(),latest=X.utils.sheet_to_json(refreshed.Sheets.正常付款,{defval:''});
     assert.equal(latest.length,7);assert.equal(latest.find(row=>row.供应商名称==='空OA唯一候选').应付时间,'2026年12月1日','替换台账采用最新本行日期');
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({status:'PASS',base,normalRows:7,classification:'ledger 是 excluded; 否/blank included despite other sources',emptyOA:'fixed 未提交OA and five blank flow fields even with candidates',due:'exact source row, empty/text retained, latest upload used',financial:'zero/settled/formulas/highlights',invalidClassification:'error/value/missing column excluded with review'}));
+    console.log(JSON.stringify({status:'PASS',base,normalRows:7,classification:'ledger 是 excluded; 否/blank included despite other sources',emptyOA:'fixed 未提交OA and five blank flow fields even with candidates',due:'exact source row, empty/text retained, latest upload used',financial:'李奇合同口径原值保留/no false overpayment; others zero/settled/formulas/highlights',invalidClassification:'error/value/missing column excluded with review'}));
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -292,6 +292,8 @@ function build(inputs,decisions={}){
   const a=money(target.values['申请付款金额']),p=money(src.values['已付金额']);
   if(p.blank||blank(src.values['已付金额']))return;
   if(a.cents===undefined||p.cents===undefined){issue('amount:'+target.record.id,'amount','申请金额或已付金额不是可用的分精度数值（含公式结果缺失），保留原付款情况。',target.record);return;}
+  // 李奇按合同口径记录付款情况，不用本次申请金额重算余额及结清状态。
+  if(src.owner==='李奇')return;
   const balance=a.cents-p.cents;
   if(balance<0n||a.cents<0n||p.cents<0n){issue('amount:'+target.record.id,'amount','金额为负或已付超过申请金额，不能自动判断结清；保留原付款情况。',target.record);return;}
   const expected=balance===0n?'是':'否',declared=settled(value(src,'是否结清'));

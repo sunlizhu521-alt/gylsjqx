@@ -138,6 +138,9 @@ test('正常付款按申请付款的日期升序，同周稳定、无效日期�
    const record={...base,'供应商名称':name,'对公付款0A流程号':'MDST-DGFK202611'+String(j+1).padStart(5,'0'),'申请付款金额':81+j,'已付金额':j,'是否结清':'否'};
    X.utils.sheet_add_aoa(ledger,[headers.map(h=>record[h]??'')],{origin:-1});setDue(ledger,j+4,due);
   });
+  // Use an application-based ledger for formula sorting; 李奇 retains contract-based source values.
+  i.ledger.book.Sheets['对账明细-李奇']=i.ledger.book.Sheets['对账明细-徐英'];
+  i.ledger.book.Sheets['对账明细-徐英']=ledger;
   i.ledger.book.Workbook={WBProps:{date1904}};
   const before=JSON.stringify(i),r=C.build(i),at=h=>headers.indexOf(h),names=r.normalRows.map(row=>row[at('供应商名称')].v);
   assert.deepEqual(names,[...(date1904?['日期零']:[]),'跨年','同周先','同周后','数值日期','年末','正常供应商','空白','文本异常',...(date1904?[]:['日期零']),'错误公式','无缓存公式']);
