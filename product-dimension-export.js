@@ -1,7 +1,7 @@
 (function(root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./vendor/xlsx.full.min.js'), require('./vendor/jszip.min.js'));
-  else root.ProductDimensionExport = factory(root.XLSX, root.JSZip);
-})(typeof globalThis !== 'undefined' ? globalThis : this, function(X, Zip) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./vendor/xlsx.full.min.js'), require('./vendor/jszip.min.js'), require('./product-dimension-core.js'));
+  else root.ProductDimensionExport = factory(root.XLSX, root.JSZip, root.ProductDimensionCore);
+})(typeof globalThis !== 'undefined' ? globalThis : this, function(X, Zip, Core) {
   'use strict';
   const escape = value => String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
   const cellText = value => escape(String(value).replace(/_x[0-9a-f]{4}_/gi,m=>'_x005F_'+m.slice(1)).replace(/[\u0000-\u0008\u000b-\u001f]/g,c=>'_x'+c.charCodeAt(0).toString(16).padStart(4,'0')+'_'));
@@ -105,6 +105,9 @@
     const {dimensionSheet:name,headerRow,headers}=analysis||{};
     if(!name||!Number.isSafeInteger(headerRow)||headerRow<1||!headers?.length||headers.length>16384||result.rows.length+headerRow>1048576)throw Error('商品维度表结果或行列范围无效。');
     const codeColumn=headers.indexOf('物料编码');if(codeColumn<0)throw Error('商品维度表缺少物料编码列。');
+    const errors=Core.validateResult(analysis,result);
+    if(errors.length)throw Error('商品维度表校验未通过：'+errors.map(error=>error.message||error.reason).join('；'));
+    const addedCodes=new Set(analysis.added.map(group=>group.code)),isNew=row=>addedCodes.has(row.code);
     let zip;try{zip=await Zip.loadAsync(sourceBytes);}catch(_){throw Error('商品维度表必须为原始.xlsx文件，请另存为.xlsx后再上传。');}
     let workbook=await read(zip,'xl/workbook.xml'),workbookRels=await read(zip,'xl/_rels/workbook.xml.rels'),types=await read(zip,'[Content_Types].xml');
     if(!tags(types,'Override').some(n=>attr(n,'PartName')==='/xl/workbook.xml'&&attr(n,'ContentType')==='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml'))throw Error('商品维度表仅支持.xlsx格式。');
@@ -124,7 +127,7 @@
     const codes=new Set();let last=headerRow,newSeen=false;
     result.rows.forEach((row,index)=>{
       if(typeof row.code!=='string'||!row.code||codes.has(row.code))throw Error('结果包含空白或重复物料编码，请重新整理。');codes.add(row.code);
-      if(row.isNew)newSeen=true;
+      if(isNew(row))newSeen=true;
       else{if(newSeen||!Number.isSafeInteger(row.sourceRow)||row.sourceRow<=last||!originalRows.has(row.sourceRow))throw Error('原商品行顺序或来源无效，请重新整理。');rowMap.set(row.sourceRow,headerRow+index+1);last=row.sourceRow;}
     });
     const mapRange=rangeMapper(rowMap),moved=[...rowMap].some(([a,b])=>a!==b)||[...originalRows.keys()].some(row=>!rowMap.has(row)),end=headerRow+result.rows.length,lastCol=X.utils.encode_col(headers.length-1),range=`A${headerRow}:${lastCol}${end}`;
@@ -132,8 +135,8 @@
     if(moved){
       for(const other of entries){if(other===entry)continue;const otherRel=relationships.find(n=>attr(n,'Id')===attr(other,'(?:[\\w.-]+:)?id'));if(!otherRel)continue;const otherXml=await read(zip,resolve('xl/workbook.xml',attr(otherRel,'Target')));if(tags(otherXml,'f').some(f=>target.test(decode(content(f)).replace(/"(?:[^"]|"")*"/g,''))))throw Error('其他工作表公式引用了商品维度主表，去重会改变引用位置，请先核对并转为值。');}
     }
-    const dateColumn=headers.indexOf('金蝶创建时间'),formats=new Set();
-    for(const row of result.rows.filter(r=>r.isNew)){const cell=row.cells?.[dateColumn];if(typeof row.values?.[dateColumn]==='number')formats.add(cell?.z||'yyyy/mm/dd');}
+    const dateColumns=new Set(['金蝶创建时间','当前日期'].map(header=>headers.indexOf(header))),formats=new Set();
+    if(result.rows.some(isNew))formats.add('yyyy-mm-dd');
     const stylePath=resolve('xl/workbook.xml',attr(styleRel,'Target')),styles=addStyles(await read(zip,stylePath),formats),p=prefix(data);
     function valueCell(address,value,style,kind='s') {
       const attrs=`r="${address}" s="${style}"`;
@@ -154,11 +157,11 @@
     const output=[];for(let row=1;row<=headerRow;row++)if(originalRows.has(row))output.push(originalRow(originalRows.get(row),row));
     result.rows.forEach((row,index)=>{
       const number=headerRow+index+1;
-      if(!row.isNew){output.push(originalRow(originalRows.get(row.sourceRow),number,row.code));return;}
+      if(!isNew(row)){output.push(originalRow(originalRows.get(row.sourceRow),number,row.code));return;}
       if(!Array.isArray(row.values)||row.values.length!==headers.length)throw Error('新增商品列结构与原表不一致。');
       output.push(`<${p}row r="${number}" ht="30" customHeight="1">`+headers.map((header,col)=>{
         const value=col===codeColumn?row.code:row.values[col],text=[codeColumn,headers.indexOf('SKU'),headers.indexOf('领星SKU')].includes(col),kind=text?'s':typeof value==='number'?'n':typeof value==='boolean'?'b':'s';
-        const format=col===dateColumn&&kind==='n'?(row.cells?.[col]?.z||'yyyy/mm/dd'):kind==='s'?'@':'General';
+        const format=dateColumns.has(col)&&kind==='n'?'yyyy-mm-dd':kind==='s'?'@':'General';
         return valueCell(X.utils.encode_col(col)+number,value,styles.styles.get(format),kind);
       }).join('')+`</${p}row>`);
     });

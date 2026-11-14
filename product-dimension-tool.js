@@ -2,17 +2,20 @@
   'use strict';
   const $ = id => document.getElementById(id), C = window.ProductDimensionCore;
   const sources = {dimension:null,material:null};
-  let analysis = null, result = null, busy = false, memoryVersion = 0;
+  let analysis = null, result = null, busy = false, memoryVersion = 0, overrides = Object.create(null);
   const versionKey = 'gylsjqx-product-dimension-version';
   function controls() {
     for (const kind of ['dimension','material']) $(kind+'File').disabled = busy;
     $('clear').disabled = busy || !sources.dimension && !sources.material;
     $('download').disabled = busy || !result?.canExport;
+    $('review-filter').disabled=busy;
+    $('reviews').querySelectorAll('input').forEach(input=>{input.disabled=busy;});
   }
   function invalidate() {
-    analysis=result=null;
-    for(const id of ['result','issue-panel']) $(id).hidden=true;
-    for(const id of ['preview','issues']) $(id).replaceChildren();
+    analysis=result=null;overrides=Object.create(null);
+    for(const id of ['result','issue-panel','review-panel']) $(id).hidden=true;
+    for(const id of ['preview','issues','reviews']) $(id).replaceChildren();
+    $('review-filter').value='pending';
     controls();
   }
   function table(headers,rows,container) {
@@ -27,20 +30,107 @@
     $('issue-panel').hidden=!result.issues.length;
     $('issue-panel').open=result.issues.some(issue=>issue.severity==='error');
   }
+  const dateFields=['金蝶创建时间','当前日期'];
+  const computedFields=['当前日期','上架时间（月）','生命周期'];
+  const priceFields=['财务加权平均价','不含税结算价','结算价'];
+  function displayValue(row,header) {
+    const value=row.values[analysis.headers.indexOf(header)];
+    return dateFields.includes(header)&&typeof value==='number' ? XLSX.SSF.format('yyyy-mm-dd',value,{date1904:analysis.date1904}) : value ?? '';
+  }
+  function sourceLabel(rows) {
+    return rows?.length ? `${analysis.dimensionSheet}原第${rows.slice(0,8).join('、')}行${rows.length>8?`等${rows.length}行`:''}` : '';
+  }
+  function showReviews() {
+    const expanded=new Set(Array.from($('reviews').querySelectorAll('details.review[open]')).map(item=>item.dataset.code));
+    const focused=document.activeElement?.closest('#reviews input'),focusId=focused?.id;
+    const selection=focused ? [focused.selectionStart,focused.selectionEnd] : null;
+    $('reviews').replaceChildren();
+    const rows=result.rows.filter(row=>row.isNew),pending=result.pendingFields || [],pendingCodes=new Set(pending.map(item=>item.code));
+    const rowIndices=new Map(rows.map((row,index)=>[row.code,index]));
+    const imported=new Map(analysis.added.map(row=>[row.code,row.values]));
+    $('review-panel').hidden=!rows.length;
+    $('pending-counts').textContent=pending.length ? `待补全 ${pendingCodes.size} 个商品、${pending.length} 个字段。请补齐后下载。` : '11列必填校验全部通过，可以下载。';
+    const visible=rows.filter(row=>$('review-filter').value==='all'||pendingCodes.has(row.code));
+    const visibleCodes=new Set(visible.map(row=>row.code));
+    for(const code of expanded)if(!visibleCodes.has(code))expanded.delete(code);
+    if(!visible.length){const p=document.createElement('p');p.className='muted';p.textContent='没有待补全商品。可切换到“全部新增商品”核对自动填写结果。';$('reviews').append(p);}
+    for(const [index,row] of visible.entries()) {
+      const missing=pending.filter(item=>item.code===row.code),missingFields=new Set(missing.map(item=>item.field));
+      const card=document.createElement('details');card.className='review';card.dataset.code=row.code;
+      card.open=expanded.has(row.code)||(!expanded.size&&index===0);
+      const summary=document.createElement('summary');summary.textContent=`${row.code} · ${displayValue(row,'金蝶名称')}（${missing.length?`待补 ${missing.length} 项`:'必填已齐全'}）`;card.append(summary);
+      const provenance=document.createElement('p');provenance.className='muted';provenance.textContent=`物料表：${analysis.materialSheet}第${row.sourceRow}行`;card.append(provenance);
+      const grid=document.createElement('div');grid.className='editor-grid';
+      const editingFields=C.EDITABLE_HEADERS.map((header,fieldIndex)=>({header,fieldIndex}));
+      editingFields.sort((a,b)=>Number(missingFields.has(b.header))-Number(missingFields.has(a.header)));
+      for(const {fieldIndex,header} of editingFields) {
+        const meta=row.fields?.[header] || {},wrap=document.createElement('div');wrap.className='editor-field';
+        const required=C.REQUIRED_HEADERS.includes(header)||header==='金蝶创建时间';
+        const label=document.createElement('label'),input=document.createElement('input');
+        input.type='text';input.id=`edit-${rowIndices.get(row.code)}-${fieldIndex}`;input.dataset.code=row.code;input.dataset.field=header;
+        let shown=displayValue(row,header);
+        if(header==='金蝶创建时间'&&missingFields.has(header)){
+          const original=imported.get(row.code)?.[analysis.headers.indexOf(header)];
+          shown=typeof original==='number'?XLSX.SSF.format('yyyy-mm-dd',original,{date1904:analysis.date1904}):original??shown;
+        }
+        input.autocomplete='off';input.value=String(Object.hasOwn(overrides[row.code]||{},header)?overrides[row.code][header]:shown);input.setAttribute('aria-invalid',String(missingFields.has(header)));
+        if(required)input.setAttribute('aria-required','true');
+        if(priceFields.includes(header))input.inputMode='decimal';
+        label.htmlFor=input.id;label.textContent=header+(required?' *':'');
+        const suggestions=document.createElement('datalist');suggestions.id=input.id+'-options';input.setAttribute('list',suggestions.id);
+        for(const candidate of (meta.candidates || []).slice(0,200)) {const option=document.createElement('option');option.value=String(candidate.value);suggestions.append(option);}
+        const note=document.createElement('small');note.id=input.id+'-note';note.className=missingFields.has(header)?'required-note':'muted';input.setAttribute('aria-describedby',note.id);
+        const reason=missing.find(item=>item.field===header)?.reason || meta.reason || '';
+        const candidates=(meta.candidates || []).slice(0,4).map(item=>`${item.value}（${sourceLabel(item.sourceRows)||'历史候选'}）`).join('；');
+        const origin=header==='金蝶创建时间'?`${analysis.materialSheet}物料表原第${row.sourceRow}行`:sourceLabel(meta.sourceRows);
+        note.textContent=[meta.method==='manual'?'人工填写':'',reason,origin,candidates?'候选：'+candidates:''].filter(Boolean).join('\n');
+        input.addEventListener('change',()=>{
+          if(busy)return;
+          if(!Object.hasOwn(overrides,row.code))overrides[row.code]=Object.create(null);
+          overrides[row.code][header]=input.value;
+          calculate();
+        });
+        wrap.append(label,input,suggestions,note);grid.append(wrap);
+      }
+      card.append(grid);
+      const computed=document.createElement('p');computed.className='computed';
+      for(const header of computedFields){
+        const output=document.createElement('output');output.dataset.code=row.code;output.dataset.field=header;
+        output.setAttribute('aria-label',header);output.textContent=String(displayValue(row,header));
+        computed.append(header+'：',output,'　');
+      }
+      card.append(computed);
+      $('reviews').append(card);
+    }
+    const restored=focusId&&document.getElementById(focusId);
+    if(restored){restored.focus({preventScroll:true});if(selection)restored.setSelectionRange(...selection);}
+  }
   function calculate() {
-    result=C.resolve(analysis);
+    result=C.resolve(analysis,overrides);
     showIssues();
-    $('result').hidden=!result.canExport;
-    if(!result.canExport) { $('status').textContent='请修正下方来源问题后重新上传。';controls();return; }
+    const fatal=result.issues.some(issue=>issue.severity==='error');
+    $('result').hidden=fatal;
+    if(fatal) { $('review-panel').hidden=true;$('status').textContent='请修正下方来源问题后重新上传。';controls();return; }
     const original=analysis.groups.reduce((n,group)=>n+group.rows.length,0), unique=analysis.groups.length;
-    $('counts').textContent=`原商品 ${original.toLocaleString('zh-CN')} 行；原唯一编码 ${unique.toLocaleString('zh-CN')} 个；重复 ${original-unique} 行；新增 ${analysis.added.length} 个编码；完成后 ${(unique+analysis.added.length).toLocaleString('zh-CN')} 行。`;
+    $('counts').textContent=`原商品 ${original.toLocaleString('zh-CN')} 行；原唯一编码 ${unique.toLocaleString('zh-CN')} 个；重复 ${original-unique} 行；新增 ${analysis.added.length} 个编码；完成后 ${(unique+analysis.added.length).toLocaleString('zh-CN')} 行。处理日期：${analysis.asOfDate}。`;
     $('preview').replaceChildren();
-    const indices=['物料编码','领星SKU','SKU','金蝶名称','金蝶创建时间','物料分组'].map(name=>analysis.headers.indexOf(name));
-    table(indices.map(i=>analysis.headers[i]),analysis.added.slice(0,100).map(row=>indices.map(i=>row.values[i])),$('preview'));
+    const added=result.rows.filter(row=>row.isNew);
+    table(analysis.headers,added.slice(0,100).map(row=>analysis.headers.map(header=>displayValue(row,header))),$('preview'));
+    let auto=0,manual=0,unknown=0,emptyPrices=0;
+    for(const row of added)for(const [field,meta] of Object.entries(row.fields||{})){
+      const value=row.values[analysis.headers.indexOf(field)];
+      if(priceFields.includes(field)&&(value===''||value==null))emptyPrices++;
+      else if(meta.method==='manual')manual++;
+      else if(meta.method==='pending')unknown++;
+      else if(!['empty'].includes(meta.method)&&field!=='金蝶创建时间')auto++;
+    }
+    $('enrichment-counts').textContent=`自动补全 ${auto} 个字段；人工填写 ${manual} 个字段；待确认 ${unknown} 个字段；缺价 ${emptyPrices} 项。`;
     $('preview-note').textContent=analysis.added.length ? `显示前 ${Math.min(100,analysis.added.length)} 个新增编码；下载包含全部保留商品和新增商品。` : '物料表中的编码均已存在，无需追加。';
-    $('status').textContent='核对完成，可下载。重复编码统一保留原表第一行。';
+    showReviews();
+    $('status').textContent=result.canExport?'11列必填校验通过，可下载。':`还有 ${result.pendingRows} 个商品需要补全，请填写下方必填项。`;
     controls();
   }
+  $('review-filter').addEventListener('change',()=>{if(result)showReviews();});
   async function readBook(bytes,zip) {
     const book=XLSX.read(bytes,{type:'array',cellFormula:true,cellNF:true,cellStyles:true,sheetStubs:true});
     const parse=xml=>new DOMParser().parseFromString(xml,'application/xml');

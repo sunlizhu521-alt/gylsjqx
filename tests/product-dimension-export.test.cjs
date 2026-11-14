@@ -4,8 +4,10 @@ const X = require('../vendor/xlsx.full.min.js');
 const Zip = require('../vendor/jszip.min.js');
 const Core = require('../product-dimension-core.js');
 const Export = require('../product-dimension-export.js');
-const D = ['物料编码','领星SKU','SKU','金蝶名称','金蝶创建时间','物料分组','人工分类'];
+const D = ['物料编码','领星SKU','SKU','金蝶名称','金蝶创建时间','物料分组','销售产品线','销售系列','销售产品分类','财务加权平均价','不含税结算价','结算价','场景分组','一级品类','二级分类','三级分类','型号','品牌','国家','销售区域','当前日期','上架时间（月）','生命周期','是否正常备货'];
 const M = ['编码','领星SKU','SKU','名称','创建日期','物料分组'];
+const REQUIRED = ['销售产品线','销售系列','销售产品分类','场景分组','一级品类','二级分类','三级分类','销售区域','当前日期','上架时间（月）','生命周期'];
+const MANUAL = {'销售产品线':'手动轮椅','销售系列':'1系列','销售产品分类':'全新品','场景分组':'九大产品线','一级品类':'轮椅','二级分类':'轮椅','三级分类':'手动轮椅','销售区域':'中国'};
 const MIME = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/';
 function makeBook(headers,rows,name='维度原表') {
   const book=X.utils.book_new();X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([headers,...rows]),name);return book;
@@ -14,19 +16,20 @@ async function fixture() {
   const book=makeBook(D,[[' 001 ','保留SKU',0,'原商品','原日期','原分组',2],['001','','','重复行','','',99],['002','','','人工商品','','','手工填写'],[0,'0',0,'零编码','','','文字缓存']]);
   const sheet=book.Sheets.维度原表;
   sheet.G2={t:'n',v:2,f:'1+1'};sheet.G5={t:'s',v:'文字缓存',f:'"文字缓存"'};
+  sheet.U2={t:'n',v:46331,f:'TODAY()',z:'yyyy/mm/dd'};sheet.V2={t:'s',v:'人工月龄'};sheet.W2={t:'s',v:'人工阶段'};
   sheet.G1.c=[{a:'作者',t:'保留表头批注'}];sheet.G3.c=[{a:'作者',t:'重复行批注去除'}];sheet.G4.c=[{a:'作者',t:'保留原第四行批注'}];
   sheet.D3.l={Target:'https://example.com/dropped'};sheet.D4.l={Target:'https://example.com/kept'};
-  sheet['!rows']=[{}, {hidden:true}, {hidden:true}, {hidden:true}];sheet['!cols']=[{wch:22},{hidden:true}];sheet['!autofilter']={ref:'A1:G5'};
+  sheet['!rows']=[{}, {hidden:true}, {hidden:true}, {hidden:true}];sheet['!cols']=[{wch:22},{hidden:true}];sheet['!autofilter']={ref:'A1:X5'};
   const aux=X.utils.aoa_to_sheet([['辅助原表',2]]);aux.B1.f='1+1';aux.A1.c=[{a:'人工',t:'辅助不变'}];X.utils.book_append_sheet(book,aux,'辅助原表');
   const zip=await Zip.loadAsync(X.write(book,{type:'buffer',bookType:'xlsx'}));
   let xml=await zip.file('xl/worksheets/sheet1.xml').async('string');
-  xml=xml.replace(/<autoFilter[^>]*\/>/,'<autoFilter ref="A1:G5"><filterColumn colId="0"><filters><filter val="001"/></filters></filterColumn></autoFilter><conditionalFormatting sqref="A2:A5"><cfRule type="duplicateValues" priority="1"/></conditionalFormatting>');
+  xml=xml.replace(/<autoFilter[^>]*\/>/,'<autoFilter ref="A1:X5"><filterColumn colId="0"><filters><filter val="001"/></filters></filterColumn></autoFilter><conditionalFormatting sqref="A2:A5"><cfRule type="duplicateValues" priority="1"/></conditionalFormatting>');
   xml=xml.replace('<f>1+1</f>','<f t="shared" si="0" ref="G2:G3">1+1</f>');
   xml=xml.replace(/(<c r="G3"[^>]*>)/,'$1<f t="shared" si="0"/>');
   zip.file('xl/worksheets/sheet1.xml',xml);zip.file('custom/keep.bin',new Uint8Array([0,255,1,99]));
   const source=await zip.generateAsync({type:'uint8array'});
   const material=makeBook(M,[['001','不得覆盖',10,'新名称','新日期','新分组'],['0003',0,'0000','新增名称',46340,'新增分组']],'物料');material.Sheets.物料.E3.z='yyyy-mm-dd';
-  const analysis=Core.analyze(X.read(source,{cellNF:true,cellStyles:true,cellDates:false}),material),result=Core.resolve(analysis);
+  const analysis=Core.analyze(X.read(source,{cellNF:true,cellStyles:true,cellDates:false}),material,{asOfDate:'2026-11-14'}),result=Core.resolve(analysis,{'0003':MANUAL});
   assert.equal(result.canExport,true);return {source,analysis,result};
 }
 async function patch(source,path,fn) {
@@ -40,8 +43,10 @@ test('keeps the first original row, appends unique codes, stores cached values a
   assert.deepEqual([2,3,4,5].map(row=>sheet['A'+row].v),['001','002','0','0003']);
   assert([2,3,4,5].every(row=>sheet['A'+row].t==='s'));
   assert.equal(sheet.B2.v,'保留SKU');assert.equal(sheet.C2.v,0);assert.equal(sheet.G2.v,2);assert.equal(sheet.G3.v,'手工填写');assert.equal(sheet.G4.v,'文字缓存');
-  assert.equal(sheet.B3?.v ?? '','');assert.equal(sheet.G5?.v ?? '','');assert.equal(sheet.B5.v,'0');assert.equal(sheet.C5.v,'0000');assert.equal(sheet.E5.v,46340);assert.equal(sheet.E5.z,'yyyy-mm-dd');
-  assert(!/<f\b/.test(xml));assert(!/<row\b[^>]*hidden=/.test(xml));assert.match(xml,/<col\b[^>]*hidden="(?:1|true)"/);assert.match(xml,/<autoFilter ref="A1:G5"\/>/);assert(!xml.includes('<filterColumn'));
+  assert.equal(sheet.B3?.v ?? '','');assert.equal(sheet.G5.v,'手动轮椅');assert.equal(sheet.B5.v,'0');assert.equal(sheet.C5.v,'0000');assert.equal(sheet.E5.v,46340);assert.equal(sheet.E5.t,'n');assert.equal(sheet.E5.z,'yyyy-mm-dd');
+  assert.equal(sheet.U5.v,46340);assert.equal(sheet.U5.t,'n');assert.equal(sheet.U5.z,'yyyy-mm-dd');assert.equal(sheet.V5.v,'0个月');assert.equal(sheet.V5.t,'s');assert.equal(sheet.W5.v,'新品期');
+  assert.equal(sheet.E2.v,'原日期');assert.equal(sheet.U2.v,46331);assert.equal(sheet.U2.z,'yyyy/mm/dd');assert.equal(sheet.V2.v,'人工月龄');assert.equal(sheet.W2.v,'人工阶段');
+  assert(!/<f\b/.test(xml));assert(!/<row\b[^>]*hidden=/.test(xml));assert.match(xml,/<col\b[^>]*hidden="(?:1|true)"/);assert.match(xml,/<autoFilter ref="A1:X5"\/>/);assert(!xml.includes('<filterColumn'));
   assert.match(xml,/<conditionalFormatting sqref="A2:A4">/);
   assert.equal(sheet.G1.c[0].t,'保留表头批注');assert.equal(sheet.G3.c[0].t,'保留原第四行批注');assert.equal(sheet.G4.c,undefined);
   assert.equal(sheet.D3.l.Target,'https://example.com/kept');assert.equal(sheet.D2.l,undefined);
@@ -92,12 +97,56 @@ test('updates filter named range, preserves auxiliary calculation chain entries 
   zip.file('[Content_Types].xml',(await zip.file('[Content_Types].xml').async('string')).replace('</Types>','<Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"/></Types>'));
   const output=await Zip.loadAsync(await Export(await zip.generateAsync({type:'uint8array'}),analysis,result)),chain=await output.file('xl/calcChain.xml').async('string');
   assert.match(chain,/<c r="B1" i="2"\/>/);assert(!chain.includes('G2'));assert(!chain.includes('G5'));
-  const workbook=await output.file('xl/workbook.xml').async('string');assert.match(workbook,/_xlnm\._FilterDatabase/);assert(workbook.includes('&apos;维度原表&apos;!$A$1:$G$5'));
+  const workbook=await output.file('xl/workbook.xml').async('string');assert.match(workbook,/_xlnm\._FilterDatabase/);assert(workbook.includes('&apos;维度原表&apos;!$A$1:$X$5'));
 });
 
 test('export rejects invalid resolution and duplicate keys',async()=>{
   const {source,analysis,result}=await fixture();
   await assert.rejects(()=>Export(source,analysis,{...result,canExport:false}),/待处理错误/);
-  await assert.rejects(()=>Export(source,analysis,{...result,rows:[result.rows[0],result.rows[0]]}),/重复物料编码/);
-  await assert.rejects(()=>Export(source,analysis,{...result,rows:[result.rows[1],result.rows[0]]}),/原商品行顺序/);
+  await assert.rejects(()=>Export(source,analysis,{...result,rows:[result.rows[0],result.rows[0],...result.rows.slice(2)]}),/重复/);
+  await assert.rejects(()=>Export(source,analysis,{...result,rows:[result.rows[1],result.rows[0],...result.rows.slice(2)]}),/顺序/);
+});
+
+test('export revalidates all eleven mandatory fields despite forged canExport and isNew flags',async()=>{
+  const {source,analysis,result}=await fixture();
+  for(const field of REQUIRED){
+    const tampered=structuredClone(result),row=tampered.rows.find(row=>row.code==='0003'),col=D.indexOf(field);
+    row.values[col]='';row.cells[col]={t:'s',v:''};row.isNew=false;tampered.canExport=true;tampered.issues=[];
+    await assert.rejects(()=>Export(source,analysis,tampered),/校验未通过/,field+' must be checked again at download');
+  }
+  const incomplete=Core.resolve(analysis);assert.equal(incomplete.canExport,false);
+  await assert.rejects(()=>Export(source,analysis,{...incomplete,canExport:true,issues:[]}),/校验未通过/);
+});
+
+test('added-code membership controls export and cannot be bypassed by changing row.isNew',async()=>{
+  const {source,analysis,result}=await fixture(),tampered=structuredClone(result);
+  tampered.rows.forEach(row=>{row.isNew=!row.isNew;});
+  const book=X.read(await Export(source,analysis,tampered));
+  assert.equal(book.Sheets.维度原表.G2.v,2);assert.equal(book.Sheets.维度原表.A5.v,'0003');assert.equal(book.Sheets.维度原表.G5.v,'手动轮椅');
+});
+
+test('date edits must match their derived month and lifecycle, while manual valid dates become native Excel dates',async()=>{
+  const {source,analysis,result}=await fixture();
+  for(const [field,value] of [['金蝶创建时间',46341],['金蝶创建时间','2026-11-14'],['当前日期',46341],['当前日期','2026-11-14'],['上架时间（月）','100个月'],['生命周期','衰弱期']]){
+    const tampered=structuredClone(result),row=tampered.rows.find(row=>row.code==='0003'),col=D.indexOf(field);
+    row.values[col]=value;row.cells[col]={t:typeof value==='number'?'n':'s',v:value};
+    await assert.rejects(()=>Export(source,analysis,tampered),/校验未通过/,field+' must be checked against the analysis date');
+  }
+  const corrected=Core.resolve(analysis,{'0003':{...MANUAL,'金蝶创建时间':'2026-10-14'}});
+  assert.equal(corrected.canExport,true);
+  const sheet=X.read(await Export(source,analysis,corrected),{cellNF:true}).Sheets.维度原表;
+  assert.equal(sheet.E5.t,'n');assert.equal(sheet.E5.v,46309);assert.equal(sheet.E5.z,'yyyy-mm-dd');assert.equal(sheet.U5.v,46340);assert.equal(sheet.V5.v,'1个月');assert.equal(sheet.W5.v,'新品期');
+});
+
+test('optional pending fields and blank prices are allowed; manual zero prices stay numeric',async()=>{
+  const {source,analysis}=await fixture(),optional={'型号':'待确认','品牌':'待确认','国家':'待确认','是否正常备货':'待确认'};
+  const blank=Core.resolve(analysis,{'0003':{...MANUAL,...optional}});assert.equal(blank.canExport,true);
+  let sheet=X.read(await Export(source,analysis,blank)).Sheets.维度原表;
+  for(const col of ['J','K','L'])assert.equal(sheet[col+'5']?.v??'','');
+  for(const col of ['Q','R','S','X'])assert.equal(sheet[col+'5'].v,'待确认');
+  const prices=Core.resolve(analysis,{'0003':{...MANUAL,...optional,'财务加权平均价':'0','不含税结算价':12.5,'结算价':'0'}});assert.equal(prices.canExport,true);
+  sheet=X.read(await Export(source,analysis,prices)).Sheets.维度原表;
+  for(const [col,value] of [['J',0],['K',12.5],['L',0]]){assert.equal(sheet[col+'5'].t,'n');assert.equal(sheet[col+'5'].v,value);}
+  const invalid=structuredClone(prices),row=invalid.rows.find(row=>row.code==='0003');row.values[D.indexOf('结算价')]=Infinity;
+  await assert.rejects(()=>Export(source,analysis,invalid),/校验未通过/);
 });

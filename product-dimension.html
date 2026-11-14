@@ -8,6 +8,9 @@
   <style>
     main{max-width:1600px;margin:28px auto;padding:20px;min-width:0}section{margin:18px 0;padding:22px;border:1px solid var(--line);border-radius:14px;background:var(--surface);min-width:0}h2{font-size:1.15rem;margin:0 0 14px}p,li{line-height:1.7}.slots{display:grid;grid-template-columns:1fr 1fr;gap:24px}.slot{min-width:0}label{display:block;font-weight:600;margin-bottom:12px}input,button{font:inherit;max-width:100%}input[type=file]{width:100%}input::file-selector-button{padding:10px 14px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface-solid);color:var(--text);cursor:pointer}button{border:0;border-radius:8px;background:#315b9d;color:white;padding:11px 20px;cursor:pointer}button:disabled,input:disabled{opacity:.5;cursor:not-allowed}.secondary{background:var(--surface-solid);border:1px solid var(--line-strong);color:var(--text)}.actions{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:20px}.muted{color:var(--muted)}.reference,#status,#issues{white-space:pre-wrap;overflow-wrap:anywhere}.reference{font-size:.9rem}#status{margin:0}.preview{overflow:auto;max-height:600px}table{border-collapse:collapse;width:100%;font-size:14px}th,td{border:1px solid #d6dee8;text-align:center;vertical-align:middle;padding:10px 14px;white-space:nowrap}th{position:sticky;top:0;background:#315b9d;color:white}td{background:white;color:#172033}details{margin-top:18px}summary{cursor:pointer;font-weight:600}[hidden]{display:none!important}a,button,input,summary{outline-offset:3px}@media(max-width:650px){main{padding:12px}section{padding:14px}.slots{grid-template-columns:1fr}.actions{align-items:stretch;flex-direction:column}}
   </style>
+  <style>
+    .review{border:1px solid var(--line);border-radius:10px;padding:16px;margin:14px 0;overflow-wrap:anywhere}.review summary{line-height:1.7}.editor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:18px}.editor-field{min-width:0}.editor-field label{margin-bottom:6px}.editor-field input,select{font:inherit;padding:10px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-solid);color:var(--text);box-sizing:border-box}.editor-field input{width:100%}.editor-field input[aria-invalid=true]{border:2px solid #b94725}.editor-field small{display:block;margin-top:7px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}.required-note{color:#a33e20}.review-toolbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap}.review-toolbar label{margin:0}.computed{line-height:1.7;margin-top:18px}#pending-counts{white-space:pre-wrap}#enrichment-counts{line-height:1.7}@media(max-width:650px){.editor-grid{grid-template-columns:1fr}.review{padding:12px}.review-toolbar{align-items:stretch;flex-direction:column}}
+  </style>
 </head>
 <body><main>
   <a href="index.html">← 返回工具箱</a>
@@ -21,19 +24,30 @@
     <div class="actions"><button id="download" disabled>下载商品维度表</button><button id="clear" class="secondary" disabled>清除文件</button><p id="status" role="status" aria-live="polite">正在加载工具…</p></div>
     <details id="issue-panel" hidden><summary id="issue-title">需要核对</summary><ul id="issues"></ul></details>
   </section>
-  <section id="result" hidden><h2>维护结果</h2><p id="counts"></p><h3>新增商品预览</h3><p id="preview-note" class="muted"></p><div id="preview" class="preview"></div></section>
+  <section id="result" hidden><h2>维护结果</h2><p id="counts"></p><p id="enrichment-counts"></p><h3>新增商品预览</h3><p id="preview-note" class="muted"></p><div id="preview" class="preview"></div></section>
+  <section id="review-panel" hidden>
+    <h2>必填待补全</h2><p id="pending-counts" role="status" aria-live="polite"></p>
+    <p class="muted">请展开商品，选择历史候选或填写明确内容。11列必填内容齐全后可下载；“待确认”“未匹配”“无法区分”等不能作为必填结果。可切换到全部新增商品，核对和修改自动补全内容。</p>
+    <div class="review-toolbar"><label for="review-filter">查看商品</label><select id="review-filter"><option value="pending">仅待补全商品</option><option value="all">全部新增商品</option></select></div>
+    <div id="reviews"></div>
+  </section>
   <section><h2>处理说明</h2><ul>
     <li>按完整物料编码匹配，保留前导零；读取全部数据行，包括被筛选隐藏的行。</li>
-    <li>只追加商品维度表没有的编码。新增列对应：编码 → 物料编码、领星SKU → 领星SKU、SKU → SKU、名称 → 金蝶名称、创建日期 → 金蝶创建时间、物料分组 → 物料分组。其余新增列留空，现有商品内容不覆盖。</li>
+    <li>只追加商品维度表没有的编码。物料表提供编码、领星SKU、SKU、名称、创建日期和物料分组；其余字段从现有商品资料总结规律补充，已有商品内容不覆盖。</li>
+    <li>销售产品线、销售系列、销售产品分类、场景分组、一级品类、二级分类、三级分类、销售区域、当前日期、上架时间（月）、生命周期共11列必须有明确内容。历史资料冲突时先人工补全，不按多数票选择，也不以“其他”作为缺失默认值。</li>
+    <li>优先匹配有效SKU，其次同分组同名称、同分组同基础型号、同物料分组。全新换包装和二手商品按退回状态区分，不照搬原成品“全新品”分类。品牌和备货状态仅复用明确资料。</li>
+    <li>当前日期按北京时间处理当天；月龄按金蝶创建日期计算完整月数，≤6个月为新品期，7–24个月为稳定期，超过24个月为衰弱期。创建日期异常需补录，再自动计算月龄和生命周期。</li>
+    <li>型号、品牌、国家、是否正常备货无法确定时可保留“待确认”。三个价格字段缺少来源时留空，不套用同系列价格。人工填写只用于本次新增商品，后续重算不会覆盖。</li>
     <li>商品维度表的重复编码统一保留原表第一行，内容不同会列出来源提示。物料表的多个使用组织如提供相同商品资料，只补入一行；新增编码的映射资料不一致时，请先核对物料表。</li>
     <li>下载的商品维度表连续排列，公式转为文件中已保存的结果值，其他工作表保留。清除商品维度表的筛选条件，默认显示全部记录，可重新筛选。</li>
-    <li>文件在当前浏览器本地处理，原文件不修改。切换工具保留本次内容；刷新后需重新上传。每次成功下载的文件名附带递增的 V 版本号。</li>
+    <li>文件在当前浏览器本地处理，原文件不修改。切换工具保留文件及人工填写；替换来源文件会清除本次填写，刷新后需重新上传和填写。每次成功下载的文件名附带递增的 V 版本号。</li>
   </ul></section>
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="product-dimension-core.js?v=product-dimension-20261114"></script>
-<script src="product-dimension-export.js?v=product-dimension-20261114"></script>
-<script src="product-dimension-tool.js?v=product-dimension-20261114"></script>
+<script src="product-dimension-enrichment.js?v=dimension-enrichment-20261114"></script>
+<script src="product-dimension-core.js?v=dimension-enrichment-20261114"></script>
+<script src="product-dimension-export.js?v=dimension-enrichment-20261114"></script>
+<script src="product-dimension-tool.js?v=dimension-enrichment-20261114"></script>
 </body>
 </html>

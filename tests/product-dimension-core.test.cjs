@@ -2,7 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const X = require('../vendor/xlsx.full.min.js');
 const C = require('../product-dimension-core.js');
-const D = ['物料编码','领星SKU','SKU','金蝶名称','金蝶创建时间','物料分组','人工分类'];
+const D = ['物料编码','领星SKU','SKU','金蝶名称','金蝶创建时间','物料分组','人工分类',...C.FIELD_HEADERS];
+const resolve = analysis => C.resolve(analysis,Object.fromEntries(analysis.added.map(row=>[row.code,Object.fromEntries(C.REQUIRED_HEADERS.filter(h=>!['当前日期','上架时间（月）','生命周期'].includes(h)).map(h=>[h,'测试'+h]))])));
 const M = ['使用组织','编码','领星SKU','SKU','名称','创建日期','物料分组','备案产品型号'];
 function book(headers, rows, name='明细', prefix=[]) {
   const result = X.utils.book_new();
@@ -18,18 +19,18 @@ test('appends only absent codes, retains source values and never fills existing 
   const d = dimension([drow('001'), ['002','','','','','','手填']]);
   const m = material([mrow('001'),mrow('002'),mrow('003')]);
   const before = JSON.stringify(d);
-  const analysis = C.analyze(d, m), result = C.resolve(analysis);
+  const analysis = C.analyze(d, m), result = resolve(analysis);
   assert.equal(result.canExport, true);
   assert.deepEqual(result.rows.map(row => row.code), ['001','002','003']);
-  assert.deepEqual(result.rows[1].values, ['002','','','','','','手填']);
-  assert.deepEqual(result.rows[2].values, ['003','新领星','0','新商品','2026/11/14','新分组','']);
+  assert.deepEqual(result.rows[1].values.slice(0,7), ['002','','','','','','手填']);
+  assert.deepEqual(result.rows[2].values.slice(0,7), ['003','新领星','0','新商品',46340,'新分组','']);
   assert.equal(result.rows[0].cells[2].t, 'n');
   assert.equal(JSON.stringify(d), before);
 });
 
 test('zero is a valid code and leading zeros are never discarded', () => {
   const analysis = C.analyze(dimension([drow(0),drow('1')]), material([mrow('0'),mrow('0001'),mrow(' 002 ')]));
-  const result = C.resolve(analysis);
+  const result = resolve(analysis);
   assert.deepEqual(result.rows.map(row => row.code), ['0','1','0001','002']);
   assert.equal(result.rows[0].values[0], '0');
   assert.equal(result.rows[0].cells[0].t, 's');
@@ -40,7 +41,7 @@ test('existing duplicate codes always retain the first row and conflicts identif
   const analysis = C.analyze(dimension([drow('1'),drow('1'),drow('2'),drow('2',{manual:'另一个人工值'})]), material([]));
   assert.equal(analysis.counts.dimensionDuplicateRows, 2);
   assert.equal(analysis.counts.dimensionConflictGroups, 1);
-  const result = C.resolve(analysis);
+  const result = resolve(analysis);
   assert.equal(result.canExport, true);
   assert.equal(result.rows[1].sourceRow, 4);
   assert.equal(result.rows[1].values[6], '人工保留');
@@ -60,7 +61,7 @@ test('new materials compare only mapped fields across organizations and expose c
   assert.equal(analysis.added[0].conflict, false);
   assert.deepEqual(analysis.added[0].sourceRows, [2,3]);
   assert.equal(analysis.added[1].conflict, true);
-  const result = C.resolve(analysis);
+  const result = resolve(analysis);
   assert.equal(result.canExport, false);
   assert.deepEqual(result.rows, []);
   assert.equal(analysis.issues[0].code, 'new-material-conflict');
@@ -72,15 +73,15 @@ test('reads raw text despite date number formats and compares formulas by cached
   d.Sheets.明细.G3 = {t:'s',v:'手动轮椅',z:'m/d/yy'};
   const analysis = C.analyze(d,material([]));
   assert.equal(analysis.groups[0].conflict, false);
-  assert.equal(C.resolve(analysis).rows[0].values[6], '手动轮椅');
-  assert.equal(C.resolve(analysis).rows[0].cells[6].f, '"手动轮椅"');
+  assert.equal(resolve(analysis).rows[0].values[6], '手动轮椅');
+  assert.equal(resolve(analysis).rows[0].cells[6].f, '"手动轮椅"');
 });
 
 test('hidden and filtered rows are included, all-empty rows are skipped', () => {
   const d = dimension([drow('1'),[],drow('2')]);
   d.Sheets.明细['!rows'] = [null,null,null,{hidden:true}];
   d.Sheets.明细['!autofilter'] = {ref:'A1:G4'};
-  assert.deepEqual(C.resolve(C.analyze(d,material([]))).rows.map(row => row.code), ['1','2']);
+  assert.deepEqual(resolve(C.analyze(d,material([]))).rows.map(row => row.code), ['1','2']);
 });
 
 test('detects headers within first twenty rows and refuses missing, repeated or ambiguous headers', () => {
@@ -90,7 +91,7 @@ test('detects headers within first twenty rows and refuses missing, repeated or 
   assert.equal(C.analyze(book([...D,'SKU'],[drow('1')]),material([])).issues[0].code, 'duplicate-header');
   X.utils.book_append_sheet(shifted, X.utils.aoa_to_sheet([D,drow('2')]), '表二');
   assert.equal(C.analyze(shifted,material([])).issues[0].code, 'ambiguous-sheet');
-  assert.equal(C.resolve(C.analyze(shifted,material([]))).canExport, false);
+  assert.equal(resolve(C.analyze(shifted,material([]))).canExport, false);
 });
 
 test('nonempty rows without a code block output with source location', () => {
@@ -99,8 +100,8 @@ test('nonempty rows without a code block output with source location', () => {
     const problem = analysis.issues.find(issue => issue.code === 'empty-code');
     assert.equal(problem.row, 2);
     assert.equal(problem.role, role);
-    assert.equal(C.resolve(analysis).canExport, false);
-    assert.deepEqual(C.resolve(analysis).rows, []);
+    assert.equal(resolve(analysis).canExport, false);
+    assert.deepEqual(resolve(analysis).rows, []);
   }
 });
 
@@ -113,11 +114,11 @@ test('errors, invalid codes and missing formula results block output; empty cach
     const d = dimension([drow('1')]); d.Sheets.明细.A2 = cell;
     const analysis = C.analyze(d,material([]));
     assert.ok(analysis.issues.some(issue => issue.code === expected));
-    assert.equal(C.resolve(analysis).canExport, false);
+    assert.equal(resolve(analysis).canExport, false);
   }
   const d = dimension([drow('1')]);
   d.Sheets.明细.G2 = {t:'s',f:'IF(A2="1","",1)',v:''};
-  assert.equal(C.resolve(C.analyze(d,material([]))).canExport, true);
+  assert.equal(resolve(C.analyze(d,material([]))).canExport, true);
   d.Sheets.明细.G2 = {t:'e',v:23,f:'1/0'};
   assert.equal(C.analyze(d,material([])).issues[0].address, 'G2');
 });
@@ -127,10 +128,10 @@ test('material errors block only code or mapped values that will actually be app
   const m = book([...M,'UPC'],[mrow('new'),mrow('existing')]);
   m.Sheets.明细.I2 = {t:'e',v:23};
   m.Sheets.明细.E3 = {t:'n',f:'1+2'};
-  assert.equal(C.resolve(C.analyze(d,m)).canExport, true);
+  assert.equal(resolve(C.analyze(d,m)).canExport, true);
   m.Sheets.明细.E2 = {t:'e',v:23};
   const analysis = C.analyze(d,m);
-  assert.equal(C.resolve(analysis).canExport, false);
+  assert.equal(resolve(analysis).canExport, false);
   assert.deepEqual(analysis.issues.map(issue => issue.address), ['E2']);
 });
 
@@ -140,13 +141,15 @@ test('new numeric creation dates retain the calendar date across 1900 and 1904 w
     d.Workbook = {WBProps:{date1904:!source1904}};
     m.Workbook = {WBProps:{date1904:source1904}};
     m.Sheets.明细.F2 = {t:'n',v:45000.5,z:'yyyy/mm/dd hh:mm',w:'旧缓存'};
-    const result = C.resolve(C.analyze(d,m));
+    const analysis = C.analyze(d,m,{asOfDate:'2028-11-14'}), result = resolve(analysis);
     assert.equal(result.canExport, true);
-    assert.equal(result.rows[1].values[4], 45000.5 + (source1904 ? 1462 : -1462));
+    assert.equal(analysis.added[0].values[4], 45000.5 + (source1904 ? 1462 : -1462));
+    assert.equal(result.rows[1].values[4], 45000 + (source1904 ? 1462 : -1462));
     const before = X.SSF.parse_date_code(45000.5,{date1904:source1904});
-    const after = X.SSF.parse_date_code(result.rows[1].values[4],{date1904:!source1904});
+    const after = X.SSF.parse_date_code(analysis.added[0].values[4],{date1904:!source1904});
     for (const part of ['y','m','d','H','M','S']) assert.equal(before[part],after[part]);
-    assert.equal(result.rows[1].cells[4].z, 'yyyy/mm/dd hh:mm');
+    assert.equal(analysis.added[0].rows[0].cells[4].z, 'yyyy/mm/dd hh:mm');
+    assert.equal(result.rows[1].cells[4].z, 'yyyy-mm-dd');
     assert.equal(result.rows[1].cells[4].w, undefined);
     assert.equal(m.Sheets.明细.F2.v, 45000.5);
     assert.equal(result.rows[0].values[4], '2026/11/01');
@@ -155,7 +158,7 @@ test('new numeric creation dates retain the calendar date across 1900 and 1904 w
   d.Workbook = {WBProps:{date1904:true}};
   m.Sheets.明细.F2 = {t:'n',v:1,z:'yyyy/mm/dd'};
   const analysis = C.analyze(d,m);
-  assert.equal(C.resolve(analysis).canExport, false);
+  assert.equal(resolve(analysis).canExport, false);
   assert.equal(analysis.issues[0].code, 'incompatible-date-system');
   assert.equal(analysis.issues[0].address, 'F2');
 });

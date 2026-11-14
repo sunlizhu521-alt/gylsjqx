@@ -1,7 +1,7 @@
 (function(root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./vendor/xlsx.full.min.js'));
-  else root.ProductDimensionCore = factory(root.XLSX);
-})(typeof globalThis !== 'undefined' ? globalThis : this, function(XLSX) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./vendor/xlsx.full.min.js'),require('./product-dimension-enrichment.js'));
+  else root.ProductDimensionCore = factory(root.XLSX,root.ProductDimensionEnrichment);
+})(typeof globalThis !== 'undefined' ? globalThis : this, function(XLSX, Enrichment) {
   'use strict';
   const MAPPING = [
     ['物料编码', '编码'], ['领星SKU', '领星SKU'], ['SKU', 'SKU'],
@@ -19,7 +19,7 @@
   }
   function locate(book, role, issues) {
     const label = role === 'dimension' ? '商品维度表' : '物料表';
-    const required = MAPPING.map(pair => pair[role === 'dimension' ? 0 : 1]);
+    const required = [...MAPPING.map(pair => pair[role === 'dimension' ? 0 : 1]),...(role==='dimension'?Enrichment.FIELD_HEADERS:[])];
     const matches = [];
     if (!book?.SheetNames?.length) {
       issue(issues, 'missing-workbook', `请上传${label}`, {role});
@@ -91,7 +91,7 @@
     }
     return {groups, total, formulaCount};
   }
-  function analyze(dimensionWorkbook, materialWorkbook) {
+  function analyze(dimensionWorkbook, materialWorkbook, settings = {}) {
     const issues = [];
     const dimension = locate(dimensionWorkbook, 'dimension', issues);
     const material = locate(materialWorkbook, 'material', issues);
@@ -155,9 +155,9 @@
       addedUnique:result.added.length, finalUnique:existing.groups.size + result.added.length,
       formulaCount:existing.formulaCount
     };
-    return result;
+    return Enrichment.prepare(result,{...settings,date1904:target1904});
   }
-  function resolve(analysis) {
+  function resolve(analysis, overrides = {}) {
     const rows = [];
     for (const [kind, groups] of [['dimension', analysis.groups], ['material', analysis.added]]) {
       for (const group of groups) {
@@ -172,8 +172,10 @@
       }
     }
     const blocked = analysis.issues.some(item => item.severity === 'error');
-    return {rows:blocked ? [] : rows, unresolved:[], counts:{...analysis.counts, resolvedRows:blocked ? 0 : rows.length}, issues:analysis.issues,
-      canExport:!blocked};
+    const enriched = !blocked ? Enrichment.enrich(analysis,rows,overrides) : {rows:[],pendingFields:[],pendingRows:0};
+    const result = {...enriched,unresolved:[],counts:{...analysis.counts,resolvedRows:enriched.rows.length,pendingRows:enriched.pendingRows},issues:analysis.issues,canExport:false};
+    result.canExport=!blocked&&!enriched.pendingFields.length&&!Enrichment.validateResult(analysis,result).length;
+    return result;
   }
-  return {MAPPING, analyze, resolve};
+  return {MAPPING, analyze, resolve,REQUIRED_HEADERS:Enrichment.REQUIRED_HEADERS,EDITABLE_HEADERS:Enrichment.EDITABLE_HEADERS,FIELD_HEADERS:Enrichment.FIELD_HEADERS,validateResult:Enrichment.validateResult};
 });
