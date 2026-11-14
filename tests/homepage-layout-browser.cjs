@@ -7,10 +7,10 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
   const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',r=>new URL(r.request().url()).origin===new URL(base).origin?r.continue():r.abort());
   await page.goto(base,{waitUntil:'networkidle'});
-  assert.deepEqual(await page.locator('.tool-tab').evaluateAll(tabs=>tabs.map(tab=>tab.dataset.tool)),['internal-statement','funds','negotiated-payment-summary','funds-ledger','quarter-budget','receipt-sign','seal','beihuo','fulfillment','contract','payment']);
+  assert.deepEqual(await page.locator('.tool-tab').evaluateAll(tabs=>tabs.map(tab=>tab.dataset.tool)),['internal-statement','funds','negotiated-payment-summary','funds-ledger','quarter-budget','receipt-sign','seal','beihuo','product-dimension','fulfillment','contract','payment']);
   for(const [width,height] of [[2560,1440],[1440,900],[1024,768],[390,844]]){
    await page.setViewportSize({width,height});
-   for(const id of ['internal-statement','funds','negotiated-payment-summary','funds-ledger','quarter-budget','receipt-sign','seal','beihuo','fulfillment','contract','payment']){
+   for(const id of ['internal-statement','funds','negotiated-payment-summary','funds-ledger','quarter-budget','receipt-sign','seal','beihuo','product-dimension','fulfillment','contract','payment']){
     await page.locator('.tool-tab[data-tool="'+id+'"]').click();
     const frameElement=page.locator('iframe[data-tool="'+id+'"]');
     if(await frameElement.count())await page.frameLocator('iframe[data-tool="'+id+'"]').locator('body').waitFor();

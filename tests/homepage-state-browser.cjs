@@ -4,7 +4,7 @@ const X = require('../vendor/xlsx.full.min.js');
 
 const url = process.env.QA_URL || 'http://127.0.0.1:8940/';
 const key = 'gylsjqx-last-tool';
-const toolIds = ['internal-statement','funds','negotiated-payment-summary','funds-ledger','quarter-budget','receipt-sign','seal','beihuo','fulfillment','contract','payment'];
+const toolIds = ['internal-statement','funds','negotiated-payment-summary','funds-ledger','quarter-budget','receipt-sign','seal','beihuo','product-dimension','fulfillment','contract','payment'];
 const retiredIds = ['merge','compare','ocr','match','convert','clean','diff','mask','split','formula','pivot','chart','funds-budget-summary'];
 const workbook = X.utils.book_new();
 X.utils.book_append_sheet(workbook, X.utils.aoa_to_sheet([['物料编码', '数量'], ['TEST-001', 12]]), '明细');

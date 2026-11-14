@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>维护商品维度表｜供应链数据清洗</title>
+  <link rel="stylesheet" href="styles-merge14.css?v=product-dimension-20261114">
+  <style>
+    main{max-width:1600px;margin:28px auto;padding:20px;min-width:0}section{margin:18px 0;padding:22px;border:1px solid var(--line);border-radius:14px;background:var(--surface);min-width:0}h2{font-size:1.15rem;margin:0 0 14px}p,li{line-height:1.7}.slots{display:grid;grid-template-columns:1fr 1fr;gap:24px}.slot{min-width:0}label{display:block;font-weight:600;margin-bottom:12px}input,button{font:inherit;max-width:100%}input[type=file]{width:100%}input::file-selector-button{padding:10px 14px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface-solid);color:var(--text);cursor:pointer}button{border:0;border-radius:8px;background:#315b9d;color:white;padding:11px 20px;cursor:pointer}button:disabled,input:disabled{opacity:.5;cursor:not-allowed}.secondary{background:var(--surface-solid);border:1px solid var(--line-strong);color:var(--text)}.actions{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:20px}.muted{color:var(--muted)}.reference,#status,#issues{white-space:pre-wrap;overflow-wrap:anywhere}.reference{font-size:.9rem}#status{margin:0}.preview{overflow:auto;max-height:600px}table{border-collapse:collapse;width:100%;font-size:14px}th,td{border:1px solid #d6dee8;text-align:center;vertical-align:middle;padding:10px 14px;white-space:nowrap}th{position:sticky;top:0;background:#315b9d;color:white}td{background:white;color:#172033}details{margin-top:18px}summary{cursor:pointer;font-weight:600}[hidden]{display:none!important}a,button,input,summary{outline-offset:3px}@media(max-width:650px){main{padding:12px}section{padding:14px}.slots{grid-template-columns:1fr}.actions{align-items:stretch;flex-direction:column}}
+  </style>
+</head>
+<body><main>
+  <a href="index.html">← 返回工具箱</a>
+  <h1>维护商品维度表</h1>
+  <p>根据物料表补充新编码，已有商品资料优先保留，每个物料编码只保留一行。</p>
+  <section aria-label="上传来源文件">
+    <div class="slots">
+      <div class="slot"><label for="dimensionFile">商品维度表</label><input id="dimensionFile" type="file" accept=".xlsx" aria-describedby="dimensionReference" disabled><p id="dimensionReference" class="reference muted">尚未上传商品维度表</p></div>
+      <div class="slot"><label for="materialFile">物料表</label><input id="materialFile" type="file" accept=".xlsx" aria-describedby="materialReference" disabled><p id="materialReference" class="reference muted">尚未上传物料表</p></div>
+    </div>
+    <div class="actions"><button id="download" disabled>下载商品维度表</button><button id="clear" class="secondary" disabled>清除文件</button><p id="status" role="status" aria-live="polite">正在加载工具…</p></div>
+    <details id="issue-panel" hidden><summary id="issue-title">需要核对</summary><ul id="issues"></ul></details>
+  </section>
+  <section id="result" hidden><h2>维护结果</h2><p id="counts"></p><h3>新增商品预览</h3><p id="preview-note" class="muted"></p><div id="preview" class="preview"></div></section>
+  <section><h2>处理说明</h2><ul>
+    <li>按完整物料编码匹配，保留前导零；读取全部数据行，包括被筛选隐藏的行。</li>
+    <li>只追加商品维度表没有的编码。新增列对应：编码 → 物料编码、领星SKU → 领星SKU、SKU → SKU、名称 → 金蝶名称、创建日期 → 金蝶创建时间、物料分组 → 物料分组。其余新增列留空，现有商品内容不覆盖。</li>
+    <li>商品维度表的重复编码统一保留原表第一行，内容不同会列出来源提示。物料表的多个使用组织如提供相同商品资料，只补入一行；新增编码的映射资料不一致时，请先核对物料表。</li>
+    <li>下载的商品维度表连续排列，公式转为文件中已保存的结果值，其他工作表保留。清除商品维度表的筛选条件，默认显示全部记录，可重新筛选。</li>
+    <li>文件在当前浏览器本地处理，原文件不修改。切换工具保留本次内容；刷新后需重新上传。每次成功下载的文件名附带递增的 V 版本号。</li>
+  </ul></section>
+</main>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="product-dimension-core.js?v=product-dimension-20261114"></script>
+<script src="product-dimension-export.js?v=product-dimension-20261114"></script>
+<script src="product-dimension-tool.js?v=product-dimension-20261114"></script>
+</body>
+</html>

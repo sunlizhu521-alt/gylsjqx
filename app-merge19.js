@@ -7,6 +7,7 @@ const tools = [
   { id: 'receipt-sign', icon: '签', title: '采购入库单签字', status: '可用', desc: '上传采购入库单后自动签字，合并下载 A4 竖向 PDF。', href: 'receipt-sign.html' },
   { id: 'seal', icon: '章', title: '检验报告单-电子章', status: '可用-品质', desc: '旋正检验报告图片，加盖内置质检合格章，下载 JPG。', href: 'quality-seal.html' },
   { id: 'beihuo', icon: '备', title: '备货分配', status: '可用', desc: '上传备货需求和维度表，匹配采购分工、汇总数量并导出分配明细。', href: 'beihuo/index.html' },
+  { id: 'product-dimension', icon: '维', title: '维护商品维度表', status: '可用', desc: '上传商品维度表和物料表，按唯一物料编码补充新商品。', href: 'product-dimension.html' },
   { id: 'fulfillment', icon: '履', title: '订单履约表整理', status: '可用', desc: '合并徐英、操思敏、邢芳芳、李奇的履约明细，校验六项数量并统一日期格式。', href: 'fulfillment.html' },
   { id: 'contract', icon: '合', title: '合同生成', status: '可用', desc: '上传订单与合同模板，确认字段映射后在浏览器本地生成合同。', href: 'contract.html' },
   { id: 'payment', icon: '付', title: '付款申请单整理', status: '可用', desc: '按付款主体整理明细，优先一页 A4，明细较多时清晰分页，导出 Word 和 PDF。' },
