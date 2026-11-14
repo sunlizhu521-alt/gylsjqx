@@ -76,9 +76,9 @@ test('谈判同供应商分批金额不同仍按原OA读取流程，申请累计
  const input=fixture('谈判付款',{oldSupplier:SUPPLIER,oldAmount:300,candidate:false});set(input,'applications','本次申请付款金额',2,40);const result=C.build(input),row=output(result,'谈判付款');
  assert.equal(row['对公付款0A流程号'].v,OLD);assert.equal(row['流程编号'].v,OLD);assert.equal(row['当前节点'].v,'新节点');assert.equal(row['是否提交付款申请单'].v,'已经提交部分');assert.equal(row['提交时间汇总'].v,retained['提交时间汇总']);assert(!result.reviewRows.some(r=>/供应商.*冲突|冲突.*供应商/.test(r[5].v)));
 });
-test('谈判空OA仍可按唯一名称金额补齐，正常付款空OA仍不新增输出',()=>{
+test('谈判空OA仍可按唯一名称金额补齐，正常付款空OA纳入但不补号或流程',()=>{
  const negotiated=C.build(fixture('谈判付款',{targetOA:''}));assert.equal(output(negotiated,'谈判付款')['对公付款0A流程号'].v,CANDIDATE);
- const normal=C.build(fixture('正常付款',{targetOA:''}));assert.equal(normal.normalRows.length,1);assert.equal(normal.normalRows[0][normal.normalHeaders.indexOf('供应商名称')].v,CONTROL);
+ const input=fixture('正常付款',{targetOA:''}),before=JSON.stringify(input),normal=C.build(input),row=output(normal,'正常付款');assert.equal(normal.normalRows.length,2);assert.equal(row['对公付款0A流程号'].v,'未提交OA');for(const h of [...FLOW_FIELDS,'流程编号'])assert.equal(row[h].v,'');assert.equal(output(normal,'正常付款',CONTROL)['对公付款0A流程号'].v,HEALTHY);assert.equal(JSON.stringify(input),before);
 });
 
 test('谈判原OA空白时，台账补入的编号若属于其他供应商，应撤回补入并保留原值',()=>{

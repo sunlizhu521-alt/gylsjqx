@@ -206,6 +206,7 @@ function build(inputs,decisions={}){
   const usesReconciliationDate=norm(t.sheetName).includes('孙立柱')&&t.headers.some(h=>norm(h)==='对账时间');
   const absent=NORMAL_HEADERS.slice(0,NORMAL_HEADERS.indexOf('是否提交付款申请单')+1).map(canonical).filter(k=>k!=='跟单员'&&k!=='是否谈判付款'&&t.map[k]===undefined&&!(usesReconciliationDate&&k==='开票时间'));
   if(absent.length)issue('headers:'+t.sheetName,'missing-header','缺少字段，输出保留空白：'+absent.join('、'),headerRecord(t));
+  if(t.map['是否谈判付款']===undefined)issue('classification-header:'+t.sheetName,'missing-header','缺少“是否谈判付款”列，无法确认正常付款分类；本表暂不纳入正常付款，请补齐台账后重新上传。',headerRecord(t),[{value:'keep',label:'本表暂不纳入正常付款，保留原文件'}]);
  }
  const absentFlow=['收款单位','付款金额',...FLOW_FIELDS].filter(k=>flow.map[k]===undefined);
  if(absentFlow.length)issue('headers:'+flow.sheetName,'missing-header','缺少字段，无法据此自动匹配或更新：'+absentFlow.join('、'),headerRecord(flow));
@@ -234,20 +235,19 @@ function build(inputs,decisions={}){
  const eligibleApplication=(r,normal)=>!applicationTypes.has(r)||applicationTypes.get(r)===(normal?'正常付款':'谈判付款');
  const applicationNegotiatedIds=new Set(applications.records.filter(r=>applicationTypes.get(r)==='谈判付款').flatMap(applicationIds));
  const isApplicationNegotiated=r=>oas(r).some(id=>applicationNegotiatedIds.has(id));
- const negotiatedKeys=new Set(),uncertainNegotiated=[];
- for(const r of negotiated.records){const info=classification(r);if(info.key)negotiatedKeys.add(info.key);else uncertainNegotiated.push({record:r,...info});}
+ const negotiatedKeys=new Set(negotiated.records.map(r=>classification(r).key).filter(Boolean));
+ const missingClassification=new Set(ledgerTables.filter(t=>t.map['是否谈判付款']===undefined).map(t=>t.sheetName));
  const normal=[];let negotiatedLedgerRows=0,excludedNormalRows=0;
  for(const r of ledger){
-  const info=classification(r);
-  const ledgerNegotiated=r.values['是否谈判付款']?.t!=='e'&&norm(value(r,'是否谈判付款'))==='是';
-  if(ledgerNegotiated||isApplicationNegotiated(r)||(info.key&&negotiatedKeys.has(info.key))){negotiatedLedgerRows++;continue;}
-  if(!hasPaymentOA(r)){excludedNormalRows++;continue;}
-  if(!info.key){normal.push(r);continue;}
-  const uncertain=uncertainNegotiated.filter(n=>(!n.name||n.name===info.name)&&(n.cents===undefined||n.cents===info.cents));
-  if(uncertain.length){
-   const message='谈判表存在可能对应的记录，但供应商名称或申请付款金额不完整，无法确认未命中。\n谈判来源：\n'+uncertain.map(n=>recordLabel(n.record)).join('\n');
-   const answer=issue('classification:'+r.id,'classification',message,r,[{value:'normal',label:'核实后确认正常付款，纳入正常付款表'},{value:'keep',label:'暂不分类，本次不纳入正常付款；保留源文件原值'}])[0];
-   if(answer!=='normal')continue;
+  if(missingClassification.has(r.source.sheet))continue;
+  const flag=r.values['是否谈判付款'],type=norm(flag?.v);
+  if(flag?.t==='e'||flag?.f&&!type||!['是','否',''].includes(type)){
+   issue('classification:'+r.id,'classification','台账“是否谈判付款”为空白或“否”时才纳入正常付款；当前值异常或公式结果不可用，请修正台账后重新上传。',r,[{value:'keep',label:'本次不纳入正常付款，保留原文件'}]);continue;
+  }
+  if(type==='是'){negotiatedLedgerRows++;continue;}
+  const oa=r.values['对公付款0A流程号'];
+  if(oa?.t==='e'||oa?.f&&!norm(oa.v)){
+   excludedNormalRows++;issue('normal-oa:'+r.id,'formula','台账“对公付款OA流程号”公式结果不可用，不能当作未提交OA；本条暂不纳入正常付款，请在源表重算后重新上传。',r,[{value:'keep',label:'本条暂不纳入正常付款，保留原文件'}]);continue;
   }
   normal.push(r);
  }
@@ -274,7 +274,7 @@ function build(inputs,decisions={}){
   const left=paymentWeek(a.values['应付款时间'],a.date1904,1).v,right=paymentWeek(b.values['应付款时间'],b.date1904,1).v;
   return (left==='日期待确认')-(right==='日期待确认')||left.localeCompare(right);
  });
- const normalObjects=normal.map((r,i)=>({record:r,normal:true,index:i,sourceOA:clone(r.values['对公付款0A流程号']),values:{...r.values,'申请日期':empty()}}));
+ const normalObjects=normal.map((r,i)=>({record:r,normal:true,index:i,missingOA:blank(r.values['对公付款0A流程号']),sourceOA:clone(r.values['对公付款0A流程号']),values:{...r.values,'申请日期':empty()}}));
  const negotiatedObjects=negotiated.records.map(r=>{
   const target={record:r,normal:false,sourceOA:clone(r.values['对公付款0A流程号']),values:{...r.values}},key=classification(r).key;
   const candidates=key?ledger.filter(l=>classification(l).key===key&&[...SUPPLEMENT_HEADERS,'OA合同编号'].every(h=>compatible(r,l,h))):[];
@@ -328,7 +328,7 @@ function build(inputs,decisions={}){
  }
  function reviewApplication(target,message,sources,highlightReview=false){
   if(!sources.some(r=>!isReapplication(r)))return;
-  if(!highlightReview&&isApplicationNegotiated(target.record))return;
+  if(!target.normal&&!highlightReview&&isApplicationNegotiated(target.record))return;
   const source=target.record.source,amount=money(target.values['申请付款金额']);
   const display=c=>c?.t==='e'?c.w||'Excel错误':c?.f&&(c.v==null||c.v==='')?'公式结果不可用':c?.v??'';
   const status=highlightReview?str(target.values['是否提交付款申请单']?.v):matchingApplications(target,true).length?'已提交':'未申请';
@@ -438,6 +438,7 @@ function build(inputs,decisions={}){
   }).join('\n');
  }
  for(const target of targets){
+  if(target.normal&&target.missingOA)continue;
   const info=classification(target.record);
   const originalIds=[...new Set([target.sourceOA,target.values['对公付款0A流程号']].flatMap(c=>c?.t==='e'?[]:codes(c?.v)))];
   const originalFlows=flow.records.filter(r=>originalIds.includes(flowId(r))&&r.values['流程编号']?.t!=='e');
@@ -498,7 +499,7 @@ function build(inputs,decisions={}){
   const conflicting=ids.flatMap(id=>flows.get(id)||[]).some(r=>identityProblem(r)||payee(r)!==info.name||money(r.values['付款金额']).cents!==info.cents);
   const col=targetCols['对公付款0A流程号'],row=target.record.r;
   const merged=!target.normal&&(negotiated.sheet['!merges']||[]).some(m=>row>=m.s.r&&row<=m.e.r&&col>=m.s.c&&col<=m.e.c&&(m.s.r!==m.e.r||m.s.c!==m.e.c));
-  const repeatedTarget=targets.filter(t=>classification(t.record).key===info.key).length>1;
+  const repeatedTarget=targets.filter(t=>t.normal===target.normal&&classification(t.record).key===info.key).length>1;
   let message='OA号复核：原对公付款0A流程号“'+old+'”；';
   if(ids.length===1&&!conflicting&&!merged&&!repeatedTarget){
    set(target,'对公付款0A流程号',cell(ids[0]));
@@ -522,7 +523,7 @@ function build(inputs,decisions={}){
   else oaReviews.push({target,message});
  }
  function applyFlow(target){
-  if(supplierConflicts.has(target))return;
+  if(supplierConflicts.has(target)||target.normal&&(target.missingOA||norm(target.values['对公付款0A流程号']?.v).toUpperCase()==='未提交OA'))return;
   const ids=oas(target.record),supplier=supplierKey(value(target.record,'供应商名称')),amount=money(target.record.values['申请付款金额']);
   const valid=supplier&&target.record.values['供应商名称']?.t!=='e'&&amount.cents!==undefined&&amount.cents>=0n;
   const problems=target.normal?flowProblems:r=>flowProblems(r).filter(f=>f==='流程编号'||FLOW_FIELDS.includes(f));
@@ -677,6 +678,8 @@ function build(inputs,decisions={}){
   reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(value(target.record,'供应商名称')),cell(target.values['付款主体']?.t==='e'?target.values['付款主体'].w||'Excel错误':target.values['付款主体']?.v),classification(target.record).cents===undefined?cell(target.values['申请付款金额']?.t==='e'?target.values['申请付款金额'].w||'Excel错误':target.values['申请付款金额']?.v):amountCell(classification(target.record).cents),cell(target.values['是否提交付款申请单']?.v),cell(message+(evidence?'\nOA 来源：'+evidence:'')),cell(source.file),cell(source.sheet),cell(source.row),cell(reviewOwner(target))]);
  }
  function normalCell(target,key){
+  if(key==='对公付款0A流程号'&&target.missingOA)return cell('未提交OA');
+  if([...FLOW_FIELDS,'流程编号'].includes(key)&&(target.missingOA||norm(target.values['对公付款0A流程号']?.v).toUpperCase()==='未提交OA'))return empty();
   if(key==='跟单员')return cell(target.record.owner);
   if(key==='申请付款的日期')return paymentWeek(target.record.values['应付款时间'],target.record.date1904,1);
   if(key==='是否对账'){

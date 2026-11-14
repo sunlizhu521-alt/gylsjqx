@@ -11,6 +11,7 @@
     "test:fulfillment-versions-browser": "node tests/fulfillment-versions-browser.cjs",
     "test:fulfillment-baseline-browser": "node tests/fulfillment-baseline-browser.cjs",
     "test:funds-browser": "node tests/funds-browser.cjs",
+    "test:funds-normal-browser": "node tests/funds-normal-browser.cjs",
     "test:funds-date-headers-browser": "node tests/funds-date-headers-browser.cjs",
     "test:browser": "node tests/payment-browser.cjs",
     "test:payment-layout-browser": "node tests/payment-layout-browser.cjs",
