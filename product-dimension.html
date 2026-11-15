@@ -26,18 +26,18 @@
   </section>
   <section id="result" hidden><h2>维护结果</h2><p id="counts"></p><p id="enrichment-counts"></p><h3>新增商品预览</h3><p id="preview-note" class="muted"></p><div id="preview" class="preview"></div></section>
   <section id="review-panel" hidden>
-    <h2>必填待补全</h2><p id="pending-counts" role="status" aria-live="polite"></p>
-    <p class="muted">请展开商品，选择历史候选或填写明确内容。11列必填内容齐全后可下载；“待确认”“未匹配”“无法区分”等不能作为必填结果。可切换到全部新增商品，核对和修改自动补全内容。</p>
+    <h2>信息补充（可选）</h2><p id="pending-counts" role="status" aria-live="polite"></p>
+    <p class="muted">未确认的信息可保留空白直接下载，也可展开商品选择历史候选或手动填写。已填写的异常内容需核对或清空；已有商品内容保留。</p>
     <div class="review-toolbar"><label for="review-filter">查看商品</label><select id="review-filter"><option value="pending">仅待补全商品</option><option value="all">全部新增商品</option></select></div>
     <div id="reviews"></div>
   </section>
   <section><h2>处理说明</h2><ul>
     <li>按完整物料编码匹配，保留前导零；读取全部数据行，包括被筛选隐藏的行。</li>
     <li>只追加商品维度表没有的编码。物料表提供编码、领星SKU、SKU、名称、创建日期和物料分组；其余字段从现有商品资料总结规律补充，已有商品内容不覆盖。</li>
-    <li>销售产品线、销售系列、销售产品分类、场景分组、一级品类、二级分类、三级分类、销售区域、当前日期、上架时间（月）、生命周期共11列必须有明确内容。历史资料冲突时先人工补全，不按多数票选择，也不以“其他”作为缺失默认值。</li>
+    <li>新增商品缺少资料或历史候选不唯一时保留空白，允许下载；候选和来源可展开查看。不按多数票选择，也不以“其他”作为缺失默认值。</li>
     <li>优先匹配有效SKU，其次同分组同名称、同分组同基础型号、同物料分组。全新换包装和二手商品按退回状态区分，不照搬原成品“全新品”分类。品牌和备货状态仅复用明确资料。</li>
-    <li>当前日期按北京时间处理当天；月龄按金蝶创建日期计算完整月数，≤6个月为新品期，7–24个月为稳定期，超过24个月为衰弱期。创建日期异常需补录，再自动计算月龄和生命周期。</li>
-    <li>型号、品牌、国家、是否正常备货无法确定时可保留“待确认”。三个价格字段缺少来源时留空，不套用同系列价格。人工填写只用于本次新增商品，后续重算不会覆盖。</li>
+    <li>当前日期按北京时间处理当天；月龄按金蝶创建日期计算完整月数，≤6个月为新品期，7–24个月为稳定期，超过24个月为衰弱期。创建日期空白时月龄和生命周期也留空；无效或未来日期需核对。</li>
+    <li>型号、品牌、国家、是否正常备货无法确定时留空。三个价格字段缺少来源时留空，不套用同系列价格。人工填写只用于本次新增商品，后续重算不会覆盖。</li>
     <li>商品维度表的重复编码统一保留原表第一行，内容不同会列出来源提示。物料表的多个使用组织如提供相同商品资料，只补入一行；新增编码的映射资料不一致时，请先核对物料表。</li>
     <li>下载的商品维度表连续排列，公式转为文件中已保存的结果值，其他工作表保留。清除商品维度表的筛选条件，默认显示全部记录，可重新筛选。</li>
     <li>文件在当前浏览器本地处理，原文件不修改。切换工具保留文件及人工填写；替换来源文件会清除本次填写，刷新后需重新上传和填写。每次成功下载的文件名附带递增的 V 版本号。</li>
@@ -45,9 +45,9 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="product-dimension-enrichment.js?v=dimension-enrichment-20261114"></script>
-<script src="product-dimension-core.js?v=dimension-enrichment-20261114"></script>
-<script src="product-dimension-export.js?v=dimension-enrichment-20261114"></script>
-<script src="product-dimension-tool.js?v=dimension-enrichment-20261114"></script>
+<script src="product-dimension-enrichment.js?v=dimension-allow-blanks-20261116"></script>
+<script src="product-dimension-core.js?v=dimension-allow-blanks-20261116"></script>
+<script src="product-dimension-export.js?v=dimension-allow-blanks-20261116"></script>
+<script src="product-dimension-tool.js?v=dimension-allow-blanks-20261116"></script>
 </body>
 </html>

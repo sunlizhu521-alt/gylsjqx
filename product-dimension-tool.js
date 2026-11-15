@@ -45,27 +45,26 @@
     const focused=document.activeElement?.closest('#reviews input'),focusId=focused?.id;
     const selection=focused ? [focused.selectionStart,focused.selectionEnd] : null;
     $('reviews').replaceChildren();
-    const rows=result.rows.filter(row=>row.isNew),pending=result.pendingFields || [],pendingCodes=new Set(pending.map(item=>item.code));
+    const rows=result.rows.filter(row=>row.isNew),pending=result.pendingFields || [],pendingCodes=new Set(pending.map(item=>item.code)),invalid=C.validateResult(analysis,result);
     const rowIndices=new Map(rows.map((row,index)=>[row.code,index]));
     const imported=new Map(analysis.added.map(row=>[row.code,row.values]));
     $('review-panel').hidden=!rows.length;
-    $('pending-counts').textContent=pending.length ? `待补全 ${pendingCodes.size} 个商品、${pending.length} 个字段。请补齐后下载。` : '11列必填校验全部通过，可以下载。';
+    $('pending-counts').textContent=pending.length ? `待补充 ${pendingCodes.size} 个商品、${pending.length} 个字段。空白可直接下载；已填写的异常内容请核对或清空。` : '字段校验通过，可以下载。';
     const visible=rows.filter(row=>$('review-filter').value==='all'||pendingCodes.has(row.code));
     const visibleCodes=new Set(visible.map(row=>row.code));
     for(const code of expanded)if(!visibleCodes.has(code))expanded.delete(code);
     if(!visible.length){const p=document.createElement('p');p.className='muted';p.textContent='没有待补全商品。可切换到“全部新增商品”核对自动填写结果。';$('reviews').append(p);}
     for(const [index,row] of visible.entries()) {
-      const missing=pending.filter(item=>item.code===row.code),missingFields=new Set(missing.map(item=>item.field));
+      const missing=pending.filter(item=>item.code===row.code),missingFields=new Set(missing.map(item=>item.field)),invalidFields=new Set(invalid.filter(item=>item.code===row.code).map(item=>item.field));
       const card=document.createElement('details');card.className='review';card.dataset.code=row.code;
       card.open=expanded.has(row.code)||(!expanded.size&&index===0);
-      const summary=document.createElement('summary');summary.textContent=`${row.code} · ${displayValue(row,'金蝶名称')}（${missing.length?`待补 ${missing.length} 项`:'必填已齐全'}）`;card.append(summary);
+      const summary=document.createElement('summary');summary.textContent=`${row.code} · ${displayValue(row,'金蝶名称')}（${missing.length?`待补 ${missing.length} 项`:'已补全'}）`;card.append(summary);
       const provenance=document.createElement('p');provenance.className='muted';provenance.textContent=`物料表：${analysis.materialSheet}第${row.sourceRow}行`;card.append(provenance);
       const grid=document.createElement('div');grid.className='editor-grid';
       const editingFields=C.EDITABLE_HEADERS.map((header,fieldIndex)=>({header,fieldIndex}));
       editingFields.sort((a,b)=>Number(missingFields.has(b.header))-Number(missingFields.has(a.header)));
       for(const {fieldIndex,header} of editingFields) {
         const meta=row.fields?.[header] || {},wrap=document.createElement('div');wrap.className='editor-field';
-        const required=C.REQUIRED_HEADERS.includes(header)||header==='金蝶创建时间';
         const label=document.createElement('label'),input=document.createElement('input');
         input.type='text';input.id=`edit-${rowIndices.get(row.code)}-${fieldIndex}`;input.dataset.code=row.code;input.dataset.field=header;
         let shown=displayValue(row,header);
@@ -73,13 +72,12 @@
           const original=imported.get(row.code)?.[analysis.headers.indexOf(header)];
           shown=typeof original==='number'?XLSX.SSF.format('yyyy-mm-dd',original,{date1904:analysis.date1904}):original??shown;
         }
-        input.autocomplete='off';input.value=String(Object.hasOwn(overrides[row.code]||{},header)?overrides[row.code][header]:shown);input.setAttribute('aria-invalid',String(missingFields.has(header)));
-        if(required)input.setAttribute('aria-required','true');
+        input.autocomplete='off';input.value=String(Object.hasOwn(overrides[row.code]||{},header)?overrides[row.code][header]:shown);input.setAttribute('aria-invalid',String(invalidFields.has(header)));
         if(priceFields.includes(header))input.inputMode='decimal';
-        label.htmlFor=input.id;label.textContent=header+(required?' *':'');
+        label.htmlFor=input.id;label.textContent=header;
         const suggestions=document.createElement('datalist');suggestions.id=input.id+'-options';input.setAttribute('list',suggestions.id);
         for(const candidate of (meta.candidates || []).slice(0,200)) {const option=document.createElement('option');option.value=String(candidate.value);suggestions.append(option);}
-        const note=document.createElement('small');note.id=input.id+'-note';note.className=missingFields.has(header)?'required-note':'muted';input.setAttribute('aria-describedby',note.id);
+        const note=document.createElement('small');note.id=input.id+'-note';note.className=invalidFields.has(header)?'required-note':'muted';input.setAttribute('aria-describedby',note.id);
         const reason=missing.find(item=>item.field===header)?.reason || meta.reason || '';
         const candidates=(meta.candidates || []).slice(0,4).map(item=>`${item.value}（${sourceLabel(item.sourceRows)||'历史候选'}）`).join('；');
         const origin=header==='金蝶创建时间'?`${analysis.materialSheet}物料表原第${row.sourceRow}行`:sourceLabel(meta.sourceRows);
@@ -127,7 +125,7 @@
     $('enrichment-counts').textContent=`自动补全 ${auto} 个字段；人工填写 ${manual} 个字段；待确认 ${unknown} 个字段；缺价 ${emptyPrices} 项。`;
     $('preview-note').textContent=analysis.added.length ? `显示前 ${Math.min(100,analysis.added.length)} 个新增编码；下载包含全部保留商品和新增商品。` : '物料表中的编码均已存在，无需追加。';
     showReviews();
-    $('status').textContent=result.canExport?'11列必填校验通过，可下载。':`还有 ${result.pendingRows} 个商品需要补全，请填写下方必填项。`;
+    $('status').textContent=result.canExport?'可下载，未确认的信息保留空白。':'存在异常内容，请核对下方标记字段。';
     controls();
   }
   $('review-filter').addEventListener('change',()=>{if(result)showReviews();});

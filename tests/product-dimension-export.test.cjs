@@ -107,15 +107,16 @@ test('export rejects invalid resolution and duplicate keys',async()=>{
   await assert.rejects(()=>Export(source,analysis,{...result,rows:[result.rows[1],result.rows[0],...result.rows.slice(2)]}),/顺序/);
 });
 
-test('export revalidates all eleven mandatory fields despite forged canExport and isNew flags',async()=>{
+test('export revalidates nonempty invalid classifications and derived fields despite forged completion flags',async()=>{
   const {source,analysis,result}=await fixture();
   for(const field of REQUIRED){
     const tampered=structuredClone(result),row=tampered.rows.find(row=>row.code==='0003'),col=D.indexOf(field);
-    row.values[col]='';row.cells[col]={t:'s',v:''};row.isNew=false;tampered.canExport=true;tampered.issues=[];
+    const value=Object.hasOwn(MANUAL,field)?'待确认':'';row.values[col]=value;row.cells[col]={t:'s',v:value};row.isNew=false;tampered.canExport=true;tampered.issues=[];
     await assert.rejects(()=>Export(source,analysis,tampered),/校验未通过/,field+' must be checked again at download');
   }
-  const incomplete=Core.resolve(analysis);assert.equal(incomplete.canExport,false);
-  await assert.rejects(()=>Export(source,analysis,{...incomplete,canExport:true,issues:[]}),/校验未通过/);
+  const incomplete=Core.resolve(analysis);assert.equal(incomplete.canExport,true);
+  const sheet=X.read(await Export(source,analysis,incomplete)).Sheets.维度原表;
+  for(const field of Object.keys(MANUAL))assert.equal(sheet[X.utils.encode_col(D.indexOf(field))+'5']?.v??'','',field+' remains blank');
 });
 
 test('added-code membership controls export and cannot be bypassed by changing row.isNew',async()=>{
@@ -149,4 +150,32 @@ test('optional pending fields and blank prices are allowed; manual zero prices s
   for(const [col,value] of [['J',0],['K',12.5],['L',0]]){assert.equal(sheet[col+'5'].t,'n');assert.equal(sheet[col+'5'].v,value);}
   const invalid=structuredClone(prices),row=invalid.rows.find(row=>row.code==='0003');row.values[D.indexOf('结算价')]=Infinity;
   await assert.rejects(()=>Export(source,analysis,invalid),/校验未通过/);
+});
+
+test('blank new classifications and creation dates round-trip without changing historical contents',async()=>{
+ const {source,analysis}=await fixture(),overrides={'0003':{...Object.fromEntries(Object.keys(MANUAL).map(h=>[h,'   '])),金蝶创建时间:'   '}};
+ const result=Core.resolve(analysis,overrides);assert.equal(result.canExport,true);assert(result.pendingFields.length>0);
+ const bytes=await Export(source,analysis,result),book=X.read(bytes,{cellNF:true,cellStyles:true}),sheet=book.Sheets.维度原表;
+ for(const field of [...Object.keys(MANUAL),'金蝶创建时间','上架时间（月）','生命周期','型号','品牌','国家','是否正常备货']){
+  const cell=sheet[X.utils.encode_col(D.indexOf(field))+'5'];assert.equal(cell?.v??'','',field+' exports empty');assert.notEqual(cell?.v,'待确认');
+ }
+ assert.equal(sheet.U5.v,46340);assert.equal(sheet.A5.v,'0003');assert.equal(sheet.C5.v,'0000');
+ assert.deepEqual([sheet.G2.v,sheet.G3.v,sheet.G4.v],[2,'手工填写','文字缓存']);
+ assert.deepEqual([sheet.E2.v,sheet.U2.v,sheet.V2.v,sheet.W2.v],['原日期',46331,'人工月龄','人工阶段']);
+ assert.equal(sheet.G3.c[0].t,'保留原第四行批注');
+ const before=await Zip.loadAsync(source),after=await Zip.loadAsync(bytes);
+ for(const path of ['xl/worksheets/sheet2.xml','custom/keep.bin'])assert.deepEqual(await after.file(path).async('uint8array'),await before.file(path).async('uint8array'));
+ for(const [field,value] of [['上架时间（月）','1个月'],['生命周期','新品期'],['当前日期','']]){
+  const invalid=structuredClone(result),row=invalid.rows.at(-1);row.values[D.indexOf(field)]=value;invalid.canExport=true;
+  await assert.rejects(()=>Export(source,analysis,invalid),/校验未通过/,field+' must not be fabricated for an unknown creation date');
+ }
+});
+test('automatic SKU conflicts export blank without choosing a candidate or changing source history',async()=>{
+ const history=(code,line)=>D.map(h=>({物料编码:code,领星SKU:'SHARED',SKU:'SHARED',金蝶名称:code,金蝶创建时间:'2026-01-01',物料分组:'共享组',...MANUAL,销售产品线:line}[h]??''));
+ const dimension=makeBook(D,[history('A','候选甲'),history('B','候选乙')]),source=X.write(dimension,{type:'buffer',bookType:'xlsx'});
+ const material=makeBook(M,[['NEW','SHARED','SHARED','新增','2026-01-01','共享组']],'物料');
+ const analysis=Core.analyze(dimension,material,{asOfDate:'2026-11-14'}),result=Core.resolve(analysis),newRow=result.rows.at(-1);
+ assert.equal(result.canExport,true);assert.deepEqual(newRow.fields.销售产品线.candidates.map(c=>c.value),['候选甲','候选乙']);
+ const sheet=X.read(await Export(source,analysis,result)).Sheets.维度原表;
+ assert.equal(sheet.G4?.v??'','');assert.equal(sheet.G2.v,'候选甲');assert.equal(sheet.G3.v,'候选乙');assert.equal(sheet.A4.v,'NEW');
 });

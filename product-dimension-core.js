@@ -174,7 +174,7 @@
     const blocked = analysis.issues.some(item => item.severity === 'error');
     const enriched = !blocked ? Enrichment.enrich(analysis,rows,overrides) : {rows:[],pendingFields:[],pendingRows:0};
     const result = {...enriched,unresolved:[],counts:{...analysis.counts,resolvedRows:enriched.rows.length,pendingRows:enriched.pendingRows},issues:analysis.issues,canExport:false};
-    result.canExport=!blocked&&!enriched.pendingFields.length&&!Enrichment.validateResult(analysis,result).length;
+    result.canExport=!blocked&&!Enrichment.validateResult(analysis,result).length;
     return result;
   }
   return {MAPPING, analyze, resolve,REQUIRED_HEADERS:Enrichment.REQUIRED_HEADERS,EDITABLE_HEADERS:Enrichment.EDITABLE_HEADERS,FIELD_HEADERS:Enrichment.FIELD_HEADERS,validateResult:Enrichment.validateResult};

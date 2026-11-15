@@ -139,7 +139,7 @@ function assertOutput(bytes) {
     const original=dimensionFixture(),material=materialFixture();
     await upload(page,'dimension',original,'合成维度.xlsx');assert(await page.locator('#download').isDisabled());
     await upload(page,'material',material,'合成物料.xlsx');
-    assert(await page.locator('#download').isDisabled(),'新增待补资料未齐全不能下载');
+    assert(await page.locator('#download').isEnabled(),'未确认字段留空也允许下载');
     assert.equal(await page.locator('#review-filter').inputValue(),'pending');
     assert.match(await page.locator('#pending-counts').innerText(),/1/);
     assert.equal(await page.locator('#preview th').count(),24,'完整24列预览');
@@ -148,14 +148,17 @@ function assertOutput(bytes) {
     const auto=await previewRow(page,'0001'),returned=await previewRow(page,'RETURN');
     assert.equal(auto[6],'轮椅产品线');assert.equal(auto[7],'测试1系列');assert.equal(auto[8],'全新品');
     assert.equal(returned[8],'全新换包装-九大产品线');assert.equal(returned[15],'二手商品');assert.equal(returned[16],'RE-MD-BASE3');
-    assert.match((await previewRow(page,'NEW'))[6],/^$|待确认/,'精确SKU冲突不得被宽泛同组产品线覆盖');
+    assert.equal((await previewRow(page,'NEW'))[6],'','精确SKU冲突保留空白，不使用宽泛同组产品线');
+    assert.equal(await field(page,'NEW','销售产品线').getAttribute('aria-invalid'),'false','空白不是错误');
+    const initial=await download(page,page,1),initialBook=X.read(initial),initialRows=X.utils.sheet_to_json(initialBook.Sheets[initialBook.SheetNames[0]],{header:1,defval:''});
+    assert.equal(initialRows.find(row=>row[0]==='NEW')[6],'','下载不写待确认或零');await preserved(original,initial);
     await fillRequired(page,'NEW');await ready(page);
     for(const name of computed){
       assert.equal(await field(page,'0001',name).count(),0,name+'不可编辑');
       const output=page.locator(`#reviews output[data-code="0001"][data-field=${JSON.stringify(name)}]`);assert.equal(await output.count(),1);assert(await output.textContent(),name+'只读结果');
     }
     for(const name of editableRequired){
-      const prior=await field(page,'0001',name).inputValue();await setField(page,'0001',name,'');assert(await page.locator('#download').isDisabled(),name+'空白阻断');
+      const prior=await field(page,'0001',name).inputValue();await setField(page,'0001',name,'');assert(await page.locator('#download').isEnabled(),name+'空白允许下载');
       await setField(page,'0001',name,'待确认');assert(await page.locator('#download').isDisabled(),name+'占位值阻断');
       if(name==='销售区域'){await setField(page,'0001',name,'无法区分');assert(await page.locator('#download').isDisabled(),'销售区域不能填无法区分');}
       await setField(page,'0001',name,prior);await ready(page,'恢复'+name+'='+prior);
@@ -163,18 +166,18 @@ function assertOutput(bytes) {
     await setField(page,'NEW','销售系列','手工指定系列');await setField(page,'NEW','金蝶创建时间','2026-11-01');await ready(page);
     assert.equal(await field(page,'NEW','销售系列').inputValue(),'手工指定系列','重算不覆盖手工值');
     assert.equal((await previewRow(page,'NEW'))[7],'手工指定系列');
-    await upload(page,'material',material,'替换物料.xlsx');assert(await page.locator('#download').isDisabled(),'替换物料清除旧补录');
+    await upload(page,'material',material,'替换物料.xlsx');assert(await page.locator('#download').isEnabled(),'替换物料清除旧补录后允许留空下载');
     await allReviews(page);assert.notEqual(await field(page,'NEW','销售系列').inputValue(),'手工指定系列');
     await fillRequired(page,'NEW');await setField(page,'NEW','销售系列','手工指定系列');await ready(page);
-    await upload(page,'dimension',original,'合成维度.xlsx');assert(await page.locator('#download').isDisabled(),'替换维度清除旧补录');
+    await upload(page,'dimension',original,'合成维度.xlsx');assert(await page.locator('#download').isEnabled(),'替换维度清除旧补录后允许留空下载');
     await fillRequired(page,'NEW');await setField(page,'NEW','销售系列','手工指定系列');await ready(page);
     await page.locator('#issue-title').click();assert.match(await page.locator('#issues').innerText(),/C/,'首行冲突仍提示来源');
-    const bytes=await download(page,page,1);assertOutput(bytes);await preserved(original,bytes);
+    const bytes=await download(page,page,2);assertOutput(bytes);await preserved(original,bytes);
     if(process.env.QA_SCREENSHOT)await page.screenshot({path:process.env.QA_SCREENSHOT,fullPage:true});
     await page.setViewportSize({width:390,height:844});const dimensions=await page.locator('body').evaluate(body=>({width:body.clientWidth,scroll:body.scrollWidth}));assert(dimensions.scroll<=dimensions.width+2,'窄屏仅表格横向滚动');
     if(process.env.QA_MOBILE_SCREENSHOT)await page.screenshot({path:process.env.QA_MOBILE_SCREENSHOT,fullPage:true});
     await page.setViewportSize({width:1440,height:1000});
-    await upload(page,'dimension',bytes,'合成维度_V1.xlsx');await ready(page);assertOutput(await download(page,page,2));
+    await upload(page,'dimension',bytes,'合成维度_V1.xlsx');await ready(page);assertOutput(await download(page,page,3));
     assert.equal(await page.locator('#reviews input').count(),0,'重新上传已补全结果无需重复补录');
     for(const slot of ['material','dimension']){
       await upload(page,slot,Buffer.from('broken'),'损坏.xlsx');assert(await page.locator('#download').isDisabled());assert.match(await page.locator('#status').innerText(),/失败|异常|有效|格式/);
@@ -191,25 +194,25 @@ function assertOutput(bytes) {
     await upload(page,'material',materialFixture([materialRow('FUTURE','未来创建国内','集团','M-BASE1','轮椅组','2026/12/01')]),'未来日期.xlsx');
     assert(await page.locator('#download').isDisabled(),'未来创建日期不得计算月龄');await allReviews(page);
     assert.match(await page.locator('#pending-counts').innerText(),/[1-9]/);await setField(page,'FUTURE','金蝶创建时间','日期不详');assert(await page.locator('#download').isDisabled());
-    await setField(page,'FUTURE','金蝶创建时间','');assert(await page.locator('#download').isDisabled());
+    await setField(page,'FUTURE','金蝶创建时间','');assert(await page.locator('#download').isEnabled());assert.deepEqual((await previewRow(page,'FUTURE')).slice(21,23),['',''],'清空日期时派生字段一起留空');
     await setField(page,'FUTURE','金蝶创建时间','2026-04-14');await ready(page);const repaired=await previewRow(page,'FUTURE');assert.equal(repaired[21],'7个月');assert.equal(repaired[22],'稳定期');
     await upload(page,'material',material,'合成物料.xlsx');await ready(page);
     await page.evaluate(()=>{window.__realDimensionExport=window.ProductDimensionExport;window.ProductDimensionExport=async()=>{throw Error('测试生成失败');};});
     await page.locator('#download').click();await page.locator('#status').filter({hasText:'测试生成失败'}).waitFor();
-    await page.evaluate(()=>window.ProductDimensionExport=window.__realDimensionExport);await download(page,page,3);
-    await page.reload({waitUntil:'networkidle'});await upload(page,'dimension',bytes,'合成维度.xlsx');await upload(page,'material',material,'合成物料.xlsx');await ready(page);await download(page,page,4);
+    await page.evaluate(()=>window.ProductDimensionExport=window.__realDimensionExport);await download(page,page,4);
+    await page.reload({waitUntil:'networkidle'});await upload(page,'dimension',bytes,'合成维度.xlsx');await upload(page,'material',material,'合成物料.xlsx');await ready(page);await download(page,page,5);
     await page.locator('#clear').click();assert(await page.locator('#download').isDisabled());assert.equal(await page.locator('#dimensionFile').inputValue(),'');assert.equal(await page.locator('#materialFile').inputValue(),'');
     await page.goto(new URL('index.html',base).href,{waitUntil:'networkidle'});await page.locator('button[data-tool="product-dimension"]').click();
     const frame=page.frameLocator('iframe[data-tool="product-dimension"]');await upload(frame,'dimension',bytes,'合成维度.xlsx');await upload(frame,'material',material,'合成物料.xlsx');await ready(frame);
-    await page.locator('button[data-tool="funds"]').click();await page.locator('button[data-tool="product-dimension"]').click();await ready(frame);assert.match(await frame.locator('#dimensionReference').innerText(),/合成维度.xlsx/);assertOutput(await download(page,frame,5));
+    await page.locator('button[data-tool="funds"]').click();await page.locator('button[data-tool="product-dimension"]').click();await ready(frame);assert.match(await frame.locator('#dimensionReference').innerText(),/合成维度.xlsx/);assertOutput(await download(page,frame,6));
     if(process.env.QA_DIMENSION_FILE&&process.env.QA_MATERIAL_FILE){
       await page.goto(new URL('product-dimension.html',base).href,{waitUntil:'networkidle'});
       await upload(page,'dimension',fs.readFileSync(process.env.QA_DIMENSION_FILE),path.basename(process.env.QA_DIMENSION_FILE));await upload(page,'material',fs.readFileSync(process.env.QA_MATERIAL_FILE),path.basename(process.env.QA_MATERIAL_FILE));
-      assert(await page.locator('#download').isDisabled(),'真实新增商品未完成手工核对前不能下载');
+      assert(await page.locator('#download').isEnabled(),'真实新增商品允许未确认信息留空下载');
       assert.match(await page.locator('#counts').innerText(),/43/);assert.match(await page.locator('#counts').innerText(),/23,718/);assert.match(await page.locator('#pending-counts').innerText(),/[1-9]/);
       assert.equal(await page.locator('#preview tbody tr').count(),43);
       const codes=await page.locator('#preview tbody tr').evaluateAll(rows=>rows.map(row=>row.cells[0].textContent));assert.equal(new Set(codes).size,43);assert(codes.includes('000000001'));
     }
-    assert.deepEqual(errors,[]);console.log('PASS: 商品维度自动补全、退回学习、11必填/手工补录、覆盖保留与替换清理、未来日期、24列预览、前导零/零值、只追加、导出回读、辅助表保留、公式缓存、版本/重复导入、布局及首页切换'+(process.env.QA_DIMENSION_FILE?'、真实样表本地验收':''));
+    assert.deepEqual(errors,[]);console.log('PASS: 商品维度自动补全、退回学习、空白可下载/非空异常校验/手工补录、覆盖保留与替换清理、未来日期、24列预览、前导零/零值、只追加、导出回读、辅助表保留、公式缓存、版本/重复导入、布局及首页切换'+(process.env.QA_DIMENSION_FILE?'、真实样表本地验收':''));
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

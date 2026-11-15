@@ -235,17 +235,17 @@
           set(field,v,detail('manual',text(v)===''?'已人工清空，不自动覆盖':'人工填写优先'));
         } else {
           const selected=automatic(analysis,row.values,field,manual);
-          if(selected&&(!PRICES.includes(field)||!selected.conflict))set(field,selected.value,selected.field);
-          else set(field,PRICES.includes(field)?'':'待确认',selected?.field||detail(PRICES.includes(field)?'empty':'pending',PRICES.includes(field)?'新增编码没有可靠价格来源，留空可下载，可人工填写':'没有无冲突的历史依据，需确认'));
+          if(selected&&(!PRICES.includes(field)||!selected.conflict))set(field,missing(selected.value)?'':selected.value,selected.field);
+          else set(field,'',selected?.field||detail(PRICES.includes(field)?'empty':'pending',PRICES.includes(field)?'新增编码没有可靠价格来源，留空可下载，可人工填写':'没有无冲突的历史依据，保留空白，可下载'));
         }
       }
       const rawCreated=own(manual,'金蝶创建时间')?manual['金蝶创建时间']:row.values[headers.indexOf('金蝶创建时间')];
       const created=dateValue(rawCreated,analysis.date1904),creationMethod=own(manual,'金蝶创建时间')?'manual':'source';
       if(!created||!asOf||created.serial>asOf.serial) {
         const reason=!created?'创建日期缺失或无法识别，请填写有效日期':'创建日期晚于处理日期，请核对';
-        set('金蝶创建时间',rawCreated??'',detail(creationMethod,reason));addPending(row.code,'金蝶创建时间',reason);
-        set('上架时间（月）','待确认',detail('pending','需先补全有效创建日期'));
-        set('生命周期','待确认',detail('pending','需先补全有效创建日期'));
+        set('金蝶创建时间',text(rawCreated)===''?'':rawCreated,detail(creationMethod,reason));addPending(row.code,'金蝶创建时间',reason);
+        set('上架时间（月）','',detail('pending','缺少有效创建日期，暂留空'));
+        set('生命周期','',detail('pending','缺少有效创建日期，暂留空'));
       } else {
         set('金蝶创建时间',created.serial,detail(creationMethod,'按目标工作簿日期系统保存日期'));
         row.cells[headers.indexOf('金蝶创建时间')].z='yyyy-mm-dd';
@@ -254,7 +254,7 @@
         set('生命周期',computed.stage,detail('derived','完整月数≤6新品期，≤24稳定期，其余衰弱期'));
       }
       if(asOf){set('当前日期',asOf.serial,detail('derived','北京时间处理日期 '+analysis.asOfDate));row.cells[headers.indexOf('当前日期')].z='yyyy-mm-dd';}
-      for(const field of REQUIRED_CLASS)if(missing(row.values[headers.indexOf(field)]))addPending(row.code,field,fields[field]?.reason||'必填字段待补',fields[field]?.candidates||[]);
+      for(const field of REQUIRED_CLASS)if(missing(row.values[headers.indexOf(field)]))addPending(row.code,field,fields[field]?.reason||'信息待补，可留空下载',fields[field]?.candidates||[]);
       for(const field of [...REQUIRED_CLASS,'品牌','国家','是否正常备货'])if(numericCategory(row.values[headers.indexOf(field)])) {
         fields[field].reason='分类字段不能填写纯数值，请填写实际分类';
         addPending(row.code,field,fields[field].reason);
@@ -274,14 +274,14 @@
       const get=h=>row.values[headers.indexOf(h)];
       if(get('物料编码')!==row.code){push(row.code,'物料编码','输出编码与原始分组不一致');}
       if(!newCodes.has(row.code))continue;
-      for(const field of REQUIRED_CLASS)if(typeof get(field)!=='string'||missing(get(field))||numericCategory(get(field)))push(row.code,field,'必填字段为空、待确认或为无效纯数值');
+      for(const field of REQUIRED_CLASS)if(typeof get(field)!=='string'||text(get(field))!==''&&(missing(get(field))||numericCategory(get(field))))push(row.code,field,'分类内容无效，请填写明确内容或留空');
       for(const field of ['品牌','国家','是否正常备货'])if(numericCategory(get(field)))push(row.code,field,'分类字段不能填写纯数值');
       for(const field of PRICES)if(get(field)!==''&&get(field)!=null&&(typeof get(field)!=='number'||!Number.isFinite(get(field))))push(row.code,field,'价格必须是有限数值或空白');
       const created=typeof get('金蝶创建时间')==='number'?dateValue(get('金蝶创建时间'),analysis.date1904):null;
-      if(!created||!asOf||created.serial>asOf.serial||created.serial!==get('金蝶创建时间'))push(row.code,'金蝶创建时间','创建日期必须为有效、非未来的Excel日期数值');
+      if(text(get('金蝶创建时间'))!==''&&(!created||!asOf||created.serial>asOf.serial||created.serial!==get('金蝶创建时间')))push(row.code,'金蝶创建时间','创建日期必须为有效、非未来的Excel日期数值，也可留空');
       if(!asOf||typeof get('当前日期')!=='number'||get('当前日期')!==asOf.serial)push(row.code,'当前日期','当前日期与处理日期不一致');
       if(created&&asOf&&created.serial<=asOf.serial){const computed=age(created,asOf);if(get('上架时间（月）')!==computed.age)push(row.code,'上架时间（月）','上架月龄与完整月数不一致');if(get('生命周期')!==computed.stage)push(row.code,'生命周期','生命周期与完整月数不一致');}
-      else {if(missing(get('上架时间（月）')))push(row.code,'上架时间（月）','缺少有效月龄');if(missing(get('生命周期')))push(row.code,'生命周期','缺少有效生命周期');}
+      else {if(text(get('上架时间（月）'))!=='')push(row.code,'上架时间（月）','缺少有效创建日期时月龄须留空');if(text(get('生命周期'))!=='')push(row.code,'生命周期','缺少有效创建日期时生命周期须留空');}
     }
     for(const code of expected.keys())if(!seen.has(code))push(code,'物料编码','输出缺少来源记录');
     for(const problem of analysis.issues.filter(i=>i.severity==='error'))push('','',problem.message);
