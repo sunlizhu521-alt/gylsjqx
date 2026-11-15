@@ -1,7 +1,7 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'),require('./funds-total-validation.js'));else root.FundsCore=factory(root.XLSX,root.FundsTotalValidation);})(typeof globalThis!=='undefined'?globalThis:this,function(X,FundsTotalValidation){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间','预估时间','开票时间','开票金额','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','申请日期','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
+const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','本次申请付款金额','摘要','应付时间','预估时间','开票时间','开票金额','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','申请日期','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
 const ADDED_HEADERS=['是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号'];
 const SUPPLEMENT_HEADERS=['对公付款0A流程号','付款主体','单据号【财务应付单】'];
 const NORMAL_HIDDEN_HEADERS=['OA合同编号','合同总金额','是否对账'];

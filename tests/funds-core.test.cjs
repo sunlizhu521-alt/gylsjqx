@@ -48,7 +48,7 @@ test('孙立柱以对账时间替代开票时间时忽略缺列表头，输出�
   const sheet=X.utils.aoa_to_sheet([LH,rows[2]]);sheet.E1.v='对账时间';sheet.E2={t:'s',v:'2026-11-01'};
   delete ledger.Sheets['对账明细-孙立柱'];ledger.Sheets[name]=sheet;ledger.SheetNames=ledger.SheetNames.map(n=>n==='对账明细-孙立柱'?name:n);
   const before=JSON.stringify(i),r=C.build(i),row=r.normalRows.find(row=>row[1].v==='孙立柱');
-  assert.equal(r.issues.some(q=>q.id==='headers:'+name),false);assert.equal(row[C.NORMAL_HEADERS.indexOf('开票时间')].v,'');assert.equal(row[6].v,100);assert.equal(JSON.stringify(i),before);
+  assert.equal(r.issues.some(q=>q.id==='headers:'+name),false);assert.equal(row[C.NORMAL_HEADERS.indexOf('开票时间')].v,'');assert.equal(row[C.NORMAL_HEADERS.indexOf('本次申请付款金额')].v,100);assert.equal(JSON.stringify(i),before);
  }
 });
 test('忽略孙立柱改名字段不放过其他缺列；其他人员仍检查开票时间',()=>{
@@ -86,7 +86,7 @@ test('新旧申请金额表头同时出现仍提示重复字段，禁止静默�
  assert.throws(()=>C.build(input),/字段“申请付款金额”重复/);
 });
 test('正常付款七个常用字段相邻，改名后金额日期与公式仍取同一来源',()=>{
- const i=fixture(),r=C.build(i),expected=['跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间'];
+ const i=fixture(),r=C.build(i),expected=['跟单员','供应商名称','付款主体','对公付款0A流程号','本次申请付款金额','摘要','应付时间'];
  assert.deepEqual(r.normalHeaders.slice(1,8),expected);assert.equal(r.normalHeaders.length,27);assert(!r.normalHeaders.includes('单据号【财务应付单】'));assert(r.negotiated.headers.includes('单据号【财务应付单】'),'原谈判表已有的财务单列保留');assert.equal(r.normalHeaders[0],'登记月份');assert.deepEqual(r.normalHeaders.slice(8,11),['预估时间','开票时间','开票金额']);
  const row=Object.fromEntries(r.normalHeaders.map((h,c)=>[h,r.normalRows[0][c]]));
  assert.equal(row['摘要'].v,'九月货款');assert.equal(row['本次申请付款金额'].v,100);assert.equal(row['本次申请付款金额'].t,'n');assert.equal(row['本次申请付款金额'].z,'#,##0.00');
@@ -1158,7 +1158,7 @@ test('原空OA不会因候选数量或旧流程内容而补号，零金额已结
   const i=fixture();set(i,'ledger','对公付款0A流程号',3,'');set(i,'ledger','申请付款金额',3,0);set(i,'ledger','已付款金额',3,0);set(i,'applications','本次申请付款金额',3,0);set(i,'oa','付款金额',3,candidates?0:9);
   X.utils.sheet_add_aoa(i.ledger.book.Sheets['对账明细-李奇'],[[...C.FLOW_FIELDS,'流程编号'],[],['旧节点','旧审批人','归档','旧申请人','MDST-DGFK20990101999']],{origin:'R1'});
   if(candidates===2)X.utils.sheet_add_aoa(i.oa.book.Sheets.Sheet0,[['MDST-DGFK20261001999','出纳','候选人','归档','申请人','测试供应商乙',0]],{origin:-1});
-  const before=JSON.stringify(i),r=C.build(i),row=r.normalRows[0];assert.equal(row[4].v,'未提交OA');assert.equal(row[6].v,0);assert.equal(row[C.NORMAL_HEADERS.indexOf('是否结清')].v,'是');assert.equal(row[C.NORMAL_HEADERS.indexOf('剩余金额')].v,0);assert.equal(row[C.NORMAL_HEADERS.indexOf('剩余金额')].f,undefined);assert.equal(row[C.NORMAL_HEADERS.indexOf('是否提交付款申请单')].v,'已提交');assert.equal(row[C.NORMAL_HEADERS.indexOf('是否对账')].v,'未对账');assert(r.highlights.normalRows.includes(2));
+  const before=JSON.stringify(i),r=C.build(i),row=r.normalRows[0];assert.equal(row[4].v,'未提交OA');assert.equal(row[C.NORMAL_HEADERS.indexOf('本次申请付款金额')].v,0);assert.equal(row[C.NORMAL_HEADERS.indexOf('是否结清')].v,'是');assert.equal(row[C.NORMAL_HEADERS.indexOf('剩余金额')].v,0);assert.equal(row[C.NORMAL_HEADERS.indexOf('剩余金额')].f,undefined);assert.equal(row[C.NORMAL_HEADERS.indexOf('是否提交付款申请单')].v,'已提交');assert.equal(row[C.NORMAL_HEADERS.indexOf('是否对账')].v,'未对账');assert(r.highlights.normalRows.includes(2));
   for(const h of [...C.FLOW_FIELDS,'流程编号'])assert.equal(row[C.NORMAL_HEADERS.indexOf(h)].v,'');
   assert(!r.issues.some(q=>q.id==='oa:对账明细-李奇!3'));assert(!r.reviewRows.some(row=>row[0].v==='正常付款'&&/OA号复核|OA名称差异/.test(row[5].v)));assert.equal(JSON.stringify(i),before);
  }
@@ -1196,7 +1196,7 @@ test('李奇合同口径保留原付款情况，不按申请金额判断结清�
   const name='对账明细-李奇'+suffix;
   if(suffix){b.Sheets[name]=source;delete b.Sheets['对账明细-李奇'];b.SheetNames=b.SheetNames.map(n=>n==='对账明细-李奇'?name:n);}
   const before=JSON.stringify(i),r=C.build(i,{['settlement:'+name+'!3']:['recalculate']}),row=r.normalRows[0];
-  assert.equal(row[1].v,'李奇');assert.equal(row[6].v,100);assert.equal(row[C.NORMAL_HEADERS.indexOf('合同总金额')].v,1000);
+  assert.equal(row[1].v,'李奇');assert.equal(row[C.NORMAL_HEADERS.indexOf('本次申请付款金额')].v,100);assert.equal(row[C.NORMAL_HEADERS.indexOf('合同总金额')].v,1000);
   assert.deepEqual(row.slice(C.NORMAL_HEADERS.indexOf('已付金额'),C.NORMAL_HEADERS.indexOf('剩余金额')+1).map(c=>c.v),[300,'否',700]);
   assert(row.slice(C.NORMAL_HEADERS.indexOf('已付金额'),C.NORMAL_HEADERS.indexOf('剩余金额')+1).every(c=>!c.f),'源公式只取有效结果，不能把源坐标搬到输出');
   assert(!r.issues.some(q=>['amount','settlement'].includes(q.kind)));
