@@ -564,10 +564,12 @@ window.FundsExport = async function(sourceBytes, result) {
         if(!Number.isInteger(r)||!Number.isInteger(c)||r<0||c<0||r>1048575||c>16383)continue;
         if(!applicationNoteCells.has(XLSX.utils.encode_cell({r,c})))continue;
         const style=new Map((shape.getAttribute('style')||'').split(';').filter(p=>p.includes(':')).map(p=>{const at=p.indexOf(':');return [p.slice(0,at).trim(),p.slice(at+1).trim()];}));
-        const dimension=(key,fallback)=>{const m=/^([\d.]+)(pt|px)$/i.exec(style.get(key)||'');return m&&Number(m[1])>0?Number(m[1])*(m[2].toLowerCase()==='pt'?4/3:1):fallback;};
-        const note=applicationNoteCells.get(XLSX.utils.encode_cell({r,c})),width=Math.max(288,dimension('width',288)),fontPixels=note.fontSize*4/3;
-        const lineCount=note.text.split(/\r\n|\r|\n/).reduce((count,line)=>count+Math.max(1,Math.ceil([...line].reduce((sum,char)=>sum+(/[\u0000-\u00ff]/.test(char)?fontPixels*.55:fontPixels),0)/(width-24))),0);
-        const height=Math.max(dimension('height',128),lineCount*(fontPixels+5)+20),startCol=Math.min(c+1,16383);
+        const note=applicationNoteCells.get(XLSX.utils.encode_cell({r,c})),fontPixels=note.fontSize*4/3;
+        const lineWidths=note.text.split(/\r\n|\r|\n/).map(line=>[...line].reduce((sum,char)=>sum+(/[\u0000-\u00ff]/.test(char)?fontPixels*.55:fontPixels),0));
+        // Refit both dimensions so a previously enlarged box can shrink with its content.
+        const width=Math.max(96,Math.min(560,Math.ceil(Math.max(...lineWidths)+24)));
+        const lineCount=lineWidths.reduce((count,line)=>count+Math.max(1,Math.ceil(line/(width-24))),0);
+        const height=Math.ceil(lineCount*(fontPixels+5)+20),startCol=Math.min(c+1,16383);
         const [endCol,endX]=edge(startCol,6+width,columnPixels,16383),[endRow,endY]=edge(r,2+height,rowPixels,1048575);
         let left=6,top=2;for(let i=0;i<startCol;i++)left+=columnPixels(i);for(let i=0;i<r;i++)top+=rowPixels(i);
         for(const [key,value] of Object.entries({position:'absolute',left:'0pt',top:'0pt','margin-left':left*.75+'pt','margin-top':top*.75+'pt',width:width*.75+'pt',height:height*.75+'pt'}))style.set(key,value);

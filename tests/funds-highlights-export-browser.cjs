@@ -7,7 +7,7 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
  try{
   const base=process.env.QA_URL||'http://127.0.0.1:8940/',page=await browser.newPage();
   await page.route('**/*',route=>new URL(route.request().url()).origin===new URL(base).origin?route.continue():route.abort());
-  await page.goto(new URL('funds.html',base).href);await page.addScriptTag({path:path.resolve('funds-export.js')});
+  await page.goto(new URL('funds.html',base).href);if(!process.env.QA_REMOTE_ASSETS)await page.addScriptTag({path:path.resolve('funds-export.js')});
   const headers=['供应商','付款计划','备注','申请付款金额','是否提交付款申请单'],book=X.utils.book_new(),source=X.utils.aoa_to_sheet([headers,['甲',10,'保留备注',30,'已经提交部分'],['乙',20,'人工红色',40,'未提交'],['丙',30,'未提交',50,'未提交']]);
   source.B2.c=[{a:'原作者',t:'保留原人工批注\n申请日期（资金整理）：2026年10月1日'}];source.C2.c=[{a:'原作者',t:'未标红的原批注'}];
   source.D2={t:'n',v:30,f:'B2*3',z:'#,##0.00'};source['!merges']=[{s:{r:2,c:2},e:{r:3,c:2}}];X.utils.book_append_sheet(book,source,'本周谈判付款');
@@ -114,6 +114,18 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
   assert.equal(batch.sheets['xl/worksheets/sheet1.xml'].cells.C2.fill,'FFFF0000');
   assert(batch.styleNames.some(n=>/^GYLSJQX_FUNDS_APPLIED_V3_FFFF0000_/.test(n.name)&&n.hidden==='1'));assert(first.styleNames.some(n=>/^GYLSJQX_FUNDS_APPLIED_V3_FFFFFF00_/.test(n.name)&&n.hidden==='1'));
   adjacent(batch,'C2');assert.deepEqual(batch.notePositions.B2.anchor.slice(0,4),[2,6,1,2]);
+  const oversized=Buffer.from(await page.evaluate(async bytes=>{
+   const zip=await JSZip.loadAsync(new Uint8Array(bytes)),p=new DOMParser(),s=new XMLSerializer(),all=(d,n)=>[...d.getElementsByTagNameNS('*',n)];
+   for(const file of Object.keys(zip.files).filter(n=>n.endsWith('.vml'))){const doc=p.parseFromString(await zip.file(file).async('string'),'application/xml');for(const data of all(doc,'ClientData'))if(all(data,'Column')[0]?.textContent==='2'){data.parentElement.setAttribute('style','position:absolute;width:1200pt;height:2400pt;visibility:hidden');all(data,'Anchor')[0].textContent='3,6,1,2,25,20,100,2';}zip.file(file,s.serializeToString(doc));}
+   return [...await zip.generateAsync({type:'uint8array'})];
+  },[...batchOutput]));
+  const compactData={...next,applicationComments:undefined,batchComments:{C2:batchLines}},compactBytes=await exportBytes(oversized,compactData),compact=await inspect(compactBytes);
+  const noteSize=info=>Object.fromEntries(info.notePositions.C2.style.split(';').filter(s=>s.includes(':')).map(s=>s.split(':'))),compactStyle=noteSize(compact);
+  assert.equal(compact.notes.find(n=>n.ref==='C2').text,batch.notes.find(n=>n.ref==='C2').text,'Resizing retains every note line');
+  assert(parseFloat(compactStyle.height)<140,'A short note must shrink even when its original box is thousands of points high');
+  assert(parseFloat(compactStyle.width)<500,'A short note must not retain the original oversized width');
+  assert.deepEqual(compact.notePositions.B2,batch.notePositions.B2,'Unchanged notes retain their geometry');adjacent(compact,'C2');
+  const compactRepeat=await inspect(await exportBytes(compactBytes,compactData));assert.deepEqual(compactRepeat.notePositions.C2,compact.notePositions.C2,'Repeated uploads do not grow the note box');
   const batchNext={...next,applicationComments:undefined,batchComments:{C2:['批次（付款节奏跟进）：共4批，第2批']},highlights:{negotiatedCells:['C2'],normalRows:[2]}};
   const batchUpdatedBytes=await exportBytes(batchOutput,batchNext),batchUpdated=await inspect(batchUpdatedBytes),batchText=batchUpdated.notes.find(n=>n.ref==='C2').text;
   assert.equal(batchText,'保留原人工批注\n'+batchLines.slice(1).join('\n')+'\n批次（付款节奏跟进）：共4批，第2批','Updating only batch count retains all previous dates');
@@ -128,7 +140,7 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
    return [...await zip.generateAsync({type:'uint8array'})];
   },[...richInput]));
   const tall=await inspect(await exportBytes(smallVisible,{...next,applicationComments:undefined,batchComments:{C2:batchLines}})),tallNote=tall.notes.find(n=>n.ref==='C2'),tallStyle=Object.fromEntries(tall.notePositions.C2.style.split(';').filter(s=>s.includes(':')).map(s=>s.split(':')));
-  assert(tallNote.text.includes('保留人工长备注'.repeat(24)));assert(tallNote.text.endsWith(batchLines.join('\n')));assert.deepEqual(tallNote.runs.slice(0,2),richNote.runs.slice(0,2));assert.equal(tallNote.author,'原作者');assert.equal(tall.noteShapes.find(n=>n.ref==='C2').visible,true);assert.equal(tallStyle.visibility,'visible');assert(parseFloat(tallStyle.width)>=216);assert(parseFloat(tallStyle.height)>250,'The note grows to fit manual text plus the four batch fields');assert.deepEqual(tall.notePositions.C2.anchor.slice(0,4),[3,6,1,2]);
+  assert(tallNote.text.includes('保留人工长备注'.repeat(24)));assert(tallNote.text.endsWith(batchLines.join('\n')));assert.deepEqual(tallNote.runs.slice(0,2),richNote.runs.slice(0,2));assert.equal(tallNote.author,'原作者');assert.equal(tall.noteShapes.find(n=>n.ref==='C2').visible,true);assert.equal(tallStyle.visibility,'visible');assert(parseFloat(tallStyle.width)>=216);assert(parseFloat(tallStyle.height)>parseFloat(compactStyle.height),'Long manual text receives more space than a short note');assert.deepEqual(tall.notePositions.C2.anchor.slice(0,4),[3,6,1,2]);
   // V2 marked only red: a yellow fill on a V2 cell is an intentional manual edit.
   const legacyStyle=async color=>Buffer.from(await page.evaluate(async({bytes,color})=>{
    const zip=await JSZip.loadAsync(new Uint8Array(bytes)),p=new DOMParser(),s=new XMLSerializer(),parse=x=>p.parseFromString(x,'application/xml'),all=(d,n)=>[...d.getElementsByTagNameNS('*',n)],styles=parse(await zip.file('xl/styles.xml').async('string')),doc=parse(await zip.file('xl/worksheets/sheet1.xml').async('string')),xfs=all(styles,'cellXfs')[0],fills=all(styles,'fills')[0],cell=all(doc,'c').find(n=>n.getAttribute('r')==='C2'),xf=xfs.children[Number(cell.getAttribute('s'))],base=xf.getAttribute('xfId');
