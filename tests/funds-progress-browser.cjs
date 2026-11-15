@@ -14,6 +14,8 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
   await page.goto(base,{waitUntil:'networkidle'});await page.locator('.tool-tab[data-tool="funds"]').click();
   const frame=page.frameLocator('iframe[data-tool="funds"]');await frame.locator('#ledgerFile').waitFor();
   const input=fixture(),apps=input.applications.book.Sheets.付款申请汇总;
+  const negotiatedSource=input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]];
+  X.utils.sheet_add_aoa(negotiatedSource,[['是否谈判分批'],['是']],{origin:'O1'});negotiatedSource.O2.f='"是"';negotiatedSource.O2.c=[{a:'人工',t:'保留分批标记说明'}];
   X.utils.sheet_add_aoa(apps,[['核对说明','是否OA备注','是否已付款'],['','2026-11-03 10:30','2026-11-05'],['','',''],['','是','2026-11-05'],['','','']],{origin:'G1'});
   for(const row of [2,6])set(input,'oa','签字意见',row,'');
   append(input,'applications',['2026-11-05','无流程合成供应商','迈德斯特',ID(99),12,'正常付款']);
@@ -33,7 +35,7 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
    assert.deepEqual(out.SheetNames,[...C.OUTPUT_SHEETS,'原工作表']);assert.equal(out.Sheets.原工作表.A2.v,'不得修改');assert.equal(out.Sheets.原工作表.A2.c[0].t,'保留人工批注');
    const progress=out.Sheets.付款进度整理,headers=X.utils.sheet_to_json(progress,{header:1})[0],data=X.utils.sheet_to_json(progress,{defval:''});
    assert.equal(headers.length,13);assert.deepEqual(headers,C.PROGRESS_HEADERS);assert.deepEqual(headers.slice(0,3),['申请日期','付款来源','跟单员']);
-   assert.deepEqual(data.map(r=>r.是否已付款),states);assert.equal(data[0].付款来源,'谈判付款表');assert.equal(data[1].付款来源,'资金台账');assert.equal(progress['!autofilter'].ref,'A1:M'+(states.length+1));
+   assert.deepEqual(data.map(r=>r.是否已付款),states);assert.equal(data[0].付款来源,'谈判付款表-谈判付款');assert.equal(data[1].付款来源,'资金台账');assert.equal(progress['!autofilter'].ref,'A1:M'+(states.length+1));
    const snap=await snapshot('progressPreview');assert.deepEqual(snap.headers,headers);
    for(let r=0;r<states.length;r++)for(let c=0;c<headers.length;c++){
     const cell=progress[X.utils.encode_cell({r:r+1,c})],paid=headers[c]==='是否已付款'&&states[r]==='已付款';
@@ -41,6 +43,7 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
    }
    assert.equal(progress.A2.t,'s');assert.equal(progress.F2.t,'s');assert.equal(progress.G2.t,'n');assert.equal(progress.H2.t,'s');
    const n=out.Sheets.谈判付款;assert.equal(n.F2.f,'D2-E2');assert.equal(n.F2.v,100);assert.equal(n.K2.f,'SUM(M2:N2)');assert.equal(n.I2.c[0].t,'保留原批注');
+   assert.equal(n.O2.v,'是');assert.equal(n.O2.f,'"是"');assert.equal(n.O2.c[0].t,'保留分批标记说明');
    const ns=await snapshot('negotiatedPreview');
    for(const [address,color]of Object.entries(colors)){
     assert.equal(fill(n[address]),color,address);const p=X.utils.decode_cell(address);
@@ -78,6 +81,11 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
   assert.equal(fill(ambiguousBook.Sheets.谈判付款.M2),'FFFF00');assert.match(ambiguousBook.Sheets.谈判付款.M2.c[0].t,/批次归属待核对/);
   await upload('negotiated',ambiguous);await analyze();const repeated=X.read(await download(9),{cellStyles:true});
   assert.equal(fill(repeated.Sheets.谈判付款.M2),'FFFF00');assert.notEqual(fill(repeated.Sheets.谈判付款.N2),'FF0000');
+  X.utils.sheet_add_aoa(input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]],[['是否谈判分批'],['否']],{origin:'O1'});
+  await upload('negotiated');await analyze();const normalSource=X.read(await download(10)),progressRecords=X.utils.sheet_to_json(normalSource.Sheets.付款进度整理);
+  assert.equal(progressRecords[0].付款来源,'谈判付款表-正常付款');assert.equal(progressRecords[0].是否已付款,'已付款');
+  const finalPreview=await snapshot('progressPreview');assert.equal(finalPreview.rows[0][1].text,'谈判付款表-正常付款');
+  assert.equal(normalSource.Sheets.谈判付款.O2.v,'否');
   assert.deepEqual(errors,[]);console.log(JSON.stringify({base,progressColumns:13,sheets:C.OUTPUT_SHEETS,latestApplicationStatus:true,fourNotes:true,yellowRed:true,normalPreserved:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -3,6 +3,27 @@ const {fixture,set,append,ID,LH,AH,OH,book}=require('./funds-progress-fixtures.c
 const records=r=>r.progressRows.map(row=>Object.fromEntries(r.progressHeaders.map((h,c)=>[h,row[c]])));
 const review=r=>r.reviewRows.filter(row=>row[5].v.startsWith('付款进度核对：'));
 const display=c=>c.t==='n'&&c.z?X.SSF.format(c.z,c.v):c.v;
+test('付款来源按谈判表只读分批标记细分，付款依据及原列不变',()=>{
+ const i=fixture(),s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];
+ X.utils.sheet_add_aoa(s,[['是否谈判分批'],['是']],{origin:'R1'});s.R2.c=[{a:'人工',t:'保留分类说明'}];
+ const yes=C.build(i);s.R2={...s.R2,v:'否',f:'"否"'};const before=JSON.stringify(i),no=C.build(i);
+ assert.deepEqual(records(yes).map(r=>r.付款来源.v),['谈判付款表-谈判付款','资金台账','谈判付款表-谈判付款','资金台账']);
+ assert.deepEqual(records(no).map(r=>r.付款来源.v),['谈判付款表-正常付款','资金台账','谈判付款表-正常付款','资金台账']);
+ const withoutSource=r=>r.progressRows.map(row=>row.filter((_,c)=>r.progressHeaders[c]!=='付款来源'));
+ assert.deepEqual(withoutSource(yes),withoutSource(no));
+ for(const key of ['normalRows','reviewRows','highlights','progressEvidence','applicationComments','batchComments'])assert.deepEqual(yes[key],no[key],key);
+ assert.deepEqual(yes.negotiated.updates,no.negotiated.updates);assert(!no.negotiated.managedColumns.includes(17));assert.equal(JSON.stringify(i),before);
+});
+test('分批标记缺失、异常、重名或来源不唯一时不猜付款来源分类',()=>{
+ for(const flag of ['', '待确认',0,{t:'e',v:23,w:'#REF!'},{t:'z',f:'A99',v:0},{t:'s',f:'A99'}]){
+  const i=fixture(),s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];X.utils.sheet_add_aoa(s,[['是否谈判分批'],[flag]],{origin:'P1'});
+  const r=C.build(i);assert.equal(records(r)[0].付款来源.v,'谈判付款表');assert(!r.negotiated.managedColumns.includes(15));
+ }
+ const i=fixture(),s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];X.utils.sheet_add_aoa(s,[['是否谈判分批','是否谈判分批'],['是','否']],{origin:'P1'});
+ assert.equal(records(C.build(i))[0].付款来源.v,'谈判付款表');
+ delete s.Q1;delete s.Q2;X.utils.sheet_add_aoa(s,[X.utils.sheet_to_json(s,{header:1})[1]],{origin:-1});
+ const result=C.build(i);assert.equal(records(result)[0].付款来源.v,'谈判付款表');assert.match(review(result).find(row=>row[8].v===2)[5].v,/对应多笔记录/);
+});
 test('重新申请不进入付款申请核对，仍保留进度、提交状态、金额及标红',()=>{
  const i=fixture();set(i,'applications','流程编码',5,ID(99));
  const before=C.build(i);assert(review(before).some(row=>row[8].v===5));

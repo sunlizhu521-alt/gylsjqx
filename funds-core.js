@@ -828,6 +828,8 @@ function build(inputs,decisions={}){
   const action=comment?.conflict?'核实谈判表 '+comment.source+' 的人工批注及本批实际支付金额；批注有误请修正后重新上传，存在退汇等情况时同步核对出纳记录。':'请先确认是否为分批付款，再确认本次申请对应的批次及是否实际支付；核对该批出纳付款金额、时间，记录不完整时重新导出OA签字意见。';
   return {paid:false,evidence:'分批付款待核对：'+reason,review:'分批付款核对：申请金额 '+amountText(application.values['申请付款金额'])+(applicationBatch(batchText(application))?'；第'+applicationBatch(batchText(application))+'批':'')+'。\n'+reason+'。\n出纳记录：'+evidence+'。\n需要处理：'+action};
  }
+ // Read the manual classification without adding its column to the managed export range.
+ const installmentColumns=negotiated.headers.flatMap((header,c)=>norm(header)==='是否谈判分批'?[c]:[]);
  const progressRows=applications.records.map(application=>{
   let paymentEvidence='';
   const notes=[],ids=applicationIds(application),info=classification(application),reference=application.values[applicationOAField];
@@ -867,6 +869,11 @@ function build(inputs,decisions={}){
   if(type==='谈判付款')dueRecord=locate(negotiatedObjects.map(t=>t.record),'应付时间/谈判付款');
   else if(type==='正常付款')dueRecord=ledgerMatch;
   else notes.push('付款分类未确认，无法确定应付时间来源，请核实申请汇总付款分类');
+  if(type==='谈判付款'&&dueRecord&&installmentColumns.length===1){
+   const flag=negotiated.sheet[X.utils.encode_cell({r:dueRecord.r,c:installmentColumns[0]})];
+   const valid=flag?.t!=='e'&&!(flag?.f&&(flag.t==='z'||flag.v==null||flag.v===''));
+   if(valid&&['是','否'].includes(norm(flag?.v)))values['付款来源']=cell('谈判付款表-'+(norm(flag.v)==='是'?'谈判付款':'正常付款'));
+  }
   if(dueRecord)values['应付时间']=readDate(dueRecord,'应付款时间','应付时间');
   const flowValues=Object.fromEntries(FLOW_FIELDS.map(h=>[h,[]]));let paymentStatus='待核对';
   if(!ids.length)notes.push('对公付款OA号为空或无法识别，请补充申请汇总流程编码');
