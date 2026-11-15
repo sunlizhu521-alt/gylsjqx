@@ -1,7 +1,6 @@
 const tools = [
   { id: 'internal-statement', icon: '对', title: '内部交易对账单', status: '可用', desc: '按采购组织整理内部交易，填充内置模板，分别下载 Excel 和 PDF。', href: 'internal-statement.html' },
   { id: 'funds', icon: '账', title: '付款节奏跟进', navLabel: '付款节奏跟进（可用）-柱', status: '可用', desc: '整理谈判付款、正常付款及申请核对记录，补充 OA 审批进度。', href: 'funds.html' },
-  { id: 'negotiated-payment-summary', icon: '谈', title: '谈判付款整理', navLabel: '谈判付款整理（可用）-颉', status: '可用', desc: '按供应商和具体付款日期汇总谈判明细，分别展示谈判付款和正常付款。', href: 'negotiated-payment-summary.html' },
   { id: 'funds-ledger', icon: '台', title: '资金台账整理', navLabel: '资金台账整理-是否已付&申请纸质单', status: '可用', desc: '汇总全部月份的正常付款，匹配 OA 流程进度，已结清记录也保留。', href: 'funds-ledger.html' },
   { id: 'quarter-budget', icon: '季', title: '季度预算整理', navLabel: '季度预算整理-每月底一次', status: '可用', desc: '合并付款预算、核对分期付款状态，按月份和分类汇总并下载 Excel。', href: 'quarter-budget.html' },
   { id: 'receipt-sign', icon: '签', title: '采购入库单签字', status: '可用', desc: '上传采购入库单后自动签字，合并下载 A4 竖向 PDF。', href: 'receipt-sign.html' },

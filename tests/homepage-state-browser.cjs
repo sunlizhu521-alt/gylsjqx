@@ -4,8 +4,8 @@ const X = require('../vendor/xlsx.full.min.js');
 
 const url = process.env.QA_URL || 'http://127.0.0.1:8940/';
 const key = 'gylsjqx-last-tool';
-const toolIds = ['internal-statement','funds','negotiated-payment-summary','funds-ledger','quarter-budget','receipt-sign','seal','beihuo','product-dimension','fulfillment','contract','payment'];
-const retiredIds = ['merge','compare','ocr','match','convert','clean','diff','mask','split','formula','pivot','chart','funds-budget-summary'];
+const toolIds = ['internal-statement','funds','funds-ledger','quarter-budget','receipt-sign','seal','beihuo','product-dimension','fulfillment','contract','payment'];
+const retiredIds = ['negotiated-payment-summary','merge','compare','ocr','match','convert','clean','diff','mask','split','formula','pivot','chart','funds-budget-summary'];
 const workbook = X.utils.book_new();
 X.utils.book_append_sheet(workbook, X.utils.aoa_to_sheet([['物料编码', '数量'], ['TEST-001', 12]]), '明细');
 const upload = {name:'工具切换测试.xlsx', mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer:Buffer.from(X.write(workbook,{type:'buffer',bookType:'xlsx'}))};
@@ -26,6 +26,7 @@ const select = async (page, id) => { await page.locator(`.tool-tab[data-tool="${
       'runMask','runSplit','runFormula','runPivot','runCompare','runSealStamp','runOcr','runChart'
     ].filter(name=>typeof window[name]!=='undefined')),[]);
     assert.deepEqual(await page.locator('script[src]').evaluateAll(scripts=>scripts.map(script=>script.src).filter(src=>/chart|tesseract|ocr/i.test(src))),[]);
+    for(const name of ['negotiated-payment-summary.html','negotiated-payment-summary-core.js','negotiated-payment-summary-export.js','negotiated-payment-summary-tool.js']){const response=await page.request.get(new URL(name,url).href);assert.equal(response.status(),404,'已删除工具文件不可访问：'+name);}
     await active(page,'funds');
     assert.equal(await page.evaluate(key=>localStorage.getItem(key),key),'funds');
     let frame = page.frameLocator('iframe[data-tool="funds"]');
