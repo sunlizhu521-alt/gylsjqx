@@ -1,7 +1,7 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'),require('./funds-total-validation.js'));else root.FundsCore=factory(root.XLSX,root.FundsTotalValidation);})(typeof globalThis!=='undefined'?globalThis:this,function(X,FundsTotalValidation){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间','开票时间','开票金额','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','申请日期','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
+const NORMAL_HEADERS=['登记月份','跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','本次申请付款金额','应付时间','预估时间','开票时间','开票金额','OA合同编号','合同总金额','已付金额','是否结清','剩余金额','是否谈判付款','是否提交付款申请单','申请日期','提交时间汇总','当前节点','未操作者','流程状态','申请人','流程编号','是否对账','申请付款的日期'];
 const ADDED_HEADERS=['是否提交付款申请单','当前节点','未操作者','流程状态','申请人','流程编号'];
 const SUPPLEMENT_HEADERS=['对公付款0A流程号','付款主体','单据号【财务应付单】'];
 const NORMAL_HIDDEN_HEADERS=['OA合同编号','合同总金额','是否对账'];
@@ -37,7 +37,10 @@ const clone=c=>c?{...c}:empty();
 const aliases={月份:'登记月份',所属月份:'登记月份',供应商:'供应商名称',供应商全称:'供应商名称',对公付款OA流程号:'对公付款0A流程号',付款OA号:'对公付款0A流程号',应付时间:'应付款时间',已付款金额:'已付金额',剩余付款金额:'剩余金额',合同号:'OA合同编号',合同金额:'合同总金额',本次申请付款金额:'申请付款金额','OA-申请付款金额':'申请付款金额',付款事由:'摘要'};
 const canonical=v=>aliases[norm(v)]||norm(v);
 const BATCH_HEADERS=['谈判明细','分批总金额','核对'];
-const relevant=new Set([...NORMAL_HEADERS.map(canonical),...ADDED_HEADERS,...BATCH_HEADERS,'单据号【财务应付单】','付款分类','申请日期','备注','对接人','创建人','流程编号','流程编码','核对说明']);
+const NORMAL_ESTIMATE_HEADERS=['预估时间','预估付款时间','预估付款月份'];
+const NORMAL_TERMS_HEADERS=['账期','账期天数','账期内时间'];
+// These inputs belong only to ledger dates; keep negotiated manual columns unmanaged.
+const relevant=new Set([...NORMAL_HEADERS.filter(h=>h!=='预估时间').map(canonical),...ADDED_HEADERS,...BATCH_HEADERS,'单据号【财务应付单】','付款分类','申请日期','备注','对接人','创建人','流程编号','流程编码','核对说明']);
 const entity=v=>({'浙江迈德斯特医疗器械科技有限公司':'迈德斯特','杭州国源养老科技有限公司':'国源'}[norm(v)]||norm(v));
 function money(c){
  if(c?.t==='e'||(c?.f&&(c.v==null||c.v==='')))return {invalid:true};
@@ -215,7 +218,7 @@ function build(inputs,decisions={}){
  const ledgerTables=PEOPLE.map(person=>{
   const names=inputs.ledger.book.SheetNames.filter(n=>new RegExp('^对账明细[-－—]?'+person+'(?:\\d{4}|\\d{8})?$').test(norm(n)));
   if(names.length!==1)throw Error('资金台账中'+person+'的对账明细'+(names.length?'存在多个版本':'缺失'));
-  const parsed=table(inputs.ledger,names[0],['供应商名称','申请付款金额']);for(const record of parsed.records)record.owner=person;return parsed;
+  const parsed=table(inputs.ledger,names[0],['供应商名称','申请付款金额'],[],[...NORMAL_ESTIMATE_HEADERS,...NORMAL_TERMS_HEADERS]);for(const record of parsed.records)record.owner=person;return parsed;
  });
  const ledger=ledgerTables.flatMap(t=>t.records),issues=[],updateMap=new Map(),reviewRows=[],highlightReviews=[],highlightedNegotiated=new Set(),highlightedPaid=new Set(),highlightedNormal=new Set(),applicationComments={},batchComments={},applicationBatchMatches={},sourceRedApplications=new Set(),sourceBatchComments=new Map();
  function issue(id,kind,message,rec,choices=[{value:'keep',label:'保留原值'}],multiple=false){
@@ -227,7 +230,7 @@ function build(inputs,decisions={}){
  const headerRecord=t=>({source:{file:t.name,sheet:t.sheetName,row:t.headerRow+1},values:{}});
  for(const t of ledgerTables){
   const usesReconciliationDate=norm(t.sheetName).includes('孙立柱')&&t.headers.some(h=>norm(h)==='对账时间');
-  const absent=NORMAL_HEADERS.slice(0,NORMAL_HEADERS.indexOf('是否提交付款申请单')+1).map(canonical).filter(k=>k!=='跟单员'&&k!=='是否谈判付款'&&t.map[k]===undefined&&!(usesReconciliationDate&&k==='开票时间'));
+  const absent=NORMAL_HEADERS.slice(0,NORMAL_HEADERS.indexOf('是否提交付款申请单')+1).map(canonical).filter(k=>!['跟单员','是否谈判付款','预估时间','应付款时间'].includes(k)&&t.map[k]===undefined&&!(usesReconciliationDate&&k==='开票时间'));
   if(absent.length)issue('headers:'+t.sheetName,'missing-header','缺少字段，输出保留空白：'+absent.join('、'),headerRecord(t));
   if(t.map['是否谈判付款']===undefined)issue('classification-header:'+t.sheetName,'missing-header','缺少“是否谈判付款”列，无法确认正常付款分类；本表暂不纳入正常付款，请补齐台账后重新上传。',headerRecord(t),[{value:'keep',label:'本表暂不纳入正常付款，保留原文件'}]);
  }
@@ -755,10 +758,44 @@ function build(inputs,decisions={}){
   const source=target.record.source;
   reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(value(target.record,'供应商名称')),cell(target.values['付款主体']?.t==='e'?target.values['付款主体'].w||'Excel错误':target.values['付款主体']?.v),classification(target.record).cents===undefined?cell(target.values['申请付款金额']?.t==='e'?target.values['申请付款金额'].w||'Excel错误':target.values['申请付款金额']?.v):amountCell(classification(target.record).cents),cell(target.values['是否提交付款申请单']?.v),cell(message+(evidence?'\nOA 来源：'+evidence:'')),cell(source.file),cell(source.sheet),cell(source.row),cell(reviewOwner(target))]);
  }
+ function normalEstimate(target){
+  const record=target.record,source=record.values,t=ledgerTables.find(t=>t.sheetName===record.source.sheet);
+  // A populated payable date wins, including source text/errors which must not be replaced by an estimate.
+  if(!blank(source['应付款时间']))return empty();
+  const warn=(message,kind='date')=>issue('normal-estimate:'+record.id,kind,'预估时间：'+message,record);
+  const invalid=c=>c?.t==='e'||c?.f&&(c.t==='z'||c.v==null||c.v==='');
+  const estimateHeaders=NORMAL_ESTIMATE_HEADERS.filter(h=>t.map[h]!==undefined);
+  if(estimateHeaders.length){
+   if(estimateHeaders.length!==1){warn('存在多个预估时间列，请在源表保留唯一来源；本次留空。');return empty();}
+   const header=estimateHeaders[0],original=source[header];
+   if(invalid(original)){warn('“'+header+'”公式结果不可用，请在源表重算并保存；本次不推算。','formula');return cell(original.w||'公式结果不可用');}
+   if(blank(original)){warn('原表“'+header+'”为空，请补充应付时间或预估时间；已有预估列不自动推算。');return empty();}
+   const monthOnly=typeof original.v==='string'&&/^\d{4}[年./-]\d{1,2}月?$/.test(str(original.v))||typeof original.v==='number'&&typeof original.z==='string'&&X.SSF.is_date(original.z)&&!/d/i.test(original.z.replace(/"[^"]*"/g,''));
+   const parsed=date(typeof original.v==='string'?{...original,v:str(original.v).replace(/月$/,'')}:original,record.date1904,monthOnly);
+   if(parsed.invalid)warn('“'+header+'”无法识别，保留原文；请补充完整日期或年月。');
+   delete parsed.invalid;return parsed;
+  }
+  const month=source['登记月份'],termHeaders=NORMAL_TERMS_HEADERS.filter(h=>t.map[h]!==undefined),terms=source[termHeaders[0]];
+  if(invalid(month)||invalid(terms)){warn('所属月份或账期公式结果不可用，请在源表重算并保存；本次留空。','formula');return empty();}
+  const parsed=date(typeof month?.v==='string'?{...month,v:str(month.v).replace(/月$/,'')}:month,record.date1904,true);
+  if(parsed.invalid||parsed.v===''){warn('无预估时间列，所属月份为空或无法识别，请补充所属月份或明确付款日期；本次留空。');return empty();}
+  const text=norm(terms?.v),durations=[];
+  if(/^\d+$/.test(text))durations.push(Number(text));
+  else for(const match of text.matchAll(/(\d+(?:\.\d+)?)\s*(个月|天|日)/g))durations.push(Number(match[1])*(match[2]==='个月'?30:1));
+  const days=[...new Set(durations)];
+  if(termHeaders.length!==1||days.length!==1||!Number.isSafeInteger(days[0])||days[0]<0||/[+＋~～至]|[-—−]\s*\d|\d\s*(?:\/|或者?)\s*\d|约|左右|至少|最多|以上|以内|工作日/.test(text)){
+   warn('无预估时间列，账期为空、存在冲突或无法识别“'+text+'”；请补充明确账期天数或付款日期，本次留空。');return empty();
+  }
+  const parts=X.SSF.parse_date_code(parsed.v),stamp=Date.UTC(parts.y,parts.m-1,1)+(15+days[0])*86400000;
+  if(!Number.isFinite(stamp)||new Date(stamp).getUTCFullYear()>9999){warn('推算日期超出有效范围，请核实账期；本次留空。');return empty();}
+  let serial=(stamp-Date.UTC(1899,11,30))/86400000;if(serial<61)serial--;
+  return {t:'n',v:serial,z:DATE_FORMAT};
+ }
  function normalCell(target,key){
   if(key==='对公付款0A流程号'&&target.missingOA)return cell('未提交OA');
   if([...FLOW_FIELDS,'流程编号'].includes(key)&&(target.missingOA||norm(target.values['对公付款0A流程号']?.v).toUpperCase()==='未提交OA'))return empty();
   if(key==='跟单员')return cell(target.record.owner);
+  if(key==='预估时间')return normalEstimate(target);
   if(key==='申请付款的日期')return paymentWeek(target.record.values['应付款时间'],target.record.date1904,1);
   if(key==='是否对账'){
    return cell(hasPaymentOA(target.record)?'已对账':'未对账');

@@ -230,7 +230,7 @@ window.FundsExport = async function(sourceBytes, result) {
     const styleId=c=>{const point=XLSX.utils.decode_cell(c.getAttribute('r')),column=oldCols.find(e=>Number(e.getAttribute('min'))<=point.c+1&&Number(e.getAttribute('max'))>=point.c+1);return Number(c.getAttribute('s')??c.parentElement.getAttribute('s')??column?.getAttribute('style')??0);};
     const flowColumns=new Set();for(let c=0;c<=end.c;c++)if(scoped(c)&&['流程编号','付款自然周','申请付款的日期'].includes(cellText(ensureCell(headerRow,c)).normalize('NFKC').replace(/\s+/g,'')))flowColumns.add(c);
     const singleLineColumns=new Set(flowColumns),dateColumns=new Set();
-    if(doc!==sheet)for(let c=0;c<=end.c;c++){const title=cellText(ensureCell(headerRow,c));if(['对公付款0A流程号','对公付款OA流程号','开票时间','OA合同编号',...(progress?['对公付款OA号','申请日期','应付时间']:[])].includes(title))singleLineColumns.add(c);if(title==='开票时间'||progress&&['申请日期','应付时间'].includes(title))dateColumns.add(c);}
+    if(doc!==sheet)for(let c=0;c<=end.c;c++){const title=cellText(ensureCell(headerRow,c));if(['对公付款0A流程号','对公付款OA流程号','应付时间','预估时间','开票时间','OA合同编号',...(progress?['对公付款OA号','申请日期','应付时间']:[])].includes(title))singleLineColumns.add(c);if(['开票时间','应付时间','预估时间'].includes(title)||progress&&['申请日期','应付时间'].includes(title))dateColumns.add(c);}
     const populatedColumns=new Set(),populatedRows=new Set();
     for(const cell of cells.values())if(cellText(cell).trim()){const point=XLSX.utils.decode_cell(cell.getAttribute('r'));populatedRows.add(point.r);if(scoped(point.c))populatedColumns.add(point.c);}
     for(const range of merges)if(cellText(cells.get(XLSX.utils.encode_cell(range.s))).trim()){for(let r=range.s.r;r<=range.e.r;r++)populatedRows.add(r);for(let c=range.s.c;c<=range.e.c;c++)if(scoped(c))populatedColumns.add(c);}
