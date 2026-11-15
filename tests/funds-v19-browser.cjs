@@ -54,7 +54,9 @@ const {fixtures}=require('./funds-fixtures.cjs');
   assert(await frame.locator('th').evaluateAll(cells=>cells.every(c=>getComputedStyle(c).whiteSpace==='nowrap'&&c.scrollWidth<=c.clientWidth+1)));
   const downloadPromise=page.waitForEvent('download');await frame.locator('#download').click();const download=await downloadPromise;
   const output=await fs.readFile(await download.path()),saved=X.read(output,{cellStyles:true,cellNF:true}),s=saved.Sheets.谈判付款,src=source.Sheets.谈判付款;
-  assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理']);assert.equal(s['!ref'],'A1:AM'+(expected.negotiated.sourceRange.e.r+1));
+  assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理','总额校验核对']);assert.equal(s['!ref'],'A1:AM'+(expected.negotiated.sourceRange.e.r+1));
+  const total=saved.Sheets.总额校验核对;assert.deepEqual(X.utils.sheet_to_json(total,{header:1})[0],Core.TOTAL_VALIDATION_HEADERS);assert.equal(X.utils.decode_range(total['!ref']).e.r,expected.totalValidation.rows.length);assert.equal(total['!autofilter'].ref,total['!ref']);
+  for(let r=0;r<expected.totalValidation.rows.length;r++)for(let c=0;c<expected.totalValidation.headers.length;c++)assert.equal(total[X.utils.encode_cell({r:r+1,c})]?.v??'',expected.totalValidation.rows[r][c].v??'');
   const reviewNotes=X.utils.sheet_to_json(saved.Sheets.付款申请核对).map(row=>row['核对说明']);
   assert.deepEqual(await frame.locator('#reviewPreview tbody tr td:nth-child(6)').allTextContents(),reviewNotes,'预览和下载核对说明一致');
   for(const note of reviewNotes.filter(text=>text.includes('申请标红核对：'))){assert.match(note,/需要处理：/);assert.match(note,/申请来源：/);assert.match(note,/本笔未标红/);}

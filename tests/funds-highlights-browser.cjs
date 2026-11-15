@@ -9,6 +9,8 @@ const FILE_IDS = { ledger: 'ledgerFile', applications: 'applicationsFile', negot
 const MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const MARKER = 'N("GYLSJQX_FUNDS_APPLIED_V1")=0';
 const SHEET = '10月谈判付款批次';
+const batchNote = '批次（付款节奏跟进）：共2批，第1批\n申请日期（付款节奏跟进）：2026年10月27日\nOA备注时间（付款节奏跟进）：未记录\n付款时间（付款节奏跟进）：未记录';
+const uncertainBatchNote = batchNote.replace('2026年10月27日','2026年10月27日（批次归属待核对）');
 const ledgerHeaders = ['登记月份', '供应商名称', '付款主体', '对公付款0A流程号', '开票时间', '开票金额', '摘要', '申请付款金额', '应付款时间', '单据号【财务应付单】', 'OA合同编号', '合同总金额', '已付金额', '是否结清', '剩余金额', '是否谈判付款', '是否提交付款申请单'];
 const negotiatedHeaders = ['供应商名称', '付款主体', '对公付款0A流程号', '申请付款金额', '已付金额', '剩余付款金额', '是否结清', '应付款时间', '单据号【财务应付单】', '备注', '谈判明细', '分批总金额', '核对', '与张培培沟通记录', '申请人', '当前节点', '未操作者', '流程状态', '流程编号', '是否提交付款申请单', 46321, 46328];
 const records = [
@@ -67,8 +69,8 @@ function fixture({ removeFirstApplication = false } = {}) {
 
     async function snapshot() {
       return frame.locator('body').evaluate(() => Object.fromEntries(['negotiatedPreview', 'normalPreview', 'reviewPreview'].map(id => [id, {
-        headers: [...document.querySelectorAll('#' + id + ' th')].map(cell => ({ text: cell.textContent, applied: !!cell.closest('.funds-applied') })),
-        rows: [...document.querySelectorAll('#' + id + ' tbody tr')].map(row => [...row.cells].map(cell => ({ text: cell.textContent, title:cell.title, applied: !!cell.closest('.funds-applied'), hidden: cell.hidden, color: getComputedStyle(cell.closest('.funds-applied') || cell).backgroundColor })))
+        headers: [...document.querySelectorAll('#' + id + ' th')].map(cell => ({ text: cell.textContent, applied: !!cell.closest('.funds-applied,.funds-requested') })),
+        rows: [...document.querySelectorAll('#' + id + ' tbody tr')].map(row => [...row.cells].map(cell => ({ text: cell.textContent, title:cell.title, applied: !!cell.closest('.funds-applied,.funds-requested'), hidden: cell.hidden, color: getComputedStyle(cell.closest('.funds-applied,.funds-requested') || cell).backgroundColor })))
       }])));
     }
     function checkPreview(actual, highlighted) {
@@ -81,12 +83,13 @@ function fixture({ removeFirstApplication = false } = {}) {
       assert.deepEqual(normal.rows.map(row=>row[normal.headers.findIndex(h=>h.text==='当前节点')].text),['财务审核','复核']);
       assert.deepEqual(normal.rows.map(row=>row[normal.headers.findIndex(h=>h.text==='申请人')].text),['李奇','徐英']);
       assert.equal(n.rows[0][firstDate].applied, highlighted);
-      assert.equal(n.rows[0][firstDate].title,highlighted?'申请日期（付款节奏跟进）：2026年10月27日':'');
+      assert.equal(n.rows[0][firstDate].title,batchNote);
       const applicationDate=normal.headers.findIndex(h=>h.text==='申请日期');assert.equal(applicationDate,normal.headers.findIndex(h=>h.text==='是否提交付款申请单')+1);assert.equal(normal.rows[0][applicationDate].text,'2026年10月27日');assert.equal(normal.rows[1][applicationDate].text,'');
-      if (highlighted) assert.equal(n.rows[0][firstDate].color, 'rgb(255, 0, 0)');
+      if (highlighted) assert.equal(n.rows[0][firstDate].color, 'rgb(255, 255, 0)');
       assert.equal(n.rows[0][secondDate].applied, false, '未申请60不标红');
       assert.equal(n.rows[1][firstDate].applied, true, '两批相同40按日期先后标记最早批次');
-      assert.equal(n.rows[1][firstDate].color, 'rgb(255, 0, 0)');
+      assert.equal(n.rows[1][firstDate].color, 'rgb(255, 255, 0)');
+      assert.equal(n.rows[1][firstDate].title,uncertainBatchNote);
       assert.equal(n.rows[1][secondDate].applied, false, '只有一笔申请，后续同额批次不能重复标红');
       assert.equal(n.rows[1].filter(cell => cell.applied).length, 1);
       assert.equal(n.rows[0].filter(cell => cell.applied).length, highlighted ? 1 : 0);
@@ -103,6 +106,7 @@ function fixture({ removeFirstApplication = false } = {}) {
         window.FundsExport = async (...args) => {
           window.FundsExport = original;
           window.__highlightResult = args[1].highlights;
+          window.__totalValidation = args[1].totalValidation;
           await new Promise(resolve => { window.__releaseHighlightExport = resolve; });
           return original(...args);
         };
@@ -113,7 +117,7 @@ function fixture({ removeFirstApplication = false } = {}) {
         const check = () => window.__releaseHighlightExport ? resolve() : attempts++ > 1500 ? reject(Error(document.getElementById('status').textContent)) : setTimeout(check, 10); check();
       }));
       assert.equal(await frame.locator('#pendingCount').innerText(), '0', '同额批次按日期分配，不产生待核对事项');
-      assert.deepEqual(await frame.locator('body').evaluate(() => window.__highlightResult), { negotiatedCells: highlighted ? ['U2', 'U3'] : ['U3'], normalRows: [2] });
+      assert.deepEqual(await frame.locator('body').evaluate(() => window.__highlightResult), { negotiatedCells: highlighted ? ['U2', 'U3'] : ['U3'], negotiatedPaidCells: [], normalRows: [2] });
       const initial = await snapshot(); checkPreview(initial, highlighted);
       await frame.locator('body').evaluate(() => { const release = window.__releaseHighlightExport; delete window.__releaseHighlightExport; release(); });
       await frame.locator('#download:not([disabled])').waitFor();
@@ -129,9 +133,9 @@ function fixture({ removeFirstApplication = false } = {}) {
     }
     async function checkExport(bytes, highlighted) {
       const book = X.read(bytes, { type: 'buffer', cellNF: true, cellStyles: true });
-      assert.deepEqual(book.SheetNames, ['谈判付款', '正常付款', '付款申请核对', '付款进度整理']);
+      assert.deepEqual(book.SheetNames, ['谈判付款', '正常付款', '付款申请核对', '付款进度整理', '总额校验核对']);
       const n = book.Sheets.谈判付款, normal = book.Sheets.正常付款;
-      assert.equal(n.U2.c?.[0]?.t,highlighted?'申请日期（付款节奏跟进）：2026年10月27日':undefined);assert.equal(n.U3.c[0].t,'申请日期（付款节奏跟进）：2026年10月27日');assert.equal(n.V2.c,undefined);
+      assert.equal(n.U2.c?.[0]?.t,batchNote);assert.equal(n.U3.c[0].t,uncertainBatchNote);assert.equal(n.V2.c,undefined);
       const actualDate=normal[X.utils.encode_cell({r:1,c:C.NORMAL_HEADERS.indexOf('申请日期')})];assert.equal(actualDate.t,'s');assert.equal(actualDate.z,'@');assert.equal(X.SSF.format(actualDate.z,actualDate.v),'2026年10月27日');
       for (const row of [2, 3]) {
         const r = records[row - 2];
@@ -143,7 +147,7 @@ function fixture({ removeFirstApplication = false } = {}) {
       assert.deepEqual([normal.G2.v, normal.M2.v, normal.O2.v, normal.G3.v, normal.M3.v, normal.O3.v], [123.45, 23.45, 100, 123.45, 0, 123.45]);
       assert.deepEqual([normal.E2.v,normal.E3.v],[records[2].id,records[3].id]);assert.deepEqual([normal.Q2.v,normal.Q3.v],['已提交','未申请']);
       assert.deepEqual([normal.X2.v,normal.X3.v],[records[2].id,records[3].id]);assert.deepEqual([normal.T2.v,normal.T3.v],['财务审核','复核']);assert.deepEqual([normal.W2.v,normal.W3.v],['李奇','徐英']);
-      assert.equal(normal.O2.f, 'G2-M2'); assert.equal(normal.O3.f, 'G3-M3');
+      assert.equal(normal.O2.f, undefined, '李奇余额保留源数值'); assert.equal(normal.O3.f, undefined, '李奇余额保留源数值');
       for (const header of C.NORMAL_HIDDEN_HEADERS) assert.equal(normal['!cols'][C.NORMAL_HEADERS.indexOf(header)].hidden, true);
       const metadata = await frame.locator('body').evaluate(async (_, { bytes, marker }) => {
         const zip = await JSZip.loadAsync(Uint8Array.from(bytes)), parse = text => new DOMParser().parseFromString(text, 'application/xml'), all = (doc, name) => [...doc.getElementsByTagNameNS('*', name)];
@@ -151,11 +155,12 @@ function fixture({ removeFirstApplication = false } = {}) {
         const result = {};
         for (const entry of all(workbook, 'sheet')) {
           const id = entry.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id'), rel = all(rels, 'Relationship').find(e => e.getAttribute('Id') === id), path = new URL(rel.getAttribute('Target'), 'https://xlsx.invalid/xl/workbook.xml').pathname.slice(1), doc = parse(await zip.file(path).async('string'));
-          const cells = new Set(), rules = [];
+          const cells = new Set(), yellowCells = new Set(), rules = [];
           const xfs = all(styles, 'cellXfs')[0], fills = all(styles, 'fills')[0];
           for (const c of all(doc, 'c')) {
             const xf = xfs.children[Number(c.getAttribute('s') || 0)], fill = fills.children[Number(xf.getAttribute('fillId') || 0)];
             if (all(fill, 'fgColor')[0]?.getAttribute('rgb') === 'FFFF0000') cells.add(c.getAttribute('r'));
+            if (all(fill, 'fgColor')[0]?.getAttribute('rgb') === 'FFFFFF00') yellowCells.add(c.getAttribute('r'));
           }
           for (const cf of all(doc, 'conditionalFormatting')) for (const rule of all(cf, 'cfRule')) {
             if (!all(rule, 'formula').some(f => f.textContent === marker)) continue;
@@ -163,15 +168,21 @@ function fixture({ removeFirstApplication = false } = {}) {
             rules.push({ type: rule.getAttribute('type'), color: dxf && all(dxf, 'fgColor')[0]?.getAttribute('rgb'), background: dxf && all(dxf, 'bgColor')[0]?.getAttribute('rgb'), backgroundIndex: dxf && all(dxf, 'bgColor')[0]?.getAttribute('indexed') });
             for (const ref of cf.getAttribute('sqref').split(/\s+/)) { const range = XLSX.utils.decode_range(ref); for (let r = range.s.r; r <= range.e.r; r++) for (let c = range.s.c; c <= range.e.c; c++) cells.add(XLSX.utils.encode_cell({ r, c })); }
           }
-          result[entry.getAttribute('name')] = { cells: [...cells].sort(), rules };
+          result[entry.getAttribute('name')] = { cells: [...cells].sort(), yellowCells: [...yellowCells].sort(), rules };
         }
         return result;
       }, { bytes: [...bytes], marker: MARKER });
-      assert.deepEqual(metadata.谈判付款.cells, highlighted ? ['U2', 'U3'] : ['U3']);
+      assert.deepEqual(metadata.谈判付款.cells, [], '未确认已付款的申请不标红');
+      assert.deepEqual(metadata.谈判付款.yellowCells, highlighted ? ['U2', 'U3'] : ['U3']);
       assert.deepEqual(metadata.正常付款.cells, C.NORMAL_HEADERS.map((_, c) => X.utils.encode_cell({ r: 1, c })).sort());
       assert.deepEqual(metadata.正常付款.rules, [], '正常付款不能用固定行号条件格式，以免排序后颜色错位');
       assert.deepEqual(metadata.谈判付款.rules, [], '谈判付款底色也可手动修改，不添加覆盖底色的条件格式');
       assert.deepEqual(metadata.付款申请核对.cells, []);
+      assert.deepEqual(metadata.总额校验核对.cells, []);assert.deepEqual(metadata.总额校验核对.yellowCells, []);
+      const total=await frame.locator('body').evaluate(()=>window.__totalValidation),totalSheet=book.Sheets.总额校验核对;
+      assert.deepEqual(X.utils.sheet_to_json(totalSheet,{header:1})[0],C.TOTAL_VALIDATION_HEADERS);assert.equal(X.utils.decode_range(totalSheet['!ref']).e.r,total.rows.length);
+      for(let r=0;r<total.rows.length;r++)for(let c=0;c<total.headers.length;c++)assert.equal(totalSheet[X.utils.encode_cell({r:r+1,c})]?.v??'',total.rows[r][c].v??'');
+      assert.equal(totalSheet['!autofilter'].ref,totalSheet['!ref']);
       for (const sheet of Object.values(metadata)) for (const rule of sheet.rules) { assert.equal(rule.type, 'expression'); assert.match(rule.color, /^(?:FF)?FF0000$/i); assert.equal(rule.background, 'FFFF0000', 'WPS conditional-format background must be explicitly red'); assert.equal(rule.backgroundIndex, null); }
       assert.equal(X.utils.sheet_to_json(book.Sheets.付款申请核对).filter(row=>!row.核对说明.includes('付款进度核对：')).length, 0, '同额批次按日期确定后不再产生核对记录');
     }
@@ -182,7 +193,7 @@ function fixture({ removeFirstApplication = false } = {}) {
     const first = await download(1); await checkExport(first, true);
     if (process.env.QA_OUT) {
       await fs.mkdir(process.env.QA_OUT, { recursive: true });
-      await frame.locator('#negotiatedPreview td.funds-applied').first().scrollIntoViewIfNeeded();
+      await frame.locator('#negotiatedPreview td.funds-requested').first().scrollIntoViewIfNeeded();
       await frame.locator('#negotiatedPreview').screenshot({ path: process.env.QA_OUT + '/negotiated.png' });
       await frame.locator('#normalPreview tbody tr').first().locator('td').nth(C.NORMAL_HEADERS.indexOf('申请日期')).scrollIntoViewIfNeeded();
       await frame.locator('#normalPreview').screenshot({ path: process.env.QA_OUT + '/normal.png' });
@@ -207,10 +218,10 @@ function fixture({ removeFirstApplication = false } = {}) {
     const sortedBytes=await download(3),sortedBook=X.read(sortedBytes,{cellNF:true,cellStyles:true}),sorted=sortedBook.Sheets.正常付款;
     const output=X.utils.sheet_to_json(sorted);assert.deepEqual(output.map(row=>row['供应商名称']),[records[3].supplier,records[2].supplier]);
     assert.deepEqual(output.map(row=>row['申请付款的日期']),['2026/10/26周','2026/12/28周']);
-    assert.equal(sorted.O2.f,'G2-M2');assert.equal(sorted.O2.v,123.45);assert.equal(sorted.O3.f,'G3-M3');assert.equal(sorted.O3.v,100);
+    assert.equal(sorted.O2.f,undefined);assert.equal(sorted.O2.v,123.45);assert.equal(sorted.O3.f,undefined);assert.equal(sorted.O3.v,100);
     for(const r of [2,3])for(let c=0;c<C.NORMAL_HEADERS.length;c++)assert.equal(/^(?:FF)?FF0000$/i.test(sorted[X.utils.encode_cell({r:r-1,c})].s?.fgColor?.rgb||''),r===3,'排序后整行标红必须随记录移动，包括隐藏列');
     assert.equal(sorted[X.utils.encode_cell({r:1,c:at('申请日期')})].v??'','');assert.equal(sorted[X.utils.encode_cell({r:2,c:at('申请日期')})].v,'2026年10月27日');
-    assert.equal(sortedBook.Sheets.谈判付款.U3.c[0].t,'申请日期（付款节奏跟进）：2026年10月27日');
+    assert.equal(sortedBook.Sheets.谈判付款.U3.c[0].t,uncertainBatchNote);
     if(process.env.QA_OUT){await fs.writeFile(process.env.QA_OUT+'/sorted-dates.xlsx',sortedBytes);await frame.locator('#normalPreview tbody tr').first().locator('td').nth(at('申请付款的日期')).scrollIntoViewIfNeeded();await frame.locator('#normalPreview').screenshot({path:process.env.QA_OUT+'/sorted-dates.png'});}
     // Replacing the application OA must move dates and red fill to that OA only, even at the same amount.
     const switched=X.read(fixture({removeFirstApplication:true}).applications);switched.Sheets.付款申请汇总.D3.v=records[3].id;

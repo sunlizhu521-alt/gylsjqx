@@ -39,8 +39,8 @@
     result = null; preparedBlob = null;
     $('sourceVersion').textContent = '';
     for (const id of Object.keys(decisions)) delete decisions[id];
-    for (const id of ['results','negotiatedPreviewSection','normalPreviewSection','reviewPreviewSection','progressPreviewSection']) $(id).hidden = true;
-    for (const id of ['issueList','normalPreview','negotiatedPreview','reviewPreview','progressPreview']) $(id).replaceChildren();
+    for (const id of ['results','negotiatedPreviewSection','normalPreviewSection','reviewPreviewSection','progressPreviewSection','totalValidationPreviewSection']) $(id).hidden = true;
+    for (const id of ['issueList','normalPreview','negotiatedPreview','reviewPreview','progressPreview','totalValidationPreview']) $(id).replaceChildren();
     controls();
   }
   function valueText(cell, date1904=false) {
@@ -52,7 +52,7 @@
   }
   function preview(id, headers, rows, date1904=false) {
     const table = document.createElement('table'), head = table.createTHead().insertRow(), body = table.createTBody();
-    const appliedRows = new Set(result?.highlights?.normalRows || []), appliedCells = new Set(result?.highlights?.negotiatedCells || []);
+    const appliedRows = new Set(result?.highlights?.normalRows || []), appliedCells = new Set(result?.highlights?.negotiatedCells || []), paidCells = new Set(result?.highlights?.negotiatedPaidCells || []);
     const singleLineHeaders=['流程编号','付款自然周','申请付款的日期',...(id==='progressPreview'?['对公付款OA号','申请日期','应付时间']:[]),...(id==='normalPreview'?['对公付款0A流程号','开票时间','OA合同编号']:[])];
     const hiddenColumns=headers.map(title=>id==='normalPreview'&&FundsCore.NORMAL_HIDDEN_HEADERS.includes(title));
     const flowColumn=headers.map(title=>singleLineHeaders.includes(String(title).normalize('NFKC').replace(/\s+/g,'')));
@@ -61,9 +61,18 @@
       const tr = body.insertRow();
       for (let i=0;i<headers.length;i++){
         const td=tr.insertCell(),text=valueText(row[i],date1904);td.hidden=hiddenColumns[i];td.textContent=id!=='negotiatedPreview'&&flowColumn[i]?text.replace(/\r\n|[\r\n]/g,'；'):text;if(flowColumn[i])td.className='flow-code';if(headers[i]==='谈判明细')td.className='batch-detail';if(id==='reviewPreview'&&headers[i]==='核对说明')td.className='review-detail';
-        const applied=id==='normalPreview'?appliedRows.has(r+2):id==='negotiatedPreview'&&appliedCells.has(XLSX.utils.encode_cell({r:r+result.negotiated.headerRow+1,c:result.negotiated.columnOrder[i]}));
+        const address=id==='negotiatedPreview'?XLSX.utils.encode_cell({r:r+result.negotiated.headerRow+1,c:result.negotiated.columnOrder[i]}):'';
+        const applied=id==='normalPreview'?appliedRows.has(r+2):id==='negotiatedPreview'&&appliedCells.has(address);
         if(id==='progressPreview'&&headers[i]==='是否已付款'&&row[i]?.v==='已付款'){td.classList.add('funds-applied');td.title=result?.progressEvidence?.[r]||(String(row[headers.indexOf('当前节点')]?.v??'').replace(/\s+/g,'')==='办理人执行'?'OA当前节点：办理人执行':'OA流程状态：归档');}
-        if(applied){td.classList.add('funds-applied');td.title=id==='negotiatedPreview'?(result.applicationComments?.[XLSX.utils.encode_cell({r:r+result.negotiated.headerRow+1,c:result.negotiated.columnOrder[i]})]||'已匹配本次付款申请'):'已匹配本次付款申请';}
+        if(applied){td.classList.add(id==='negotiatedPreview'&&!paidCells.has(address)?'funds-requested':'funds-applied');td.title='已匹配本次付款申请';}
+        if(id==='negotiatedPreview'){
+          const lines=result.batchComments?.[address]||[result.applicationComments?.[address]].filter(Boolean);
+          const original=(row[i]?.c||[]).map(note=>note.t||'').join('\n');
+          // Updated tool lines share one preview with the preserved manual note.
+          const prefixes=lines.map(line=>line.slice(0,line.indexOf('：')+1));
+          const manual=original.split(/\r\n|[\r\n]/).filter(line=>!prefixes.some(prefix=>line.startsWith(prefix))&&!(prefixes.includes('申请日期（付款节奏跟进）：')&&line.startsWith('申请日期（资金整理）：'))).join('\n').trim();
+          const note=[manual,...lines].filter(Boolean).join('\n');if(note)td.title=note;
+        }
       }
     }
     $(id).replaceChildren(table);
@@ -119,6 +128,10 @@
       preview('negotiatedPreview',negotiatedHeaders,result.negotiated.rows.map(row=>order.map(c=>row[c])),Boolean(inputs.negotiated.book.Workbook?.WBProps?.date1904));
       preview('reviewPreview',result.reviewHeaders,result.reviewRows.map(row=>row.map((cell,i)=>result.reviewHeaders[i]==='核对说明'?{...cell,v:FundsCore.formatReviewText(cell.v)}:cell)));
       preview('progressPreview',result.progressHeaders,result.progressRows);
+      preview('totalValidationPreview',result.totalValidation.headers,result.totalValidation.rows);
+      const totals=result.totalValidation.stats;
+      $('totalValidationStats').textContent=`共 ${totals.total} 条；一致 ${totals.consistent} 条；不一致 ${totals.inconsistent} 条；待核对 ${totals.unverified} 条。差异不自动修改原金额，也不单独阻止下载。`;
+      $('totalValidationPreviewSection').hidden = false;
       $('progressPreviewSection').hidden = false;
       $('negotiatedPreviewSection').hidden = false; $('normalPreviewSection').hidden = false; $('reviewPreviewSection').hidden = false;
       $('status').textContent = pending() ? `已完成整理，请处理下方 ${pending()} 项核对。` : '核对已完成，正在验证导出结果…';
@@ -139,6 +152,10 @@
         const progressRows=result.progressRows.map((_,r)=>result.progressHeaders.map((_,c)=>progress[XLSX.utils.encode_cell({r:r+1,c})]));
         if(progressRange.e.r!==result.progressRows.length)throw Error('付款进度记录数量检查未通过');
         preview('progressPreview',result.progressHeaders,progressRows,Boolean(saved.Workbook?.WBProps?.date1904));
+        const totalSheet=saved.Sheets['总额校验核对'],totalRange=XLSX.utils.decode_range(totalSheet['!ref']);
+        if(totalRange.e.c!==result.totalValidation.headers.length-1||totalRange.e.r!==result.totalValidation.rows.length||result.totalValidation.headers.some((h,c)=>totalSheet[XLSX.utils.encode_cell({r:0,c})]?.v!==h))throw Error('总额校验核对表检查未通过');
+        const totalRows=result.totalValidation.rows.map((_,r)=>result.totalValidation.headers.map((_,c)=>totalSheet[XLSX.utils.encode_cell({r:r+1,c})]));
+        preview('totalValidationPreview',result.totalValidation.headers,totalRows);
         const sheet = saved.Sheets['谈判付款'];
         const rows = result.negotiated.rows.map((_,index)=>result.negotiated.headers.map((_,col)=>sheet[XLSX.utils.encode_cell({r:index+result.negotiated.headerRow+1,c:col})]));
         preview('negotiatedPreview',negotiatedHeaders,rows,Boolean(saved.Workbook?.WBProps?.date1904));
@@ -148,7 +165,7 @@
     } catch (e) {
       if (revision !== sourceRevision) return;
       result = null; $('results').hidden = true;
-      for (const id of ['normalPreviewSection','negotiatedPreviewSection','reviewPreviewSection','progressPreviewSection']) $(id).hidden = true;
+      for (const id of ['normalPreviewSection','negotiatedPreviewSection','reviewPreviewSection','progressPreviewSection','totalValidationPreviewSection']) $(id).hidden = true;
       $('status').textContent = (review?'核对失败：':'整理失败：') + e.message;
     } finally { busy = false; controls(); }
   }
@@ -194,7 +211,7 @@
   $('download').addEventListener('click',async()=>{
     if (!currentSources() || resultRevision !== sourceRevision) { invalidate(); $('status').textContent = '来源文件已更换，请按最新上传版本重新整理后下载。'; return; }
     if (busy || !result || !preparedBlob || pending()) return;
-    busy = true; controls(); $('status').textContent = '正在生成四张工作表，请稍候…';
+    busy = true; controls(); $('status').textContent = '正在生成付款节奏跟进表，请稍候…';
     let url;
     try {
       const blob = preparedBlob;

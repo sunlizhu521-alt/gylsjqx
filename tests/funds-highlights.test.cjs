@@ -28,7 +28,7 @@ test('重新申请不生成标红批次核对，同额普通申请仍独立核�
 });
 test('逐笔精确匹配只标一个分批单元格，正常付款只标本次匹配行，保留原公式和源对象',()=>{
  const i=fixture([60,40],[60]);sheet(i,'negotiated').L2={t:'n',v:60,f:'D2-40'};const before=JSON.stringify(i),r=C.build(i);
- assert.deepEqual(r.highlights,{negotiatedCells:['L2'],normalRows:[2]});assert.equal(state(r),'已经提交部分');assert.equal(r.negotiated.rows[0][11].f,'D2-40');assert.equal(r.stats.pending,0);assert.equal(reviews(r).length,0);assert.equal(JSON.stringify(i),before);
+ assert.deepEqual(r.highlights,{negotiatedCells:['L2'],negotiatedPaidCells:[],normalRows:[2]});assert.equal(state(r),'已经提交部分');assert.equal(r.negotiated.rows[0][11].f,'D2-40');assert.equal(r.stats.pending,0);assert.equal(reviews(r).length,0);assert.equal(JSON.stringify(i),before);
 });
 test('按分比较文本金额与公式缓存，逐笔不累计凑批次，跨日重复只计一次',()=>{
  const i=fixture(['￥60.00',40],[60,40,60]),r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,['L2','M2']);assert.equal(state(r),'已经提交全部');assert.equal(r.reviewRows.filter(row=>row[5].v.startsWith('重复提交')).length,1);assert.equal(reviews(r).length,0);
@@ -72,8 +72,8 @@ test('同流程对应多笔款项归属不明不标红，独立核对绕过谈�
 });
 test('分类隔离且原已提交状态不能触发红色，未申请不新增标红核对',()=>{
  const i=fixture([100],[100]);sheet(i,'applications').F2={t:'s',v:'正常付款'};sheet(i,'applications').E3={t:'n',v:79};sheet(i,'negotiated').H2={t:'s',v:'已经提交全部'};const r=C.build(i);
- assert.deepEqual(r.highlights,{negotiatedCells:[],normalRows:[]});assert.equal(state(r),'未提交');assert.equal(r.normalRows[0][r.normalHeaders.indexOf('是否提交付款申请单')].v,'未申请');assert.equal(reviews(r).length,0);
- const noApplications=fixture([100],[]);sheet(noApplications,'applications').E2={t:'n',v:79};assert.deepEqual(C.build(noApplications).highlights,{negotiatedCells:[],normalRows:[]});
+ assert.deepEqual(r.highlights,{negotiatedCells:[],negotiatedPaidCells:[],normalRows:[]});assert.equal(state(r),'未提交');assert.equal(r.normalRows[0][r.normalHeaders.indexOf('是否提交付款申请单')].v,'未申请');assert.equal(reviews(r).length,0);
+ const noApplications=fixture([100],[]);sheet(noApplications,'applications').E2={t:'n',v:79};assert.deepEqual(C.build(noApplications).highlights,{negotiatedCells:[],negotiatedPaidCells:[],normalRows:[]});
 });
 test('零、空、负、异常分批和无缓存公式不标红，不按申请日期选择批次',()=>{
  for(const value of [0,'',-1,'待定',{t:'e',v:23},{t:'n',f:'D2'},{t:'n',v:100.001}]){const i=fixture([value],[100]),r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,[]);assert.equal(reviews(r).length,1);assert.equal(r.stats.pending,0);assert.match(reviews(r)[0][5].v,/需要处理/);}
@@ -112,7 +112,7 @@ test('付款归属不明的100个同额日期候选分条完整列出，不产�
 });
 test('申请日期只随本次匹配输出，重复申请日期去重排序并附于同一批次',()=>{
  const i=fixture([100,100],[100,100,100]),apps=sheet(i,'applications');apps.A2.v='2026-10-23';apps.A3.v='2026-10-20';apps.A4.v='2026-10-23';
- const before=JSON.stringify(i),r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,['L2']);assert.deepEqual(r.applicationComments,{L2:'申请日期（付款节奏跟进）：2026年10月20日；2026年10月23日'});
+ const before=JSON.stringify(i),r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,['L2']);assert.deepEqual(r.applicationComments,{L2:'申请日期（付款节奏跟进）：2026年10月20日；2026年10月23日（批次归属待核对）'});
  const c=r.normalRows[0][r.normalHeaders.indexOf('申请日期')];assert.equal(c.t,'n');assert.equal(c.z,C.DATE_FORMAT);assert.equal(X.SSF.format(c.z,c.v),'2026年10月27日');assert.equal(JSON.stringify(i),before);
  apps.E5.v=79;sheet(i,'ledger')[X.utils.encode_cell({r:2,c:LEDGER_HEADERS.indexOf('申请日期')})]={t:'s',v:'历史日期不沿用'};const next=C.build(i);assert.equal(next.normalRows[0][next.normalHeaders.indexOf('申请日期')].v,'');
 });
@@ -125,7 +125,7 @@ test('多次正常申请日期合并，异常和空日期明确显示，日期�
 });
 test('独立同额申请依次分配的批注只包含各自日期，未标红批次无批注',()=>{
  const i=fixture([100,100,100],[100,100]),apps=sheet(i,'applications');apps.D2.v=apps.D3.v='';const r=C.build(i);
- assert.deepEqual(r.applicationComments,{L2:'申请日期（付款节奏跟进）：2026年10月20日',M2:'申请日期（付款节奏跟进）：2026年10月21日'});
+ assert.deepEqual(r.applicationComments,{L2:'申请日期（付款节奏跟进）：2026年10月20日（批次归属待核对）',M2:'申请日期（付款节奏跟进）：2026年10月21日（批次归属待核对）'});
  apps.F2.v=apps.F3.v='正常付款';const next=C.build(i);assert.deepEqual(next.applicationComments,{});
 });
 test('正常付款按申请付款的日期升序，同周稳定、无效日期置后，标红与公式跟随记录',()=>{

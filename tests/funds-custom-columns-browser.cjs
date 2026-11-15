@@ -87,7 +87,7 @@ const MARKER='N("GYLSJQX_FUNDS_APPLIED_V1")=0';
   assert.equal(saved.Sheets.谈判付款.G3,undefined,'An originally absent custom cell stays absent');
   assert.equal(saved.Sheets.谈判付款.J2.s.fgColor.rgb,'FF0000','Owned red in a custom column is retained');
   assert.equal(saved.Sheets.谈判付款.B3.s.fgColor.rgb,'B6D7A8','Owned red in a managed column can still be withdrawn');
-  assert.equal(saved.Sheets.谈判付款.D2.s.fgColor.rgb,'FF0000');assert.equal(saved.Sheets.谈判付款.D2.c[0].t,'保留受管人工说明\n申请日期（付款节奏跟进）：2026年11月11日');
+  assert.equal(saved.Sheets.谈判付款.D2.s.fgColor.rgb,'FFFF00');assert.equal(saved.Sheets.谈判付款.D2.c[0].t,'保留受管人工说明\n申请日期（付款节奏跟进）：2026年11月11日');
   assert.equal(saved.Sheets.谈判付款.Q2.v,'FLOW-1');assert.equal(saved.Sheets.谈判付款['!ref'],'A1:Q3');
   assert.equal(before.noteShapes.N2,undefined);assert(before.noteShapes.O2);assert.equal(before.comments.O2,undefined);
 

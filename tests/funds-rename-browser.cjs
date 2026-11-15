@@ -2,12 +2,12 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=r
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const X=require('../vendor/xlsx.full.min.js'),{fixtures}=require('./funds-fixtures.cjs');
 const MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',TITLE='付款节奏跟进';
-const SHEETS=['谈判付款','正常付款','付款申请核对','付款进度整理','辅助说明','谈判付款-反馈'];
+const SHEETS=['谈判付款','正常付款','付款申请核对','付款进度整理','总额校验核对','辅助说明','谈判付款-反馈'];
 const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
 (async()=>{
  const base=process.env.BASE_URL||process.env.QA_URL||'http://127.0.0.1:8899/',out=process.env.OUT_DIR||process.env.QA_OUT||'/private/tmp/funds-rename-browser';
  await fs.mkdir(out,{recursive:true});const data=await fixtures(),ledger=X.read(data.ledger,{cellNF:true}),oa=X.read(data.oa,{cellNF:true});
- Object.assign(ledger.Sheets['对账明细-李奇'],{M2:{t:'n',v:40},N2:{t:'s',v:'是'},O2:{t:'n',v:999}});
+ for(const owner of ['李奇','邢芳芳'])Object.assign(ledger.Sheets['对账明细-'+owner],{M2:{t:'n',v:40},N2:{t:'s',v:'是'},O2:{t:'n',v:999}});
  oa.Sheets.Sheet0.B3={t:'s',v:'另一审批节点'};
  oa.Sheets.Sheet0['!ref']='A1:G'+(Math.max(...Object.keys(oa.Sheets.Sheet0).filter(a=>/^[A-Z]+\d+$/.test(a)).map(a=>X.utils.decode_cell(a).r))+1);
  data.ledger=write(ledger);data.oa=write(oa);
@@ -28,7 +28,7 @@ const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
   assert.equal(await frame.locator('body').evaluate(()=>document.title),TITLE+'｜供应链数据清洗');
   assert.equal(await frame.locator('#download').textContent(),'下载'+TITLE+'表');
   assert.equal(await frame.locator('#filenameHint').textContent(),TITLE+'-2026-11-08-V10.xlsx');
-  const settlement='settlement:对账明细-李奇!2',oaIssue='oa:对账明细-李奇!2';
+  const settlement='settlement:对账明细-邢芳芳!2',oaIssue='oa:对账明细-李奇!2';
   const decision=id=>frame.locator('select[data-decision="'+id+'"]');
   async function setup(){
    for(const role of ['ledger','applications','oa','negotiated']){await frame.locator('#'+role+'File:not([disabled])').waitFor();await frame.locator('#'+role+'File').setInputFiles({name:role+'.xlsx',mimeType:MIME,buffer:data[role]});}
@@ -54,14 +54,17 @@ const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
   async function verify(book,choice){
    assert.deepEqual(book.SheetNames,SHEETS);const sheet=book.Sheets.正常付款,range=X.utils.decode_range(sheet['!ref']);
    const headers=Array.from({length:range.e.c+1},(_,c)=>sheet[X.utils.encode_cell({r:0,c})].v);
-   const supplier=headers.indexOf('供应商名称'),row=Array.from({length:range.e.r},(_,i)=>i+1).find(r=>sheet[X.utils.encode_cell({r,c:supplier})]?.v==='正常供应商1');
+   const supplier=headers.indexOf('供应商名称'),row=Array.from({length:range.e.r},(_,i)=>i+1).find(r=>sheet[X.utils.encode_cell({r,c:supplier})]?.v==='正常供应商3');
    assert.notEqual(row,undefined);const get=h=>sheet[X.utils.encode_cell({r:row,c:headers.indexOf(h)})];
-   assert.equal(get('已付金额').v,40);assert.equal(get('剩余金额').v,choice==='keep'?999:60);assert.equal(get('是否结清').v,choice==='keep'?'是':'否');
-   assert.equal(get('本次申请付款金额').v,100);assert.equal(get('对公付款0A流程号').v,'MDST-DGFK20261024001');
+   assert.equal(get('已付金额').v,40);assert.equal(get('剩余金额').v,choice==='keep'?999:62);assert.equal(get('是否结清').v,choice==='keep'?'是':'否');
+   assert.equal(get('本次申请付款金额').v,102);assert.equal(get('对公付款0A流程号').v,'MDST-DGFK20261024003');
    if(choice==='recalculate')assert.equal(get('剩余金额').f,'G'+(row+1)+'-M'+(row+1));
    const preview=await frame.locator('#normalPreview tbody tr').evaluateAll(rows=>rows.map(r=>[...r.cells].map(c=>c.textContent)));
-   const visible=preview.find(r=>r[supplier]==='正常供应商1');for(const h of ['已付金额','剩余金额','是否结清'])assert.equal(visible[headers.indexOf(h)],X.utils.format_cell(get(h)));
-   for(const name of SHEETS.slice(0,4))assert(book.Sheets[name]['!autofilter']);
+   const visible=preview.find(r=>r[supplier]==='正常供应商3');for(const h of ['已付金额','剩余金额','是否结清'])assert.equal(visible[headers.indexOf(h)],X.utils.format_cell(get(h)));
+   for(const name of SHEETS.slice(0,5))assert(book.Sheets[name]['!autofilter']);
+   assert.deepEqual(X.utils.sheet_to_json(book.Sheets.总额校验核对,{header:1})[0],require('../funds-core.js').TOTAL_VALIDATION_HEADERS);assert.equal(X.utils.sheet_to_json(book.Sheets.总额校验核对).length,2);
+   const liqiRow=Array.from({length:range.e.r},(_,i)=>i+1).find(r=>sheet[X.utils.encode_cell({r,c:supplier})]?.v==='正常供应商1'),liqi=h=>sheet[X.utils.encode_cell({r:liqiRow,c:headers.indexOf(h)})];
+   assert.deepEqual([liqi('已付金额').v,liqi('剩余金额').v,liqi('是否结清').v],[40,999,'是']);assert.equal(liqi('剩余金额').f,undefined);assert.equal(await decision('settlement:对账明细-李奇!2').count(),0,'李奇源付款情况不再要求重算');
   }
   await setup();await checkChoices();await choose('keep');await verify(await download(10),'keep');
   await frame.locator('#onlyPending').uncheck();await checkChoices();await choose('recalculate');await verify(await download(11),'recalculate');
@@ -91,9 +94,9 @@ const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
   },[...migrated]);assert(nativeAuthors.includes('原作者'),'原生批注XML保留中文作者');
   const next={...result,applicationComments:{B2:'申请日期（付款节奏跟进）：2026年11月9日'}};
   const repeated=await exportNotes(migrated,next);assert.equal(X.read(repeated).Sheets.谈判付款.B2.c[0].t,'保留原人工批注\n申请日期（付款节奏跟进）：2026年11月9日');
-  const withdrawn=await exportNotes(repeated,{...next,highlights:undefined});assert.equal(X.read(withdrawn).Sheets.谈判付款.B2.c[0].t,'保留原人工批注');
+  const withdrawn=await exportNotes(repeated,{...next,applicationComments:undefined,highlights:undefined});assert.equal(X.read(withdrawn).Sheets.谈判付款.B2.c[0].t,'保留原人工批注\n申请日期（付款节奏跟进）：2026年11月9日');
   await fs.writeFile(path.join(out,'legacy-comment-migrated.xlsx'),migrated);
-  assert.deepEqual(errors,[]);console.log(JSON.stringify({base,out,title:TITLE,oldVersionContinues:[10,11,12],settlementKeep:true,settlementRecalculate:true,sourceChoicePrefix:true,matchSourcePreserved:true,legacyCommentMigration:true,fourSheets:true,errors}));
+  assert.deepEqual(errors,[]);console.log(JSON.stringify({base,out,title:TITLE,oldVersionContinues:[10,11,12],settlementKeep:true,settlementRecalculate:true,sourceChoicePrefix:true,matchSourcePreserved:true,legacyCommentMigration:true,fiveSheets:true,liqiSourcePreserved:true,errors}));
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
 

@@ -31,7 +31,7 @@ test('重新申请不掩盖台账或OA自身核对',()=>{
 test('每笔申请一行、重复及未进入付款表申请保留，来源日期金额类型正确，归档仅改变新表状态',()=>{
  const i=fixture(),before=JSON.stringify(i),r=C.build(i),p=records(r);
  assert.equal(p.length,4);assert.deepEqual(p.map(row=>row['申请付款金额'].v),[40,200,40,0]);
- assert.deepEqual(p.map(row=>row['是否已付款'].v),['已付款','未付款','已付款','未付款']);
+ assert.deepEqual(p.map(row=>row['是否已付款'].v),['待核对','未付款','待核对','未付款']);
  assert.deepEqual(p.map(row=>row['跟单员'].v),['李奇','徐英','李奇','']);
  assert.equal(display(p[0]['应付时间']),'2026年11月6日');assert.equal(display(p[1]['应付时间']),'2026年11月9日');
  assert.equal(display(p[0]['申请日期']),'2026年11月1日');assert.equal(p[0]['申请日期'].t,'n');assert.equal(p[3]['申请付款金额'].t,'n');assert.equal(p[0]['对公付款OA号'].t,'s');
@@ -118,7 +118,7 @@ test('空白、零值、金额异常、日期异常及1904日期分别保留，�
  i.applications.book.Workbook={WBProps:{date1904:true}};set(i,'applications','申请日期',3,46328-1462);r=C.build(i);assert.equal(display(records(r)[1]['申请日期']),'2026年11月2日');
 });
 test('旧合同号兼容；新流程编码列存在且为空时不回退；不依据OA申请人填跟单员',()=>{
- const i=fixture(),s=i.applications.book.Sheets.付款申请汇总;s.D1.v='合同号';assert.equal(records(C.build(i))[0]['是否已付款'].v,'已付款');
+ const i=fixture(),s=i.applications.book.Sheets.付款申请汇总;s.D1.v='合同号';assert.equal(records(C.build(i))[0]['是否已付款'].v,'待核对');
  X.utils.sheet_add_aoa(s,[['流程编码'],['']],{origin:'G1'});let p=records(C.build(i))[0];assert.equal(p['对公付款OA号'].v,'');assert.equal(p['是否已付款'].v,'待核对');assert.equal(p['跟单员'].v,'');
 });
 test('原三表金额、提交标红及公式与上一版一致，进度核对不增加下载阻断',()=>{
@@ -126,12 +126,12 @@ test('原三表金额、提交标红及公式与上一版一致，进度核对�
  assert.deepEqual(first.normalRows.map(row=>row[C.NORMAL_HEADERS.indexOf('供应商名称')].v),['合成供应商2','合成供应商3']);
  assert.equal(first.normalRows[0][C.NORMAL_HEADERS.indexOf('申请付款的日期')].v,'2026/11/02周');
  assert.equal(first.applicationComments.M2,'申请日期（付款节奏跟进）：2026年11月1日；2026年11月3日');
- set(i,'oa','流程状态',2,'未归档');set(i,'oa','流程状态',6,'未归档');assert.equal(records(C.build(i))[0]['是否已付款'].v,'已付款','明确出纳支付记录不由流程状态替代');
+ set(i,'oa','流程状态',2,'未归档');set(i,'oa','流程状态',6,'未归档');assert.equal(records(C.build(i))[0]['是否已付款'].v,'待核对','谈判付款缺少申请汇总付款列时不由出纳支付记录补判');
  assert.deepEqual(C.build(i).highlights,first.highlights);
 });
-test('没有申请时仍输出固定12列表头与空进度表',()=>{
- const i=fixture();i.applications.book=book('付款申请汇总',[AH]);const r=C.build(i);assert.deepEqual(r.progressRows,[]);assert.deepEqual(r.progressHeaders,['申请日期','跟单员','供应商名称','付款主体','对公付款OA号','申请付款金额','应付时间','当前节点','未操作者','流程状态','申请人','是否已付款']);
- assert.equal(C.OUTPUT_SHEETS.length,4);
+test('没有申请时仍输出固定13列表头与空进度表',()=>{
+ const i=fixture();i.applications.book=book('付款申请汇总',[AH]);const r=C.build(i);assert.deepEqual(r.progressRows,[]);assert.deepEqual(r.progressHeaders,['申请日期','付款来源','跟单员','供应商名称','付款主体','对公付款OA号','申请付款金额','应付时间','当前节点','未操作者','流程状态','申请人','是否已付款']);
+ assert.equal(C.OUTPUT_SHEETS.length,5);
 });
 
 test('付款分类沿用台账谈判优先规则，应付时间不会误取台账日期',()=>{
@@ -146,13 +146,13 @@ test('多OA换行文本统一显示，最新上传OA状态变化不沿用旧状�
 test('核对说明含重新申请时优先显示重新申请，不改变付款状态金额和标红',()=>{
  for(const note of ['重新申请','退回后重新申请付款','重新\n申请',{t:'s',v:'重新申请',f:'"重新申请"'}]){
   const i=fixture(),before=C.build(i);X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['核对说明'],[note]],{origin:'G1'});
-  const r=C.build(i),p=records(r);assert.equal(p[0]['是否已付款'].v,'重新申请');assert.equal(p[0]['流程状态'].v,'归档');assert.equal(p[2]['是否已付款'].v,'已付款','同OA重复申请只按本行说明判断');
+  const r=C.build(i),p=records(r);assert.equal(p[0]['是否已付款'].v,'重新申请');assert.equal(p[0]['流程状态'].v,'归档');assert.equal(p[2]['是否已付款'].v,'待核对','同OA重复申请只按本行说明判断');
   for(const key of ['normalRows','negotiated','highlights','applicationComments','issues'])assert.deepEqual(r[key],before[key]);
   assert.deepEqual(r.reviewRows,before.reviewRows.filter(row=>!row[5].v.startsWith('重复提交')));
   for(const code of ['',ID(99),ID(1)+' / '+ID(2)]){set(i,'applications','流程编码',2,code);assert.equal(records(C.build(i))[0]['是否已付款'].v,'重新申请');}
  }
  for(const note of ['',0,'核对通过',{t:'e',v:'重新申请'},{t:'s',f:'A1'}]){
-  const i=fixture();X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['核对说明'],[note]],{origin:'G1'});assert.equal(records(C.build(i))[0]['是否已付款'].v,'已付款');
+  const i=fixture();X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['核对说明'],[note]],{origin:'G1'});assert.equal(records(C.build(i))[0]['是否已付款'].v,'待核对');
  }
  const i=fixture();X.utils.sheet_add_aoa(i.applications.book.Sheets.付款申请汇总,[['核对说明'],[''],['重新申请']],{origin:'G1'});assert.equal(records(C.build(i))[1]['是否已付款'].v,'重新申请','未归档也优先采用重新申请');
 });

@@ -88,7 +88,7 @@ window.FundsExport = async function(sourceBytes, result) {
     // Native fills follow records when WPS sorts them and remain manually editable.
     const xf=create(styles,'xf',{numFmtId:formatId(code),fontId:header?headerFontId:fontId,fillId:header?fillId:applied?redFill():0,borderId:header?headerBorderId:borderId,xfId:0,applyFont:1,applyFill:1,applyBorder:1,applyAlignment:1,applyNumberFormat:1});xf.append(create(styles,'alignment',{horizontal:'center',vertical:'center',wrapText:1}));const id=append('cellXfs',xf);styleIds.set(key,id);return id;
   };
-  const appliedFormula='N("GYLSJQX_FUNDS_APPLIED_V1")=0',appliedStylePrefix='GYLSJQX_FUNDS_APPLIED_V2_';
+  const appliedFormula='N("GYLSJQX_FUNDS_APPLIED_V1")=0',appliedStylePrefix='GYLSJQX_FUNDS_APPLIED_V3_';
   // Remove only our old fixed-address rules; they override manual colors and drift after sorting.
   for(const container of elements(sheet,'conditionalFormatting')){
     // Withdraw old tool rules only from business columns, retaining custom-column rules.
@@ -112,7 +112,17 @@ window.FundsExport = async function(sourceBytes, result) {
   let baseXfs=first(styles,'cellStyleXfs'),namedStyles=first(styles,'cellStyles');
   if(!baseXfs){baseXfs=create(styles,'cellStyleXfs',{count:0});styles.documentElement.insertBefore(baseXfs,xfs);}
   if(!namedStyles){namedStyles=create(styles,'cellStyles',{count:0});styles.documentElement.insertBefore(namedStyles,xfs.nextSibling);}
-  const ownedBases=new Set([...namedStyles.children].filter(n=>n.getAttribute('name')?.startsWith(appliedStylePrefix)).map(n=>Number(n.getAttribute('xfId'))));
+  const ownedBases=new Map(),currentBases=new Set();
+  for(const style of namedStyles.children){
+    const name=style.getAttribute('name')||'',current=/^GYLSJQX_FUNDS_APPLIED_V3_(FFFF0000|FFFFFF00)_\d+$/.exec(name);
+    if(current||name.startsWith('GYLSJQX_FUNDS_APPLIED_V2_'))ownedBases.set(Number(style.getAttribute('xfId')),current?.[1]||'FFFF0000');
+    if(current)currentBases.add(Number(style.getAttribute('xfId')));
+  }
+  let pendingFillId;
+  const pendingFill=()=>{
+    if(pendingFillId===undefined){const fill=create(styles,'fill'),pattern=create(styles,'patternFill',{patternType:'solid'});pattern.append(create(styles,'fgColor',{rgb:'FFFFFF00'}),create(styles,'bgColor',{rgb:'FFFFFF00'}));fill.append(pattern);pendingFillId=[...fills.children].findIndex(existing=>existing.isEqualNode(fill));if(pendingFillId<0)pendingFillId=append('fills',fill);}
+    return pendingFillId;
+  };
   const restoredStyles=new Map(),appliedStyles=new Map();
   // Hidden native cell styles keep the previous fill with the cell, including after sorting/save.
   for(const c of elements(sheetData,'c')){
@@ -121,21 +131,23 @@ window.FundsExport = async function(sourceBytes, result) {
     if(!restoredStyles.has(id)){
       const base=baseXfs.children[parent];if(!base)throw Error('付款申请标色的原样式缺失');
       const restored=xf.cloneNode(true),pattern=first(fills.children[Number(xf.getAttribute('fillId')||0)],'patternFill');
-      if(pattern?.getAttribute('patternType')==='solid'&&first(pattern,'fgColor')?.getAttribute('rgb')==='FFFF0000')restored.setAttribute('fillId',base.getAttribute('fillId')||'0');
+      if(pattern?.getAttribute('patternType')==='solid'&&first(pattern,'fgColor')?.getAttribute('rgb')?.toUpperCase()===ownedBases.get(parent))restored.setAttribute('fillId',base.getAttribute('fillId')||'0');
       restored.setAttribute('xfId',base.getAttribute('xfId')||'0');restoredStyles.set(id,append('cellXfs',restored));
     }
     c.setAttribute('s',restoredStyles.get(id));
   }
-  const applyEditableFill=c=>{
-    const id=Number(c.getAttribute('s')||0);if(!appliedStyles.has(id)){
-      const original=xfs.children[id];let base=[...ownedBases].find(i=>baseXfs.children[i].isEqualNode(original));
-      if(base===undefined){base=append('cellStyleXfs',original.cloneNode(true));append('cellStyles',create(styles,'cellStyle',{name:appliedStylePrefix+base,xfId:base,hidden:1}));ownedBases.add(base);}
-      const xf=original.cloneNode(true);xf.setAttribute('fillId',redFill());xf.setAttribute('applyFill','1');xf.setAttribute('xfId',base);appliedStyles.set(id,append('cellXfs',xf));
+  const applyEditableFill=(c,color)=>{
+    const id=Number(c.getAttribute('s')||0),key=id+':'+color;if(!appliedStyles.has(key)){
+      const original=xfs.children[id];let base=[...ownedBases].find(([i,marker])=>marker===color&&currentBases.has(i)&&baseXfs.children[i].isEqualNode(original))?.[0];
+      if(base===undefined){base=append('cellStyleXfs',original.cloneNode(true));append('cellStyles',create(styles,'cellStyle',{name:appliedStylePrefix+color+'_'+base,xfId:base,hidden:1}));ownedBases.set(base,color);currentBases.add(base);}
+      const xf=original.cloneNode(true);xf.setAttribute('fillId',color==='FFFF0000'?redFill():pendingFill());xf.setAttribute('applyFill','1');xf.setAttribute('xfId',base);appliedStyles.set(key,append('cellXfs',xf));
     }
-    c.setAttribute('s',appliedStyles.get(id));
+    c.setAttribute('s',appliedStyles.get(key));
   };
-  const highlightedCells=result.highlights?.negotiatedCells??[],highlightedRows=result.highlights?.normalRows??[];
-  if(!Array.isArray(highlightedCells)||!Array.isArray(highlightedRows))throw Error('付款申请标红位置无效');
+  const highlightedCells=result.highlights?.negotiatedCells??[],paidCells=result.highlights?.negotiatedPaidCells??[],highlightedRows=result.highlights?.normalRows??[];
+  if(!Array.isArray(highlightedCells)||!Array.isArray(paidCells)||!Array.isArray(highlightedRows))throw Error('付款申请标色位置无效');
+  if(paidCells.some(address=>!highlightedCells.includes(address)))throw Error('谈判付款已付款位置必须属于本次匹配申请');
+  const paidSet=new Set(paidCells);
   for(const row of highlightedRows)if(!Number.isInteger(row)||row<1||row>result.normalRows.length+1)throw Error('正常付款标红行号无效');
   const appliedNormalRows=new Set(highlightedRows);
   const wrappedStyles=new Map();
@@ -370,8 +382,21 @@ window.FundsExport = async function(sourceBytes, result) {
   // Move the existing column XML, including styles and references, instead of rebuilding the source sheet.
   // Patch native notes before column relocation so notes and their VML anchors move together.
   const commentPrefix='申请日期（付款节奏跟进）：',commentAuthor='付款节奏跟进';
-  const isToolComment=line=>line.startsWith(commentPrefix)||line.startsWith('申请日期（资金整理）：');
-  const commentEntries=Object.entries(result.applicationComments||{}).filter(([address])=>highlightedCells.includes(address));
+  const commentPrefixes=['批次（付款节奏跟进）：',commentPrefix,'OA备注时间（付款节奏跟进）：','付款时间（付款节奏跟进）：'];
+  const prefixOf=line=>typeof line!=='string'?undefined:line.startsWith('申请日期（资金整理）：')?commentPrefix:commentPrefixes.find(prefix=>line.startsWith(prefix));
+  const updatesByAddress=new Map(Object.entries(result.applicationComments||{}).map(([address,message])=>[address,[message]]));
+  for(const [address,messages] of Object.entries(result.batchComments||{})){
+    if(!Array.isArray(messages))throw Error('付款批次批注数据无效');
+    const merged=new Map((updatesByAddress.get(address)||[]).map(message=>[prefixOf(message),message]));
+    for(const message of messages){if(typeof message!=='string'||!prefixOf(message)||/[\r\n]/.test(message))throw Error('付款批次批注数据无效');merged.set(prefixOf(message),message);}
+    updatesByAddress.set(address,[...merged.values()].sort((a,b)=>commentPrefixes.indexOf(prefixOf(a))-commentPrefixes.indexOf(prefixOf(b))));
+  }
+  const commentEntries=[...updatesByAddress].filter(([,messages])=>messages.length);
+  for(const [address,messages] of commentEntries){
+    if(!/^[A-Z]+[1-9]\d*$/.test(address)||messages.some(message=>typeof message!=='string'||!prefixOf(message)||/[\r\n]/.test(message)))throw Error('付款批次批注数据无效');
+    if(!managedAddress(address))throw Error('谈判付款批注超出业务列：'+address+'，未改动保留列');
+  }
+  const noteTexts=new Map();
   const sheetRelationsPath=relPath(sheetPath),sheetRelations=zip.file(sheetRelationsPath)?await parse(zip,sheetRelationsPath):parseText(`<Relationships xmlns="${P}"/>`);
   const findRelation=type=>elements(sheetRelations,'Relationship').find(r=>r.getAttribute('Type')===R+'/'+type);
   const oldCommentRelation=findRelation('comments');
@@ -382,10 +407,12 @@ window.FundsExport = async function(sourceBytes, result) {
     const textOf=node=>elements(node,'t').map(t=>t.textContent).join('');
     // Locate complete tool lines before editing runs: rich-text boundaries are not line boundaries.
     for(const comment of elements(list,'comment')){
-      if(!managedAddress(comment.getAttribute('ref')))continue;
+      const address=comment.getAttribute('ref'),messages=updatesByAddress.get(address);
+      if(!managedAddress(address)||!messages?.length)continue;
+      const replacing=new Set(messages.map(prefixOf));
       const text=first(comment,'text');if(!text)continue;
       const original=textOf(text),removed=[];
-      for(const line of original.matchAll(/[^\r\n]*(?:\r\n|\r|\n|$)/g))if(isToolComment(line[0].replace(/[\r\n]+$/,''))){
+      for(const line of original.matchAll(/[^\r\n]*(?:\r\n|\r|\n|$)/g))if(replacing.has(prefixOf(line[0].replace(/[\r\n]+$/,'')))){
         const end=line.index+line[0].length,last=removed.at(-1);
         if(last?.[1]===line.index)last[1]=end;else removed.push([line.index,end]);
       }
@@ -400,18 +427,16 @@ window.FundsExport = async function(sourceBytes, result) {
         if(clean){t.textContent=clean;t.setAttribute('xml:space','preserve');}
         else {const parent=t.parentElement;t.remove();if(parent.localName==='r'&&!elements(parent,'t').length)parent.remove();}
       }
-      if(!textOf(text))comment.remove();
     }
     let authorId=elements(authors,'author').findIndex(a=>a.textContent===commentAuthor);
     if(authorId<0&&commentEntries.length){authorId=authors.children.length;const author=create(comments,'author');author.textContent=commentAuthor;authors.append(author);}
-    for(const [address,message] of commentEntries){
-      if(!/^[A-Z]+[1-9]\d*$/.test(address)||typeof message!=='string'||!message.startsWith(commentPrefix)||/[\r\n]/.test(message))throw Error('申请日期批注数据无效');
-      if(!managedAddress(address))throw Error('谈判付款批注超出业务列：'+address+'，未改动保留列');
+    for(const [address,messages] of commentEntries){
       let comment=elements(list,'comment').find(c=>c.getAttribute('ref')===address);
       if(!comment){comment=create(comments,'comment',{ref:address,authorId});comment.append(create(comments,'text'));list.append(comment);}
       const text=first(comment,'text');
       for(const t of [...text.children].filter(c=>c.localName==='t')){const run=create(comments,'r');t.replaceWith(run);run.append(t);}
-      const run=create(comments,'r'),t=create(comments,'t');t.setAttribute('xml:space','preserve');t.textContent=(textOf(text)?'\n':'')+message;run.append(t);text.append(run);
+      const run=create(comments,'r'),t=create(comments,'t');t.setAttribute('xml:space','preserve');t.textContent=(textOf(text)?'\n':'')+messages.join('\n');run.append(t);text.append(run);
+      noteTexts.set(address,{text:textOf(text),fontSize:Math.max(11,...elements(text,'sz').map(size=>Number(size.getAttribute('val'))||11))});
     }
     const addRelation=(type,path)=>{
       let id='rIdFunds'+type;while(elements(sheetRelations,'Relationship').some(r=>r.getAttribute('Id')===id))id+='x';
@@ -520,11 +545,11 @@ window.FundsExport = async function(sourceBytes, result) {
     if(!managedAddress(address))throw Error('谈判付款标红超出业务列：'+address+'，未改动保留列');
     const point=XLSX.utils.decode_cell(address);if(point.r<=(result.negotiated.headerRow||0))return [];
     if(point.r>maxRow||point.c>maxColumn)throw Error('谈判付款标红地址超出明细范围');
-    const moved=order?.indexOf(point.c);return [XLSX.utils.encode_cell({r:point.r,c:moved>=0?moved:point.c})];
+    const moved=order?.indexOf(point.c);return [[XLSX.utils.encode_cell({r:point.r,c:moved>=0?moved:point.c}),paidSet.has(address)?'FFFF0000':'FFFFFF00']];
   });
-  const appliedSet=new Set(appliedCells);for(const c of elements(sheetData,'c'))if(appliedSet.has(c.getAttribute('r')))applyEditableFill(c);
-  const applicationNoteCells=new Set(commentEntries.map(([address])=>{const point=XLSX.utils.decode_cell(address),moved=order?.indexOf(point.c);return XLSX.utils.encode_cell({r:point.r,c:moved>=0?moved:point.c});}));
-  // Only this export's application-date notes need repositioning; retain manual note placement.
+  const appliedSet=new Map(appliedCells);for(const c of elements(sheetData,'c'))if(appliedSet.has(c.getAttribute('r')))applyEditableFill(c,appliedSet.get(c.getAttribute('r')));
+  const applicationNoteCells=new Map([...noteTexts].map(([address,note])=>{const point=XLSX.utils.decode_cell(address),moved=order?.indexOf(point.c);return [XLSX.utils.encode_cell({r:point.r,c:moved>=0?moved:point.c}),note];}));
+  // Only updated notes are resized and placed next to their cell; retain other note placement.
   if(applicationNoteCells.size&&first(sheet,'legacyDrawing')){
     const legacy=first(sheet,'legacyDrawing'),relations=await parse(zip,sheetRelationsPath);
     const relation=legacy&&elements(relations,'Relationship').find(r=>r.getAttribute('Id')===legacy.getAttributeNS(R,'id'));
@@ -540,7 +565,9 @@ window.FundsExport = async function(sourceBytes, result) {
         if(!applicationNoteCells.has(XLSX.utils.encode_cell({r,c})))continue;
         const style=new Map((shape.getAttribute('style')||'').split(';').filter(p=>p.includes(':')).map(p=>{const at=p.indexOf(':');return [p.slice(0,at).trim(),p.slice(at+1).trim()];}));
         const dimension=(key,fallback)=>{const m=/^([\d.]+)(pt|px)$/i.exec(style.get(key)||'');return m&&Number(m[1])>0?Number(m[1])*(m[2].toLowerCase()==='pt'?4/3:1):fallback;};
-        const width=dimension('width',288),height=dimension('height',128),startCol=Math.min(c+1,16383);
+        const note=applicationNoteCells.get(XLSX.utils.encode_cell({r,c})),width=Math.max(288,dimension('width',288)),fontPixels=note.fontSize*4/3;
+        const lineCount=note.text.split(/\r\n|\r|\n/).reduce((count,line)=>count+Math.max(1,Math.ceil([...line].reduce((sum,char)=>sum+(/[\u0000-\u00ff]/.test(char)?fontPixels*.55:fontPixels),0)/(width-24))),0);
+        const height=Math.max(dimension('height',128),lineCount*(fontPixels+5)+20),startCol=Math.min(c+1,16383);
         const [endCol,endX]=edge(startCol,6+width,columnPixels,16383),[endRow,endY]=edge(r,2+height,rowPixels,1048575);
         let left=6,top=2;for(let i=0;i<startCol;i++)left+=columnPixels(i);for(let i=0;i<r;i++)top+=rowPixels(i);
         for(const [key,value] of Object.entries({position:'absolute',left:'0pt',top:'0pt','margin-left':left*.75+'pt','margin-top':top*.75+'pt',width:width*.75+'pt',height:height*.75+'pt'}))style.set(key,value);
@@ -555,7 +582,7 @@ window.FundsExport = async function(sourceBytes, result) {
   selected.removeAttribute('state');
   const outputEntries=new Map([['谈判付款',selected]]),outputPaths=new Set([sheetPath]);
   let nextSheetId=Math.max(...entries.map(e=>Number(e.getAttribute('sheetId'))),0)+1;
-  const generatedSheets=[['正常付款','Normal',result.normalHeaders,result.normalRows],['付款申请核对','Review',result.reviewHeaders,result.reviewRows],['付款进度整理','Progress',result.progressHeaders||FundsCore.PROGRESS_HEADERS,result.progressRows||[]]];
+  const generatedSheets=[['正常付款','Normal',result.normalHeaders,result.normalRows],['付款申请核对','Review',result.reviewHeaders,result.reviewRows],['付款进度整理','Progress',result.progressHeaders||FundsCore.PROGRESS_HEADERS,result.progressRows||[]],['总额校验核对','TotalValidation',result.totalValidation?.headers||FundsCore.TOTAL_VALIDATION_HEADERS,result.totalValidation?.rows||[]]];
   for(const [name,key,headers,data] of generatedSheets){
     const generated=parseText(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="${S}"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews><cols/><sheetData/></worksheet>`);
     const generatedData=first(generated,'sheetData');
@@ -567,7 +594,7 @@ window.FundsExport = async function(sourceBytes, result) {
     }
     const range=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:allRows.length-1,c:headers.length-1}});
     generated.documentElement.insertBefore(create(generated,'dimension',{ref:range}),generated.documentElement.firstChild);
-    fitSheet(generated,{r:allRows.length-1,c:headers.length-1},0,key==='Review',key==='Progress');
+    fitSheet(generated,{r:allRows.length-1,c:headers.length-1},0,key==='Review'||key==='TotalValidation',key==='Progress');
     if(key==='Normal'){
       for(const col of elements(generated,'col'))if(FundsCore.NORMAL_HIDDEN_HEADERS.includes(headers[Number(col.getAttribute('min'))-1]))col.setAttribute('hidden','1');
     }

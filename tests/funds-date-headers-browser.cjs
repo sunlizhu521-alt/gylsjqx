@@ -74,12 +74,16 @@ const C=require('../funds-core.js'),{fixtures}=require('./funds-fixtures.cjs');
   const actualInput=Buffer.from(X.write(inputs.negotiated.book,{type:'buffer',bookType:'xlsx'})),actualResult=C.build(inputs);
   const actualOutput=await exportBytes(actualInput,actualResult),reopened=X.read(actualOutput,{cellNF:true,cellStyles:true});
   const rebuilt=C.build({...inputs,negotiated:{name:'再次上传.xlsx',book:reopened,sheetName:'谈判付款'}});
-  for(const column of [15,16]){
+  for(const column of [15]){
    const address=X.utils.encode_cell({r:0,c:column});
    assert.equal(reopened.Sheets.谈判付款[address].t,'s');
    assert.equal(reopened.Sheets.谈判付款[address].v,X.SSF.format(C.DATE_FORMAT,schedule[address].v));
    assert(actualResult.negotiated.managedColumns.includes(column));assert(rebuilt.negotiated.managedColumns.includes(column),'重新导入后仍识别为付款日期列：'+address);
   }
+  assert.equal(reopened.Sheets.谈判付款.Q1.t,'n','仅年月格式未声明具体付款日期，保留原表列');
+  assert.equal(reopened.Sheets.谈判付款.Q1.v,schedule.Q1.v);
+  assert.equal(reopened.Sheets.谈判付款.Q1.z,schedule.Q1.z);
+  assert(!actualResult.negotiated.managedColumns.includes(16));
   assert.deepEqual(rebuilt.negotiated.managedColumns,actualResult.negotiated.managedColumns,'文本日期回读不会丢失或增加业务列');
   const rebuiltOutput=X.read(await exportBytes(actualOutput,rebuilt),{cellNF:true});
   for(const address of ['P1','Q1'])assert.equal(rebuiltOutput.Sheets.谈判付款[address].v,reopened.Sheets.谈判付款[address].v);
