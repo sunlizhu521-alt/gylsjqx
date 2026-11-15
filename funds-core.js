@@ -203,6 +203,27 @@ function oneTable(input,required,optionalHeaders=[]){
  if(found.length!==1)throw Error(input.name+'：'+(found.length?'存在多个可用明细工作表，请只保留本次明细':'未找到包含 '+required.join('、')+' 的工作表'));
  return found[0];
 }
+function unmergeLedgerClassification(parsed){
+ const column=parsed.map['是否谈判付款'];if(column===undefined)return parsed;
+ const merges=parsed.sheet['!merges']||[],selected=merges.filter(m=>m.e.r>parsed.headerRow&&m.s.c<=column&&m.e.c>=column);
+ if(!selected.length)return parsed;
+ // Work on a copy: merged followers carry the anchor's classification, not a blank normal-payment flag.
+ const sheet={...parsed.sheet,'!merges':merges.filter(m=>!selected.includes(m))};
+ for(const merge of selected){
+  const label=parsed.name+' / '+parsed.sheetName+'!'+X.utils.encode_range(merge)+'（是否谈判付款）';
+  if(merge.s.r<=parsed.headerRow)throw Error(label+'：合并跨越表头和明细，请先核实合并范围后重新上传');
+  if(merge.s.c!==column||merge.e.c!==column)throw Error(label+'：合并跨越其他列，请先核实合并范围后重新上传');
+  if((merge.e.r-parsed.headerRow)*(parsed.range.e.c+1)>2000000)throw Error(label+'：合并范围过大，请核实源表');
+  const anchor=parsed.sheet[X.utils.encode_cell(merge.s)];
+  if(anchor?.t==='e'||anchor?.f&&(anchor.t==='z'||anchor.v==null||anchor.v===''))throw Error(label+'：合并首格公式结果不可用，请在源表重算并保存后重新上传');
+  for(let r=merge.s.r+1;r<=merge.e.r;r++){
+   const address=X.utils.encode_cell({r,c:column}),original=parsed.sheet[address];
+   if(original?.f||original?.t==='e'||norm(original?.v)&&norm(original.v)!==norm(anchor?.v))throw Error(label+'：'+address+' 含不同内容或公式，请核实后重新上传，未覆盖原值');
+   sheet[address]={...original,t:anchor?.t||'s',v:anchor?.v??''};
+  }
+ }
+ return {...parsed,sheet,records:parsed.records.map(record=>({...record,values:{...record.values,'是否谈判付款':clone(sheet[X.utils.encode_cell({r:record.r,c:column})])}}))};
+}
 const value=(r,k)=>r.values[k]?.v;
 const oas=r=>codes(value(r,'对公付款0A流程号'));
 const hasPaymentOA=r=>r.values['对公付款0A流程号']?.t!=='e'&&norm(value(r,'对公付款0A流程号'))!=='';
@@ -218,7 +239,7 @@ function build(inputs,decisions={}){
  const ledgerTables=PEOPLE.map(person=>{
   const names=inputs.ledger.book.SheetNames.filter(n=>new RegExp('^对账明细[-－—]?'+person+'(?:\\d{4}|\\d{8})?$').test(norm(n)));
   if(names.length!==1)throw Error('资金台账中'+person+'的对账明细'+(names.length?'存在多个版本':'缺失'));
-  const parsed=table(inputs.ledger,names[0],['供应商名称','申请付款金额'],[],[...NORMAL_ESTIMATE_HEADERS,...NORMAL_TERMS_HEADERS]);for(const record of parsed.records)record.owner=person;return parsed;
+  const parsed=unmergeLedgerClassification(table(inputs.ledger,names[0],['供应商名称','申请付款金额'],[],[...NORMAL_ESTIMATE_HEADERS,...NORMAL_TERMS_HEADERS]));for(const record of parsed.records)record.owner=person;return parsed;
  });
  const ledger=ledgerTables.flatMap(t=>t.records),issues=[],updateMap=new Map(),reviewRows=[],highlightReviews=[],highlightedNegotiated=new Set(),highlightedPaid=new Set(),highlightedNormal=new Set(),applicationComments={},batchComments={},applicationBatchMatches={},sourceRedApplications=new Set(),sourceBatchComments=new Map();
  function issue(id,kind,message,rec,choices=[{value:'keep',label:'保留原值'}],multiple=false){
