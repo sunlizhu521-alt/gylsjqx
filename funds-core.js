@@ -807,7 +807,7 @@ function build(inputs,decisions={}){
   if(termHeaders.length!==1||days.length!==1||!Number.isSafeInteger(days[0])||days[0]<0||/[+＋~～至]|[-—−]\s*\d|\d\s*(?:\/|或者?)\s*\d|约|左右|至少|最多|以上|以内|工作日/.test(text)){
    warn('无预估时间列，账期为空、存在冲突或无法识别“'+text+'”；请补充明确账期天数或付款日期，本次留空。');return empty();
   }
-  const parts=X.SSF.parse_date_code(parsed.v),stamp=Date.UTC(parts.y,parts.m-1,1)+(15+days[0])*86400000;
+  const parts=X.SSF.parse_date_code(parsed.v),stamp=Date.UTC(parts.y,parts.m,0)+(15+days[0])*86400000;
   if(!Number.isFinite(stamp)||new Date(stamp).getUTCFullYear()>9999){warn('推算日期超出有效范围，请核实账期；本次留空。');return empty();}
   let serial=(stamp-Date.UTC(1899,11,30))/86400000;if(serial<61)serial--;
   return {t:'n',v:serial,z:DATE_FORMAT};

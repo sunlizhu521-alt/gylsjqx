@@ -91,8 +91,8 @@ function fixture() {
     await upload('ledger',corrected);await analyze();
     const refreshed=await download(),latest=X.utils.sheet_to_json(refreshed.Sheets.正常付款,{defval:''});
     assert.equal(latest.length,7);assert.equal(latest.find(row=>row.供应商名称==='空OA唯一候选').应付时间,'2026年12月1日','替换台账采用最新本行日期');
-    assert.equal(latest.find(row=>row.供应商名称==='零额缺日期').预估时间,'2026年11月16日','移除预估列后按月初＋15天＋零账期重算，不用旧文件日期');
+    assert.equal(latest.find(row=>row.供应商名称==='零额缺日期').预估时间,'2026年12月15日','移除预估列后按月末＋15天＋零账期重算，不用旧文件日期');
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({status:'PASS',base,normalRows:7,classification:'merged 是 applies to every source row before filtering; 否/blank included',emptyOA:'fixed 未提交OA and five blank flow fields even with candidates',due:'source due wins; estimates from cached formula or month-start +15+terms; mutually exclusive and latest upload used',financial:'李奇合同口径原值保留/no false overpayment; others zero/settled/formulas/highlights',invalidClassification:'error/value/missing column excluded with review'}));
+    console.log(JSON.stringify({status:'PASS',base,normalRows:7,classification:'merged 是 applies to every source row before filtering; 否/blank included',emptyOA:'fixed 未提交OA and five blank flow fields even with candidates',due:'source due wins; estimates from cached formula or month-end +15+terms; mutually exclusive and latest upload used',financial:'李奇合同口径原值保留/no false overpayment; others zero/settled/formulas/highlights',invalidClassification:'error/value/missing column excluded with review'}));
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -21,17 +21,17 @@ test('正常付款日期互斥，应付优先，预估仅从本行表头读取�
   assert.equal(row.应付时间.v,'');assert.equal(display(row.预估时间),'2026年11月18日');assert(!row.预估时间.f);assert.equal(built.stats.pending,0);assert.equal(row['申请付款的日期'].v,'日期待确认','不改变现有申请周计算来源');
  }
 });
-test('无预估列时从所属月1日加15天和账期，含跨年、闰年、零和月账期',()=>{
+test('无预估列时从所属月最后一天加15天和账期，含跨年、闰年、零和月账期',()=>{
  for(const [month,terms,expected] of [
-  ['2026年10月',30,'2026年11月15日'],['2026-10-31','票到7天','2026年10月23日'],['2026/9',30,'2026年10月16日'],
-  ['2026-10',0,'2026年10月16日'],['2026-12',30,'2027年1月15日'],['2028-02',30,'2028年3月17日'],
-  ['2026-10','5个月账期（月底付款）50%承兑','2027年3月15日']
+  ['2026年10月',30,'2026年12月15日'],['2026-10-31','票到7天','2026年11月22日'],['2026/9',30,'2026年11月14日'],
+  ['2026-10',0,'2026年11月15日'],['2026-12',30,'2027年2月14日'],['2028-02',30,'2028年4月14日'],['2027-02',30,'2027年4月14日'],
+  ['2026-10','5个月账期（月底付款）50%承兑','2027年4月14日']
  ]){
   const i=fixture({'所属月份':month,'账期':terms}),before=JSON.stringify(i),{built,row}=result(i);
   assert.equal(display(row.预估时间),expected);assert.equal(row.应付时间.v,'');assert.equal(built.stats.pending,0);assert.equal(JSON.stringify(i),before);
  }
  const i=fixture({'所属月份':{t:'n',v:44864,f:'DATE(2026,10,31)',z:'yyyy-mm'},'账期':{t:'n',v:30,f:'15+15'}});i.ledger.book.Workbook={WBProps:{date1904:true}};
- assert.equal(display(result(i).row.预估时间),'2026年11月15日');
+ assert.equal(display(result(i).row.预估时间),'2026年12月15日');
 });
 test('已有预估列空白不推算，年月保持精度，错误与不确定账期保留核对来源',()=>{
  for(const month of ['2026年12月','2026-12',{t:'n',v:46371,z:'yyyy年m月'}]){
