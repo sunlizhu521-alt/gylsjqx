@@ -10,6 +10,39 @@ function fixture(extra={},owner='李奇',reverse=false){
 }
 const display=c=>c?.z?X.SSF.format(c.z,c.v):c?.v;
 const result=i=>{const built=C.build(i);return {built,row:Object.fromEntries(C.NORMAL_HEADERS.map((h,c)=>[h,built.normalRows[0][c]]))};};
+test('正常付款月底应付日调整为同月25日，申请周使用调整日期且源数据不变',()=>{
+ const serial=(Date.UTC(2026,9,31)-Date.UTC(1899,11,30))/86400000;
+ for(const [raw,expected,week,date1904] of [
+  ['2026-10-26','2026年10月25日','2026/10/12周'],['2026/11/28 23:59:59','2026年11月25日','2026/11/16周'],
+  ['2028年2月29日','2028年2月25日','2028/02/14周'],['2026-04-30','2026年4月25日','2026/04/13周'],['2026-12-31','2026年12月25日','2026/12/14周'],
+  ['2026-11-24','2026年11月24日','2026/11/16周'],['2026-11-25','2026年11月25日','2026/11/16周'],['2026-01-01','2026年1月1日','2025/12/22周'],
+  [{t:'n',v:serial+.75,z:'yyyy-mm-dd'},'2026年10月25日','2026/10/12周'],
+  [{t:'n',v:serial-1462,f:'DATE(2026,10,31)',z:'yyyy-mm-dd'},'2026年10月25日','2026/10/12周',true]
+ ]){
+  const i=fixture({'应付时间':raw,'预估时间':'2027-01-31'});if(date1904)i.ledger.book.Workbook={WBProps:{date1904:true}};
+  const before=JSON.stringify(i),{row}=result(i);
+  assert.equal(display(row.应付时间),expected,JSON.stringify(raw));assert.equal(row['申请付款的日期'].v,week);
+  assert.equal(row.预估时间.v,'');assert(!row.应付时间.f,'输出日期不沿用源公式');assert.equal(JSON.stringify(i),before);
+ }
+ for(const raw of ['','2026-11','2026年11月','2026-02-30','月底协商',{t:'e',v:23,w:'#REF!'},{t:'n',f:'DATE(2026,11,30)'}]){
+  const i=fixture({'应付时间':raw,'预估时间':'2027-01-31'}),before=JSON.stringify(i),{row}=result(i);
+  assert.equal(row['申请付款的日期'].v,'日期待确认');assert.equal(JSON.stringify(i),before);
+  if(typeof raw==='string')assert.equal(row.应付时间.v,raw,'空白或不完整/无效日期不补值');
+ }
+ const estimated=result(fixture({'预估时间':'2027-01-31'})).row;
+ assert.equal(display(estimated.预估时间),'2027年1月31日');assert.equal(estimated['申请付款的日期'].v,'日期待确认');
+});
+test('正常付款按调整后的申请周稳定排序，同周保持台账源顺序',()=>{
+ const i=fixture({'应付时间':'2026-10-31','供应商名称':'月底先录入'}),sheet=i.ledger.book.Sheets['对账明细-李奇'];
+ const rows=X.utils.sheet_to_json(sheet,{header:1}),headers=rows[0],base=rows[1];
+ for(const [name,due] of [['同周25日','2026-10-25'],['同周20日','2026-10-20'],['更早一周','2026-10-18'],['次月','2026-11-02'],['日期待确认','']]){
+  const row=base.slice();row[headers.indexOf('供应商名称')]=name;row[headers.indexOf('应付时间')]=due;X.utils.sheet_add_aoa(sheet,[row],{origin:-1});
+ }
+ const before=JSON.stringify(i),built=C.build(i),name=C.NORMAL_HEADERS.indexOf('供应商名称'),due=C.NORMAL_HEADERS.indexOf('应付时间');
+ assert.deepEqual(built.normalRows.map(row=>row[name].v),['更早一周','月底先录入','同周25日','同周20日','次月','日期待确认']);
+ assert.deepEqual(built.normalRows.map(row=>row.at(-1).v),['2026/10/05周','2026/10/12周','2026/10/12周','2026/10/12周','2026/10/26周','日期待确认']);
+ assert.equal(display(built.normalRows[1][due]),'2026年10月25日');assert.equal(JSON.stringify(i),before);
+});
 test('正常付款日期互斥，应付优先，预估仅从本行表头读取，谈判手工列不受影响',()=>{
  for(const [index,owner] of C.PEOPLE.entries())for(const header of ['预估时间','预估付款时间','预估付款月份']){
   const i=fixture({'应付时间':'2026-11-18',[header]:'2027-01-01'},owner,index%2===0),before=JSON.stringify(i),{built,row}=result(i);

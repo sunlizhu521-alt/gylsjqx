@@ -90,7 +90,8 @@ test('正常付款七个常用字段相邻，改名后金额日期与公式仍�
  assert.deepEqual(r.normalHeaders.slice(1,8),expected);assert.equal(r.normalHeaders.length,27);assert(!r.normalHeaders.includes('单据号【财务应付单】'));assert(r.negotiated.headers.includes('单据号【财务应付单】'),'原谈判表已有的财务单列保留');assert.equal(r.normalHeaders[0],'登记月份');assert.deepEqual(r.normalHeaders.slice(8,11),['预估时间','开票时间','开票金额']);
  const row=Object.fromEntries(r.normalHeaders.map((h,c)=>[h,r.normalRows[0][c]]));
  assert.equal(row['摘要'].v,'九月货款');assert.equal(row['本次申请付款金额'].v,100);assert.equal(row['本次申请付款金额'].t,'n');assert.equal(row['本次申请付款金额'].z,'#,##0.00');
- assert.equal(row['应付时间'].t,'n');assert.equal(X.SSF.format(row['应付时间'].z,row['应付时间'].v),'2026年10月31日');assert.equal(row['剩余金额'].f,undefined);assert.equal(row['剩余金额'].v,row['本次申请付款金额'].v-row['已付金额'].v);
+ assert.equal(row['应付时间'].t,'n');assert.equal(X.SSF.format(row['应付时间'].z,row['应付时间'].v),'2026年10月25日');assert.equal(row['剩余金额'].f,undefined);assert.equal(row['剩余金额'].v,row['本次申请付款金额'].v-row['已付金额'].v);
+ const progress=r.progressRows.find(row=>row[C.PROGRESS_HEADERS.indexOf('供应商名称')].v==='测试供应商乙');assert.equal(X.SSF.format(C.DATE_FORMAT,progress[C.PROGRESS_HEADERS.indexOf('应付时间')].v),'2026年10月31日','付款进度整理继续使用源台账应付日期');
  const s=i.ledger.book.Sheets['对账明细-李奇'];s[X.utils.encode_cell({r:0,c:LH.indexOf('申请付款金额')})].v='本次申请付款金额';s[X.utils.encode_cell({r:0,c:LH.indexOf('应付款时间')})].v='应付时间';
  assert.deepEqual(C.build(i).normalRows,r.normalRows);assert.deepEqual(C.build(i).progressRows,r.progressRows);
 });
@@ -194,24 +195,24 @@ test('重算使用最新台账，重新上传结果不会累计实付',()=>{
  assert.deepEqual(financial(C.build(i)),[[20,80,'否']]);set(i,'ledger','已付款金额',2,35);assert.deepEqual(financial(C.build(i)),[[35,65,'否']]);set(i,'ledger','已付款金额',2,'');assert.deepEqual(financial(C.build(i)),[[20,80,'否']]);
 });
 function resolveKeep(input){let d={};for(let i=0;i<4;i++){const r=C.build(input,d);if(!r.stats.pending)return r;for(const issue of r.issues)if(!issue.resolved)d[issue.id]=['keep'];}return C.build(input,d);}
-test('正常付款申请付款的日期按应付款时间提前一周计算，跨月跨年且不使用申请日期',()=>{
+test('正常付款申请付款的日期按调整后的应付款时间提前一周计算，跨月跨年且不使用申请日期',()=>{
  const serial=(Date.UTC(2026,9,28)-Date.UTC(1899,11,30))/86400000;
  for(const [raw,expected,date1904] of [
-  ['2026-10-26','2026/10/19周'],['2026-10-27','2026/10/19周'],['2026年10月28日','2026/10/19周'],['2026/11/1 23:59:59','2026/10/19周'],['2026-11-02','2026/10/26周'],
-  ['2026-01-01','2025/12/22周'],['2026-12-31','2026/12/21周'],['2024-02-29','2024/02/19周'],[serial+.75,'2026/10/19周'],[serial-1462,'2026/10/19周',true],
-  ['', '日期待确认'],['日期待定','日期待确认'],['2026-02-30','日期待确认'],[0,'日期待确认'],[{t:'e',v:23,w:'#REF!'},'日期待确认'],[{t:'n',f:'A99'},'日期待确认'],[{t:'n',v:serial,f:'A99'},'2026/10/19周']
+  ['2026-10-26','2026/10/12周'],['2026-10-27','2026/10/12周'],['2026年10月28日','2026/10/12周'],['2026/11/1 23:59:59','2026/10/19周'],['2026-11-02','2026/10/26周'],
+  ['2026-01-01','2025/12/22周'],['2026-12-31','2026/12/14周'],['2024-02-29','2024/02/12周'],[serial+.75,'2026/10/12周'],[serial-1462,'2026/10/12周',true],
+  ['', '日期待确认'],['日期待定','日期待确认'],['2026-02-30','日期待确认'],[0,'日期待确认'],[{t:'e',v:23,w:'#REF!'},'日期待确认'],[{t:'n',f:'A99'},'日期待确认'],[{t:'n',v:serial,f:'A99'},'2026/10/12周']
  ]){
   const i=fixture(),n=i.negotiated.book.Sheets['10月谈判付款主表'];X.utils.sheet_add_aoa(n,[['应付时间','付款自然周'],[raw,'旧周标记']],{origin:'N1'});set(i,'ledger','应付款时间',3,raw);
   if(date1904){i.negotiated.book.Workbook={WBProps:{date1904:true}};i.ledger.book.Workbook={WBProps:{date1904:true}};}
   const before=JSON.stringify(i),r=C.build(i),column=r.negotiated.headers.indexOf('付款自然周');assert.equal(r.negotiated.rows[0][column].v,'旧周标记');assert(!r.negotiated.managedColumns.includes(column));assert(!r.negotiated.updates.some(u=>X.utils.decode_cell(u.address).c===column));assert.equal(r.normalRows[0][r.normalHeaders.indexOf('申请付款的日期')].v,expected);assert.equal(r.normalHeaders.at(-1),'申请付款的日期');assert.equal(r.negotiated.headers.filter(h=>h==='付款自然周').length,1);assert.equal(r.negotiated.rows[0][4].v,20);assert.equal(JSON.stringify(i),before);
  }
- const i=fixture(),r=C.build(i);assert(!r.negotiated.headers.includes('付款自然周'));assert.equal(r.normalRows[0][r.normalHeaders.indexOf('申请付款的日期')].v,'2026/10/19周');assert.equal(r.reviewHeaders.includes('付款自然周'),false);
+ const i=fixture(),r=C.build(i);assert(!r.negotiated.headers.includes('付款自然周'));assert.equal(r.normalRows[0][r.normalHeaders.indexOf('申请付款的日期')].v,'2026/10/12周');assert.equal(r.reviewHeaders.includes('付款自然周'),false);
 });
 
 test('谈判付款不新增付款自然周，原计划日期金额和公式完整保留',()=>{
  const i=fixture(),s=i.negotiated.book.Sheets['10月谈判付款主表'];
  X.utils.sheet_add_aoa(s,[['应付款时间',46325,'2026-11-01','2026-11-03','2026-12-31','2027-01-02','2026-10-05','2026-10-12'],['2030-01-01',10,{t:'n',v:20,f:'G2'},30,40,50,0,'']],{origin:'N1'});
- const before=JSON.stringify(i),r=C.build(i);assert(!r.negotiated.headers.includes('付款自然周'));assert.equal(JSON.stringify(i),before);assert.equal(r.normalRows[0][r.normalHeaders.indexOf('申请付款的日期')].v,'2026/10/19周');
+ const before=JSON.stringify(i),r=C.build(i);assert(!r.negotiated.headers.includes('付款自然周'));assert.equal(JSON.stringify(i),before);assert.equal(r.normalRows[0][r.normalHeaders.indexOf('申请付款的日期')].v,'2026/10/12周');
  for(const [header,amount] of [
   ['2026-10-28',0],['2026-10-28',''],['2026-10-28','￥1,234.56'],['2026-10-28',{t:'n',v:12,f:'G2'}],
   ['2026-10-28',{t:'n',f:'G2'}],['2026-10-28',{t:'e',v:23}],['2026-10-28',-10],['2026-10-28','待定'],
@@ -328,7 +329,7 @@ test('登记月份和应付款时间无法识别时完整保留原文，不产�
  }
 });
 test('登记月份和应付款时间有效时仍导出真实Excel日期及相应格式',()=>{
- const i=fixture();set(i,'ledger','月份',3,'2026-10');set(i,'ledger','应付款时间',3,'2026年10月31日');const r=C.build(i),month=r.normalRows[0][0],due=r.normalRows[0][C.NORMAL_HEADERS.indexOf('应付时间')];assert.equal(month.t,'n');assert.equal(X.SSF.format('yyyy-mm-dd',month.v),'2026-10-01');assert.equal(month.z,'yyyy"年"m"月"');assert.equal(due.t,'n');assert.equal(X.SSF.format('yyyy-mm-dd',due.v),'2026-10-31');assert.equal(due.z,C.DATE_FORMAT);assert.equal(r.stats.pending,0);
+ const i=fixture();set(i,'ledger','月份',3,'2026-10');set(i,'ledger','应付款时间',3,'2026年10月31日');const r=C.build(i),month=r.normalRows[0][0],due=r.normalRows[0][C.NORMAL_HEADERS.indexOf('应付时间')];assert.equal(month.t,'n');assert.equal(X.SSF.format('yyyy-mm-dd',month.v),'2026-10-01');assert.equal(month.z,'yyyy"年"m"月"');assert.equal(due.t,'n');assert.equal(X.SSF.format('yyyy-mm-dd',due.v),'2026-10-25');assert.equal(due.z,C.DATE_FORMAT);assert.equal(r.stats.pending,0);
 });
 test('开票时间无法识别仍保留原文并要求日期核对',()=>{
  const i=fixture();set(i,'ledger','月份',3,'10月登记');set(i,'ledger','应付款时间',3,'月末付款');set(i,'ledger','开票时间',3,'开票待确认');const r=C.build(i),issues=r.issues.filter(x=>x.kind==='date');assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('开票时间')].v,'开票待确认');assert.equal(issues.length,1);assert.equal(issues[0].id,'date:对账明细-李奇!3:开票时间');assert.equal(issues[0].resolved,false);assert.equal(r.stats.pending,1);
@@ -1169,7 +1170,7 @@ test('原空OA不会因候选数量或旧流程内容而补号，零金额已结
 test('同名同额空OA明细不共享纸质申请，排序后各行日期和余额公式不串行',()=>{
  const i=fixture(),s=i.ledger.book.Sheets['对账明细-李奇'];set(i,'ledger','对公付款0A流程号',3,'');const row=X.utils.sheet_to_json(s,{header:1})[2].slice();row[8]='2026-10-20';X.utils.sheet_add_aoa(s,[row],{origin:-1});
  const before=JSON.stringify(i),r=C.build(i);assert.equal(r.normalRows.length,2);assert.deepEqual(r.normalRows.map(row=>row[4].v),['未提交OA','未提交OA']);assert.deepEqual(r.normalRows.map(row=>row[C.NORMAL_HEADERS.indexOf('是否提交付款申请单')].v),['未申请','未申请']);assert.deepEqual(r.highlights.normalRows,[]);
- assert.deepEqual(r.normalRows.map(row=>X.SSF.format('yyyy-mm-dd',row[7].v)),['2026-10-20','2026-10-31']);assert.deepEqual(r.normalRows.map(row=>row[C.NORMAL_HEADERS.indexOf('剩余金额')].f),[undefined,undefined]);assert(r.reviewRows.some(row=>row[5].v.startsWith('付款申请归属核对')));assert.equal(JSON.stringify(i),before);
+ assert.deepEqual(r.normalRows.map(row=>X.SSF.format('yyyy-mm-dd',row[7].v)),['2026-10-25','2026-10-20']);assert.deepEqual(r.normalRows.map(row=>row[C.NORMAL_HEADERS.indexOf('剩余金额')].f),[undefined,undefined]);assert(r.reviewRows.some(row=>row[5].v.startsWith('付款申请归属核对')));assert.equal(JSON.stringify(i),before);
 });
 
 test('空OA正常付款仅取本行应付时间，兼容OA别名且不借谈判或申请日期',()=>{

@@ -74,6 +74,14 @@ function date(c,date1904,month=false){
  let serial=(t-Date.UTC(1899,11,30))/86400000;if(serial<61)serial--;
  return {t:'n',v:serial,z:month?'yyyy"年"m"月"':DATE_FORMAT};
 }
+function normalDueDate(c,date1904){
+ const parsed=date(c,date1904);
+ if(!parsed.invalid&&parsed.t==='n'){
+  const parts=X.SSF.parse_date_code(parsed.v);
+  if(parts.d>25)parsed.v-=parts.d-25;
+ }
+ return parsed;
+}
 function paymentWeek(c,date1904,weeksBefore=0){
  const parsed=date(c,date1904);
  if(parsed.invalid||parsed.v===''||c?.t==='e')return cell('日期待确认');
@@ -318,7 +326,7 @@ function build(inputs,decisions={}){
  function reviewOwner(target){return target.normal?target.record.owner:usable(target.values['跟单员'])?str(target.values['跟单员'].v):ledgerOwner(target.record);}
  // Sort before assigning output row numbers so formulas and highlights follow their records.
  normal.sort((a,b)=>{
-  const left=paymentWeek(a.values['应付款时间'],a.date1904,1).v,right=paymentWeek(b.values['应付款时间'],b.date1904,1).v;
+  const left=paymentWeek(normalDueDate(a.values['应付款时间'],a.date1904),false,1).v,right=paymentWeek(normalDueDate(b.values['应付款时间'],b.date1904),false,1).v;
   return (left==='日期待确认')-(right==='日期待确认')||left.localeCompare(right);
  });
  const normalObjects=normal.map((r,i)=>({record:r,normal:true,index:i,missingOA:blank(r.values['对公付款0A流程号']),sourceOA:clone(r.values['对公付款0A流程号']),values:{...r.values,'申请日期':empty()}}));
@@ -817,7 +825,7 @@ function build(inputs,decisions={}){
   if([...FLOW_FIELDS,'流程编号'].includes(key)&&(target.missingOA||norm(target.values['对公付款0A流程号']?.v).toUpperCase()==='未提交OA'))return empty();
   if(key==='跟单员')return cell(target.record.owner);
   if(key==='预估时间')return normalEstimate(target);
-  if(key==='申请付款的日期')return paymentWeek(target.record.values['应付款时间'],target.record.date1904,1);
+  if(key==='申请付款的日期')return paymentWeek(normalDueDate(target.record.values['应付款时间'],target.record.date1904),false,1);
   if(key==='是否对账'){
    return cell(hasPaymentOA(target.record)?'已对账':'未对账');
   }
@@ -825,7 +833,7 @@ function build(inputs,decisions={}){
   if(key==='剩余金额'&&original.f&&target.values['已付金额']!==target.record.values['已付金额'])return clone(original);
   if(original.t==='e'||(original.f&&(original.v==null||original.v===''))){issue('cell:'+target.record.id+':'+key,'formula','“'+key+'”公式结果不可用，输出保留错误提示，请在源表重算后上传或确认保留。',target.record);return cell(original.w||'公式结果不可用');}
   if(['登记月份','开票时间','应付款时间'].includes(key)){
-   const d=date(original,target.record.date1904,key==='登记月份');
+   const d=key==='应付款时间'?normalDueDate(original,target.record.date1904):date(original,target.record.date1904,key==='登记月份');
    if(d.invalid&&key==='开票时间'){
     const missingYear=/^\d{1,2}(?:月|[./-])\d{1,2}日?$/.test(norm(original.v));
     issue('date:'+target.record.id+':'+key,'date',missingYear?'“开票时间”为“'+str(original.v)+'”，缺少年份。请在源表补充完整年月日后重新上传；当前保留原文。':'“'+key+'”日期无法识别，保留原文。',target.record);

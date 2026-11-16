@@ -144,7 +144,7 @@ test('正常付款按申请付款的日期升序，同周稳定、无效日期�
   i.ledger.book.Workbook={WBProps:{date1904}};
   const before=JSON.stringify(i),r=C.build(i),at=h=>headers.indexOf(h),names=r.normalRows.map(row=>row[at('供应商名称')].v);
   assert.deepEqual(names,[...(date1904?['日期零']:[]),'跨年','同周先','同周后','数值日期','年末','正常供应商','空白','文本异常',...(date1904?[]:['日期零']),'错误公式','无缓存公式']);
-  const validCount=date1904?7:6;assert.deepEqual(r.normalRows.slice(0,validCount).map(row=>row[at('申请付款的日期')].v),[...(date1904?['1903/12/21周']:[]),'2025/12/22周','2026/10/26周','2026/10/26周','2026/10/26周','2026/12/21周','2026/12/28周']);
+  const validCount=date1904?7:6;assert.deepEqual(r.normalRows.slice(0,validCount).map(row=>row[at('申请付款的日期')].v),[...(date1904?['1903/12/21周']:[]),'2025/12/22周','2026/10/26周','2026/10/26周','2026/10/26周','2026/12/14周','2026/12/28周']);
   assert(r.normalRows.slice(validCount).every(row=>row[at('申请付款的日期')].v==='日期待确认'));
   const submitted=names.indexOf('正常供应商');assert.deepEqual(r.highlights.normalRows,[submitted+2]);assert.equal(r.normalRows[submitted][at('申请日期')].v,46322);assert.equal(r.normalRows[submitted][at('是否提交付款申请单')].v,'已提交');
   for(const [j,row]of r.normalRows.entries()){assert.equal(row[at('剩余金额')].f,'F'+(j+2)+'-N'+(j+2));assert.equal(row[at('剩余金额')].v,row[at('申请付款金额')].v-row[at('已付金额')].v);}
