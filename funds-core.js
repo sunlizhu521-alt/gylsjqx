@@ -703,6 +703,17 @@ function build(inputs,decisions={}){
    review('OA来源身份或金额存在冲突','核实 OA 流程表中同一编号的收款单位和付款金额后重新上传。');continue;
   }
   if(matches.length!==1){
+   // A merged negotiated total can represent several ledger lines; suppress only the mismatch, never allocate paid amounts.
+   if(!matches.length&&ids.length===1&&info.key&&info.cents>0n&&usable(record.values['付款主体'])){
+    const grouped=ledger.filter(r=>oas(r).includes(ids[0]));
+    const singleTarget=negotiatedObjects.filter(t=>oas(t.record).includes(ids[0])).length===1;
+    const complete=grouped.length>1&&grouped.every(r=>{
+     const part=classification(r),paid=money(r.values['已付金额']);
+     return sameOA(r)&&part.name===info.name&&part.cents!==undefined&&usable(r.values['付款主体'])&&entity(value(r,'付款主体'))===entity(value(record,'付款主体'))&&
+      (paid.blank||paid.cents!==undefined&&paid.cents>=0n&&paid.cents<=part.cents);
+    });
+    if(singleTarget&&complete&&grouped.reduce((sum,r)=>sum+classification(r).cents,0n)===info.cents)continue;
+   }
    if(matches.length>1)review('同一匹配键对应多条台账记录，不能相加或任选一条','核实重复台账记录，明确唯一付款记录后重新上传。');
    else if(related.length)review('未找到 OA号、供应商和申请付款金额三项完全一致的台账记录','核对双方编号、供应商及金额；分批金额与整笔总金额不同的，请核实该批实际已付金额，勿直接套用整笔已付。');
    continue;

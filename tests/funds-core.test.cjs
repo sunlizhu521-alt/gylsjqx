@@ -103,6 +103,94 @@ test('谈判按台账实付同步三项，零实付有效，已申请和归档�
   assert.deepEqual(financial(r),[[paid,left,status]]);if(left!==100)assert.equal(update(r,'K2').f,'G2-E2');assert.equal(paidReviews(r).length,0);assert.equal(r.stats.pending,0);assert.equal(JSON.stringify(i),before);
  }
 });
+function splitLedgerFixture(amounts=[942145,1068615],total=2010760){
+ const i=fixture(),id='MDST-DGFK20260709009',supplier='德州艾丽伦医疗科技有限公司';
+ for(const role of ['ledger','negotiated']){
+  set(i,role,role==='ledger'?'供应商名称':'供应商',2,supplier);set(i,role,'对公付款0A流程号',2,id);set(i,role,'申请付款金额',2,role==='ledger'?amounts[0]:total);
+ }
+ set(i,'ledger','已付款金额',2,'');set(i,'ledger','剩余付款金额',2,amounts[0]);
+ set(i,'negotiated','剩余付款金额',2,{t:'n',v:total,f:'G2-E2'});set(i,'negotiated','付款计划',2,{t:'n',v:total,f:'G2'});
+ set(i,'oa','流程编号',2,id);set(i,'oa','收款单位',2,supplier);set(i,'oa','付款金额',2,total);
+ i.applications.book=book('付款申请汇总',AH,[]);
+ const ledger=i.ledger.book.Sheets['对账明细-李奇'],row=X.utils.sheet_to_json(ledger,{header:1})[1];
+ for(const amount of amounts.slice(1)){const next=row.slice();next[LH.indexOf('申请付款金额')]=amount;next[LH.indexOf('剩余付款金额')]=amount;X.utils.sheet_add_aoa(ledger,[next],{origin:-1});}
+ return i;
+}
+function buildWithRetainedSplitFinancials(i){
+ const before=JSON.stringify(i),source=i.negotiated.book.Sheets['10月谈判付款主表'],r=C.build(i);
+ for(const address of ['E2','J2','K2','M2']){
+  assert.deepEqual(r.negotiated.rows[0][X.utils.decode_cell(address).c],source[address],address+' 保留原单元格及公式');
+  assert.equal(update(r,address),undefined,address+' 不生成付款或计划更新');
+ }
+ assert.equal(JSON.stringify(i),before,'不修改任何上传源表');return r;
+}
+test('同OA同供应商主体的拆笔申请合计2010760，仅消除未匹配提示并保留原实付零和余额',()=>{
+ const r=buildWithRetainedSplitFinancials(splitLedgerFixture());
+ assert.deepEqual(financial(r),[[0,2010760,'否']]);assert.equal(paidReviews(r).length,0);assert.equal(r.stats.pending,0);
+});
+test('同OA三笔小数按分合计，跨人员台账的空白、零及非零实付均不汇总写回谈判公式',()=>{
+ for(const paid of ['',0,5]){
+  const i=splitLedgerFixture([10.1,20.2,30.3],60.6),ledger=i.ledger.book.Sheets['对账明细-李奇'];
+  for(const row of [2,4,5])set(i,'ledger','已付款金额',row,paid);
+  const rows=X.utils.sheet_to_json(ledger,{header:1});
+  i.ledger.book.Sheets['对账明细-李奇']=X.utils.aoa_to_sheet(rows.slice(0,3));
+  for(const [index,person] of [[3,'徐英'],[4,'孙立柱']])X.utils.sheet_add_aoa(i.ledger.book.Sheets['对账明细-'+person],[rows[index]],{origin:-1});
+  const originalPaid=paid===''?'':17.25,left=paid===''?60.6:43.35;
+  set(i,'negotiated','已付金额',2,originalPaid===''?'':{t:'n',v:originalPaid,f:'15+2.25'});
+  set(i,'negotiated','剩余付款金额',2,{t:'n',v:left,f:'ROUND(G2-E2,2)'});
+  set(i,'negotiated','是否结清',2,{t:'s',v:'否',f:'IF(K2=0,"是","否")'});
+  const r=buildWithRetainedSplitFinancials(i);assert.deepEqual(financial(r),[[originalPaid,left,'否']]);assert.equal(paidReviews(r).length,0);
+ }
+});
+test('拆笔合计差一分或多一笔时继续核对，不能任选金额凑数子集',()=>{
+ for(const amounts of [[942145,1068615.01],[942145,1068614.99],[942145,1068615,1]]){
+  const r=buildWithRetainedSplitFinancials(splitLedgerFixture(amounts));
+  assert.equal(paidReviews(r).length,1);assert.match(paidReviews(r)[0][5].v,/未找到 OA号、供应商和申请付款金额三项完全一致/);
+ }
+});
+test('拆笔不跨OA、供应商或主体合计，任一身份字段缺失或异常仍需核对',()=>{
+ for(const [role,field,value] of [
+  ['ledger','对公付款0A流程号','MDST-DGFK20260709010'],['ledger','对公付款0A流程号','MDST-DGFK20260709009、MDST-DGFK20260709010'],['ledger','对公付款0A流程号',''],
+  ['ledger','供应商名称','其他供应商'],['ledger','供应商名称',''],['ledger','供应商名称',{t:'e',v:23,w:'#REF!'}],
+  ['ledger','付款主体','国源'],['ledger','付款主体',''],['ledger','付款主体',{t:'s',f:'B99'}],
+  ['negotiated','供应商','其他供应商'],['negotiated','供应商',''],['negotiated','付款主体','国源'],['negotiated','付款主体','']
+ ]){
+  const i=splitLedgerFixture();set(i,role,field,role==='ledger'?4:2,value);
+  const r=buildWithRetainedSplitFinancials(i);assert(paidReviews(r).length,JSON.stringify([role,field,value]));
+ }
+ const i=splitLedgerFixture(),ids='MDST-DGFK20260709009、MDST-DGFK20260709010';
+ for(const row of [2,4])set(i,'ledger','对公付款0A流程号',row,ids);set(i,'negotiated','对公付款0A流程号',2,ids);i.oa.book=book('Sheet0',OH,[]);
+ assert(paidReviews(buildWithRetainedSplitFinancials(i)).length,'多号即使整体相同也不按拆笔合计消除提示');
+});
+test('同OA另有无法归属的台账行时保留核对，不只选已相等的供应商主体组',()=>{
+ for(const [field,value] of [['供应商名称','其他供应商'],['供应商名称',''],['付款主体','国源'],['付款主体','']]){
+  const i=splitLedgerFixture([942145,1068615,1]);set(i,'ledger',field,5,value);
+  assert(paidReviews(buildWithRetainedSplitFinancials(i)).length,field+' '+value);
+ }
+});
+test('拆笔申请只接受有效分精度金额，缺失公式缓存和Excel错误不会被相加',()=>{
+ for(const bad of ['',-1,'异常','1068615.001',{t:'n',f:'1000000+68615'},{t:'e',v:23,w:'#REF!'}]){
+  const i=splitLedgerFixture();set(i,'ledger','申请付款金额',4,bad);
+  assert(paidReviews(buildWithRetainedSplitFinancials(i)).length,JSON.stringify(bad));
+ }
+ const i=splitLedgerFixture();set(i,'ledger','申请付款金额',2,'￥942,145.00');set(i,'ledger','申请付款金额',4,{t:'n',v:1068615,f:'1000000+68615'});
+ assert.equal(paidReviews(buildWithRetainedSplitFinancials(i)).length,0,'已有有效缓存的金额公式按缓存数值核对');
+ for(const bad of ['',-1,'异常',{t:'n',f:'942145+1068615'},{t:'e',v:23,w:'#REF!'}]){
+  const j=splitLedgerFixture();set(j,'negotiated','申请付款金额',2,bad);
+  assert(paidReviews(buildWithRetainedSplitFinancials(j)).length,'谈判金额异常 '+JSON.stringify(bad));
+ }
+});
+test('拆笔合计不掩盖OA身份及金额冲突，也不消除重复谈判记录的核对',()=>{
+ for(const [field,value] of [['收款单位','其他供应商'],['付款金额',{t:'e',v:23,w:'#REF!'}],['付款金额',{t:'n',f:'A99'}]]){
+  const i=splitLedgerFixture();set(i,'oa',field,2,value);assert(paidReviews(buildWithRetainedSplitFinancials(i)).length,field);
+ }
+ const conflicting=splitLedgerFixture(),oa=conflicting.oa.book.Sheets.Sheet0,row=X.utils.sheet_to_json(oa,{header:1})[1].slice();row[6]=2010759;X.utils.sheet_add_aoa(oa,[row],{origin:-1});
+ assert(paidReviews(buildWithRetainedSplitFinancials(conflicting)).length,'同一OA有不同付款金额仍核对');
+ for(const amount of [2010760,1]){
+  const i=splitLedgerFixture(),sheet=i.negotiated.book.Sheets['10月谈判付款主表'],row=X.utils.sheet_to_json(sheet,{header:1})[1].slice();row[6]=amount;X.utils.sheet_add_aoa(sheet,[row],{origin:-1});
+  const r=buildWithRetainedSplitFinancials(i);assert.equal(paidReviews(r).length,2,'同OA同供应商主体有两条谈判记录，金额不同也不能消除提示');
+ }
+});
 const RONGJIE_NAMES=['中山荣杰医疗器械工业有限公司','中山荣杰医疗器器材工业有限公司'];
 function rongjieFixture(names=RONGJIE_NAMES.concat(RONGJIE_NAMES)){
  const i=classifiedFixture(),id='MDST-DGFK20261021013';
