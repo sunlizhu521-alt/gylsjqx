@@ -1,11 +1,12 @@
 (()=>{'use strict';
 const XLSX=typeof module==='object'&&module.exports?require('./vendor/xlsx.full.min.js'):globalThis.XLSX;
 const text=cell=>String(cell?.w??cell?.v??'');
-function supplierName(sheet){
+const normalized=cell=>text(cell).normalize('NFKC').replace(/\s+/g,'');
+function fieldValue(sheet,pattern){
  const range=XLSX.utils.decode_range(sheet['!ref']);
  for(let r=range.s.r;r<=range.e.r;r++)for(let c=range.s.c;c<=range.e.c;c++){
   const value=text(sheet[XLSX.utils.encode_cell({r,c})]).trim();
-  const match=value.match(/^供\s*应\s*商\s*(?:[：:]\s*(.*))?$/s);
+  const match=value.match(pattern);
   if(!match)continue;
   if(match[1]?.trim())return match[1].trim();
   const merged=(sheet['!merges']||[]).find(m=>m.s.r===r&&m.s.c===c);
@@ -16,24 +17,54 @@ function supplierName(sheet){
  }
  return '';
 }
+const supplierName=sheet=>fieldValue(sheet,/^供\s*应\s*商\s*(?:[：:]\s*(.*))?$/s);
 function receiptQuantity(sheet){
  const range=XLSX.utils.decode_range(sheet['!ref']),headers=[],totals=[];
- const normalized=c=>text(c).normalize('NFKC').replace(/\s+/g,'');
  for(let r=range.s.r;r<=range.e.r;r++)for(let c=range.s.c;c<=range.e.c;c++){
   const label=normalized(sheet[XLSX.utils.encode_cell({r,c})]);
   if(['实收数量','入库数量','数量'].includes(label))headers.push({r,c,label});
  }
  const preferred=headers.filter(h=>h.label==='实收数量'),columns=preferred.length?preferred:headers;
- if(columns.length!==1)throw Error('无法唯一识别实收数量列，请检查入库单表头');
+ if(columns.length!==1)throw Error('无法唯一识别实收数量列，请检查入库单表头（'+(columns.map(h=>XLSX.utils.encode_cell(h)).join('、')||sheet['!ref'])+'）');
  const header=columns[0];
  for(let r=header.r+1;r<=range.e.r;r++){
   let label='';for(let c=range.s.c;c<=range.e.c;c++){const value=normalized(sheet[XLSX.utils.encode_cell({r,c})]);if(/^(?:合计|总计)[：:]?$/.test(value))label=value;}
-  if(label)totals.push(sheet[XLSX.utils.encode_cell({r,c:header.c})]);
+  if(label){const address=XLSX.utils.encode_cell({r,c:header.c});totals.push({cell:sheet[address],address});}
  }
- if(totals.length!==1)throw Error('无法唯一识别实收数量的合计，请检查入库单合计行');
- const total=totals[0],value=String(total?.v??'').normalize('NFKC').trim();
- if(total?.t==='e'||!['n','s'].includes(total?.t)||! /^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(value))throw Error('实收数量合计为空或不是有效数字，请核实后重新上传');
+ if(totals.length!==1)throw Error('无法唯一识别实收数量的合计，请检查入库单合计行（'+(totals.map(t=>t.address).join('、')||sheet['!ref'])+'）');
+ const total=totals[0].cell,value=String(total?.v??'').normalize('NFKC').trim();
+ if(total?.t==='e'||!['n','s'].includes(total?.t)||! /^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(value))throw Error('实收数量合计为空或不是有效数字，请核实后重新上传（'+totals[0].address+'）');
  return value.replace(/,/g,'');
+}
+function splitReceipts(sheet,source='工作表'){
+ if(!sheet['!ref'])throw Error(source+'：工作表没有内容');
+ const range=XLSX.utils.decode_range(sheet['!ref']),entries=Object.keys(sheet).filter(a=>/^[A-Z]+[1-9]\d*$/.test(a)).map(address=>({address,cell:sheet[address],...XLSX.utils.decode_cell(address)})).filter(p=>p.r>=range.s.r&&p.r<=range.e.r&&p.c>=range.s.c&&p.c<=range.e.c);
+ const titles=entries.filter(p=>normalized(p.cell)==='采购入库单').sort((a,b)=>a.r-b.r||a.c-b.c);
+ if(titles.some((p,i)=>i&&p.r===titles[i-1].r))throw Error(source+'：同一行有多个入库单标题，无法确认单据边界（'+titles.map(p=>p.address).join('、')+'）');
+ const starts=[range.s.r,...titles.slice(1).map(p=>p.r)];
+ return starts.map((start,index)=>{
+  const end=(starts[index+1]??range.e.r+1)-1,label=source+' / 第'+(index+1)+'张（第'+(start+1)+'–'+(end+1)+'行）';
+  try{
+   const cells=entries.filter(p=>p.r>=start&&p.r<=end),content=cells.filter(p=>p.cell.f||p.cell.t==='e'||text(p.cell).trim());
+   if(!content.length)throw Error('单据没有内容');
+   const merges=(sheet['!merges']||[]).filter(m=>m.e.r>=start&&m.s.r<=end);
+   for(const m of merges)if(m.s.r<start||m.e.r>end)throw Error('合并区域 '+XLSX.utils.encode_range(m)+' 跨越单据边界，请检查源表');
+   // Keep original addresses so merged cells and cached formulas cannot shift to another receipt.
+   let first=start,last=end;
+   if(starts.length>1){
+    first=content.reduce((min,p)=>Math.min(min,p.r),end);last=content.reduce((max,p)=>Math.max(max,p.r),start);
+    for(const m of merges)if(m.e.r>=first&&m.s.r<=last){first=Math.min(first,m.s.r);last=Math.max(last,m.e.r);}
+   }
+   const part={'!ref':XLSX.utils.encode_range({s:{r:first,c:range.s.c},e:{r:last,c:range.e.c}}),'!merges':merges.filter(m=>m.s.r>=first&&m.e.r<=last),'!cols':sheet['!cols'],'!rows':sheet['!rows']};
+   if((last-first+1)*(range.e.c-range.s.c+1)>20000)throw Error('单据范围过大，请先删除无用途的空行空列后重试');
+   for(const p of cells)if(p.r>=first&&p.r<=last){
+    if(p.cell.t==='e'||(p.cell.f&&p.cell.v==null))throw Error('单元格 '+p.address+' 的公式结果不可用，请在 Excel/WPS 中重算后上传');
+    part[p.address]=p.cell;
+   }
+   receiptQuantity(part);
+   return {sheet:part,number:fieldValue(part,/^单\s*据\s*编\s*号\s*(?:[：:]\s*(.*))?$/s)};
+  }catch(e){throw Error(label+'：'+e.message);}
+ });
 }
 function receiptFileName(sheets){
  const names=[...new Set(Object.values(sheets).map(sheet=>supplierName(sheet)||'未识别供应商'))];
@@ -44,7 +75,7 @@ function receiptFileName(sheets){
  const quantity=(total<0n?'-':'')+(precision?(digits.slice(0,-precision)+'.'+digits.slice(-precision)).replace(/\.?0+$/,''):digits);
  return '入库单-'+names.join('、').replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/\s+/g,' ').trim()+'-'+quantity+'.pdf';
 }
-if(typeof module==='object'&&module.exports){module.exports={receiptFileName};return;}
+if(typeof module==='object'&&module.exports){module.exports={receiptFileName,splitReceipts};return;}
 const $=id=>document.getElementById(id),W=1190,H=1684,PAD=55;
 let book=null,fileName='',documentCount=0,signature=null,busy=false,pageIndex=0;
 const layouts=new Map(),positions=new Map(),preview=$('preview'),ctx=preview.getContext('2d');
@@ -113,7 +144,7 @@ function changePage(delta){
  pageIndex=Math.max(0,Math.min(book.SheetNames.length-1,pageIndex+delta));refresh();
 }
 function refresh(message=''){
- updatePagination();$('download').disabled=true;try{draw(currentPage());if(book){const model=layouts.get(currentPage());$('status').textContent=message||`${documentCount} 个文件、${book.SheetNames.length} 个工作表，每表一页；当前最小字号约 ${model.minFont.toFixed(1)} pt。${signature?'签名已添加，可点击空白处调整。':'默认签名正在加载。'} 下载名称：${fileName}`;if(model.minFont<6)$('status').textContent+=' 内容较多，打印字号较小，请检查预览。';} $('download').disabled=busy||!book||!signature;}catch(e){$('status').textContent=e.message;}
+ updatePagination();$('download').disabled=true;try{draw(currentPage());if(book){const model=layouts.get(currentPage());$('status').textContent=message||`${documentCount} 个文件、${book.SheetNames.length} 张入库单，每张一页；当前最小字号约 ${model.minFont.toFixed(1)} pt。${signature?'签名已添加，可点击空白处调整。':'默认签名正在加载。'} 下载名称：${fileName}`;if(model.minFont<6)$('status').textContent+=' 内容较多，打印字号较小，请检查预览。';} $('download').disabled=busy||!book||!signature;}catch(e){$('status').textContent=e.message;}
 }
 async function loadImage(file){if(file.size>15*1024*1024)throw Error('签名图片不能超过15MB');const url=URL.createObjectURL(file);try{const image=new Image();image.src=url;await image.decode();if(image.width*image.height>20000000)throw Error('签名图片尺寸过大');return image;}finally{URL.revokeObjectURL(url);}}
 function extractSignature(image){
@@ -153,8 +184,12 @@ $('file').onchange=async()=>{
    const workbook=XLSX.read(await file.arrayBuffer(),{type:'array',cellStyles:true,cellNF:true});
    if(!workbook.SheetNames.length)throw Error(file.name+' 没有工作表');
    for(const sheetName of workbook.SheetNames){
-    const name=`${index+1}. ${file.name} / ${sheetName}`;
-    layouts.set(name,layout(workbook.Sheets[sheetName]));next.SheetNames.push(name);next.Sheets[name]=workbook.Sheets[sheetName];
+    const source=`${index+1}. ${file.name} / ${sheetName}`;
+    for(const [receiptIndex,receipt] of splitReceipts(workbook.Sheets[sheetName],source).entries()){
+     const name=`${source} / 第${receiptIndex+1}张${receipt.number?' / 单据编号：'+receipt.number:''}`;
+     try{layouts.set(name,layout(receipt.sheet));}catch(e){throw Error(name+'：'+e.message);}
+     next.SheetNames.push(name);next.Sheets[name]=receipt.sheet;
+    }
    }
   }
   book=next;documentCount=files.length;fileName=receiptFileName(book.Sheets);

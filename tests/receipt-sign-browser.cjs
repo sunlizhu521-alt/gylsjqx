@@ -31,5 +31,35 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright'),fs=require
  assert.equal(await page.locator('#pageInfo').innerText(),'第 1 / 1 页');assert(await page.locator('#previousPage').isDisabled());assert(await page.locator('#nextPage').isDisabled());
  const restoredDownload=page.waitForEvent('download');await page.locator('#download').click();assert.equal((await restoredDownload).suggestedFilename(),'入库单-测试甲公司-12.5.pdf');
 
+ // The homepage must also handle multiple receipts stacked in a single sheet.
+ const host=await browser.newPage();host.on('pageerror',e=>errors.push(e.message));
+ await host.route('**/*',route=>new URL(route.request().url()).origin===new URL(base).origin?route.continue():route.abort());
+ await host.goto(base);await host.locator('.tool-tab[data-tool="receipt-sign"]').click();const frame=host.frameLocator('iframe[data-tool="receipt-sign"]');
+ const stacked=X.utils.aoa_to_sheet([]),numbers=['MULTI001','MULTI002','MULTI001'],totals=[.1,.2,2.5];stacked['!merges']=[];stacked['!cols']=[{wch:18},{wch:40},{wch:15}];let offset=0,lastTotal;
+ for(let i=0;i<numbers.length;i++){
+  const rows=[['采购入库单'],['单据编号：',numbers[i]],['供应商：'+(i===1?'乙公司':'甲公司')],['物料编码','物料名称','实收数量'],...Array.from({length:i+1},(_,j)=>['000'+j,'第'+(i+1)+'单产品'+j,j===0?totals[i]:0]),['合计','',totals[i]],['创建人','原创建人'],['审核日期','2026/11/16']];
+  X.utils.sheet_add_aoa(stacked,rows,{origin:{r:offset,c:0}});stacked['!merges'].push({s:{r:offset,c:0},e:{r:offset,c:2}});lastTotal=X.utils.encode_cell({r:offset+4+i+1,c:2});offset+=rows.length+i+1;
+ }
+ const multi=X.utils.book_new();X.utils.book_append_sheet(multi,stacked,'连续入库单');
+ const multiBuffer=()=>Buffer.from(X.write(multi,{type:'buffer',bookType:'biff8'})),originalBytes=multiBuffer();
+ const uploadMulti=bytes=>frame.locator('#file:not([disabled])').setInputFiles({name:'连续多单.XLS',mimeType:'application/vnd.ms-excel',buffer:bytes});
+ await uploadMulti(originalBytes);await frame.locator('#download:not([disabled])').waitFor();
+ assert.match(await frame.locator('#status').innerText(),/1 个文件、3 张入库单/);const pictures=[];
+ for(let i=0;i<3;i++){
+  assert.equal(await frame.locator('#pageInfo').innerText(),`第 ${i+1} / 3 页`);assert.match(await frame.locator('#pageName').innerText(),new RegExp('第'+(i+1)+'张 / 单据编号：'+numbers[i]));
+  pictures.push(await frame.locator('#preview').evaluate(c=>c.toDataURL()));
+  if(i<2)await frame.locator('#nextPage').click();
+ }
+ assert.equal(new Set(pictures).size,3,'单据内容独立，重复单号也不去重');assert(await frame.locator('#nextPage').isDisabled());
+ await host.locator('.tool-tab[data-tool="funds"]').click();await host.locator('.tool-tab[data-tool="receipt-sign"]').click();assert.equal(await frame.locator('#pageInfo').innerText(),'第 3 / 3 页');
+ await frame.locator('#previousPage').click();assert.equal(await frame.locator('#preview').evaluate(c=>c.toDataURL()),pictures[1]);
+ const multiEvent=host.waitForEvent('download');await frame.locator('#download').click();const multiDownload=await multiEvent;assert.equal(multiDownload.suggestedFilename(),'入库单-甲公司、乙公司-2.8.pdf');
+ await multiDownload.saveAs(out+'/多单签字.pdf');const multiBytes=await fs.readFile(out+'/多单签字.pdf');
+ const multiInfo=await frame.locator('body').evaluate(async(_,bytes)=>{const doc=await PDFLib.PDFDocument.load(new Uint8Array(bytes));return {count:doc.getPageCount(),sizes:doc.getPages().map(p=>p.getSize())};},[...multiBytes]);assert.equal(multiInfo.count,3);assert(multiInfo.sizes.every(s=>Math.abs(s.width-595.28)<.1&&Math.abs(s.height-841.89)<.1));
+ await frame.locator('body').evaluate(async(_,bytes)=>{const pdfjs=await import('./vendor/pdf.min.mjs');pdfjs.GlobalWorkerOptions.workerSrc=new URL('./vendor/pdf.worker.min.mjs',location.href).href;const pdf=await pdfjs.getDocument({data:new Uint8Array(bytes)}).promise;for(let i=1;i<=pdf.numPages;i++){const p=await pdf.getPage(i),view=p.getViewport({scale:1.5}),c=document.createElement('canvas');c.id='multi-pdf-'+i;c.width=view.width;c.height=view.height;document.body.append(c);await p.render({canvasContext:c.getContext('2d'),viewport:view}).promise;}},[...multiBytes]);
+ for(let i=1;i<=3;i++)await fs.writeFile(out+'/multi-pdf-page'+i+'.png',Buffer.from(await frame.locator('#multi-pdf-'+i).evaluate(c=>c.toDataURL('image/png').split(',')[1]),'base64'));
+ // A later invalid receipt cannot leave an earlier signed page downloadable.
+ stacked[lastTotal]={t:'n',f:'SUM(C1:C2)'};await uploadMulti(multiBuffer());await frame.locator('#status').filter({hasText:'读取失败'}).waitFor();assert(await frame.locator('#download').isDisabled());assert.match(await frame.locator('#status').innerText(),new RegExp('第3张.*'+lastTotal));assert.equal(await frame.locator('#pageInfo').innerText(),'第 0 / 0 页');
+ await uploadMulti(originalBytes);await frame.locator('#download:not([disabled])').waitFor();assert.equal(await frame.locator('#pageInfo').innerText(),'第 1 / 3 页');
  assert.deepEqual(errors,[]);console.log(JSON.stringify({status:'PASS',pages,out,filename:download.suggestedFilename()}));
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
