@@ -64,7 +64,7 @@ function fixture() {
     }
     assert.deepEqual(['合同总金额','已付金额','剩余金额','是否结清'].map(h=>find('空OA唯一候选')[col(h)]),[1000,300,700,'否']);
     assert.equal(find('有OA已结清')[col('对公付款0A流程号')],flowCode(102));assert.equal(find('有OA已结清')[col('流程编号')],flowCode(102));assert.equal(find('有OA已结清')[col('已付金额')],102);assert.equal(find('有OA已结清')[col('剩余金额')],0);
-    assert.equal(find('零额缺日期')[col('本次申请付款金额')],0);assert.equal(find('零额缺日期')[col('是否结清')],'是');assert.equal(find('零额缺日期')[col('申请付款的日期')],'日期待确认');
+    assert.equal(find('零额缺日期')[col('本次申请付款金额')],0);assert.equal(find('零额缺日期')[col('是否结清')],'是');assert.equal(find('零额缺日期')[col('申请付款的日期')],'2026/12/21周');
     assert.equal(find('空OA唯一候选')[col('是否提交付款申请单')],'已提交','纸质申请与OA号独立');
     assert.equal(find('台账空申请分类谈判')[col('是否提交付款申请单')],'未申请','申请分类不改变台账纳入，只影响申请归属');
     const expectedOrder=['月底先录入','调整后同申请周','空白分类多候选','有OA已结清','空OA唯一候选','台账空申请分类谈判','别名表头本行日期','零额缺日期','台账否命中谈判表'];
@@ -101,6 +101,7 @@ function fixture() {
     const refreshed=await download(),latest=X.utils.sheet_to_json(refreshed.Sheets.正常付款,{defval:''});
     assert.equal(latest.length,9);assert.equal(latest.find(row=>row.供应商名称==='空OA唯一候选').应付时间,'2026年12月1日','替换台账采用最新本行日期');
     assert.equal(latest.find(row=>row.供应商名称==='零额缺日期').预估时间,'2026年12月15日','移除预估列后按月末＋15天＋零账期重算，不用旧文件日期');
+    assert.equal(latest.find(row=>row.供应商名称==='零额缺日期')['申请付款的日期'],'2026/12/07周','按账期推算的预估日期同样生成申请周');
     const months=X.read(encode(data.ledger),{cellNF:true}),li=months.Sheets['对账明细-李奇'];
     for(const row of [2,6,7])li['I'+row]={t:'s',v:''};
     li.W2={t:'s',v:'2026年11月'};li.W7={t:'s',v:'2026-11'};
@@ -118,7 +119,25 @@ function fixture() {
     assert.deepEqual(monthPreview.map(row=>row[col('供应商名称')]),monthlyRows.map(row=>row.供应商名称));
     for(const record of monthlyRows){const shown=monthPreview.find(row=>row[col('供应商名称')]===record.供应商名称);for(const key of ['应付时间','预估时间','申请付款的日期'])assert.equal(shown[col(key)],record[key]);}
     assert.equal(await frame.locator('#pendingCount').innerText(),'0');
+    const concrete=X.read(encode(months),{cellNF:true}),concreteLi=concrete.Sheets['对账明细-李奇'];
+    concreteLi.W2={t:'s',v:'2026-11-30'};concreteLi.W7={t:'s',v:'2026-11-18'};concreteLi.W6={t:'s',v:'2026-12-31'};
+    await upload('ledger',concrete);await analyze();
+    const dated=await download(),datedSheet=dated.Sheets.正常付款,datedRows=X.utils.sheet_to_json(datedSheet,{defval:''});
+    assert.deepEqual(datedRows.map(row=>row.供应商名称),['空白分类多候选','调整后同申请周','有OA已结清','空OA唯一候选','台账空申请分类谈判','别名表头本行日期','月底先录入','零额缺日期','台账否命中谈判表']);
+    for(const [name,estimate,week] of [['空OA唯一候选','2026年11月30日','2026/11/16周'],['调整后同申请周','2026年11月18日','2026/11/09周'],['月底先录入','2026年12月31日','2026/12/14周'],['零额缺日期','2027年1月1日','2026/12/21周']]){
+      const record=datedRows.find(row=>row.供应商名称===name);assert.equal(record.应付时间,'');assert.equal(record.预估时间,estimate);assert.equal(record['申请付款的日期'],week);
+    }
+    const datedPreview=await frame.locator('#normalPreview tbody tr').evaluateAll(nodes=>nodes.map(row=>[...row.cells].map(cell=>cell.textContent)));
+    assert.deepEqual(datedPreview.map(row=>row[col('供应商名称')]),datedRows.map(row=>row.供应商名称));
+    for(const [r,record] of datedRows.entries()){
+      const excelRow=r+2;
+      for(const key of ['应付时间','预估时间','申请付款的日期'])assert.equal(datedPreview[r][col(key)],record[key]);
+      assert.equal(record['本次申请付款金额'],originalAmounts[record.供应商名称]);
+      assert.equal(datedSheet['P'+excelRow].f,record.跟单员==='李奇'?undefined:`F${excelRow}-N${excelRow}`);
+      if(record.供应商名称==='空OA唯一候选')assert.equal(datedSheet['A'+excelRow].s.fgColor.rgb,'FF0000','预估日期排序后标红跟随原记录');
+    }
+    assert.equal(concreteLi.W2.v,'2026-11-30','原预估日期不改写');assert.equal(await frame.locator('#pendingCount').innerText(),'0');
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({status:'PASS',base,normalRows:9,classification:'merged 是 applies to every source row before filtering; 否/blank included',emptyOA:'fixed 未提交OA and five blank flow fields even with candidates',due:'normal due day capped at 25; month-only estimates use day 25 for previous-week application date and stable sort; preview/export text dates agree; source/negotiated/progress due unchanged',financial:'李奇合同口径原值保留/no false overpayment; others zero/settled/formulas/highlights',invalidClassification:'error/value/missing column excluded with review'}));
+    console.log(JSON.stringify({status:'PASS',base,normalRows:9,classification:'merged 是 applies to every source row before filtering; 否/blank included',emptyOA:'fixed 未提交OA and five blank flow fields even with candidates',due:'normal due day capped at 25; month-only, exact and derived estimates use day 25 cap for previous-week application date and stable sort; preview/export text dates agree; source/negotiated/progress due unchanged',financial:'李奇合同口径原值保留/no false overpayment; others zero/settled/formulas/highlights',invalidClassification:'error/value/missing column excluded with review'}));
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

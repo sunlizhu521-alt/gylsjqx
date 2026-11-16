@@ -327,9 +327,11 @@ function build(inputs,decisions={}){
  const normalDates=new Map(normal.map(record=>{
   const estimate=normalEstimate({record});
   let applicationDate=normalDueDate(record.values['应付款时间'],record.date1904);
-  if(blank(record.values['应付款时间'])&&estimate.t==='n'&&estimate.z==='yyyy"年"m"月"'){
-   const parts=X.SSF.parse_date_code(estimate.v);
-   applicationDate={t:'n',v:estimate.v-parts.d+25,z:DATE_FORMAT};
+  if(blank(record.values['应付款时间'])&&estimate.t==='n'){
+   if(estimate.z==='yyyy"年"m"月"'){
+    const parts=X.SSF.parse_date_code(estimate.v);
+    applicationDate={t:'n',v:estimate.v-parts.d+25,z:DATE_FORMAT};
+   }else applicationDate=normalDueDate(estimate,false);
   }
   return [record.id,{estimate,week:paymentWeek(applicationDate,false,1)}];
  }));
