@@ -324,9 +324,18 @@ function build(inputs,decisions={}){
   const owners=[...new Set(matches.map(r=>r.owner))];return owners.length===1?owners[0]:'';
  }
  function reviewOwner(target){return target.normal?target.record.owner:usable(target.values['跟单员'])?str(target.values['跟单员'].v):ledgerOwner(target.record);}
+ const normalDates=new Map(normal.map(record=>{
+  const estimate=normalEstimate({record});
+  let applicationDate=normalDueDate(record.values['应付款时间'],record.date1904);
+  if(blank(record.values['应付款时间'])&&estimate.t==='n'&&estimate.z==='yyyy"年"m"月"'){
+   const parts=X.SSF.parse_date_code(estimate.v);
+   applicationDate={t:'n',v:estimate.v-parts.d+25,z:DATE_FORMAT};
+  }
+  return [record.id,{estimate,week:paymentWeek(applicationDate,false,1)}];
+ }));
  // Sort before assigning output row numbers so formulas and highlights follow their records.
  normal.sort((a,b)=>{
-  const left=paymentWeek(normalDueDate(a.values['应付款时间'],a.date1904),false,1).v,right=paymentWeek(normalDueDate(b.values['应付款时间'],b.date1904),false,1).v;
+  const left=normalDates.get(a.id).week.v,right=normalDates.get(b.id).week.v;
   return (left==='日期待确认')-(right==='日期待确认')||left.localeCompare(right);
  });
  const normalObjects=normal.map((r,i)=>({record:r,normal:true,index:i,missingOA:blank(r.values['对公付款0A流程号']),sourceOA:clone(r.values['对公付款0A流程号']),values:{...r.values,'申请日期':empty()}}));
@@ -824,8 +833,8 @@ function build(inputs,decisions={}){
   if(key==='对公付款0A流程号'&&target.missingOA)return cell('未提交OA');
   if([...FLOW_FIELDS,'流程编号'].includes(key)&&(target.missingOA||norm(target.values['对公付款0A流程号']?.v).toUpperCase()==='未提交OA'))return empty();
   if(key==='跟单员')return cell(target.record.owner);
-  if(key==='预估时间')return normalEstimate(target);
-  if(key==='申请付款的日期')return paymentWeek(normalDueDate(target.record.values['应付款时间'],target.record.date1904),false,1);
+  if(key==='预估时间')return clone(normalDates.get(target.record.id).estimate);
+  if(key==='申请付款的日期')return clone(normalDates.get(target.record.id).week);
   if(key==='是否对账'){
    return cell(hasPaymentOA(target.record)?'已对账':'未对账');
   }

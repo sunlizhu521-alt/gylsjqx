@@ -101,7 +101,24 @@ function fixture() {
     const refreshed=await download(),latest=X.utils.sheet_to_json(refreshed.Sheets.正常付款,{defval:''});
     assert.equal(latest.length,9);assert.equal(latest.find(row=>row.供应商名称==='空OA唯一候选').应付时间,'2026年12月1日','替换台账采用最新本行日期');
     assert.equal(latest.find(row=>row.供应商名称==='零额缺日期').预估时间,'2026年12月15日','移除预估列后按月末＋15天＋零账期重算，不用旧文件日期');
+    const months=X.read(encode(data.ledger),{cellNF:true}),li=months.Sheets['对账明细-李奇'];
+    for(const row of [2,6,7])li['I'+row]={t:'s',v:''};
+    li.W2={t:'s',v:'2026年11月'};li.W7={t:'s',v:'2026-11'};
+    li.W6={t:'n',v:46371,f:'DATE(2026,12,15)',z:'yyyy"年"m"月"'};
+    await upload('ledger',months);await analyze();
+    const monthly=await download(),monthlySheet=monthly.Sheets.正常付款,monthlyRows=X.utils.sheet_to_json(monthlySheet,{defval:''});
+    assert.deepEqual(monthlyRows.map(row=>row.供应商名称),['空白分类多候选','有OA已结清','空OA唯一候选','调整后同申请周','台账空申请分类谈判','别名表头本行日期','月底先录入','零额缺日期','台账否命中谈判表'],'按预估月份25日计算出的申请日期参与稳定排序');
+    for(const [name,month,week] of [['空OA唯一候选','2026年11月','2026/11/16周'],['调整后同申请周','2026年11月','2026/11/16周'],['月底先录入','2026年12月','2026/12/14周']]){
+      const record=monthlyRows.find(row=>row.供应商名称===name),r=monthlyRows.indexOf(record)+1;
+      assert.equal(record.应付时间,'');assert.equal(record.预估时间,month);assert.equal(record['申请付款的日期'],week);
+      assert.equal(monthlySheet[X.utils.encode_cell({r,c:col('预估时间')})].t,'s');
+      assert.equal(monthlySheet[X.utils.encode_cell({r,c:col('申请付款的日期')})].t,'s');
+    }
+    const monthPreview=await frame.locator('#normalPreview tbody tr').evaluateAll(nodes=>nodes.map(row=>[...row.cells].map(cell=>cell.textContent)));
+    assert.deepEqual(monthPreview.map(row=>row[col('供应商名称')]),monthlyRows.map(row=>row.供应商名称));
+    for(const record of monthlyRows){const shown=monthPreview.find(row=>row[col('供应商名称')]===record.供应商名称);for(const key of ['应付时间','预估时间','申请付款的日期'])assert.equal(shown[col(key)],record[key]);}
+    assert.equal(await frame.locator('#pendingCount').innerText(),'0');
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({status:'PASS',base,normalRows:9,classification:'merged 是 applies to every source row before filtering; 否/blank included',emptyOA:'fixed 未提交OA and five blank flow fields even with candidates',due:'normal due day capped at 25; previous-week sort stable; preview/export text dates agree; source/negotiated/progress due unchanged; estimate rules unchanged',financial:'李奇合同口径原值保留/no false overpayment; others zero/settled/formulas/highlights',invalidClassification:'error/value/missing column excluded with review'}));
+    console.log(JSON.stringify({status:'PASS',base,normalRows:9,classification:'merged 是 applies to every source row before filtering; 否/blank included',emptyOA:'fixed 未提交OA and five blank flow fields even with candidates',due:'normal due day capped at 25; month-only estimates use day 25 for previous-week application date and stable sort; preview/export text dates agree; source/negotiated/progress due unchanged',financial:'李奇合同口径原值保留/no false overpayment; others zero/settled/formulas/highlights',invalidClassification:'error/value/missing column excluded with review'}));
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

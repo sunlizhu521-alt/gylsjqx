@@ -83,3 +83,45 @@ test('已有预估列空白不推算，年月保持精度，错误与不确定�
  const source=result(fixture({'应付时间':'月底协商','预估时间':'2026-11-20'}));assert.equal(source.row.应付时间.v,'月底协商');assert.equal(source.row.预估时间.v,'');
  const bad=result(fixture({'预估时间':'2026-02-30'}));assert.equal(bad.row.预估时间.v,'2026-02-30');assert.equal(bad.built.stats.pending,1);
 });
+test('正常付款预估仅有年月时按该月25日计算上一周周一，保留月份显示及源数据',()=>{
+ const serial=(Date.UTC(2026,10,1)-Date.UTC(1899,11,30))/86400000;
+ for(const [raw,month,week,date1904] of [
+  ['2026年11月','2026年11月','2026/11/16周'],['2026-11','2026年11月','2026/11/16周'],['2026/11','2026年11月','2026/11/16周'],
+  [{t:'n',v:serial,z:'yyyy-mm'},'2026年11月','2026/11/16周'],
+  [{t:'n',v:serial-1462,f:'DATE(2026,11,1)',z:'yyyy年m月'},'2026年11月','2026/11/16周',true],
+  ['2026-12','2026年12月','2026/12/14周'],['2027-01','2027年1月','2027/01/18周'],
+  ['2028-02','2028年2月','2028/02/14周'],['2027-02','2027年2月','2027/02/15周']
+ ])for(const header of ['预估时间','预估付款时间','预估付款月份']){
+  const i=fixture({[header]:raw});if(date1904)i.ledger.book.Workbook={WBProps:{date1904:true}};
+  const before=JSON.stringify(i),{built,row}=result(i);
+  assert.equal(row['申请付款的日期'].v,week,JSON.stringify(raw));assert.equal(display(row.预估时间),month);
+  assert.equal(row.应付时间.v,'');assert(!row.预估时间.f);assert.equal(built.stats.pending,0);assert.equal(JSON.stringify(i),before);
+ }
+ for(const [due,week] of [['2026-11-18','2026/11/09周'],['2026-11-30','2026/11/16周'],['月底协商','日期待确认']]){
+  const i=fixture({'应付时间':due,'预估时间':'2027-01'}),before=JSON.stringify(i),{row}=result(i);
+  assert.equal(row['申请付款的日期'].v,week);assert.equal(row.预估时间.v,'','非空应付时间仍优先，不用月份预估覆盖');assert.equal(JSON.stringify(i),before);
+ }
+});
+test('空白、非法预估月份和无效公式缓存不产生申请日期，仍保留核对提示',()=>{
+ for(const raw of ['', '2026-00', '2026-13', '11月', {t:'e',v:23,w:'#REF!'}, {t:'n',f:'DATE(2026,11,1)',z:'yyyy-mm'}, {t:'s',v:'',f:'TEXT(A2,"yyyy-mm")'}]){
+  const i=fixture({'预估时间':raw}),before=JSON.stringify(i),{built,row}=result(i);
+  assert.equal(row['申请付款的日期'].v,'日期待确认');assert.equal(built.stats.pending,1);
+  assert(built.issues.some(q=>q.id.startsWith('normal-estimate:')));assert.equal(JSON.stringify(i),before);
+  if(raw==='')assert.equal(row.预估时间.v,'','已有预估列空白仍不推算');
+ }
+});
+test('月份预估与有效应付日期共同按申请周排序，同周和待确认组均保持台账原序',()=>{
+ const i=fixture({'供应商名称':'待确认先录','预估时间':'2026-13'}),sheet=i.ledger.book.Sheets['对账明细-李奇'];
+ const [headers,base]=X.utils.sheet_to_json(sheet,{header:1});
+ for(const [name,due,estimate] of [
+  ['十一月先录','','2026年11月'],['具体预估保持待确认','','2026-11-18'],['同周应付','2026-11-24','2027-01'],
+  ['更早月份','','2026/10'],['十一月后录','','2026-11'],['更早应付','2026-11-18',''],['十二月','','2026-12'],['预估空白','','']
+ ]){
+  const row=base.slice();for(const [header,value] of [['供应商名称',name],['应付时间',due],['预估时间',estimate]])row[headers.indexOf(header)]=value;
+  X.utils.sheet_add_aoa(sheet,[row],{origin:-1});
+ }
+ const before=JSON.stringify(i),built=C.build(i),name=C.NORMAL_HEADERS.indexOf('供应商名称');
+ assert.deepEqual(built.normalRows.map(row=>row[name].v),['更早月份','更早应付','十一月先录','同周应付','十一月后录','十二月','待确认先录','具体预估保持待确认','预估空白']);
+ assert.deepEqual(built.normalRows.map(row=>row.at(-1).v),['2026/10/12周','2026/11/09周','2026/11/16周','2026/11/16周','2026/11/16周','2026/12/14周','日期待确认','日期待确认','日期待确认']);
+ assert.equal(JSON.stringify(i),before);
+});
