@@ -48,14 +48,23 @@ function mergeStyles(base,donor,theme){
  }
  return {xml:base,offset:counts.cellXfs,dxfOffset:counts.dxfs};
 }
-function addResultStyles(xml){
+const numberFormat=value=>{
+ const precision=(value.toLocaleString('en-US',{useGrouping:false,maximumSignificantDigits:21}).split('.')[1]||'').length;
+ return precision>250?'0.0000000000000000E+00':precision?'0.'+'0'.repeat(precision):'0';
+};
+function addResultStyles(xml,rows){
  let m=appendStyle(xml,'fonts','<font><sz val="11"/><name val="等线"/><color rgb="FF172033"/></font><font><b/><sz val="11"/><name val="等线"/><color rgb="FFFFFFFF"/></font>');xml=m.xml;const font=m.offset;
  m=appendStyle(xml,'fills','<fill><patternFill patternType="solid"><fgColor rgb="FFFFFFFF"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF315B9D"/><bgColor indexed="64"/></patternFill></fill>');xml=m.xml;const fill=m.offset;
  m=appendStyle(xml,'borders',['thin','hair'].map(s=>'<border>'+['left','right','top','bottom'].map(side=>`<${side} style="${s}"><color rgb="FF404040"/></${side}>`).join('')+'<diagonal/></border>').join(''));xml=m.xml;const border=m.offset;
- const numId=Math.max(163,...tags(first(xml,'numFmts'),'numFmt').map(n=>+attr(n,'numFmtId')))+1;
- xml=appendStyle(xml,'numFmts',`<numFmt numFmtId="${numId}" formatCode="0.###############"/>`).xml;
- const xf=(header,wrap,numeric,integer=false)=>`<xf numFmtId="${numeric?(integer?1:numId):49}" fontId="${font+(header?1:0)}" fillId="${fill+(header?1:0)}" borderId="${border+(header?0:1)}" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="${wrap?'left':'center'}" vertical="center" wrapText="${wrap?1:0}"/></xf>`;
- m=appendStyle(xml,'cellXfs',xf(true,false,false)+xf(false,false,false)+xf(false,true,false)+xf(false,false,true)+xf(false,false,true,true));return {xml:m.xml,header:m.offset,text:m.offset+1,wrap:m.offset+2,number:m.offset+3,integer:m.offset+4};
+ let numId=Math.max(163,...tags(first(xml,'numFmts'),'numFmt').map(n=>+attr(n,'numFmtId')))+1;
+ const formats=new Map([['0',1]]);
+ for(const row of rows)for(const value of row)if(typeof value==='number'){
+  if(!Number.isFinite(value))throw Error('核对数量超出有效范围');
+  const format=numberFormat(value);if(!formats.has(format)){formats.set(format,numId);xml=appendStyle(xml,'numFmts',`<numFmt numFmtId="${numId++}" formatCode="${format}"/>`).xml;}
+ }
+ const xf=(header,wrap,format=49)=>`<xf numFmtId="${format}" fontId="${font+(header?1:0)}" fillId="${fill+(header?1:0)}" borderId="${border+(header?0:1)}" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="${wrap?'left':'center'}" vertical="center" wrapText="${wrap?1:0}"/></xf>`;
+ m=appendStyle(xml,'cellXfs',xf(true,false)+xf(false,false)+xf(false,true)+[...formats.values()].map(id=>xf(false,false,id)).join(''));
+ return {xml:m.xml,header:m.offset,text:m.offset+1,wrap:m.offset+2,numbers:new Map([...formats.keys()].map((format,i)=>[format,m.offset+3+i]))};
 }
 const width=v=>Math.max(...String(v??'').split('\n').map(line=>[...line].reduce((n,c)=>n+(c.codePointAt(0)>255?2:1),0)));
 function resultSheet(headers,rows,styles,detail){
@@ -66,7 +75,7 @@ function resultSheet(headers,rows,styles,detail){
   const lines=r?Math.max(1,...row.map((v,c)=>notes.has(c)?String(v??'').split('\n').reduce((n,l)=>n+Math.max(1,Math.ceil(width(l)/(widths[c]-2))),0):1)):1;
   // Excel caps a row at 409 points; full text also remains in the cell and edit bar.
   return `<row r="${r+1}" ht="${Math.min(409,Math.max(28,lines*16+8))}" customHeight="1">`+headers.map((_,c)=>{
-   const v=row[c],s=r===0?styles.header:typeof v==='number'?(Number.isInteger(v)?styles.integer:styles.number):notes.has(c)?styles.wrap:styles.text,a=X.utils.encode_cell({r,c});
+   const v=row[c],s=r===0?styles.header:typeof v==='number'?styles.numbers.get(numberFormat(v)):notes.has(c)?styles.wrap:styles.text,a=X.utils.encode_cell({r,c});
    if(v===null||v===undefined)return `<c r="${a}" s="${s}"/>`;
    if(typeof v==='number'){if(!Number.isFinite(v))throw Error('核对数量超出有效范围');return `<c r="${a}" s="${s}"><v>${v}</v></c>`;}
    if(String(v).length>32767)throw Error('核对说明超过 Excel 单元格上限，请缩小文件范围后重试');
@@ -102,7 +111,7 @@ return async function(purchaseBytes,fulfillmentBytes,result){
  if(donorXml.some(x=>/<(?:\w+:)?(?:extLst|tableParts)\b/.test(x)))throw Error('采购表含扩展或结构化表，暂不能保真合并，请使用原始采购订单导出');
  const stylePath=base.path('styles'),donorStyle=await read(donor.zip,donor.path('styles'));
  if(first(donorStyle,'colors')&&first(donorStyle,'colors')!==first(await read(zip,stylePath),'colors'))throw Error('采购表使用不同的自定义调色板，无法保持原颜色');
- const merged=mergeStyles(await read(zip,stylePath),donorStyle,donor.path('theme')?await read(donor.zip,donor.path('theme')):''),styles=addResultStyles(merged.xml);
+ const merged=mergeStyles(await read(zip,stylePath),donorStyle,donor.path('theme')?await read(donor.zip,donor.path('theme')):''),styles=addResultStyles(merged.xml,[...result.summary,...result.detail]);
  const strings=donor.path('sharedStrings')?tags(await read(donor.zip,donor.path('sharedStrings')),'si'):[];
  let folder='xl/fulfillment-check-import/';while(Object.keys(zip.files).some(p=>p.startsWith(folder)))folder=folder.replace(/\/$/,'x/');
  let wb=base.wb,rels=base.rels,types=base.types;

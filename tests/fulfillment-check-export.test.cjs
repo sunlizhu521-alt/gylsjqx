@@ -28,3 +28,13 @@ test('原始的空白和数值零不混淆；特殊采购结构明确停止，�
  const z=await Z.loadAsync(bytes(p));z.file('xl/worksheets/sheet1.xml',(await z.file('xl/worksheets/sheet1.xml').async('string')).replace('</worksheet>','<tableParts count="1"><tablePart r:id="rId2"/></tableParts></worksheet>'));
  await assert.rejects(E(await z.generateAsync({type:'uint8array'}),bytes(b),result),/结构化表/);
 });
+test('结果表整数无末尾点、小数按实际精度显示；保留原表的格式和数值',async()=>{
+ const values=[1378,0,-60,0.25,-0.125,1234.56789],p=book('采购'),b=book('徐英');
+ b.Sheets.徐英.B4.z='0.###############';
+ const r={...result,summary:values.map(v=>['甲',v,v,v,0,1,0,0,0,0]),detail:values.map(v=>result.detail[0].map((old,i)=>[9,10,11].includes(i)?v:old))};
+ const out=X.read(await E(bytes(p),bytes(b),r),{type:'array',cellNF:true});
+ for(const [name,columns] of [['汇总',['B','C','D']],['差异明细',['J','K','L']]])for(const [i,value] of values.entries())for(const column of columns){
+  const cell=out.Sheets[name][column+(i+2)];assert.equal(cell.v,value);assert.equal(cell.t,'n');assert.equal(cell.w,String(value));
+ }
+ assert.equal(out.Sheets.徐英.B4.z,'0.###############');assert.equal(out.Sheets.徐英.B4.v,2);assert.equal(out.Sheets.徐英.B4.f,'B2+B3+1.5');
+});
