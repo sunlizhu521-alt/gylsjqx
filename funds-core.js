@@ -258,59 +258,62 @@ function negotiatedSheets(book){return (book?.SheetNames||[]).filter(n=>n.includ
 // Reconcile original records independently of application status and later OA supplementation.
 function ledgerAmountAudit(negotiated,ledgerTables,targets){
  const invalid=c=>c?.t==='e'||c?.f&&(c.t==='z'||c.v==null||c.v==='');
- const unknown=v=>['','/','-','待核对','待确认','未提交OA','未申请OA','未交OA'].includes(norm(v));
- const idFields=['对公付款0A流程号','单据号【财务应付单】','OA合同编号'];
- const identityFields=['供应商名称','付款主体',...idFields];
- function describe(record,table){
-  const v=record.values,amount=invalid(v['申请付款金额'])?{}:money(v['申请付款金额']);
-  return {record,table,name:supplierKey(v['供应商名称']?.v),subject:unknown(v['付款主体']?.v)?'':entity(v['付款主体']?.v),
-   valid:identityFields.every(h=>!invalid(v[h])),ids:idFields.map(h=>codes(v[h]?.v,h==='单据号【财务应付单】')),
-   cents:amount.cents!==undefined&&amount.cents>=0n?amount.cents:undefined};
- }
- const rows=ledgerTables.flatMap(t=>t.records.map(r=>describe(r,t)));
- const entries=negotiated.records.filter(r=>invalid(r.values['对公付款0A流程号'])||norm(value(r,'对公付款0A流程号'))!=='不支付').map(r=>describe(r,negotiated));
- const sharesId=(a,b)=>a.ids.some((ids,i)=>ids.length&&b.ids[i].length&&!identifiersConflict(ids,b.ids[i]));
- const compatible=(a,b)=>a.valid&&b.valid&&a.name&&a.name===b.name&&(!a.subject||!b.subject||a.subject===b.subject)&&a.ids.every((ids,i)=>!identifiersConflict(ids,b.ids[i]));
- const plans=entries.map(entry=>{
-  const compatibleRows=rows.filter(row=>compatible(entry,row)),strong=compatibleRows.filter(row=>sharesId(entry,row));
-  const candidates=strong.length?strong:compatibleRows.filter(row=>!invalid(row.record.values['是否谈判付款'])&&norm(value(row.record,'是否谈判付款'))==='是');
-  // Only the complete, uniquely owned same-OA group may be summed; never search amount subsets.
-  const oa=entry.ids[0],group=oa.length===1?rows.filter(row=>row.ids[0].includes(oa[0])):[];
-  const split=entry.cents!==undefined&&entry.subject&&group.length>1&&entries.filter(other=>other.ids[0].includes(oa[0])).length===1&&group.every(row=>{
-   const paid=money(row.record.values['已付金额']);
-   return compatible(entry,row)&&row.ids[0].length===1&&row.subject===entry.subject&&row.cents!==undefined&&
-    !invalid(row.record.values['已付金额'])&&(paid.blank||paid.cents!==undefined&&paid.cents>=0n&&paid.cents<=row.cents);
-  })&&group.reduce((sum,row)=>sum+row.cents,0n)===entry.cents;
-  const exact=candidates.filter(row=>entry.cents!==undefined&&row.cents===entry.cents);
-  const claims=split?group:strong.length===1?strong:!strong.length&&exact.length===1?exact:[];
-  return {entry,candidates,strong:strong.length>0,split,claims};
- });
- const claimed=new Map();
- for(const plan of plans)for(const row of plan.claims){if(!claimed.has(row))claimed.set(row,[]);claimed.get(row).push(plan);}
- const source=entry=>entry.record.source.file+' / '+entry.record.source.sheet+'!'+X.utils.encode_cell({r:entry.record.r,c:entry.table.map['申请付款金额']})+'（第 '+entry.record.source.row+' 行）';
- const amount=entry=>entry.cents===undefined?'金额为空、异常或公式结果不可用':centsText(entry.cents);
- const detail=entry=>source(entry)+'｜付款主体 '+(str(value(entry.record,'付款主体'))||'空白')+'｜申请付款金额 '+amount(entry)+
-  idFields.map((h,i)=>entry.ids[i].length?'｜'+h+' '+entry.ids[i].join('、'):'').join('');
- const reviews=[];
- for(const plan of plans){
-  if(plan.split)continue;
-  const {entry}=plan;
-  let candidates=plan.candidates;
-  if(!plan.strong){
-   candidates=candidates.filter(row=>{const owners=claimed.get(row)||[];return owners.length!==1||owners[0]===plan;});
-   if(plan.claims.length===1&&claimed.get(plan.claims[0])?.length===1)candidates=plan.claims;
+ const notPay=r=>!invalid(r.values['对公付款0A流程号'])&&norm(value(r,'对公付款0A流程号'))==='不支付';
+ const name=r=>invalid(r.values['供应商名称'])?'':supplierKey(value(r,'供应商名称'));
+ const describe=(record,table)=>{
+  const source=record.values['申请付款金额'],amount=invalid(source)?{}:money(source);
+  return {record,table,cents:amount.cents!==undefined&&amount.cents>=0n?amount.cents:undefined};
+ };
+ const sum=rows=>{
+  if(rows.some(row=>row.cents===undefined))return null;
+  const total=rows.reduce((total,row)=>total+row.cents,0n);
+  return total<=BigInt(Number.MAX_SAFE_INTEGER)?total:null;
+ };
+ const details=(label,entries)=>{
+  const groups=new Map();
+  for(const entry of entries){
+   const r=entry.record,source=r.source,key=JSON.stringify([source.file,source.sheet]),address=X.utils.encode_cell({r:r.r,c:entry.table.map['申请付款金额']});
+   if(!groups.has(key))groups.set(key,{file:source.file,refs:[]});
+   groups.get(key).refs.push(source.sheet+'!'+address+'='+
+    (entry.cents===undefined?'金额为空、异常或公式结果不可用':centsText(entry.cents)));
   }
-  if(!candidates.length||entry.cents!==undefined&&candidates.every(row=>row.cents===entry.cents))continue;
-  const unique=candidates.length===1,matched=candidates[0];
-  const basis=plan.strong?'独立编号一致（'+idFields.filter((h,i)=>entry.ids[i].length&&candidates.every(row=>row.ids[i].length&&!identifiersConflict(entry.ids[i],row.ids[i]))).join('、')+'）':
-   '同供应商、主体及已有编号无冲突；仅取台账“是否谈判付款=是”，排除其他谈判记录已独占对应的台账后'+(unique?'剩余唯一待核对候选':'仍有多个候选');
-  const difference=unique&&entry.cents!==undefined&&matched.cents!==undefined?'谈判金额 '+amount(entry)+'，资金台账金额 '+amount(matched)+'，差额（谈判减台账）'+centsText(entry.cents-matched.cents)+'。':
-   unique?'双方金额为空、异常或公式结果不可用，无法计算差额。':'存在多条台账候选，付款归属待确认，不能任选或相加计算差额。';
-  reviews.push({target:targets.find(t=>t.record.id===entry.record.id),owner:unique?matched.record.owner:'',message:'台账金额差异核对：'+difference+
-   '\n匹配依据：'+basis+'。\n谈判记录：'+detail(entry)+candidates.map(row=>'\n台账候选：'+detail(row)).join('')+
-   '\n需要处理：以资金台账金额为核对基准；先复核是否同一笔及分批口径，确认后修正谈判登记、谈判明细和付款计划。本次不自动改写金额。'});
+  return [...groups.values()].map(group=>'\n'+label+'：'+group.file+' / '+group.refs.join('、')).join('');
+ };
+ const allLedger=ledgerTables.flatMap(table=>table.records.map(record=>({...describe(record,table),
+  invalidType:table.map['是否谈判付款']===undefined||invalid(record.values['是否谈判付款'])||!['是','否',''].includes(norm(value(record,'是否谈判付款'))),
+  negotiated:norm(value(record,'是否谈判付款'))==='是'})));
+ const suppliers=new Map();
+ for(const record of negotiated.records){const key=name(record);if(!key)continue;if(!suppliers.has(key))suppliers.set(key,[]);suppliers.get(key).push(describe(record,negotiated));}
+ const reviews=[],balancedForPaid=new Set();
+ for(const [supplier,sourceRows]of suppliers){
+  const entries=sourceRows.filter(row=>!notPay(row.record)),excluded=sourceRows.filter(row=>notPay(row.record));
+  if(!entries.length)continue;
+  const related=allLedger.filter(row=>name(row.record)===supplier),invalidTypes=related.filter(row=>row.invalidType);
+  const parts=related.filter(row=>!row.invalidType&&row.negotiated&&!notPay(row.record)),excludedParts=related.filter(row=>!row.invalidType&&row.negotiated&&notPay(row.record));
+  if(!parts.length&&!invalidTypes.length)continue;
+  const negotiatedTotal=sum(entries),ledgerTotal=sum(parts);
+  const unclearExcluded=excluded.length>0&&(sum(excluded)===null||sum(excluded)!==sum(excludedParts));
+  const complete=parts.length>0&&!invalidTypes.length&&!unclearExcluded&&negotiatedTotal!==null&&ledgerTotal!==null;
+  if(complete&&negotiatedTotal===ledgerTotal){
+   if(parts.length>1&&parts.every(row=>{const source=row.record.values['已付金额'],paid=money(source);return !invalid(source)&&(paid.blank||paid.cents!==undefined&&paid.cents>=0n&&paid.cents<=row.cents);}))balancedForPaid.add(supplier);
+   continue;
+  }
+  const reasons=[];
+  if(!parts.length)reasons.push('没有可确认的台账谈判款，不能当作零金额');
+  if(invalidTypes.length)reasons.push('台账分类缺失、异常或公式结果不可用，无法确认完整汇总范围');
+  if(unclearExcluded)reasons.push('同供应商含不支付记录，台账未明确区分对应的不支付金额，汇总范围待核对');
+  if(negotiatedTotal===null||ledgerTotal===null)reasons.push('金额为空、异常、公式结果不可用或总额超出安全范围，无法核对完整总额');
+  const conclusion=complete?'谈判总金额 '+centsText(negotiatedTotal)+'，资金台账总金额 '+centsText(ledgerTotal)+'，差额（谈判减台账）'+centsText(negotiatedTotal-ledgerTotal)+'。':reasons.join('；')+'。';
+  const owners=[...new Set([...parts,...invalidTypes].map(row=>row.record.owner).filter(Boolean))];
+  reviews.push({target:targets.find(target=>target.record.id===entries[0].record.id),owner:owners.join('、'),totalCents:negotiatedTotal,
+   entryIds:entries.map(row=>row.record.id),subjects:[...new Set(entries.map(row=>str(value(row.record,'付款主体'))).filter(Boolean))].join('、'),
+   sourceRows:entries.length===1?entries[0].record.source.row:entries.map(row=>row.record.source.row).join('、'),
+   message:'台账金额差异核对：'+conclusion+'\n匹配依据：按同一供应商汇总谈判总金额，不逐期匹配；台账只取“是否谈判付款=是”，包含已付和已结清分期，正常付款不计入。逐行合计申请付款金额，不累加合同总金额。'+
+    '\n谈判共 '+entries.length+' 行，台账谈判款共 '+parts.length+' 行。'+details('谈判记录',entries)+
+    details('台账分期',parts)+details('分类待核对',invalidTypes)+(unclearExcluded?details('不支付来源',excluded):'')+
+    '\n需要处理：以资金台账金额为核对基准，复核供应商总额及以上来源；本次保留各期原金额、已付金额、余额和付款计划。'});
  }
- return reviews;
+ return {reviews,balancedForPaid};
 }
 function build(inputs,decisions={}){
  for(const role of ['ledger','applications','negotiated','oa'])if(!inputs[role]?.book)throw Error('请上传全部四份文件');
@@ -765,6 +768,7 @@ function build(inputs,decisions={}){
   }
   return refs.some(a=>referencesFinancial(a,financial,seen));
  }
+ const amountAudit=ledgerAmountAudit(negotiated,ledgerTables,negotiatedObjects);
  for(const target of negotiatedObjects){
   const record=target.record,info=classification(record),ids=oas(record);
   const sameOA=r=>hasPaymentOA(r)&&oas(r).length>0&&!identifiersConflict(ids,oas(r));
@@ -781,6 +785,11 @@ function build(inputs,decisions={}){
    review('OA来源身份或金额存在冲突','核实 OA 流程表中同一编号的收款单位和付款金额后重新上传。');continue;
   }
   if(matches.length!==1){
+   // A balanced supplier total removes only the installment-size mismatch, never allocates paid money.
+   if(!matches.length&&ids.length===1&&amountAudit.balancedForPaid.has(info.name)&&related.every(r=>classification(r).name===info.name)){
+    if(!usable(record.values['付款主体'])||related.some(r=>!usable(r.values['付款主体'])||!compatible(record,r,'付款主体')))review('付款主体不一致或异常','供应商本金总额已一致；如需同步实付，请核实各主体的实际付款归属，本次不分配已付金额。');
+    continue;
+   }
    // A merged negotiated total can represent several ledger lines; suppress only the mismatch, never allocate paid amounts.
    if(!matches.length&&ids.length===1&&info.key&&info.cents>0n&&usable(record.values['付款主体'])){
     const grouped=ledger.filter(r=>oas(r).includes(ids[0]));
@@ -881,9 +890,11 @@ function build(inputs,decisions={}){
   const message='重复提交：共 '+group.length+' 次，重复 '+(group.length-1)+' 次；单笔金额 '+centsText(amount)+'；重复计入金额 '+centsText(amount*BigInt(group.length-1))+'。';
   reviewRows.push([cell(applicationTypes.get(first)),cell(value(first,'供应商名称')),cell(subjects),amountCell(amount),cell('已提交'),cell(message),cell(source.file),cell(source.sheet),cell(source.row),cell(owners.length===1?owners[0]:'')]);
  }
- for(const {target,message,evidence,owner} of [...oaReviews,...paidReviews,...ledgerAmountAudit(negotiated,ledgerTables,negotiatedObjects)]){
+ for(const {target,message,evidence,owner,totalCents,sourceRows,subjects,entryIds} of [...oaReviews,...paidReviews,...amountAudit.reviews]){
   const source=target.record.source;
-  reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(value(target.record,'供应商名称')),cell(target.values['付款主体']?.t==='e'?target.values['付款主体'].w||'Excel错误':target.values['付款主体']?.v),classification(target.record).cents===undefined?cell(target.values['申请付款金额']?.t==='e'?target.values['申请付款金额'].w||'Excel错误':target.values['申请付款金额']?.v):amountCell(classification(target.record).cents),cell(target.values['是否提交付款申请单']?.v),cell(message+(evidence?'\nOA 来源：'+evidence:'')),cell(source.file),cell(source.sheet),cell(source.row),cell(owner??reviewOwner(target))]);
+  const reviewAmount=totalCents===null?empty():totalCents!==undefined?amountCell(totalCents):classification(target.record).cents===undefined?cell(target.values['申请付款金额']?.t==='e'?target.values['申请付款金额'].w||'Excel错误':target.values['申请付款金额']?.v):amountCell(classification(target.record).cents);
+  const submission=entryIds?[...new Set(negotiatedObjects.filter(t=>entryIds.includes(t.record.id)).map(t=>str(t.values['是否提交付款申请单']?.v)).filter(Boolean))].join('、'):target.values['是否提交付款申请单']?.v;
+  reviewRows.push([cell(target.normal?'正常付款':'谈判付款'),cell(value(target.record,'供应商名称')),cell(subjects??(target.values['付款主体']?.t==='e'?target.values['付款主体'].w||'Excel错误':target.values['付款主体']?.v)),reviewAmount,cell(submission),cell(message+(evidence?'\nOA 来源：'+evidence:'')),cell(source.file),cell(source.sheet),cell(sourceRows??source.row),cell(owner??reviewOwner(target))]);
  }
  function normalEstimate(target){
   const record=target.record,source=record.values,t=ledgerTables.find(t=>t.sheetName===record.source.sheet);

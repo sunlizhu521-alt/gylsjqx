@@ -148,7 +148,7 @@ test('拆笔合计差一分或多一笔时继续核对，不能任选金额凑�
   assert.equal(paidReviews(r).length,1);assert.match(paidReviews(r)[0][5].v,/未找到 OA号、供应商和申请付款金额三项完全一致/);
  }
 });
-test('拆笔不跨OA、供应商或主体合计，任一身份字段缺失或异常仍需核对',()=>{
+test('分期本金总额相等允许OA变化或缺号，实付身份缺失或主体冲突仍需核对',()=>{
  for(const [role,field,value] of [
   ['ledger','对公付款0A流程号','MDST-DGFK20260709010'],['ledger','对公付款0A流程号','MDST-DGFK20260709009、MDST-DGFK20260709010'],['ledger','对公付款0A流程号',''],
   ['ledger','供应商名称','其他供应商'],['ledger','供应商名称',''],['ledger','供应商名称',{t:'e',v:23,w:'#REF!'}],
@@ -156,7 +156,9 @@ test('拆笔不跨OA、供应商或主体合计，任一身份字段缺失或异
   ['negotiated','供应商','其他供应商'],['negotiated','供应商',''],['negotiated','付款主体','国源'],['negotiated','付款主体','']
  ]){
   const i=splitLedgerFixture();set(i,role,field,role==='ledger'?4:2,value);
-  const r=buildWithRetainedSplitFinancials(i);assert(paidReviews(r).length,JSON.stringify([role,field,value]));
+  const r=buildWithRetainedSplitFinancials(i);
+  if(role==='ledger'&&field==='对公付款0A流程号')assert.equal(paidReviews(r).length,0,'同供应商分期本金总额相等，不因分期OA变化或缺号继续报金额未匹配');
+  else assert(paidReviews(r).length,JSON.stringify([role,field,value]));
  }
  const i=splitLedgerFixture(),ids='MDST-DGFK20260709009、MDST-DGFK20260709010';
  for(const row of [2,4])set(i,'ledger','对公付款0A流程号',row,ids);set(i,'negotiated','对公付款0A流程号',2,ids);i.oa.book=book('Sheet0',OH,[]);
