@@ -2,7 +2,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),X=require('
 // Progress reviews are additive and have their own full-result coverage in funds-progress.test.cjs.
 const legacyReviews=result=>result.reviewRows.filter(row=>!row[5].v.startsWith('付款进度核对：'));
 // Application/OA assertions exclude independent highlighting and paid-sync reviews, covered separately.
-const applicationAndOAReviews=result=>legacyReviews(result).filter(row=>!/^申请标红核对：|^已付金额同步核对：/.test(row[5].v));
+const applicationAndOAReviews=result=>legacyReviews(result).filter(row=>!/^申请标红核对：|^已付金额同步核对：|^台账金额差异核对：/.test(row[5].v));
 const LH=['月份','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付款金额','是否结清','剩余付款金额','是否谈判付款','是否提交付款申请单'];
 const NH=['供应商','付款主体','对公付款0A流程号','合同总金额','已付金额','摘要','申请付款金额','单据号【财务应付单】','创建人','是否结清','剩余付款金额','原备注','付款计划'];
 const AH=['申请日期','供应商全称','付款主体','合同号','合同金额','已付金额','付款事由','备注','本次申请付款金额'];
