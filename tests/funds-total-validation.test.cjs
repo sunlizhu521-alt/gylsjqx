@@ -20,10 +20,63 @@ const values=(result,r=0)=>Object.fromEntries(result.headers.map((header,c)=>[he
 
 test('逐原行保留重复记录，五组金额按分相等；计数不同不导致金额不一致且不改来源',()=>{
  const source=table([row(),['供应商甲','OA-001',0.3,'11月2日－0.1\n11月16日－0.2',0.3,0.3,0,0.3,0]]),before=JSON.stringify(source),result=build(source),data=values(result,1);
- assert.deepEqual(result.stats,{total:2,consistent:2,inconsistent:0,unverified:0});
+ assert.deepEqual(result.stats,{total:2,excludedNotPay:0,consistent:2,inconsistent:0,unverified:0});
  assert.equal(data['谈判明细金额合计'],0.3);assert.equal(data['谈判明细有效条数'],2);assert.equal(data['日期计划非零金额格数'],1);assert.equal(data['月度有数值月份数'],2);
  assert.equal(data['校验结果'],'一致');assert.equal(result.rows[1][5].z,'#,##0.00');assert.equal(JSON.stringify(source),before);
  assert.equal(result.headers.length,19);assert.ok(result.rows.every(r=>r.length===result.headers.length));assert.equal(result.canExport,undefined);
+});
+
+test('仅排除源OA列有效的不支付标记，保留原行号、零金额记录及来源数据',()=>{
+ for(const marker of [{t:'s',v:'不支付'},{t:'s',v:'\u3000不 支\n付\u00a0'},{t:'s',f:'"不支付"',v:'不支付'}]){
+  const source=table([row(),row(),row(0)]);source.sheet.B3=marker;
+  const before=JSON.stringify(source),result=build(source);
+  assert.deepEqual(result.stats,{total:2,excludedNotPay:1,consistent:2,inconsistent:0,unverified:0});
+  assert.deepEqual(result.rows.map(r=>r[2].v),[2,4]);assert.equal(values(result,1)['OA-申请付款金额'],0);
+  assert.equal(JSON.stringify(source),before);
+ }
+});
+
+test('较长说明、其他列的不支付、空OA及无有效缓存的OA公式均不作为排除标记',()=>{
+ const markers=[
+  {t:'s',v:'是否不支付'},{t:'s',v:'不支付待确认'},{t:'s',v:'不支付（暂缓）'},
+  {t:'s',v:'未提交OA'},{t:'s',v:''},{t:'s',v:'\u3000 '},
+  {t:'e',v:'不支付',w:'#VALUE!'},{t:'s',f:'"不支付"',w:'不支付'},
+  {t:'z',f:'"不支付"',v:'不支付'},{t:'str',f:'"不支付"',v:'',w:'不支付'}
+ ];
+ for(const marker of markers){
+  const source=table([row()]);source.sheet.B2=marker;source.sheet.A2.v='不支付';
+  const result=build(source);
+  assert.deepEqual(result.stats,{total:1,excludedNotPay:0,consistent:1,inconsistent:0,unverified:0},JSON.stringify(marker));
+ }
+ const source=table([row()]);source.sheet.D2.v='不支付';delete source.sheet.B2;
+ const result=build(source);assert.equal(result.stats.total,1);assert.equal(result.stats.excludedNotPay,0);assert.equal(result.stats.unverified,1);
+});
+
+test('不支付按map所指的原单元格判断，不使用固定列或过期记录值；缺少OA列不排除',()=>{
+ const headers=[HEADERS[1],HEADERS[0],...HEADERS.slice(2)],moved=row(),source=table([[moved[1],moved[0],...moved.slice(2)]],headers);
+ source.sheet.A2={t:'s',v:'不支付'};assert.equal(build(source).stats.excludedNotPay,1);
+ source.sheet.A2={t:'s',v:'OA-001'};source.records[0].values['对公付款0A流程号']={t:'s',v:'不支付'};
+ assert.equal(build(source).stats.excludedNotPay,0);
+ delete source.map['对公付款0A流程号'];source.sheet.A2={t:'s',v:'不支付'};
+ assert.equal(build(source).stats.total,1);assert.equal(build(source).stats.excludedNotPay,0);
+});
+
+test('有效不支付即使金额异常也不核对；全部排除时保留19列表头且不修改源表',()=>{
+ const source=table([row(),row()]);source.sheet.B2={t:'s',v:'不支付'};source.sheet.B3={t:'s',v:'不支付'};
+ source.sheet.C2={t:'e',v:7};source.sheet.D2={t:'s',v:'异常明细'};source.sheet.E3={t:'n',f:'1+1'};source.sheet.F3={t:'s',v:'无效金额'};
+ const before=JSON.stringify(source),result=build(source);
+ assert.deepEqual(result.stats,{total:0,excludedNotPay:2,consistent:0,inconsistent:0,unverified:0});
+ assert.deepEqual(result.rows,[]);assert.deepEqual(result.headers,Validation.HEADERS);assert.equal(result.headers.length,19);assert.equal(JSON.stringify(source),before);
+});
+
+test('支付与不支付跨记录合并的金额仍归属不清，排除记录不能掩盖合并冲突',()=>{
+ for(const c of [4,5]){
+  const source=table([row(),row()]);source.sheet.B2={t:'s',v:'不支付'};source.sheet['!merges']=[{s:{r:1,c},e:{r:2,c}}];
+  const before=JSON.stringify(source),result=build(source),data=values(result);
+  assert.deepEqual(result.stats,{total:1,excludedNotPay:1,consistent:0,inconsistent:0,unverified:1});
+  assert.equal(data['来源行号'],3);assert.equal(data['校验结果'],'待核对');assert.match(data['需要处理'],new RegExp(c===4?'E2:E3':'F2:F3'));
+  assert.equal(JSON.stringify(source),before);
+ }
 });
 
 test('五组包含独立分批总金额，差额按各组合计减OA列，说明准确指向原单元格',()=>{
@@ -104,5 +157,5 @@ test('真实XML无缓存公式读取为t:z时不充当0；显式缓存0仍有效
 test('浏览器UMD和CommonJS提供同样的独立接口；空数据不生成人造总计',()=>{
  const context=vm.createContext({});vm.runInContext(fs.readFileSync(require.resolve('../funds-total-validation.js'),'utf8'),context);
  assert.equal(typeof context.FundsTotalValidation.build,'function');assert.equal(typeof context.FundsTotalValidation.selectColumns,'function');assert.deepEqual(Array.from(context.FundsTotalValidation.HEADERS),Validation.HEADERS);
- const result=build(table([]));assert.deepEqual(result.rows,[]);assert.deepEqual(result.stats,{total:0,consistent:0,inconsistent:0,unverified:0});
+ const result=build(table([]));assert.deepEqual(result.rows,[]);assert.deepEqual(result.stats,{total:0,excludedNotPay:0,consistent:0,inconsistent:0,unverified:0});
 });

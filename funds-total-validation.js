@@ -31,14 +31,19 @@ function selectColumns(table){
  return {dateColumns,monthColumns};
 }
 function build(table,money){
- const {dateColumns,monthColumns}=selectColumns(table),rows=[],stats={total:table.records.length,consistent:0,inconsistent:0,unverified:0};
+ const oaColumn=table.map['对公付款0A流程号'];
+ const records=table.records.filter(record=>{
+  const source=oaColumn===undefined?null:table.sheet[column(oaColumn)+(record.r+1)];
+  return invalid(source)||norm(source?.v)!=='不支付';
+ });
+ const {dateColumns,monthColumns}=selectColumns(table),rows=[],stats={total:records.length,excludedNotPay:table.records.length-records.length,consistent:0,inconsistent:0,unverified:0};
  const address=(c,r)=>column(c)+(r+1),head=c=>table.sheet[address(c,table.headerRow)],dates=new Map(),months=new Map();
  const remember=(map,value)=>{if(!map.has(value.month))map.set(value.month,new Set());map.get(value.month).add(value.year);};
  for(const c of dateColumns)remember(dates,headerDate(head(c),table.date1904));
  for(const c of monthColumns)remember(months,monthHeader(head(c)));
  const fields={detail:'谈判明细',oa:'申请付款金额',batch:'分批总金额'};
  const merged=(c,r)=>(table.sheet['!merges']||[]).find(m=>c>=m.s.c&&c<=m.e.c&&r>=m.s.r&&r<=m.e.r&&(m.s.c!==m.e.c||table.records.filter(record=>record.r>=m.s.r&&record.r<=m.e.r).length>1));
- for(const record of table.records){
+ for(const record of records){
   const issues=[],r=record.r,where=c=>address(c,r),group=()=>({sum:null,count:0,complete:true});
   const read=(c,label)=>{
    const source=table.sheet[where(c)],merge=merged(c,r);

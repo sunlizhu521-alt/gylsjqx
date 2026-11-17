@@ -130,7 +130,7 @@
       preview('progressPreview',result.progressHeaders,result.progressRows);
       preview('totalValidationPreview',result.totalValidation.headers,result.totalValidation.rows);
       const totals=result.totalValidation.stats;
-      $('totalValidationStats').textContent=`共 ${totals.total} 条；一致 ${totals.consistent} 条；不一致 ${totals.inconsistent} 条；待核对 ${totals.unverified} 条。差异不自动修改原金额，也不单独阻止下载。`;
+      $('totalValidationStats').textContent=`核对 ${totals.total} 条；已排除“不支付” ${totals.excludedNotPay} 条；一致 ${totals.consistent} 条；不一致 ${totals.inconsistent} 条；待核对 ${totals.unverified} 条。差异不自动修改原金额，也不单独阻止下载。`;
       $('totalValidationPreviewSection').hidden = false;
       $('progressPreviewSection').hidden = false;
       $('negotiatedPreviewSection').hidden = false; $('normalPreviewSection').hidden = false; $('reviewPreviewSection').hidden = false;

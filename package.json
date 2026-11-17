@@ -13,6 +13,7 @@
     "test:funds-browser": "node tests/funds-browser.cjs",
     "test:funds-blank-format-browser": "node tests/funds-blank-format-browser.cjs",
     "test:funds-normal-browser": "node tests/funds-normal-browser.cjs",
+    "test:funds-total-validation-browser": "node tests/funds-total-validation-browser.cjs",
     "test:funds-date-headers-browser": "node tests/funds-date-headers-browser.cjs",
     "test:browser": "node tests/payment-browser.cjs",
     "test:payment-layout-browser": "node tests/payment-layout-browser.cjs",
