@@ -54,8 +54,8 @@ function addResultStyles(xml){
  m=appendStyle(xml,'borders',['thin','hair'].map(s=>'<border>'+['left','right','top','bottom'].map(side=>`<${side} style="${s}"><color rgb="FF404040"/></${side}>`).join('')+'<diagonal/></border>').join(''));xml=m.xml;const border=m.offset;
  const numId=Math.max(163,...tags(first(xml,'numFmts'),'numFmt').map(n=>+attr(n,'numFmtId')))+1;
  xml=appendStyle(xml,'numFmts',`<numFmt numFmtId="${numId}" formatCode="0.###############"/>`).xml;
- const xf=(header,wrap,numeric)=>`<xf numFmtId="${numeric?numId:49}" fontId="${font+(header?1:0)}" fillId="${fill+(header?1:0)}" borderId="${border+(header?0:1)}" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="${wrap?'left':'center'}" vertical="center" wrapText="${wrap?1:0}"/></xf>`;
- m=appendStyle(xml,'cellXfs',xf(true,false,false)+xf(false,false,false)+xf(false,true,false)+xf(false,false,true));return {xml:m.xml,header:m.offset,text:m.offset+1,wrap:m.offset+2,number:m.offset+3};
+ const xf=(header,wrap,numeric,integer=false)=>`<xf numFmtId="${numeric?(integer?1:numId):49}" fontId="${font+(header?1:0)}" fillId="${fill+(header?1:0)}" borderId="${border+(header?0:1)}" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="${wrap?'left':'center'}" vertical="center" wrapText="${wrap?1:0}"/></xf>`;
+ m=appendStyle(xml,'cellXfs',xf(true,false,false)+xf(false,false,false)+xf(false,true,false)+xf(false,false,true)+xf(false,false,true,true));return {xml:m.xml,header:m.offset,text:m.offset+1,wrap:m.offset+2,number:m.offset+3,integer:m.offset+4};
 }
 const width=v=>Math.max(...String(v??'').split('\n').map(line=>[...line].reduce((n,c)=>n+(c.codePointAt(0)>255?2:1),0)));
 function resultSheet(headers,rows,styles,detail){
@@ -66,7 +66,7 @@ function resultSheet(headers,rows,styles,detail){
   const lines=r?Math.max(1,...row.map((v,c)=>notes.has(c)?String(v??'').split('\n').reduce((n,l)=>n+Math.max(1,Math.ceil(width(l)/(widths[c]-2))),0):1)):1;
   // Excel caps a row at 409 points; full text also remains in the cell and edit bar.
   return `<row r="${r+1}" ht="${Math.min(409,Math.max(28,lines*16+8))}" customHeight="1">`+headers.map((_,c)=>{
-   const v=row[c],s=r===0?styles.header:typeof v==='number'?styles.number:notes.has(c)?styles.wrap:styles.text,a=X.utils.encode_cell({r,c});
+   const v=row[c],s=r===0?styles.header:typeof v==='number'?(Number.isInteger(v)?styles.integer:styles.number):notes.has(c)?styles.wrap:styles.text,a=X.utils.encode_cell({r,c});
    if(v===null||v===undefined)return `<c r="${a}" s="${s}"/>`;
    if(typeof v==='number'){if(!Number.isFinite(v))throw Error('核对数量超出有效范围');return `<c r="${a}" s="${s}"><v>${v}</v></c>`;}
    if(String(v).length>32767)throw Error('核对说明超过 Excel 单元格上限，请缩小文件范围后重试');

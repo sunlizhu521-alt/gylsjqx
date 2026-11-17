@@ -11,6 +11,7 @@ test('两张结果表先于全部原表；原母包非元数据部分逐字保�
  for(const n of Object.keys(source.files).filter(n=>!source.files[n].dir&&!changed.has(n)))assert.equal(await z.file(n).async('base64'),await source.file(n).async('base64'),n);
  for(const name of ['采购','徐英']){assert.equal(read.Sheets[name].B4.f,'B2+B3+1.5');assert.equal(read.Sheets[name].B4.v,2);assert.match(read.Sheets[name].A2.c[0].t,/原批注/);assert.equal(read.Sheets[name]['!autofilter'].ref,'A1:B4');assert.deepEqual(read.Sheets[name]['!merges'],a.Sheets.采购['!merges']);}
  assert.deepEqual(X.utils.sheet_to_json(read.Sheets.汇总,{header:1})[0],C.SUMMARY);assert.deepEqual(X.utils.sheet_to_json(read.Sheets.差异明细,{header:1})[0],C.DETAIL);assert.equal(read.Sheets.汇总.B2.t,'n');assert.equal(read.Sheets.差异明细.D2.t,'s');assert.equal(read.Sheets.差异明细.D2.v,'001');assert.equal(read.Sheets.汇总.A1.s.fgColor.rgb,'315B9D');
+ assert.equal(read.Sheets.汇总.E2.w,'0');assert.equal(read.Sheets.汇总.F2.w,'1');assert.equal(read.Sheets.汇总.B2.w,'0.3');
  assert.equal(read.Sheets.差异明细['!autofilter'].ref,'A1:Q2');assert.equal(read.Sheets.汇总['!autofilter'].ref,'A1:J2');
  const styles=await z.file('xl/styles.xml').async('string'),original=await source.file('xl/styles.xml').async('string');for(const name of ['fonts','fills','borders','cellXfs'])assert(section(styles,name).startsWith(section(original,name)),name);
  const types=await z.file('[Content_Types].xml').async('string'),parts=[...types.matchAll(/PartName="([^"]+)"/g)].map(m=>m[1]);assert.equal(new Set(parts).size,parts.length,'no duplicate content types');
