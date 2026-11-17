@@ -63,7 +63,9 @@ function evaluator(sheet,onIssue,onFormula,options={}){
   if(cache.has(address))return cache.get(address);
   if(visiting.has(address))throw Error('公式存在循环引用（'+address+'）');
   if(visiting.size>=150)throw Error('公式引用层数过多，无法可靠核验');
-  const source=sheet[address];if(!source?.f){try{return scalar(source);}catch(error){error.cell=address;if(options.name)error.sheet=options.name;throw error;}}
+  const source=sheet[address];
+  if(options.rejectArrays&&(source?.D||source?.F&&source.F!==address&&source.F!==address+':'+address))throw Error('数组公式暂不能可靠重算，请在源表核验');
+  if(!source?.f){try{return scalar(source);}catch(error){error.cell=address;if(options.name)error.sheet=options.name;throw error;}}
   onFormula(address);visiting.add(address);
   let value;
   try{
@@ -238,5 +240,21 @@ function validate(book,result,core){
  FIELDS.forEach((field,index)=>{const sourceTotal=grandInvalid[index]?null:total(grandSource[index],'合计',field),summaryTotal=grandInvalid[index]?null:total(grandSummary[index],'合计',field);checks.push({sheet:'合计',field,sourceTotal,summaryTotal,difference:sourceTotal===null||summaryTotal===null?null:equal(sourceTotal,summaryTotal)?0:summaryTotal-sourceTotal,status:sourceTotal===null||summaryTotal===null?'待核验':issues.some(item=>!item.field||item.field===field)||!equal(sourceTotal,summaryTotal)?'不一致':'通过'});});
  return {passed:issues.length===0&&checks.every(check=>check.status==='通过'),checks,issues,formulaCount:formulas.size};
 }
-return {validate,materialize,FIELDS};
+// Calculate only requested cells and dependencies. Never rewrite the retained source workbook.
+function createReader(book){
+ const readers=new Map(),names=Object.keys(book.Sheets||{});
+ const resolve=name=>{
+  const actual=names.find(item=>item.toLowerCase()===String(name).toLowerCase());
+  if(!actual)throw Error('引用的工作表不存在：'+name);
+  if(!readers.has(actual)){
+   const source=book.Sheets[actual],view={...source,'!fulfillmentFilterActive':false,'!filterMode':false};
+   delete view['!autofilter'];
+   view['!rows']=(source['!rows']||[]).map(row=>row?{...row,hidden:false}:row);
+   readers.set(actual,evaluator(view,()=>{},()=>{},{valuesOnly:true,rejectArrays:true,name:actual,resolve}));
+  }
+  return readers.get(actual);
+ };
+ return (sheet,address)=>resolve(sheet)(address);
+}
+return {validate,materialize,FIELDS,createReader};
 });

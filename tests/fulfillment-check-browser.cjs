@@ -1,0 +1,32 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const X=require('../vendor/xlsx.full.min.js'),Z=require('../vendor/jszip.min.js');
+const root=path.resolve(__dirname,'..'),base=new URL(process.env.QA_URL||'https://fulfillment-check.test/'),mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+function fixture(kind){const b=X.utils.book_new();if(kind==='purchase'){X.utils.book_append_sheet(b,X.utils.aoa_to_sheet([['供应商','单据编号','物料编码','剩余入库数量','关闭状态'],['合成甲公司','CGDD1','001',3,'未关闭'],['合成甲公司','CGDD2','001',7,'未关闭'],['合成乙公司','CGDD3','001',5,'已关闭']]),'采购');}else{for(const name of ['徐英','操思敏','邢芳芳','李奇']){const s=X.utils.aoa_to_sheet([['供应商简称','采购订单号','物料编码','未交付数量'],...(name==='徐英'?[['合成甲','CGDD1+CGDD2','001',10],['合成乙','CGDD3','001',5]]:[])]);X.utils.book_append_sheet(b,s,name);}const other=X.utils.aoa_to_sheet([['其他原表'],[12]]);other.A2.c=[{a:'合成',t:'原批注保留'}];X.utils.book_append_sheet(b,other,'保留页');}return Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));}
+const purchase=fixture('purchase'),fulfillment=fixture('fulfillment');
+async function upload(scope,kind,data=kind==='purchase'?purchase:fulfillment){await scope.locator('#'+kind+'File:not([disabled])').setInputFiles({name:kind+'.xlsx',mimeType:mime,buffer:data});}
+async function ready(scope){await scope.locator('#download:not([disabled])').waitFor();}
+async function download(page,scope,version){const wait=page.waitForEvent('download');await scope.locator('#download').click();const file=await wait,chunks=[];for await(const chunk of await file.createReadStream())chunks.push(chunk);assert.match(file.suggestedFilename(),new RegExp('^订单履约表核对-\\d{4}-\\d{2}-\\d{2}-V'+version+'\\.xlsx$'));return Buffer.concat(chunks);}
+(async()=>{
+const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
+try{
+const context=await browser.newContext({acceptDownloads:true,viewport:{width:1440,height:950}}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+await context.route('**/*',route=>{const url=new URL(route.request().url());if(url.origin!==base.origin)return route.abort();if(process.env.QA_URL)return route.continue();const relative=decodeURIComponent(url.pathname).slice(1)||'index.html';if(relative.split('/').includes('..'))return route.abort();const file=path.join(root,relative);if(!fs.existsSync(file))return route.fulfill({status:404,body:''});return route.fulfill({contentType:file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.css')?'text/css':'application/javascript',body:fs.readFileSync(file)});});
+await page.goto(new URL('index.html',base).href,{waitUntil:'networkidle'});await page.locator('[data-tool="fulfillment-check"]').first().click();const frame=page.frameLocator('iframe[data-tool="fulfillment-check"]');
+await upload(frame,'purchase');assert(await frame.locator('#download').isDisabled());await upload(frame,'fulfillment');await ready(frame);assert.match(await frame.locator('#counts').innerText(),/采购 3 条.*未关闭 2.*已关闭 1.*履约 2 条.*一致 1 项/);
+const first=await download(page,frame,1),book=X.read(first,{type:'buffer'});assert.deepEqual(book.SheetNames,['汇总','差异明细','采购','徐英','操思敏','邢芳芳','李奇','保留页']);assert.equal(book.Sheets.差异明细.A2.v,'已关闭异常');
+const a=await Z.loadAsync(fulfillment),b=await Z.loadAsync(first);for(const n of Object.keys(a.files).filter(n=>/^xl\/(worksheets|comments|drawings)\//.test(n)&&!a.files[n].dir))assert.equal(await a.file(n).async('base64'),await b.file(n).async('base64'),n);
+await frame.locator('#view').selectOption('detail');assert.match(await frame.locator('#preview').innerText(),/已关闭异常/);
+await page.locator('[data-tool="fulfillment"]').first().click();await page.locator('[data-tool="fulfillment-check"]').first().click();assert.match(await frame.locator('#purchaseReference').innerText(),/purchase.xlsx/);await download(page,frame,2);
+await upload(frame,'purchase',Buffer.from('broken'));await frame.locator('#status').filter({hasText:'读取失败'}).waitFor();assert(await frame.locator('#result').isHidden());assert(await frame.locator('#download').isDisabled());await upload(frame,'purchase');await ready(frame);
+await page.setViewportSize({width:390,height:844});const dims=await frame.locator('body').evaluate(b=>[b.clientWidth,b.scrollWidth]);assert(dims[1]<=dims[0]+2,'page should not overflow');
+await page.setViewportSize({width:1440,height:950});if(process.env.QA_SCREENSHOT)await page.screenshot({path:process.env.QA_SCREENSHOT,fullPage:true});
+await frame.locator('#purchaseClear').click();assert(await frame.locator('#download').isDisabled());await upload(frame,'purchase');await ready(frame);await download(page,frame,3);
+const cp=X.read(purchase,{type:'buffer'}),cf=X.read(fulfillment,{type:'buffer'});cp.Sheets.采购.A3.v='合成乙公司';cf.Sheets.徐英.B2.v='CGDD1';cf.Sheets.徐英.D2.v=3;cf.Sheets.徐英.A3.v='合成甲';cf.Sheets.徐英.B3.v='CGDD2';cf.Sheets.徐英.D3.v=7;
+await upload(frame,'purchase',Buffer.from(X.write(cp,{type:'buffer',bookType:'xlsx'})));await upload(frame,'fulfillment',Buffer.from(X.write(cf,{type:'buffer',bookType:'xlsx'})));await ready(frame);await frame.locator('#choiceTitle').click();assert.equal(await frame.locator('#choices select').count(),1);await frame.locator('#choices select').selectOption('合成甲公司');assert.match(await frame.locator('#counts').innerText(),/一致 1 项/);assert.equal(await frame.locator('#choices select').count(),0);
+await upload(frame,'fulfillment',Buffer.from(X.write(cf,{type:'buffer',bookType:'xlsx'})));await ready(frame);assert.equal(await frame.locator('#choices select').count(),1,'replacement clears manual confirmation');
+await frame.locator('body').evaluate(()=>{window.__savedExport=window.FulfillmentCheckExport;window.FulfillmentCheckExport=async()=>{throw Error('模拟生成失败');};});await frame.locator('#download').click();await frame.locator('#status').filter({hasText:'模拟生成失败'}).waitFor();await frame.locator('body').evaluate(()=>window.FulfillmentCheckExport=window.__savedExport);await download(page,frame,4);
+assert.deepEqual(errors,[]);console.log('PASS: embedded uploads, preview, eight-sheet preservation, version increments, replace-failure, switching and mobile layout');
+await browser.close();
+}catch(e){await browser.close();throw e;}
+})().catch(e=>{console.error(e);process.exitCode=1;});

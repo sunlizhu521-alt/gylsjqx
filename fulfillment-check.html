@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>订单履约表核对｜供应链数据清洗</title><link rel="stylesheet" href="styles-merge14.css?v=fulfillment-check-20261118">
+<style>
+main{margin:24px auto;max-width:1700px;padding:20px;min-width:0}section{margin:18px 0;padding:22px;border:1px solid var(--line);border-radius:14px;background:var(--surface);min-width:0}h2{font-size:1.15rem;margin:0 0 14px}.uploads{display:flex;gap:18px;overflow-x:auto}.uploads>div{min-width:290px;flex:1;border:1px solid var(--line);padding:16px;border-radius:10px}label{display:block;font-weight:600;margin-bottom:12px}input,button,select{font:inherit;max-width:100%}input[type=file]{width:100%}input::file-selector-button,button,select{padding:10px 14px;border:1px solid var(--line-strong);border-radius:7px;cursor:pointer}button{background:#315b9d;color:white}button:disabled,input:disabled{opacity:.5;cursor:not-allowed}.secondary{background:var(--surface-solid);color:var(--text)}.actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:18px}.muted{color:var(--muted)}.reference,#status{white-space:pre-wrap;overflow-wrap:anywhere}.reference{font-size:.9rem}details{margin-top:16px}summary{cursor:pointer;color:var(--accent);font-weight:600}p,li{line-height:1.7}#choices>div{margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:8px}#choices p{white-space:pre-wrap;overflow-wrap:anywhere}.preview{overflow:auto;max-height:680px;margin-top:16px}table{border-collapse:collapse;min-width:100%;font-size:14px}th,td{border:1px solid #777;padding:8px 12px;white-space:nowrap;text-align:center}th{position:sticky;top:0;background:#315b9d;color:#fff}td{background:#fff;color:#172033}td.note{white-space:pre-wrap;text-align:left;min-width:240px;max-width:600px}button,input,select,summary{outline-offset:3px}[hidden]{display:none!important}@media(max-width:650px){main{padding:12px}section{padding:14px}}
+</style></head><body><main>
+<a href="index.html">← 返回工具箱</a><h1>订单履约表核对</h1><p>核对未关闭采购订单与四位跟单员的未交付数量，下载结果并保留两份来源的原工作表。</p>
+<section aria-label="上传来源文件"><div class="uploads">
+<div><label for="purchaseFile">采购订单</label><input id="purchaseFile" type="file" accept=".xlsx" disabled><p id="purchaseReference" class="reference muted">尚未引用文件</p><button id="purchaseClear" class="secondary" hidden>移除采购订单</button></div>
+<div><label for="fulfillmentFile">订单履约表</label><input id="fulfillmentFile" type="file" accept=".xlsx" disabled><p id="fulfillmentReference" class="reference muted">尚未引用文件</p><button id="fulfillmentClear" class="secondary" hidden>移除订单履约表</button></div></div>
+<div class="actions"><button id="download" disabled>下载核对结果</button><p id="status" role="status" aria-live="polite">正在加载工具…</p></div>
+<details><summary>查看核对规则</summary><ul>
+<li>只比较徐英、操思敏、邢芳芳、李奇的工作表，兼容人员名后的日期。采购订单仅“未关闭”计入数量。</li>
+<li>按供应商、物料编码及订单号匹配。同一履约单元格多个订单号拆号查询、合计核对，不分摊原数量；重叠订单或不完整对应列入待核对。</li>
+<li>供应商简称优先使用相同订单号和物料的唯一对应关系，否则使用唯一全称包含关系；冲突由下方确认。</li>
+<li>数量为空、异常或订单号缺失时保留空白并列出来源。差额＝履约未交付－采购剩余入库；仅有一侧时差额留空。关闭订单仍有未交付时提示。</li>
+<li>数量公式只在计算副本中重算，不受筛选显示影响。原工作表的内容、公式、格式及附件保留，不修改源文件。</li>
+<li>下载为“汇总、差异明细、采购原表、履约全部原表”。待核对不阻止下载；无法保真合并的特殊原表结构会明确提示。刷新后请重新上传。</li>
+</ul></details>
+<details id="choicePanel" hidden><summary id="choiceTitle">供应商对应待确认</summary><div id="choices"></div></details>
+</section>
+<section id="result" hidden><h2>核对结果</h2><p id="counts"></p><div class="actions"><label for="view">查看</label><select id="view"><option value="summary">汇总</option><option value="detail">差异明细</option></select><button id="previous" class="secondary">上一页</button><span id="pageInfo"></span><button id="next" class="secondary">下一页</button></div><div class="preview" id="preview"></div></section>
+</main>
+<script src="vendor/xlsx.full.min.js"></script><script src="vendor/jszip.min.js"></script><script src="fulfillment-core.js?v=fulfillment-check-20261118"></script><script src="fulfillment-validation.js?v=fulfillment-check-20261118"></script><script src="fulfillment-check-core.js?v=fulfillment-check-20261118"></script><script src="fulfillment-check-export.js?v=fulfillment-check-20261118"></script><script src="fulfillment-check-tool.js?v=fulfillment-check-20261118"></script>
+</body></html>
