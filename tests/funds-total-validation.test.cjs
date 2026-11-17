@@ -107,14 +107,86 @@ test('明细按有效笔数计数，保留正负金额及可解析小计，异�
  assert.equal(partial['谈判明细金额合计'],80);assert.equal(partial['谈判明细有效条数'],2);assert.equal(partial['校验结果'],'待核对');assert.equal(partial['谈判明细减OA差额'],'');assert.match(partial['需要处理'],/D3第2笔/);
 });
 
+test('总额相等仍识别月份错位，按明细减月度提示金额及来源，19列结构和源表不变',()=>{
+ const source=table([row()]);source.sheet.H2.v=80;source.sheet.I2={t:'n',v:20};
+ const before=JSON.stringify(source),result=build(source),data=values(result);
+ assert.deepEqual(result.stats,{total:1,excludedNotPay:0,consistent:0,inconsistent:1,unverified:0});
+ assert.equal(data['谈判明细金额合计'],100);assert.equal(data['月度支付金额合计'],100);
+ for(const field of ['谈判明细减OA差额','分批总金额减OA差额','日期计划减OA差额','月度支付减OA差额'])assert.equal(data[field],0);
+ assert.match(data['需要处理'],/2026年11月[^\n]*谈判明细D2[^\n]*100\.00[^\n]*月度支付H2[^\n]*80\.00[^\n]*差额20\.00/);
+ assert.match(data['需要处理'],/2026年12月[^\n]*0\.00[^\n]*I2[^\n]*20\.00[^\n]*差额-20\.00/);
+ assert.equal(result.headers.length,19);assert.equal(result.rows[0].length,19);assert.equal(JSON.stringify(source),before);
+ source.sheet.B2={t:'s',v:'不支付'};assert.equal(build(source).stats.excludedNotPay,1);assert.deepEqual(build(source).rows,[]);
+});
+
+test('同年月多笔按分汇总正负和零金额，接受带年及不带年的仅月份明细',()=>{
+ const source=table([row(0.3)]);source.sheet.D2.v='1、2026年11月－0.1\n2、11月16日－0.3\n3、11月－-0.1\n4、12月－0';source.sheet.I2={t:'n',f:'0',v:0};
+ const data=values(build(source));
+ assert.equal(data['谈判明细金额合计'],0.3);assert.equal(data['谈判明细有效条数'],4);assert.equal(data['月度有数值月份数'],2);assert.equal(data['校验结果'],'一致');
+ assert.doesNotMatch(data['需要处理'],/差额|无法完整解析/);
+});
+
+test('跨年同月分别核对，缺年份时拒绝跨年歧义及日期和月度表头年份冲突',()=>{
+ const source=table([row()]);source.sheet.H1.v='2025年11月支付';source.sheet.I1.v='2026年11月支付';
+ source.sheet.D2.v='2025年11月2日－40\n2026年11月－60';source.sheet.H2.v=60;source.sheet.I2={t:'n',v:40};
+ let data=values(build(source));assert.equal(data['校验结果'],'不一致');
+ assert.match(data['需要处理'],/2025年11月[^\n]*差额-20\.00/);assert.match(data['需要处理'],/2026年11月[^\n]*差额20\.00/);
+ source.sheet.H2.v=40;source.sheet.I2.v=60;assert.equal(values(build(source))['校验结果'],'一致');
+ source.sheet.D2.v='11月－100';data=values(build(source));assert.equal(data['校验结果'],'待核对');assert.equal(data['谈判明细有效条数'],0);assert.match(data['需要处理'],/年份.*唯一/);
+ const conflict=table([row()]);conflict.sheet.H1.v='2027年11月支付';conflict.sheet.D2.v='11月－100';
+ data=values(build(conflict));assert.equal(data['校验结果'],'待核对');assert.equal(data['谈判明细有效条数'],0);assert.match(data['需要处理'],/年份.*唯一|年份.*冲突/);
+ conflict.sheet.H1.v='备注';conflict.sheet.I2={t:'n',v:0};data=values(build(conflict));
+ assert.equal(data['谈判明细有效条数'],1);assert.equal(data['谈判明细金额合计'],100);assert.equal(data['校验结果'],'待核对');assert.match(data['需要处理'],/2026年11月/);
+});
+
+test('明细月份有金额而月度列缺失、空白或公式异常时待核对，不能补零',()=>{
+ const cases=[undefined,{t:'s',v:' '},{t:'e',v:7,w:'#DIV/0!'},{t:'n',f:'100'},{t:'z',f:'100',v:0}];
+ for(const monthly of cases){
+  const source=table([row()]);source.sheet.D2.v='2026年11月－100';source.sheet.I2={t:'n',v:0};
+  if(monthly)source.sheet.H2=monthly;else delete source.sheet.H2;
+  const data=values(build(source));assert.equal(data['校验结果'],'待核对',JSON.stringify(monthly));
+  assert.match(data['需要处理'],/2026年11月/);assert.match(data['需要处理'],/H2/);assert.doesNotMatch(data['需要处理'],/2026年11月[^\n]*差额100\.00/);
+ }
+ const missing=table([row()]);missing.sheet.D2.v='2026年11月－100';missing.sheet.H1.v='备注';missing.sheet.I2={t:'n',v:0};
+ const data=values(build(missing));assert.equal(data['校验结果'],'待核对');assert.match(data['需要处理'],/2026年11月/);assert.match(data['需要处理'],/缺少.*月度|未找到.*月度/);
+});
+
+test('双方无金额的月份不提示，明确零金额配空白月度仍需核对',()=>{
+ const source=table([row()]);let data=values(build(source));assert.equal(data['校验结果'],'一致');assert.doesNotMatch(data['需要处理'],/2026年12月/);
+ source.sheet.I2={t:'n',v:0};data=values(build(source));assert.equal(data['校验结果'],'一致');assert.doesNotMatch(data['需要处理'],/2026年12月/);
+ source.sheet.D2.v='11月－100\n12月－0';delete source.sheet.I2;data=values(build(source));
+ assert.equal(data['校验结果'],'待核对');assert.match(data['需要处理'],/2026年12月/);assert.match(data['需要处理'],/I2/);
+});
+
+test('同年月重复月度表头不自动合并掩盖问题，提示两处表头位置',()=>{
+ const source=table([row()]);source.sheet.I1.v='2026年11月支付';source.sheet.H2.v=40;source.sheet.I2={t:'n',v:60};
+ const data=values(build(source));assert.equal(data['校验结果'],'待核对');assert.match(data['需要处理'],/2026年11月[^\n]*表头重复/);assert.match(data['需要处理'],/H1/);assert.match(data['需要处理'],/I1/);
+});
+
+test('不完整明细不以部分小计做月差额，其他组不完整时保留月差异但优先待核对',()=>{
+ const source=table([row()]);source.sheet.D2.v='11月2日－100\n不完整';source.sheet.H2.v=80;source.sheet.I2={t:'n',v:20};
+ let data=values(build(source));assert.equal(data['校验结果'],'待核对');assert.equal(data['谈判明细金额合计'],100);assert.match(data['需要处理'],/D2第2笔/);
+ assert.doesNotMatch(data['需要处理'],/2026年(?:11|12)月[^\n]*差额/);
+ source.sheet.D2.v='11月2日－100';delete source.sheet.C2;data=values(build(source));
+ assert.equal(data['校验结果'],'待核对');assert.match(data['需要处理'],/2026年11月[^\n]*差额20\.00/);
+});
+
+test('月合计及月差额超出安全整数分时待核对，即使跨月抵消后的总额为零',()=>{
+ const max='90071992547409.91',source=table([row(0)]);source.sheet.I2={t:'n',v:0};
+ source.sheet.D2.v='2026年11月－'+max+'\n11月－0.01\n12月－-'+max+'\n12月－-0.01';
+ let data=values(build(source));assert.equal(data['谈判明细金额合计'],0);assert.equal(data['校验结果'],'待核对');assert.match(data['需要处理'],/2026年11月/);assert.match(data['需要处理'],/超出安全整数分范围/);
+ source.sheet.D2.v='2026年11月－'+max+'\n12月－-'+max;source.sheet.H2={t:'s',v:'-'+max};source.sheet.I2={t:'s',v:max};
+ data=values(build(source));assert.equal(data['谈判明细金额合计'],0);assert.equal(data['月度支付金额合计'],0);assert.equal(data['校验结果'],'待核对');assert.match(data['需要处理'],/差额[^\n]*超出安全整数分范围/);
+});
+
 test('计划和月度按表头识别，列插入移动、分散、隐藏均有效，命名日期元数据不计金额',()=>{
  const headers=['应付款时间','2026年12月支付','供应商','摘要','2026年11月16日','OA-申请付款金额','2026年11月支付','谈判明细','分批总金额','对公付款0A流程号','申请日期','2026年11月2日'];
  const source=table([[999,20,'甲','说明',30,100,80,'11月2日－70\n11月16日－30',100,'OA-1',999,70]],headers);
  source.sheet['!cols']=headers.map((_,c)=>({hidden:[1,4,6,11].includes(c)}));source.sheet.A1.z='yyyy"年"m"月"d"日"';source.sheet.K1.z='yyyy-mm-dd';
  assert.deepEqual(Validation.selectColumns(source),{dateColumns:[4,11],monthColumns:[1,6]});const result=build(source),data=values(result);
- assert.equal(data['日期计划金额合计'],100);assert.equal(data['月度支付金额合计'],100);assert.equal(data['校验结果'],'一致');assert.equal(data['日期计划非零金额格数'],2);
+ assert.equal(data['日期计划金额合计'],100);assert.equal(data['月度支付金额合计'],100);assert.equal(data['校验结果'],'不一致');assert.equal(data['日期计划非零金额格数'],2);assert.match(data['需要处理'],/2026年11月[^\n]*H2[^\n]*G2[^\n]*差额20\.00/);
  const inserted=table([[999,123,20,'甲','说明',30,46328,100,80,'11月2日－70\n11月16日－30',100,'OA-1',999,70]],[headers[0],123,...headers.slice(1,5),46328,...headers.slice(5)]);
- const insertedData=values(build(inserted));assert.deepEqual(Validation.selectColumns(inserted),{dateColumns:[5,13],monthColumns:[2,8]});assert.equal(insertedData['日期计划金额合计'],100);assert.equal(insertedData['校验结果'],'一致');
+ const insertedData=values(build(inserted));assert.deepEqual(Validation.selectColumns(inserted),{dateColumns:[5,13],monthColumns:[2,8]});assert.equal(insertedData['日期计划金额合计'],100);assert.equal(insertedData['校验结果'],'不一致');assert.match(insertedData['需要处理'],/2026年11月[^\n]*J2[^\n]*I2[^\n]*差额20\.00/);
 });
 
 test('Excel日期、1904系统及完整文本表头有效；缺年、仅月、非法日期和非日期数值格式不误判',()=>{
