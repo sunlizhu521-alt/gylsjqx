@@ -2,7 +2,7 @@
 'use strict';
 const PEOPLE=['徐英','操思敏','邢芳芳','李奇'];
 const SUMMARY=['供应商','采购剩余入库数量有效值合计','履约未交付数量有效值合计','已匹配差额','一致项数','数量差异项数','待核对项数','仅采购项数','仅履约项数','已关闭异常项数'];
-const DETAIL=['核对结果','供应商','履约供应商原值','物料编码','SKU','物料名称','采购单据编号','履约采购订单号','采购订单组成','采购剩余入库数量','履约未交付数量','差额','关闭状态','采购来源','履约来源','匹配依据','需要处理'];
+const DETAIL=['核对结果','供应商','履约供应商','物料编码','SKU','物料名称','采购单据编号','履约采购订单号','采购订单组成','采购剩余入库数量','履约未交付数量','差额','关闭状态','采购来源','履约来源','匹配依据','需要处理'];
 const norm=value=>String(value??'').normalize('NFKC').replace(/\s/g,'').trim();
 const key=(...parts)=>JSON.stringify(parts);
 const unique=values=>[...new Set(values.filter(v=>v!==''&&v!=null))];
@@ -74,9 +74,50 @@ function parse(input,kind){
  if(!found)throw Error(input.filename+'：未找到含物料编码、剩余入库数量的采购明细表');
  return {rows,problems};
 }
-function build({purchase,fulfillment,decisions={}}){
+function supplierDirectory(input){
+ const full=new Map(),short=new Map(),warnings=[];let found=false;
+ if(input){
+  const read=V.createReader(input.book);
+  for(const name of input.book.SheetNames){
+   const sheet=input.book.Sheets[name],cells=Object.entries(sheet).filter(([a])=>/^[A-Z]+[1-9]\d*$/.test(a)),headerRows=new Map();
+   for(const [a,cell] of cells){const {r,c}=X.utils.decode_cell(a);if(r>29)continue;if(!headerRows.has(r))headerRows.set(r,[]);headerRows.get(r).push([c,norm(cell.v)]);}
+   let header,fc,sc;
+   for(const [r,columns] of [...headerRows].sort((a,b)=>a[0]-b[0])){
+    const names=columns.filter(([,v])=>['供应商名称','供应商全称','供应商'].includes(v)),shorts=columns.filter(([,v])=>v==='供应商简称');
+    if(!names.length||!shorts.length)continue;
+    if(names.length!==1||shorts.length!==1)throw Error(input.filename+' / '+name+'：供应商名称或供应商简称表头重复，请保留唯一列');
+    header=r;fc=names[0][0];sc=shorts[0][0];break;
+   }
+   if(header===undefined)continue;found=true;
+   const rows=unique(cells.map(([a])=>X.utils.decode_cell(a).r)).filter(r=>r>header).sort((a,b)=>a-b);
+   for(const r of rows){
+    const at=c=>X.utils.encode_cell({r,c}),source=input.filename+' / '+name+' 第 '+(r+1)+' 行';
+    const value=c=>{const cell=sheet[at(c)];if(!cell)return '';if(cell.t==='e')throw Error(source+'（'+at(c)+'）：名称为错误值');try{return String(cell.f||cell.F||cell.D?read(name,at(c)):cell.v??'').trim();}catch(e){throw Error(source+'（'+at(c)+'）：'+e.message);}};
+    const nameValue=value(fc),shortValue=value(sc),n=norm(nameValue),s=norm(shortValue);
+    if(!n&&!s)continue;
+    if(!n){warnings.push(source+'：供应商名称为空，未使用此简称');continue;}
+    if(!full.has(n))full.set(n,{name:nameValue,shorts:new Map(),sources:[]});
+    const entry=full.get(n);entry.sources.push(source);if(s&&s!=='/')entry.shorts.set(s,shortValue);
+   }
+  }
+  if(!found)throw Error(input.filename+'：找不到“供应商名称／供应商全称／供应商”和“供应商简称”两列表头');
+ }
+ for(const [n,entry] of full){
+  if(entry.shorts.size>1)warnings.push(entry.name+'：名录有多个简称，保留全称。'+entry.sources.join('；'));
+  for(const s of entry.shorts.keys()){if(!short.has(s))short.set(s,new Set());short.get(s).add(n);}
+ }
+ for(const [s,names] of short)if(names.size>1)warnings.push('简称“'+s+'”对应多家供应商，按全称分别核对，不按简称合并。'+[...names].map(n=>full.get(n).name+'（'+full.get(n).sources.join('；')+'）').join('；'));
+ const identity=value=>{const n=norm(value);if(full.has(n))return n;const candidates=short.get(n);return candidates?.size===1?[...candidates][0]:'';};
+ const display=(value,fallback)=>{const n=identity(value),entry=full.get(n);return entry?(entry.shorts.size===1?[...entry.shorts.values()][0]:entry.name):fallback;};
+ return {identity,display,full,warnings};
+}
+function build({purchase,fulfillment,directory,decisions={}}){
  const p=parse(purchase,'po').rows,f=parse(fulfillment,'fulfillment').rows;
+ const catalog=supplierDirectory(directory);
+ // Keep the full company identity as the key: shared short names must not merge companies.
+ for(const row of [...p,...f]){const name=catalog.identity(row.supplier);if(name){row.supplier=name;row.directoryMatched=true;}}
  const suppliers=new Map();for(const row of p)if(row.supplier&&!suppliers.has(row.supplier))suppliers.set(row.supplier,row.rawSupplier);
+ const display=(supplier,fallback)=>catalog.display(supplier,fallback||'（供应商为空）');
  const byOrderCode=new Map();for(const row of p)for(const id of row.ids){const k=key(id,row.code);if(!byOrderCode.has(k))byOrderCode.set(k,[]);byOrderCode.get(k).push(row);}
  const aliasesMap=new Map(),choices=[];
  for(const supplier of unique(f.map(r=>r.supplier))){
@@ -85,6 +126,7 @@ function build({purchase,fulfillment,decisions={}}){
   const contains=[...suppliers.keys()].filter(n=>n.includes(supplier));
   const candidates=unique([...evidence,...contains]);let canonical='',basis='';
   if(decisions[supplier]&&suppliers.has(decisions[supplier])){canonical=decisions[supplier];basis='人工确认供应商';}
+  else if(source.some(r=>r.directoryMatched)){canonical=supplier;basis='供应商名录：全称与简称对应';}
   else if(suppliers.has(supplier)){canonical=supplier;basis='供应商名称一致';}
   else if(evidence.length===1){canonical=evidence[0];basis='单据编号＋物料编码唯一对应供应商';}
   else if(!evidence.length&&contains.length===1){canonical=contains[0];basis='简称唯一包含于采购供应商全称';}
@@ -102,7 +144,7 @@ function build({purchase,fulfillment,decisions={}}){
  const aggregate=rows=>rows.length&&rows.every(r=>r.qty!==null)?sum(rows.map(r=>r.qty)):null;
  const add=(status,prs,frs,extra={})=>{
   const first=frs[0]||prs[0],supplier=frs[0]?.canonical||first?.supplier||'',pq=extra.pqty??null,fq=aggregate(frs);
-  const record={status,supplier,supplierName:suppliers.get(supplier)||first?.rawSupplier||'（供应商为空）',purchase:prs,fulfillment:frs,pqty:pq,fqty:fq,difference:extra.difference??null,basis:frs[0]?.basis||'',action:extra.action||'',...extra};records.push(record);return record;
+  const record={status,supplier,supplierName:display(supplier,suppliers.get(supplier)||first?.rawSupplier),purchase:prs,fulfillment:frs,pqty:pq,fqty:fq,difference:extra.difference??null,basis:frs[0]?.basis||'',action:extra.action||'',...extra};records.push(record);return record;
  };
  for(const g of work){
   const {rows,first,candidates}=g,issues=[...g.issues];
@@ -131,13 +173,13 @@ function build({purchase,fulfillment,decisions={}}){
  for(const r of p)if(r.closed!=='已关闭'){const g=get(r.supplier);if(r.closed==='未关闭'&&r.qty!==null)g.p.push(r.qty);}
  for(const r of f){const g=get(r.canonical);if(r.qty!==null)g.f.push(r.qty);}
  for(const r of records){const g=get(r.supplier);g.counts[r.status]=(g.counts[r.status]||0)+1;if(r.difference!==null)g.diff.push(r.difference);}
- const summary=[...totals.values()].map(g=>[g.name,g.p.length?sum(g.p):null,g.f.length?sum(g.f):null,g.diff.length?sum(g.diff):null,...['一致','数量差异','待核对','仅采购','仅履约','已关闭异常'].map(s=>g.counts[s]||0)]);
+ const summary=[...totals.values()].map(g=>[display(g.supplier,g.name),g.p.length?sum(g.p):null,g.f.length?sum(g.f):null,g.diff.length?sum(g.diff):null,...['一致','数量差异','待核对','仅采购','仅履约','已关闭异常'].map(s=>g.counts[s]||0)]);
  const detail=records.filter(r=>r.status!=='一致').map(r=>{
   const all=[...r.fulfillment,...r.purchase],join=field=>unique(all.map(x=>x[field])).join('、');
-  return [r.status,r.supplierName,unique(r.fulfillment.map(x=>x.rawSupplier)).join('、'),join('code'),join('sku'),join('name'),unique(r.purchase.flatMap(x=>x.ids)).join('＋'),unique(r.fulfillment.map(x=>x.rawOrder)).join('；'),
+  return [r.status,r.supplierName,unique(r.fulfillment.map(x=>directory?display(x.canonical,suppliers.get(x.canonical)||x.rawSupplier):x.rawSupplier)).join('、'),join('code'),join('sku'),join('name'),unique(r.purchase.flatMap(x=>x.ids)).join('＋'),unique(r.fulfillment.map(x=>x.rawOrder)).join('；'),
    r.purchase.map(x=>x.rawOrder+'：'+(x.qty===null?'数量空白或异常':x.qty)+'（'+x.closed+'；'+x.sheet+'!'+x.row+'）').join('\n'),r.pqty,r.fqty,r.difference,unique(r.purchase.map(x=>x.closed)).join('、'),r.purchase.map(x=>x.source).join('\n'),r.fulfillment.map(x=>x.source).join('\n'),r.basis,r.action];
  });
- return {summary,detail,records,choices,purchaseRows:p,fulfillmentRows:f,stats:{purchase:p.length,open:p.filter(r=>r.closed==='未关闭').length,closed:p.filter(r=>r.closed==='已关闭').length,fulfillment:f.length,matched:records.filter(r=>r.status==='一致').length},canExport:true};
+ return {summary,detail,records,choices,directoryWarnings:catalog.warnings,purchaseRows:p,fulfillmentRows:f,stats:{purchase:p.length,open:p.filter(r=>r.closed==='未关闭').length,closed:p.filter(r=>r.closed==='已关闭').length,fulfillment:f.length,matched:records.filter(r=>r.status==='一致').length},canExport:true};
 }
-return {build,parse,orders,number,norm,SUMMARY,DETAIL};
+return {build,parse,supplierDirectory,orders,number,norm,SUMMARY,DETAIL};
 });

@@ -54,3 +54,40 @@ test('缺必要表头与多张同人员来源不猜测',()=>{
  X.utils.book_append_sheet(f.book,X.utils.aoa_to_sheet([fh]),'徐英1117');assert.throws(()=>C.build({purchase:source([po()],'po'),fulfillment:f}),/多张/);
 });
 module.exports={source,po,fu};
+function directory(rows,headers=['供应商名称','供应商简称']){const book=X.utils.book_new();X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([headers,...rows]),'名录');return {book,filename:'供应商名录.xlsx'};}
+test('名录全称映射简称，汇总和两个差异供应商字段一致，未知名称保留全称',()=>{
+ const p=source([po('CGDD1',3),po('CGDD2',2,'未收录有限公司')],'po'),f=source([fu('CGDD1',4,'甲有限公司'),fu('CGDD2',3,'未收录有限公司')],'f');
+ const before=JSON.stringify([p,f]),r=C.build({purchase:p,fulfillment:f,directory:directory([['甲有限公司','甲供']])});
+ assert.deepEqual(r.summary.map(x=>x[0]),['甲供','未收录有限公司']);assert.equal(r.detail[0][1],'甲供');assert.equal(r.detail[0][2],'甲供');assert.equal(r.detail[1][1],'未收录有限公司');assert.equal(r.detail[1][2],'未收录有限公司');assert.equal(JSON.stringify([p,f]),before);
+});
+test('名录支持三个全称表头、列顺序变化、空简称及相同重复项',()=>{
+ for(const header of ['供应商','供应商名称','供应商全称']){
+  const d=directory([['甲供','甲有限公司'],['甲供','甲有限公司'],['','乙有限公司']],['供应商简称',header]),catalog=C.supplierDirectory(d);
+  assert.equal(catalog.identity(' 甲供 '),'甲有限公司');assert.equal(catalog.display('甲有限公司','原值'),'甲供');assert.equal(catalog.display('乙有限公司','原值'),'乙有限公司');assert.equal(catalog.warnings.length,0);
+ }
+});
+test('同简称不同公司不合并，全称对应多个简称时保持全称并提示来源',()=>{
+ const d=directory([['甲有限公司','同简称'],['乙有限公司','同简称'],['丙有限公司','丙一'],['丙有限公司','丙二']]),catalog=C.supplierDirectory(d);
+ assert.equal(catalog.identity('同简称'),'');assert.equal(catalog.display('丙有限公司','丙'),'丙有限公司');assert.equal(catalog.warnings.length,2);assert(catalog.warnings.every(x=>x.includes('供应商名录.xlsx')));
+ const r=C.build({purchase:source([po('CGDD1',3,'甲有限公司'),po('CGDD2',2,'乙有限公司')],'po'),fulfillment:source([fu('CGDD1',3,'甲有限公司'),fu('CGDD2',2,'乙有限公司')],'f'),directory:d});
+ assert.equal(r.summary.length,2);assert.deepEqual(r.summary.map(x=>x.slice(0,3)),[['同简称',3,3],['同简称',2,2]]);
+});
+test('明确名录对应关系优先，不再以错误订单证据把简称认成另一公司',()=>{
+ const r=C.build({purchase:source([po('CGDD1',5,'乙有限公司')],'po'),fulfillment:source([fu('CGDD1',5,'甲别称')],'f'),directory:directory([['甲有限公司','甲别称']])});
+ assert.equal(r.records[0].supplier,'甲有限公司');assert.equal(r.records[0].status,'待核对');assert.match(r.records[0].action,/供应商不一致/);assert.equal(r.records[0].pqty,null);
+});
+test('采购来源本身为简称可通过名录识别，但源名称和数量不改',()=>{
+ const p=source([po('CGDD1',0,'甲别称')],'po'),f=source([fu('CGDD1',0,'甲有限公司')],'f');
+ const r=C.build({purchase:p,fulfillment:f,directory:directory([['甲有限公司','甲别称']])});assert.equal(r.records[0].status,'一致');assert.equal(r.summary[0][0],'甲别称');assert.equal(r.purchaseRows[0].rawSupplier,'甲别称');assert.equal(r.summary[0][1],0);
+});
+test('替换或移除名录重新使用当前简称，不保留旧版本映射',()=>{
+ const inputs={purchase:source([po()],'po'),fulfillment:source([fu()],'f')};
+ assert.equal(C.build({...inputs,directory:directory([['甲有限公司','旧简称']])}).summary[0][0],'旧简称');
+ assert.equal(C.build({...inputs,directory:directory([['甲有限公司','新简称']])}).summary[0][0],'新简称');
+ assert.equal(C.build(inputs).summary[0][0],'甲有限公司');
+});
+test('名录缺表头、重复表头及名称公式错误不能静默忽略',()=>{
+ assert.throws(()=>C.supplierDirectory(directory([['甲','简称']],['其他','供应商简称'])),/找不到/);
+ assert.throws(()=>C.supplierDirectory(directory([['甲','甲','简称']],['供应商','供应商名称','供应商简称'])),/重复/);
+ const d=directory([['甲有限公司','']]);d.book.Sheets.名录.B2={t:'n',f:'UNKNOWN(A2)',v:0};assert.throws(()=>C.supplierDirectory(d),/名录 第 2 行（B2）/);
+});

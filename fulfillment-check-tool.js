@@ -1,10 +1,10 @@
 (() => {
 'use strict';
 const $=id=>document.getElementById(id),C=window.FulfillmentCheckCore;
-const sources={purchase:null,fulfillment:null},versionKey='fulfillment-check-export-versions',memoryVersions={};
+const sources={purchase:null,fulfillment:null,directory:null},failures={},versionKey='fulfillment-check-export-versions',memoryVersions={};
 let result=null,busy=false,decisions={},page=0;
 function controls(){for(const kind of Object.keys(sources)){$(kind+'File').disabled=busy;$(kind+'Clear').disabled=busy;}for(const select of $('choices').querySelectorAll('select'))select.disabled=busy;$('download').disabled=busy||!result?.canExport;}
-function clearResult(){result=null;decisions={};page=0;$('preview').replaceChildren();$('choices').replaceChildren();$('result').hidden=$('choicePanel').hidden=true;controls();}
+function clearResult(){result=null;decisions={};page=0;$('preview').replaceChildren();$('choices').replaceChildren();$('directoryWarnings').replaceChildren();$('result').hidden=$('choicePanel').hidden=$('directoryWarningPanel').hidden=true;controls();}
 function table(){
  const detail=$('view').value==='detail',rows=detail?result.detail:result.summary,headers=detail?C.DETAIL:C.SUMMARY;
  const pages=Math.max(1,Math.ceil(rows.length/100));page=Math.max(0,Math.min(page,pages-1));
@@ -25,25 +25,27 @@ function choices(){
  if(Object.keys(decisions).length){const reset=document.createElement('button'),confirmed=document.createElement('p');confirmed.textContent='本次已确认：'+Object.entries(decisions).map(([from,to])=>from+' → '+to).join('；');reset.className='secondary';reset.textContent='清除本次供应商确认';reset.onclick=()=>{decisions={};calculate();};$('choices').prepend(confirmed,reset);$('choicePanel').hidden=false;}
 }
 function calculate(){
+ if(Object.values(failures).some(Boolean)){clearResult();$('status').textContent='读取失败：'+Object.values(failures).filter(Boolean).join('；')+'。请重新上传或移除失败文件。';return;}
  if(!sources.purchase||!sources.fulfillment){$('status').textContent='请上传两份文件。';return;}
  try{
-  result=C.build({purchase:sources.purchase,fulfillment:sources.fulfillment,decisions});page=0;
+  result=C.build({purchase:sources.purchase,fulfillment:sources.fulfillment,directory:sources.directory,decisions});page=0;
+  $('directoryWarnings').replaceChildren();for(const text of result.directoryWarnings){const li=document.createElement('li');li.textContent=text;$('directoryWarnings').append(li);}$('directoryWarningPanel').hidden=!result.directoryWarnings.length;
   const s=result.stats;$('counts').textContent=`采购 ${s.purchase} 条（未关闭 ${s.open}，已关闭 ${s.closed}）；履约 ${s.fulfillment} 条；一致 ${s.matched} 项，差异或待核对 ${result.detail.length} 项。`;
   $('result').hidden=false;choices();table();$('status').textContent='核对完成，可下载。待核对数量及单边记录未按零处理。';
  }catch(e){clearResult();$('status').textContent='核对失败：'+e.message;}controls();
 }
 for(const kind of Object.keys(sources)){
  $(kind+'File').addEventListener('change',async()=>{
-  clearResult();sources[kind]=null;const file=$(kind+'File').files[0];$(kind+'Clear').hidden=!file;
+  clearResult();sources[kind]=null;delete failures[kind];const file=$(kind+'File').files[0];$(kind+'Clear').hidden=!file;
   if(!file){$(kind+'Reference').textContent='尚未引用文件';calculate();return;}
   busy=true;controls();$(kind+'Reference').textContent=file.name+'\n引用时间：'+new Date().toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});$('status').textContent='正在读取并核对…';
   try{
    if(!/\.xlsx$/i.test(file.name))throw Error('请上传 .xlsx 原文件，以保留原工作表');if(file.size>60*1024*1024)throw Error('文件超过 60 MB，请缩小后上传');
    const bytes=await file.arrayBuffer(),zip=await JSZip.loadAsync(bytes);if(!zip.file('xl/workbook.xml'))throw Error('不是有效的 Excel 工作簿');
-   const book=XLSX.read(bytes,{type:'array',cellNF:true,cellFormula:true,sheetStubs:true});sources[kind]={bytes,book,filename:file.name};calculate();
-  }catch(e){clearResult();$('status').textContent='读取失败：'+e.message;}finally{busy=false;controls();}
+   const book=XLSX.read(bytes,{type:'array',cellNF:true,cellFormula:true,sheetStubs:true});if(kind==='directory')C.supplierDirectory({book,filename:file.name});sources[kind]={bytes,book,filename:file.name};calculate();
+  }catch(e){failures[kind]=file.name+'：'+e.message;clearResult();$('status').textContent='读取失败：'+failures[kind];}finally{busy=false;controls();}
  });
- $(kind+'Clear').onclick=()=>{clearResult();sources[kind]=null;$(kind+'File').value='';$(kind+'Reference').textContent='尚未引用文件';$(kind+'Clear').hidden=true;calculate();};
+ $(kind+'Clear').onclick=()=>{clearResult();sources[kind]=null;delete failures[kind];$(kind+'File').value='';$(kind+'Reference').textContent='尚未引用文件';$(kind+'Clear').hidden=true;calculate();};
 }
 $('view').onchange=()=>{page=0;if(result)table();};$('previous').onclick=()=>{page--;table();};$('next').onclick=()=>{page++;table();};
 $('download').onclick=async()=>{
