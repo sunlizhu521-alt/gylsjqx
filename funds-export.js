@@ -644,5 +644,5 @@ window.FundsExport = async function(sourceBytes, result) {
   for(const override of elements(types,'Override'))if(!zip.file(override.getAttribute('PartName').replace(/^\//,'')))override.remove();
   save('[Content_Types].xml',types);
   if(zip.file('docProps/app.xml')){const app=await parse(zip,'docProps/app.xml');for(const title of elements(app,'TitlesOfParts')){const vector=first(title,'vector');if(vector){vector.setAttribute('size',plan.length);vector.replaceChildren();for(const {name} of plan){const text=app.createElementNS(vector.namespaceURI,'vt:lpstr');text.textContent=name;vector.append(text);}}}const pairs=first(app,'HeadingPairs');if(pairs){const count=first(pairs,'i4');if(count)count.textContent=plan.length;}save('docProps/app.xml',app);}
-  return zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  return new Blob([await FundsCleanup(zip)],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 };
