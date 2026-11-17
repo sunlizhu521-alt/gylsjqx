@@ -79,7 +79,7 @@
     <div class="actions"><button id="download" disabled>下载付款节奏跟进表</button><span id="filenameHint"></span></div>
     <details class="help-details"><summary>查看核对与下载说明</summary><ul><li>核对说明含“重新申请”的申请不再生成申请相关核对提示。其余重复申请每组只列一次；OA 编号补齐、更正、缺失及冲突均保留来源供核对。</li><li>未申请本身无需核对。重复、超额、归属不清及申请日期问题写入核对表，不阻止下载；其他待处理项需先确认。</li><li>当天在当前浏览器再次下载时，文件版本自动递增。</li></ul></details>
   </section>
-  <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>预览最多 100 行，下载包含全部记录。</li><li>日期付款计划上方按年月分组显示，其他表头上下合并；筛选仍在下方日期表头行。仅新增表头，金额行和月度支付列保留；再次上传不会重复加行。</li><li>日期付款计划列有一笔非零金额为单笔，两笔及以上为分批；未提交 OA 也按金额格计批次。</li><li>匹配付款申请后标黄，申请汇总确认已付且批次唯一时标红。同额多批按明确批号或原批注申请日期定位，无法确定时列入核对。</li><li>批注包含批次、申请日期、OA 备注时间和付款时间。有具体时间就显示时间；只有“是”时显示已备注或已付款、时间未填。原人工批注保留，底色下载后可手动修改。</li></ul></details><div class="preview" id="negotiatedPreview"></div></section>
+  <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>预览最多 100 行，下载包含全部记录。</li><li>第一行按谈判明细的实际付款月份显示“2026年9月付款”等标题，第二行保留申请日期，筛选仍在第二行。按同一行的分期金额核对对应关系，只有相邻且能明确归属同一付款月份的列才合并。跨月、同额归属不清、明细金额不一致或缺少依据时，显示“付款月份待核对”。原金额行和月度支付列保留；旧版再次上传会修正月份标题，不会重复加行。</li><li>日期付款计划列有一笔非零金额为单笔，两笔及以上为分批；未提交 OA 也按金额格计批次。</li><li>匹配付款申请后标黄，申请汇总确认已付且批次唯一时标红。同额多批按明确批号或原批注申请日期定位，无法确定时列入核对。</li><li>批注包含批次、申请日期、OA 备注时间和付款时间。有具体时间就显示时间；只有“是”时显示已备注或已付款、时间未填。原人工批注保留，底色下载后可手动修改。</li></ul></details><div class="preview" id="negotiatedPreview"></div></section>
   <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>台账每笔付款分别保留；同供应商、同金额但 OA 号不同的记录不合并，各自读取对应流程信息和申请状态。</li><li>本次已匹配付款申请的记录整行标红，排序时底色跟随记录，下载后可手动改色。</li><li>跟单员取资金台账来源工作表，放在登记月份后。</li><li>单据号、OA 合同编号、合同总金额、是否对账默认隐藏，可在导出文件中取消隐藏；行高为 30 磅。</li></ul></details><div class="preview" id="normalPreview"></div></section>
   <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>显示重复申请、OA 编号、台账金额差异和实付同步等需复核事项，保留来源文件、工作表、行号和跟单员。</li><li>谈判登记金额与资金台账比较时，优先按 OA、财务应付单号、合同号确认；没有明确编号时，在同供应商的台账谈判付款中排除其他已独占对应记录，再列出剩余候选。唯一候选显示双方金额和差额（谈判减台账），多笔候选列出待确认归属，不按金额接近程度配对。</li><li>金额以资金台账为核对基准，确认付款及分批口径后再修正谈判登记和计划；本次保留原金额。未提交申请或“重新申请”不屏蔽该检查；原 OA 栏为“不支付”的记录跳过。</li><li>核对说明分条显示，自动换行并调整行高；申请提交进度不等于实际付款，实付金额以资金台账的唯一匹配结果更新。</li></ul></details><div class="preview" id="reviewPreview"></div></section>
   <section id="progressPreviewSection" hidden><h2>付款进度整理</h2><details class="help-details"><summary>查看付款进度说明</summary><p>每笔申请保留一行，包括重复申请。谈判表“是否谈判分批”为“是”时，付款来源显示“谈判付款表-谈判付款”；为“否”时显示“谈判付款表-正常付款”。未能读取明确分类时保留“谈判付款表”。两类均以本次申请汇总的“是否已付款”为准：日期或“是”为已付款，“否”为未付款，空白或异常为待核对；不由旧批注或 OA 状态补判。付款来源为“资金台账”时沿用现有流程判断。“重新申请”优先显示。仅已付款状态格标红，悬停可查看依据。预览前 100 行，下载包含全部记录。</p></details><div class="preview" id="progressPreview"></div></section>
@@ -87,10 +87,10 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-total-validation.js?v=month-amount-validation-20261117"></script>
-<script src="funds-core.js?v=ledger-amount-review-20261118"></script>
+<script src="funds-total-validation.js?v=payment-month-headers-20261118"></script>
+<script src="funds-core.js?v=payment-month-headers-20261118"></script>
 <script src="funds-cleanup.js?v=trim-blank-format-20261117"></script>
-<script src="funds-month-header.js?v=month-header-20261118"></script>
+<script src="funds-month-header.js?v=payment-month-headers-20261118"></script>
 <script src="funds-export.js?v=month-header-20261118"></script>
 <script src="funds-tool.js?v=month-header-20261118"></script>
 </body>

@@ -5,8 +5,9 @@ const {fixture}=require('./funds-progress-fixtures.cjs');
 const roles=['ledger','applications','oa','negotiated'],write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
 const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex'),read=bytes=>X.read(bytes,{cellFormula:true,cellNF:true,cellStyles:true});
 const serial=s=>(Date.parse(s+'T00:00:00Z')-Date.UTC(1899,11,30))/86400000;
-const days=['2026-09-02','2026-09-16','2026-10-02','2026-10-16','2026-11-02','2026-11-09','2026-11-16'];
-const bands=[{startCol:16,endCol:17,label:'2026年9月'},{startCol:18,endCol:19,label:'2026年10月'},{startCol:20,endCol:22,label:'2026年11月'}];
+const days=['2026-09-02','2026-09-16','2026-10-02','2026-10-16','2026-11-02','2026-11-09','2026-11-30'];
+const paymentDays=[...days.slice(0,6),'2026-12-10'];
+const bands=[{startCol:16,endCol:17,label:'2026年9月付款'},{startCol:18,endCol:19,label:'2026年10月付款'},{startCol:20,endCol:21,label:'2026年11月付款'},{startCol:22,endCol:22,label:'2026年12月付款'}];
 const sourceName='十一月谈判付款主表';
 
 function sample(headerRow=0,withDates=true){
@@ -19,12 +20,12 @@ function sample(headerRow=0,withDates=true){
  headers.push(...days.map((day,i)=>withDates?serial(day):'人工金额'+(i+17)));
  while(headers.length<34)headers.push('保留字段'+(headers.length+1));
  headers.push(...['2026年9月支付','2026年10月支付','2026年11月支付','2026年12月支付','2027年1月支付','2027年2月支付','2027年3月支付','2027年4月支付']);
- const amounts=[100,0,25],plans=[[10,10,20,20,10,10,20],[0,0,0,0,0,0,0],[0,0,0,0,25,0,0]];
+ const amounts=[100,0,25],plans=[[1,2,3,4,5,6,79],[0,0,0,0,0,0,0],[0,0,0,0,25,0,0]];
  const data=amounts.map((amount,i)=>{
   const values=Array(42).fill('');
-  values.splice(0,16,'表头合成'+(i+1),'迈德斯特','未提交OA',amount,0,amount,amount?'否':'是',serial('2026-11-30'),'保留人工备注'+i,days.map((day,c)=>X.SSF.format(C.DATE_FORMAT,serial(day))+'－'+plans[i][c]).join('\n'),amount,'一致',amount*2,i===0?'手工合并备注':'','引用字符串D2','人工'+i);
+  values.splice(0,16,'表头合成'+(i+1),'迈德斯特','未提交OA',amount,0,amount,amount?'否':'是',serial('2026-11-30'),'保留人工备注'+i,paymentDays.map((day,c)=>X.SSF.format(C.DATE_FORMAT,serial(day))+'－'+plans[i][c]).join('\n'),amount,'一致',amount*2,i===0?'手工合并备注':'','引用字符串D2','人工'+i);
   values.splice(16,7,...plans[i]);
-  values.splice(34,8,plans[i][0]+plans[i][1],plans[i][2]+plans[i][3],plans[i][4]+plans[i][5]+plans[i][6],0,0,0,0,0);
+  values.splice(34,8,plans[i][0]+plans[i][1],plans[i][2]+plans[i][3],plans[i][4]+plans[i][5],plans[i][6],0,0,0,0);
   return values;
  });
  const prefix=Array.from({length:headerRow},(_,i)=>['人工标题'+(i+1)]),sheet=X.utils.aoa_to_sheet([...prefix,headers,...data]),h=headerRow+1,first=h+1;
@@ -34,7 +35,7 @@ function sample(headerRow=0,withDates=true){
   sheet['F'+r]={t:'n',v:amount,f:'D'+r+'-E'+r,z:'#,##0.00'};
   sheet['K'+r]={t:'n',v:amount,f:'SUM(Q'+r+':W'+r+')'};
   sheet['M'+r]={t:'n',v:amount*2,f:'SUM(Q'+r+':W'+r+')+$D$'+r};
-  for(const [column,range] of [['AI','Q'+r+':R'+r],['AJ','S'+r+':T'+r],['AK','U'+r+':W'+r]])sheet[column+r].f='SUM('+range+')';
+  for(const [column,range] of [['AI','Q'+r+':R'+r],['AJ','S'+r+':T'+r],['AK','U'+r+':V'+r],['AL','W'+r]])sheet[column+r].f='SUM('+range+')';
   sheet['H'+r].z=C.DATE_FORMAT;
  }
  sheet['Q'+first].c=[{a:'人工',t:'金额批注跟随原记录'}];sheet['N'+first].c=[{a:'人工',t:'合并备注批注'}];
@@ -61,7 +62,9 @@ function verifyBook(bytes,sourceBook,sourceHeaderRow,inserted,withDates){
  if(withDates){
   for(const band of bands){
    const start=X.utils.encode_col(band.startCol),finish=X.utils.encode_col(band.endCol),top=lower-1;
-   assert.equal(sheet[start+top].v,band.label);assert.equal(sheet[start+top].t,'s');assert(merges.has(start+top+':'+finish+top),'同月日期横向合并');
+   assert.equal(sheet[start+top].v,band.label);assert.equal(sheet[start+top].t,'s');
+   if(band.startCol!==band.endCol)assert(merges.has(start+top+':'+finish+top),'同付款月日期横向合并');
+   else assert(![...merges].some(ref=>{const range=X.utils.decode_range(ref);return range.s.r<=top-1&&range.e.r>=top-1&&range.s.c<=band.startCol&&range.e.c>=band.startCol;}),'单列付款月份不并入相邻月份');
   }
   for(let c=0;c<=X.utils.decode_range(sheet['!ref']).e.c;c++)if(c<16||c>22){const col=X.utils.encode_col(c);assert(merges.has(col+(lower-1)+':'+col+lower),col+' 普通表头上下合并');}
   for(let c=16;c<=22;c++){const cell=sheet[X.utils.encode_col(c)+lower];assert.equal(cell.v,X.SSF.format(C.DATE_FORMAT,serial(days[c-16])));assert.equal(cell.t,'s','日期表头不参与金额求和');}
@@ -72,7 +75,7 @@ function verifyBook(bytes,sourceBook,sourceHeaderRow,inserted,withDates){
   const r=first+i,sr=sourceFirst+i;assert.equal(sheet['A'+r].v,source['A'+sr].v);
   for(const c of numericColumns){const col=X.utils.encode_col(c);assert.equal(sheet[col+r].v,source[col+sr].v,col+r+' 原金额保持');assert.equal(sheet[col+r].t,'n');}
   assert.equal(sheet['F'+r].f,'D'+r+'-E'+r);assert.equal(sheet['K'+r].f,'SUM(Q'+r+':W'+r+')');assert.equal(sheet['M'+r].f,'SUM(Q'+r+':W'+r+')+$D$'+r);
-  for(const [column,range] of [['AI','Q'+r+':R'+r],['AJ','S'+r+':T'+r],['AK','U'+r+':W'+r]])assert.equal(sheet[column+r].f,'SUM('+range+')');
+  for(const [column,range] of [['AI','Q'+r+':R'+r],['AJ','S'+r+':T'+r],['AK','U'+r+':V'+r],['AL','W'+r]])assert.equal(sheet[column+r].f,'SUM('+range+')');
  }
  for(let c=34;c<=41;c++){const col=X.utils.encode_col(c),titleRow=withDates?lower-1:lower;assert.equal(sheet[col+titleRow].v,source[col+(sourceHeaderRow+1)]?.v||source[col+sourceHeaderRow]?.v,col+' 原AI–AP表头保留');}
  assert.match(sheet['Q'+first].c[0].t,/^金额批注跟随原记录(?:\n|$)/);assert.equal(sheet['N'+first].c[0].t,'合并备注批注');
@@ -122,15 +125,25 @@ function verifyBook(bytes,sourceBook,sourceHeaderRow,inserted,withDates){
    }
    if(headerRow===0&&withDates&&process.env.QA_OUT){
     await fs.mkdir(process.env.QA_OUT,{recursive:true});await fs.writeFile(path.join(process.env.QA_OUT,'funds-month-header.xlsx'),output);
-    await frame.locator('#negotiatedPreview').evaluate(el=>{const band=[...el.querySelectorAll('th')].find(cell=>cell.textContent==='2026年9月');el.scrollLeft=band.offsetLeft;});
+    await frame.locator('#negotiatedPreview').evaluate(el=>{const band=[...el.querySelectorAll('th')].find(cell=>cell.textContent==='2026年9月付款');el.scrollLeft=band.offsetLeft;});
     await frame.locator('#negotiatedPreview').screenshot({path:path.join(process.env.QA_OUT,'funds-month-header.png')});
    }
    assert.equal(JSON.stringify(input),originalJSON,'核心处理不修改源输入对象');for(const role of roles)assert.equal(hash(buffers[role]),hashes[role],'上传下载不修改源字节');
    if(headerRow===0&&withDates){
-    const zip=await Zip.loadAsync(output),file='xl/worksheets/sheet1.xml';let xml=await zip.file(file).async('string');
-    for(const [address,value] of [['W3',21],['D3',101],['F3',101],['K3',101],['AK3',41],['M3',202]]){
+    const file='xl/worksheets/sheet1.xml',legacyZip=await Zip.loadAsync(output);let legacyXml=await legacyZip.file(file).async('string');
+    for(const column of ['Q','S','U']){
+     let matches=0;legacyXml=legacyXml.replace(new RegExp('(<c\\b[^>]*\\br="'+column+'1"[^>]*>)([\\s\\S]*?)(</c>)'),(_,start,body,end)=>{matches++;assert.match(body,/2026年\d+月付款/);return start+body.replace(/(2026年\d+月)付款/,'$1')+end;});assert.equal(matches,1,column+'1 旧版无后缀标签');
+    }
+    assert.match(legacyXml,/<mergeCell\b[^>]*\bref="U1:V1"/);legacyXml=legacyXml.replace(/(<mergeCell\b[^>]*\bref=")U1:V1"/,'$1U1:W1"').replace(/<c\b[^>]*\br="W1"[^>]*>[\s\S]*?<\/c>/,'');
+    legacyZip.file(file,legacyXml);const legacy=await legacyZip.generateAsync({type:'nodebuffer'}),legacyHash=hash(legacy),legacyBook=read(legacy);
+    assert.equal(legacyBook.Sheets.谈判付款.U1.v,'2026年11月');assert(legacyBook.Sheets.谈判付款['!merges'].some(merge=>X.utils.encode_range(merge)==='U1:W1'));
+    await upload('negotiated',legacy);const migrated=await download(true),migratedBook=verifyBook(migrated,legacyBook,1,0,true);
+    assert.equal(migratedBook.Sheets.谈判付款['!ref'],saved.Sheets.谈判付款['!ref'],'旧版重传只改月份分组，不重复插行');assert.equal(hash(legacy),legacyHash);
+    const zip=await Zip.loadAsync(migrated);let xml=await zip.file(file).async('string');
+    for(const [address,value] of [['W3',21],['D3',42],['F3',42],['K3',42],['AL3',21],['M3',84]]){
      let matches=0;xml=xml.replace(new RegExp('(<c\\b[^>]*\\br="'+address+'"[^>]*>)([\\s\\S]*?)(</c>)'),(_,start,body,end)=>{matches++;assert.match(body,/<v>[^<]*<\/v>/);return start+body.replace(/<v>[^<]*<\/v>/,'<v>'+value+'</v>')+end;});assert.equal(matches,1,address+' 手工金额修改');
     }
+    assert.equal(xml.split('2026年12月10日－79').length,2,'手改金额前明细有唯一原付款记录');xml=xml.replace('2026年12月10日－79','2026年12月10日－21');
     zip.file(file,xml);const edited=await zip.generateAsync({type:'nodebuffer'}),editedHash=hash(edited),editedBook=read(edited);
     await upload('negotiated',edited);const repeated=await download(true),again=verifyBook(repeated,editedBook,1,0,true);
     assert.equal(again.Sheets.谈判付款.W3.v,21,'重复上传保留人工修改后的金额');assert.equal(again.Sheets.谈判付款['!ref'],saved.Sheets.谈判付款['!ref'],'重复导出不再增加表头行');assert.equal(hash(edited),editedHash);
@@ -145,7 +158,7 @@ function verifyBook(bytes,sourceBook,sourceHeaderRow,inserted,withDates){
   }
   const addHeader=async bytes=>Buffer.from(await frame.locator('body').evaluate(async(_,{bytes})=>{
    const zip=await JSZip.loadAsync(Uint8Array.from(bytes));
-   await FundsMonthHeader(zip,{sheetName:'谈判付款',headerRow:0,headerTopRow:null,headerBands:[{startCol:16,endCol:17,label:'2026年9月'}]});
+   await FundsMonthHeader(zip,{sheetName:'谈判付款',headerRow:0,headerTopRow:null,headerBands:[{startCol:16,endCol:17,label:'2026年9月付款'}]});
    return [...await zip.generateAsync({type:'uint8array'})];
   },{bytes:[...bytes]}));
   for(const formula of ['COUNTA(A1:AP1)','SUM(1:1)','COUNTBLANK(A1:A3)','COUNTA(Q:Q)'])await assert.rejects(()=>addHeader(referenceBook(formula)),error=>{
@@ -155,6 +168,6 @@ function verifyBook(bytes,sourceBook,sourceHeaderRow,inserted,withDates){
    const saved=read(await addHeader(referenceBook(formula)));assert.equal(saved.Sheets.谈判付款.S3.f,expected,'安全范围引用正确下移');
    const names=saved.Workbook.Names;assert.equal(names.find(name=>name.Name==='_xlnm.Print_Area').Ref,"'谈判付款'!$A$1:$AP$4");assert.equal(names.find(name=>name.Name==='_xlnm.Print_Titles').Ref,"'谈判付款'!$1:$2");assert.equal(names.find(name=>name.Name==='_xlnm._FilterDatabase').Ref,"'谈判付款'!$A$2:$AP$4");
   }
-  assert.deepEqual(errors,[]);console.log(JSON.stringify({status:'PASS',base,groupedHeader:true,filterOnLowerHeader:true,amountsAndAItoAPPreserved:true,formulasCommentsMergesAndReferencesShifted:true,reimportAndManualEdit:true,shiftedHeader:true,noDatesNoInsert:true,lastRowFormattingCleanedBeforeInsert:true,unsafeHeaderFormulaRangesBlocked:true,safeRangesAndBuiltinNamesShifted:true,sourceUnchanged:true}));
+  assert.deepEqual(errors,[]);console.log(JSON.stringify({status:'PASS',base,actualPaymentMonthHeader:true,applicationDatesPreserved:true,legacyHeaderMigration:true,filterOnLowerHeader:true,amountsAndAItoAPPreserved:true,formulasCommentsMergesAndReferencesShifted:true,reimportAndManualEdit:true,shiftedHeader:true,noDatesNoInsert:true,lastRowFormattingCleanedBeforeInsert:true,unsafeHeaderFormulaRangesBlocked:true,safeRangesAndBuiltinNamesShifted:true,sourceUnchanged:true}));
  }finally{await browser.close();}
 })().catch(error=>{console.error(error.name+': '+error.message);process.exitCode=1;});

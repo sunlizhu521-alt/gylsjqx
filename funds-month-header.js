@@ -22,7 +22,7 @@ window.FundsMonthHeader = async function(zip, negotiated) {
   if(!Number.isInteger(top)||lower!==top+1||!data)throw Error('月份表头：双层表头结构无效');
   const occupied=new Set();
   for(const b of bands){
-    if(!Number.isInteger(b.startCol)||!Number.isInteger(b.endCol)||b.startCol<0||b.endCol<b.startCol||b.endCol>16383||!/^\d{4}年\d{1,2}月$/.test(b.label))throw Error('月份表头：月份分组无效');
+    if(!Number.isInteger(b.startCol)||!Number.isInteger(b.endCol)||b.startCol<0||b.endCol<b.startCol||b.endCol>16383||!FundsTotalValidation.isMonthBandLabel(b.label))throw Error('月份表头：月份分组无效');
     for(let c=b.startCol;c<=b.endCol;c++){if(occupied.has(c))throw Error('月份表头：月份分组重叠');occupied.add(c);}
   }
   const originalRows=all(data,'row'),originalCells=all(data,'c');

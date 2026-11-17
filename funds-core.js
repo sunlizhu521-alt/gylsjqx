@@ -202,8 +202,8 @@ function table(input,sheetName,required,ignoredHeaders=[],optionalHeaders=[],mon
   if(!columns.dateColumns.length)continue;
   const banded=columns.dateColumns.every(c=>{
    const merge=merges.find(m=>m.s.r===r&&m.e.r===r&&m.s.c<=c&&m.e.c>=c),upper=sheet[X.utils.encode_cell({r,c:merge?.s.c??c})];
-   const label=/^(\d{4})年(\d{1,2})月$/.exec(norm(upper?.v)),parsed=date(copied[X.utils.encode_cell({r:r+1,c})],!!input.book.Workbook?.WBProps?.date1904);
-   return upper?.t!=='e'&&!(upper?.f&&(upper.t==='z'||upper.v==null||upper.v===''))&&label&&+label[1]>=1900&&+label[1]<=9999&&+label[2]>=1&&+label[2]<=12&&!parsed.invalid&&parsed.v!==''&&X.SSF.parse_date_code(parsed.v).m===+label[2];
+   const parsed=date(copied[X.utils.encode_cell({r:r+1,c})],!!input.book.Workbook?.WBProps?.date1904);
+   return upper?.t!=='e'&&!(upper?.f&&(upper.t==='z'||upper.v==null||upper.v===''))&&FundsTotalValidation.isMonthBandLabel(upper?.v)&&!parsed.invalid&&parsed.v!=='';
   });
   if(banded){if(conflicts.length)throw Error(sheetName+'：双层表头合并范围内 '+conflicts.join('、')+' 含不同内容或公式，请核实后重新上传');sheet=copied;headerTopRow=r;break;}
  }
@@ -511,13 +511,7 @@ function build(inputs,decisions={}){
   }
   planDates.set(c,parsed);
  }
- const headerBands=[];
- if(selectedPlanColumns.dateColumns.length&&selectedPlanColumns.monthColumns.length)for(const c of selectedPlanColumns.dateColumns){
-  const parsed=planDates.get(c);if(parsed.invalid||parsed.v==='')continue;
-  const parts=X.SSF.parse_date_code(parsed.v),label=parts.y+'年'+parts.m+'月',previous=headerBands.at(-1);
-  if(previous&&previous.endCol+1===c&&previous.label===label)previous.endCol=c;
-  else headerBands.push({startCol:c,endCol:c,label});
- }
+ const headerBands=FundsTotalValidation.paymentHeaderBands(negotiated,money);
  const batchPlansByRow=new Map(),batchPlans=[];
  const merges=negotiated.sheet['!merges']||[],mergedAt=(r,c)=>merges.find(m=>r>=m.s.r&&r<=m.e.r&&c>=m.s.c&&c<=m.e.c&&(m.s.r!==m.e.r||m.s.c!==m.e.c));
  for(const target of negotiatedObjects){

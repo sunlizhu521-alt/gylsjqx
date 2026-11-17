@@ -21,7 +21,7 @@ function headerDate(c,date1904){
  const m=/^(\d{4})[年./-](\d{1,2})[月./-](\d{1,2})日?$/.exec(norm(v));
  return m?day(+m[1],+m[2],+m[3]):null;
 }
-function monthHeader(c){if(!c||invalid(c))return null;const m=/^(\d{4})年(\d{1,2})月支付$/.exec(norm(c.v));return m&&day(+m[1],+m[2],1)?{year:+m[1],month:+m[2]}:null;}
+function monthHeader(c){if(!c||invalid(c))return null;const m=/^(\d{4})年(\d{1,2})月(?:支付|付款)$/.exec(norm(c.v));return m&&day(+m[1],+m[2],1)?{year:+m[1],month:+m[2]}:null;}
 const monthKey=({year,month})=>year+'-'+String(month).padStart(2,'0');
 function moneyText(cents){return (cents<0n?'-':'')+(cents<0n?-cents:cents)/100n+'.'+String((cents<0n?-cents:cents)%100n).padStart(2,'0');}
 function selectColumns(table){
@@ -31,6 +31,66 @@ function selectColumns(table){
   if(monthHeader(value))monthColumns.push(c);else if(headerDate(value,table.date1904))dateColumns.push(c);
  }
  return {dateColumns,monthColumns};
+}
+function parseDetailLines(raw,yearsForMonth,money,sourceAddress){
+ const result={sum:null,count:0,complete:true,months:new Map(),payments:[],issues:[]};
+ const lines=raw.replace(/\s+(?=\d+\s*[、.)）．]\s*(?:(?:\d{4}年)?\d{1,2}月|\d{4}[-/.]))/g,'\n').split(/[\r\n;；]+/).map(text).filter(Boolean);
+ if(!lines.length){result.issues.push(sourceAddress+'谈判明细没有可解析的日期和金额');result.complete=false;}
+ for(let i=0;i<lines.length;i++){
+  const line=lines[i].replace(/^\d+\s*[、.)）．]\s*(?=(?:\d{4}年)?\d{1,2}月|\d{4}[-/.])/,'');
+  const match=/^(?:(\d{4})年)?(\d{1,2})月(?:(\d{1,2})日?)?\s*[－—–:：-]\s*(.+)$/.exec(line)||/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\s*[－—–:：-]\s*(.+)$/.exec(line),location=sourceAddress+'第'+(i+1)+'笔';
+  if(!match){result.issues.push(location+'无法完整解析“'+lines[i]+'”，请填写日期－金额');result.complete=false;continue;}
+  const years=yearsForMonth(+match[2]),year=match[1]?+match[1]:years.size===1?[...years][0]:null;
+  if(year===null||!day(year,+match[2],match[3]===undefined?1:+match[3])){result.issues.push(location+(year===null?'日期缺少年份且无唯一表头依据':'日期无效')+'：“'+lines[i]+'”');result.complete=false;continue;}
+  let raw=text(match[4]);const note=/[（(]([\p{L}\s，,。！!、；;：:]+)[）)]$/u.exec(raw);
+  if(note){raw=raw.slice(0,note.index).trim();result.issues.push(location+'括号说明“'+text(note[1])+'”不参与金额汇总');}
+  const value=money(cell(raw.normalize('NFKC').replace(/\s*元$/,'')));
+  if(value.cents===undefined){result.issues.push(location+'金额无效：“'+match[4]+'”');result.complete=false;continue;}
+  result.sum=(result.sum??0n)+value.cents;result.count++;result.payments.push({year,month:+match[2],cents:value.cents});
+  const key=monthKey({year,month:+match[2]});result.months.set(key,(result.months.get(key)??0n)+value.cents);
+ }
+ return result;
+}
+function isMonthBandLabel(value){
+ const label=norm(value),match=/^(\d{4})年(\d{1,2})月(?:付款)?$/.exec(label);
+ return label==='付款月份待核对'||!!(match&&day(+match[1],+match[2],1));
+}
+function paymentHeaderBands(table,money){
+ const {dateColumns,monthColumns}=selectColumns(table);
+ if(!dateColumns.length||!monthColumns.length&&table.headerTopRow==null)return [];
+ const head=c=>table.sheet[column(c)+(table.headerRow+1)],years=new Map(),dateYears=new Map();
+ const remember=(map,date)=>{if(!map.has(date.month))map.set(date.month,new Set());map.get(date.month).add(date.year);};
+ for(const c of monthColumns)remember(years,monthHeader(head(c)));
+ for(const c of dateColumns)remember(dateYears,headerDate(head(c),table.date1904));
+ const evidence=new Map(dateColumns.map(c=>[c,{months:new Set(),uncertain:false}]));
+ const merged=(r,c)=>(table.sheet['!merges']||[]).some(m=>r>=m.s.r&&r<=m.e.r&&c>=m.s.c&&c<=m.e.c&&(m.s.r!==m.e.r||m.s.c!==m.e.c));
+ const counts=values=>{const map=new Map();for(const value of values)map.set(value.cents,(map.get(value.cents)||0)+1);return map;};
+ for(const record of table.records){
+  const plans=dateColumns.map(c=>{
+   const source=table.sheet[column(c)+(record.r+1)];
+   return {c,...(invalid(source)||merged(record.r,c)||merged(table.headerRow,c)?{invalid:true}:money(source))};
+  }).filter(p=>!p.blank&&p.cents!==0n);
+  if(!plans.length)continue;
+  const c=table.map['谈判明细'],source=c===undefined?null:table.sheet[column(c)+(record.r+1)];
+  const parsed=c!==undefined&&!invalid(source)&&!merged(record.r,c)&&typeof source?.v==='string'&&text(source.v)?
+   parseDetailLines(source.v,month=>years.get(month)||dateYears.get(month)||new Set(),money,column(c)+(record.r+1)):null;
+  const payments=parsed?.payments.filter(p=>p.cents!==0n)||[],planCounts=counts(plans),paymentCounts=counts(payments);
+  // Repeated amounts cannot consume the same installment twice; unmatched groups stay visible for review.
+  const complete=parsed?.complete&&plans.every(p=>p.cents!==undefined&&p.cents>=0n)&&payments.every(p=>p.cents>=0n)&&
+   planCounts.size===paymentCounts.size&&[...planCounts].every(([amount,count])=>paymentCounts.get(amount)===count);
+  for(const plan of plans){
+   const entry=evidence.get(plan.c),months=complete?new Set(payments.filter(p=>p.cents===plan.cents).map(monthKey)):new Set();
+   if(months.size===1)entry.months.add([...months][0]);else entry.uncertain=true;
+  }
+ }
+ const bands=[];
+ for(const c of dateColumns){
+  const entry=evidence.get(c),known=!entry.uncertain&&entry.months.size===1,key=known?[...entry.months][0]:null;
+  const label=key?key.slice(0,4)+'年'+Number(key.slice(5))+'月付款':'付款月份待核对',previous=bands.at(-1);
+  if(known&&previous?.endCol===c-1&&previous.label===label)previous.endCol=c;
+  else bands.push({startCol:c,endCol:c,label});
+ }
+ return bands;
 }
 function build(table,money){
  const oaColumn=table.map['对公付款0A流程号'];
@@ -67,21 +127,9 @@ function build(table,money){
   else if(invalid(detailCell)||merged(dc,r)){issues.push(where(dc)+'谈判明细公式结果错误、缺失或跨记录合并，请核实来源');detail.complete=false;}
   else if(typeof detailCell?.v!=='string'||!text(detailCell.v)){issues.push(where(dc)+'谈判明细为空或不是日期金额文本，空白不按零处理');detail.complete=false;}
   else{
-   const lines=detailCell.v.replace(/\s+(?=\d+\s*[、.)）．]\s*(?:(?:\d{4}年)?\d{1,2}月|\d{4}[-/.]))/g,'\n').split(/[\r\n;；]+/).map(text).filter(Boolean);
-   if(!lines.length){issues.push(where(dc)+'谈判明细没有可解析的日期和金额');detail.complete=false;}
-   for(let i=0;i<lines.length;i++){
-    const line=lines[i].replace(/^\d+\s*[、.)）．]\s*(?=(?:\d{4}年)?\d{1,2}月|\d{4}[-/.])/,'');
-    const match=/^(?:(\d{4})年)?(\d{1,2})月(?:(\d{1,2})日?)?\s*[－—–:：-]\s*(.+)$/.exec(line)||/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\s*[－—–:：-]\s*(.+)$/.exec(line),location=where(dc)+'第'+(i+1)+'笔';
-    if(!match){issues.push(location+'无法完整解析“'+lines[i]+'”，请填写日期－金额');detail.complete=false;continue;}
-    const years=new Set([...(months.get(+match[2])||[]),...(dates.get(+match[2])||[])]),year=match[1]?+match[1]:years.size===1?[...years][0]:null;
-    if(year===null||!day(year,+match[2],match[3]===undefined?1:+match[3])){issues.push(location+(year===null?'日期缺少年份且无唯一表头依据':'日期无效')+'：“'+lines[i]+'”');detail.complete=false;continue;}
-    let raw=text(match[4]);const note=/[（(]([\p{L}\s，,。！!、；;：:]+)[）)]$/u.exec(raw);
-    if(note){raw=raw.slice(0,note.index).trim();issues.push(location+'括号说明“'+text(note[1])+'”不参与金额汇总');}
-    const value=money(cell(raw.normalize('NFKC').replace(/\s*元$/,'')));
-    if(value.cents===undefined){issues.push(location+'金额无效：“'+match[4]+'”');detail.complete=false;continue;}
-    detail.sum=(detail.sum??0n)+value.cents;detail.count++;
-    const key=monthKey({year,month:+match[2]});detailMonths.set(key,(detailMonths.get(key)??0n)+value.cents);
-   }
+   const parsed=parseDetailLines(detailCell.v,month=>new Set([...(months.get(month)||[]),...(dates.get(month)||[])]),money,where(dc));
+   Object.assign(detail,{sum:parsed.sum,count:parsed.count,complete:parsed.complete});
+   for(const [key,value]of parsed.months)detailMonths.set(key,value);issues.push(...parsed.issues);
   }
   const range=(columns,label,nonzero)=>{
    const result={...group(),values:new Map()};
@@ -122,5 +170,5 @@ function build(table,money){
  }
  return {headers:HEADERS.slice(),rows,stats};
 }
-return {HEADERS,selectColumns,build};
+return {HEADERS,selectColumns,paymentHeaderBands,isMonthBandLabel,build};
 });
