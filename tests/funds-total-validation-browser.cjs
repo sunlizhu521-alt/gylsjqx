@@ -40,7 +40,8 @@ const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
    assert.deepEqual(preview.headers,grid[0]);assert.equal(preview.rows.length,expectedRows.length);
    for(let r=0;r<expectedRows.length;r++)for(let c=0;c<grid[0].length;c++)assert.equal(preview.rows[r][c],X.utils.format_cell(sheet[X.utils.encode_cell({r:r+1,c})]));
    assert.deepEqual(await snapshot(),preview,'下载后预览与下载前一致');
-   const original=output.Sheets.谈判付款,rows=X.utils.sheet_to_json(original,{header:1,defval:''}),headers=rows[0];
+   const original=output.Sheets.谈判付款,gridWithHeader=X.utils.sheet_to_json(original,{header:1,defval:''}),rows=[gridWithHeader[0],...gridWithHeader.slice(2)],headers=rows[0];
+   assert.equal(original['!autofilter'].ref,original['!ref'].replace(/^A1:/,'A2:'),'筛选在下方日期表头行');
    const col=names=>headers.findIndex(h=>names.includes(h));
    assert.equal(rows.length,4,'原谈判付款三条记录均保留');
    for(let r=1;r<=3;r++){
@@ -49,8 +50,8 @@ const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
     assert.equal(rows[r][col(['申请付款金额','OA-申请付款金额'])],source['D'+(r+1)].v);
    }
    assert.equal(rows[2][col(['备注'])],'保留人工备注');
-   assert.equal(original[X.utils.encode_cell({r:2,c:col(['备注'])})].c[0].t,'不支付记录仍保留批注');
-   assert.equal(original.F2.f,'D2-E2','原金额公式保留');
+   assert.equal(original[X.utils.encode_cell({r:3,c:col(['备注'])})].c[0].t,'不支付记录仍保留批注');
+   assert.equal(original.F3.f,'D3-E3','原金额公式随新增表头下移');
   }
   await verify([2,4],1,true);
   source.O2.v=100;source.P2.v=0;await upload('negotiated');await verify([2,4],1);

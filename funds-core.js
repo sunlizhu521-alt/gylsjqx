@@ -182,14 +182,32 @@ function batchCommentPayment(source,amount){
  }
  return {paid:paid.length>0&&!conflicts.length,conflict:conflicts.length>0,text:[...new Set([...paid,...conflicts])].join('；'),applicationDates};
 }
-function table(input,sheetName,required,ignoredHeaders=[],optionalHeaders=[]){
- const sheet=input.book.Sheets[sheetName];if(!sheet)throw Error(input.name+'：缺少工作表 '+sheetName);
+function table(input,sheetName,required,ignoredHeaders=[],optionalHeaders=[],monthHeaderLayout=false){
+ let sheet=input.book.Sheets[sheetName];if(!sheet)throw Error(input.name+'：缺少工作表 '+sheetName);
  // WPS can extend !ref to XFD solely because of formatting. Keep all real values/formulas.
  const points=Object.keys(sheet).filter(a=>/^[A-Z]+[1-9]\d*$/.test(a)&&(sheet[a]?.f||sheet[a]?.v!==null&&sheet[a]?.v!==undefined&&sheet[a]?.v!=='')).map(a=>X.utils.decode_cell(a));
  const range=points.reduce((range,p)=>({s:{r:Math.min(range.s.r,p.r),c:Math.min(range.s.c,p.c)},e:{r:Math.max(range.e.r,p.r),c:Math.max(range.e.c,p.c)}}),{s:points[0]||{r:0,c:0},e:points[0]||{r:0,c:0}});
  if((range.e.r-range.s.r+1)*(range.e.c-range.s.c+1)>2000000)throw Error(sheetName+'：数据范围过大');
- let headerRow=-1,map,headers;
- for(let r=range.s.r;r<=Math.min(range.e.r,range.s.r+29);r++){
+ let headerRow=-1,headerTopRow=null,map,headers;
+ if(monthHeaderLayout)for(let r=range.s.r;r<Math.min(range.e.r,range.s.r+29);r++){
+  const merges=sheet['!merges']||[],vertical=merges.filter(m=>m.s.r===r&&m.e.r===r+1&&m.s.c===m.e.c);
+  if(!required.every(key=>vertical.some(m=>canonical(sheet[X.utils.encode_cell(m.s)]?.v)===key)))continue;
+  const copied={...sheet},conflicts=[];
+  for(const merge of vertical){
+   const upper=sheet[X.utils.encode_cell(merge.s)],address=X.utils.encode_cell(merge.e),lower=sheet[address];
+   if(lower?.f||lower?.t==='e'||norm(lower?.v)&&norm(lower.v)!==norm(upper?.v))conflicts.push(address);
+   copied[address]=clone(upper);
+  }
+  const columns=FundsTotalValidation.selectColumns({sheet:copied,range,headerRow:r+1,date1904:!!input.book.Workbook?.WBProps?.date1904});
+  if(!columns.dateColumns.length)continue;
+  const banded=columns.dateColumns.every(c=>{
+   const merge=merges.find(m=>m.s.r===r&&m.e.r===r&&m.s.c<=c&&m.e.c>=c),upper=sheet[X.utils.encode_cell({r,c:merge?.s.c??c})];
+   const label=/^(\d{4})年(\d{1,2})月$/.exec(norm(upper?.v)),parsed=date(copied[X.utils.encode_cell({r:r+1,c})],!!input.book.Workbook?.WBProps?.date1904);
+   return upper?.t!=='e'&&!(upper?.f&&(upper.t==='z'||upper.v==null||upper.v===''))&&label&&+label[1]>=1900&&+label[1]<=9999&&+label[2]>=1&&+label[2]<=12&&!parsed.invalid&&parsed.v!==''&&X.SSF.parse_date_code(parsed.v).m===+label[2];
+  });
+  if(banded){if(conflicts.length)throw Error(sheetName+'：双层表头合并范围内 '+conflicts.join('、')+' 含不同内容或公式，请核实后重新上传');sheet=copied;headerTopRow=r;break;}
+ }
+ for(let r=headerTopRow===null?range.s.r:headerTopRow+1;r<=Math.min(range.e.r,range.s.r+29);r++){
   const h={},hs=[];for(let c=0;c<=range.e.c;c++){const cc=sheet[X.utils.encode_cell({r,c})],key=canonical(cc?.v);hs.push(str(cc?.w??cc?.v));if(!ignoredHeaders.includes(key)&&(required.includes('流程编号')?OA_FIELDS.includes(key)||OA_PROGRESS_FIELDS.includes(key):relevant.has(key)||optionalHeaders.includes(key)))(h[key]??=[]).push(c);}
   if(required.every(k=>h[k])){headerRow=r;map=h;headers=hs;break;}
  }
@@ -204,7 +222,7 @@ function table(input,sheetName,required,ignoredHeaders=[],optionalHeaders=[]){
   else{if(/^(?:合计|总计|小计)$/.test(supplier))continue;if(!supplier&&!oa&&!str(values['流程编码']?.v)&&!str(values['OA合同编号']?.v)&&(amount==null||amount===''))continue;}
   records.push({id:sheetName+'!'+(r+1),r,values,source:{file:input.name,sheet:sheetName,row:r+1},date1904:!!input.book.Workbook?.WBProps?.date1904,owner:sheetName.replace(/^对账明细[-－—]?/,'')});
  }
- return {sheetName,sheet,range,headerRow,map,headers,records,name:input.name,date1904:!!input.book.Workbook?.WBProps?.date1904};
+ return {sheetName,sheet,range,headerRow,headerTopRow,map,headers,records,name:input.name,date1904:!!input.book.Workbook?.WBProps?.date1904};
 }
 function oneTable(input,required,optionalHeaders=[]){
  const found=[];for(const name of input.book.SheetNames){try{found.push(table(input,name,required,[],optionalHeaders));}catch(e){if(!e.message.includes('找不到表头'))throw e;}}
@@ -241,7 +259,7 @@ function build(inputs,decisions={}){
  for(const role of ['ledger','applications','negotiated','oa'])if(!inputs[role]?.book)throw Error('请上传全部四份文件');
  const candidates=negotiatedSheets(inputs.negotiated.book),selected=inputs.negotiated.sheetName||(candidates.length===1?candidates[0]:'');
  if(!selected||!candidates.includes(selected))throw Error(candidates.length?'请选择包含“谈判付款”的工作表':'未找到名称包含“谈判付款”的工作表');
- const negotiated=table(inputs.negotiated,selected,['供应商名称','申请付款金额'],['提交付款申请单日期','提交时间汇总','付款自然周']);
+ const negotiated=table(inputs.negotiated,selected,['供应商名称','申请付款金额'],['提交付款申请单日期','提交时间汇总','付款自然周'],[],true);
  const applications=oneTable(inputs.applications,['供应商名称','申请付款金额'],['是否OA备注','是否已付款']);
  const flow=oneTable(inputs.oa,['流程编号']);
  const ledgerTables=PEOPLE.map(person=>{
@@ -435,6 +453,13 @@ function build(inputs,decisions={}){
    }
   }
   planDates.set(c,parsed);
+ }
+ const headerBands=[];
+ if(selectedPlanColumns.dateColumns.length&&selectedPlanColumns.monthColumns.length)for(const c of selectedPlanColumns.dateColumns){
+  const parsed=planDates.get(c);if(parsed.invalid||parsed.v==='')continue;
+  const parts=X.SSF.parse_date_code(parsed.v),label=parts.y+'年'+parts.m+'月',previous=headerBands.at(-1);
+  if(previous&&previous.endCol+1===c&&previous.label===label)previous.endCol=c;
+  else headerBands.push({startCol:c,endCol:c,label});
  }
  const batchPlansByRow=new Map(),batchPlans=[];
  const merges=negotiated.sheet['!merges']||[],mergedAt=(r,c)=>merges.find(m=>r>=m.s.r&&r<=m.e.r&&c>=m.s.c&&c<=m.e.c&&(m.s.r!==m.e.r||m.s.c!==m.e.c));
@@ -997,7 +1022,7 @@ function build(inputs,decisions={}){
   if(notes.length&&!isReapplication(application)){const source=application.source;reviewRows.push([cell(type||'待核对'),values['供应商名称'],values['付款主体'],values['申请付款金额'],cell('已提交'),cell('付款进度核对：'+(sourceText(reference)||'OA号空白')+'。\n'+[...new Set(notes.map(note=>note.replace(/[。；\s]+$/u,'')))].join('。\n')+'。'),cell(source.file),cell(source.sheet),cell(source.row),values['跟单员']]);}
   return PROGRESS_HEADERS.map(h=>values[h]);
  });
- return {totalValidation:FundsTotalValidation.build(negotiated,money),progressHeaders:[...PROGRESS_HEADERS],progressRows,progressEvidence,normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,batchComments,applicationBatchMatches,highlights:{negotiatedCells:[...highlightedNegotiated],negotiatedPaidCells:[...highlightedPaid],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,sourceRange:negotiated.range,batchLayout,batchPlans,batchYearAdjustments,headers:negHeaders,rows,updates,columnOrder,managedColumns},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
+ return {totalValidation:FundsTotalValidation.build(negotiated,money),progressHeaders:[...PROGRESS_HEADERS],progressRows,progressEvidence,normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,batchComments,applicationBatchMatches,highlights:{negotiatedCells:[...highlightedNegotiated],negotiatedPaidCells:[...highlightedPaid],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,headerTopRow:negotiated.headerTopRow,headerBands,sourceRange:negotiated.range,batchLayout,batchPlans,batchYearAdjustments,headers:negHeaders,rows,updates,columnOrder,managedColumns},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
 }
 return {PEOPLE,PROGRESS_HEADERS,OUTPUT_SHEETS,TOTAL_VALIDATION_HEADERS,outputSheetPlan,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText};
 });

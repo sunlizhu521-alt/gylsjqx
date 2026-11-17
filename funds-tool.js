@@ -52,11 +52,17 @@
   }
   function preview(id, headers, rows, date1904=false) {
     const table = document.createElement('table'), head = table.createTHead().insertRow(), body = table.createTBody();
+    const bands=id==='negotiatedPreview'?(result?.negotiated.headerBands||[]):[],lowerHead=bands.length?table.tHead.insertRow():null;
+    if(lowerHead)table.classList.add('month-header-preview');
     const appliedRows = new Set(result?.highlights?.normalRows || []), appliedCells = new Set(result?.highlights?.negotiatedCells || []), paidCells = new Set(result?.highlights?.negotiatedPaidCells || []);
     const singleLineHeaders=['流程编号','付款自然周','申请付款的日期',...(id==='progressPreview'?['对公付款OA号','申请日期','应付时间']:[]),...(id==='normalPreview'?['对公付款0A流程号','应付时间','预估时间','开票时间','OA合同编号']:[])];
     const hiddenColumns=headers.map(title=>id==='normalPreview'&&FundsCore.NORMAL_HIDDEN_HEADERS.includes(title));
     const flowColumn=headers.map(title=>singleLineHeaders.includes(String(title).normalize('NFKC').replace(/\s+/g,'')));
-    for (const [i,title] of headers.entries()) { const th = document.createElement('th'); th.textContent = title;th.hidden=hiddenColumns[i];if(flowColumn[i])th.className='flow-code'; head.append(th); }
+    for (const [i,title] of headers.entries()) {
+      const th=document.createElement('th'),band=bands.find(b=>i>=b.startCol&&i<=b.endCol);th.textContent=title;th.hidden=hiddenColumns[i];if(flowColumn[i])th.className='flow-code';
+      if(band){if(i===band.startCol){const month=document.createElement('th');month.textContent=band.label;month.colSpan=band.endCol-band.startCol+1;head.append(month);}lowerHead.append(th);}
+      else{if(lowerHead)th.rowSpan=2;head.append(th);}
+    }
     for (const [r,row] of rows.slice(0,100).entries()) {
       const tr = body.insertRow();
       for (let i=0;i<headers.length;i++){
@@ -157,7 +163,8 @@
         const totalRows=result.totalValidation.rows.map((_,r)=>result.totalValidation.headers.map((_,c)=>totalSheet[XLSX.utils.encode_cell({r:r+1,c})]));
         preview('totalValidationPreview',result.totalValidation.headers,totalRows);
         const sheet = saved.Sheets['谈判付款'];
-        const rows = result.negotiated.rows.map((_,index)=>result.negotiated.headers.map((_,col)=>sheet[XLSX.utils.encode_cell({r:index+result.negotiated.headerRow+1,c:col})]));
+        const exportedHeaderRow=result.negotiated.headerRow+(result.negotiated.headerBands?.length&&result.negotiated.headerTopRow==null?1:0);
+        const rows = result.negotiated.rows.map((_,index)=>result.negotiated.headers.map((_,col)=>sheet[XLSX.utils.encode_cell({r:index+exportedHeaderRow+1,c:col})]));
         preview('negotiatedPreview',negotiatedHeaders,rows,Boolean(saved.Workbook?.WBProps?.date1904));
         preparedBlob = blob;
         $('status').textContent = '核对及导出检查已完成，预览与下载使用同一份结果。';
