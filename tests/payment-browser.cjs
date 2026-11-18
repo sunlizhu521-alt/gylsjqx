@@ -23,7 +23,7 @@ const base = (extra = {}) => ({
     const downloadLog = []; page.on('download', d => downloadLog.push(d.suggestedFilename()));
     await page.goto(process.env.QA_URL || 'http://127.0.0.1:8899/');
     assert.equal(await page.title(), '供应链数据清洗');
-    assert.match(await page.locator('#toolTitle').innerText(), /资金整理/);
+    assert.match(await page.locator('#toolTitle').innerText(), /付款节奏跟进/);
     await page.locator('[data-tool="payment"]').click();
     assert.equal(await page.locator('#embeddedTools iframe[data-tool="funds"]').isVisible(), false);
     async function upload(rows, options = {}) {
@@ -69,6 +69,10 @@ const base = (extra = {}) => ({
     }
     assert.equal(await page.locator('#paymentGenerate + #paymentDownloadWord').count(), 1);
     await upload([base({合同总金额:'',已付金额:'  ',票据状态:'未开票',应付时间:46328.5,付款分类:'加急 AP00027464（￥175714.10） AP00027463（￥7049.90） AP00027462（￥-89156.00）',备注:'原备注不输出',对接人:'张三'})], {keepDefault:true});
+    await generate();
+    assert.match(await page.locator('#paymentStatus').innerText(), /备注.*8 磅.*无法单行/);
+    assert.equal(await page.locator('[data-payment-download="docx"]').isDisabled(), true);
+    await upload([base({合同总金额:'',已付金额:'  ',票据状态:'未开票',应付时间:46328.5,付款分类:'加急',备注:'原备注不输出',对接人:'张三'})], {keepDefault:true});
     const direct = await downloadPrint('11月6日付款申请单-打印.docx');
     assert.match(await page.locator('#paymentStatus').innerText(), /已开始下载合并 Word，共 1 个付款主体/);
     const sample = await save('docx', 'synthetic-single'); await save('pdf', 'synthetic-single');
@@ -84,9 +88,10 @@ const base = (extra = {}) => ({
     assert.equal(docStats.cells[4], '/'); assert.equal(docStats.cells[5], '/'); assert.equal(docStats.cells[7], '已开票');
     assert.equal(docStats.cells[8], '货款，11月2日前付款');
     assert.ok(docStats.text.includes('2026年11月06日'));
-    assert.doesNotMatch(docStats.text, /未开票|原备注不输出/);
-    assert.ok(docStats.sizes.length > 0 && docStats.sizes.every(size => size === 21), 'single-page payment details use clear 10.5pt text');
-    assert.ok(docStats.text.includes('AP00027462（￥-89156.00）-张三'));
+    assert.doesNotMatch(docStats.text, /未开票/);
+    assert.ok(docStats.text.includes('原备注不输出'));
+    assert.ok(docStats.sizes.length > 0 && docStats.sizes.every(size => size >= 16 && size <= 18), 'payment details stay between 8 and 9pt');
+    assert.ok(docStats.text.includes('加急-测试人-原备注不输出'));
     assert.ok(docStats.widths[9] > docStats.widths[4], 'long remarks receive more width than empty amount columns');
     assert.ok(docStats.widths.every(v => v > 0));
     for (const text of ['贰仟贰佰零伍元整', '☑ 采购货款', '☑ 对公转账', '三、审批意见', '四、财务办结记录', '整体付款凭证：详见银行付款单', '0012 3456 7890 1234']) assert.ok(docStats.text.includes(text), text);
@@ -107,7 +112,7 @@ const base = (extra = {}) => ({
     await upload([base({应付时间:44866.5,付款分类:'正常付款',对接人:'张三',备注:'原备注不输出',合同总金额:0,已付金额:0})], {date1904:true});
     const detailCells = await page.locator('#paymentGroups tbody tr').first().locator('td').allTextContents();
     assert.equal(detailCells[4], '0'); assert.equal(detailCells[5], '0');
-    assert.equal(detailCells[8], '货款，11月2日前付款'); assert.equal(detailCells[9], '正常付款-张三');
+    assert.equal(detailCells[8], '货款，11月2日前付款'); assert.equal(detailCells[9], '正常付款-测试人-原备注不输出');
     await upload([base({应付时间:'日期不明确'})]);
     assert.match(await page.locator('#paymentGroups').innerText(), /应付时间.*请核对付款期限/);
     await upload([base({ 本次申请付款金额: '' })]);
@@ -127,7 +132,7 @@ const base = (extra = {}) => ({
     assert.equal(await page.locator('[data-confirm]').count(), 0);
     assert.doesNotMatch(await page.locator('#paymentGroups').innerText(), /行付款总金额/);
     assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
-    await upload([base({本次申请付款金额:0,对接人:'ZERO-OMIT'}),base({本次申请付款金额:'0.01',对接人:'KEEP-ONE',开户银行及账号:'未知银行原文'}),base({本次申请付款金额:'2.20',对接人:'KEEP-TWO'})]); await generate();
+    await upload([base({本次申请付款金额:0,备注:'ZERO-OMIT'}),base({本次申请付款金额:'0.01',备注:'KEEP-ONE',开户银行及账号:'未知银行原文'}),base({本次申请付款金额:'2.20',备注:'KEEP-TWO'})]); await generate();
     assert.doesNotMatch(await page.locator('#paymentGroups').innerText(), /银行信息无法明确识别|ZERO-OMIT/);
     assert.match(await page.locator('#paymentGroups').innerText(), /2 笔/);
     const filtered = await save('docx','zero-filtered'); await save('pdf','zero-filtered');
@@ -218,12 +223,12 @@ const base = (extra = {}) => ({
     await page.locator('#paymentClearDirectory').click();
     assert.match(await page.locator('[data-reference="directory"]').innerText(), /未引用/);
     assert.equal(await page.locator('[data-payment-download="docx"]').isDisabled(),true);
-    const stress = [base({ 付款主体: '单笔主体' }), ...Array.from({ length: 30 }, (_, i) => base({ 付款主体: '多笔主体', 对接人: `记录${i+1}`, 本次申请付款金额: '0.01' })), ...Array.from({ length: 45 }, (_, i) => base({ 付款主体: '短明细主体', 开户银行及账号: '测试银行 0012 3456', 本次申请付款金额: '1.10', 对接人: `记录${i+1}` }))];
+    const stress = [base({ 付款主体: '单笔主体' }), ...Array.from({ length: 30 }, (_, i) => base({ 付款主体: '多笔主体', 备注: `记录${i+1}`, 本次申请付款金额: '0.01' })), ...Array.from({ length: 45 }, (_, i) => base({ 付款主体: '短明细主体', 开户银行及账号: '测试银行 0012 3456', 本次申请付款金额: '1.10', 备注: `记录${i+1}` }))];
     await upload(stress); await generate();
     const subjectPageCounts = await page.locator('#paymentPages .payment-preview').evaluateAll(cards => cards.map(card => card.querySelectorAll('canvas').length));
     const totalPages = subjectPageCounts.reduce((sum, count) => sum + count, 0);
     assert.equal(subjectPageCounts.length, 3); assert.equal(subjectPageCounts[0], 1);
-    assert.ok(subjectPageCounts[1] > 1 && subjectPageCounts[2] > 1, 'crowded subjects paginate without shrinking details below 9pt');
+    assert.ok(subjectPageCounts[1] > 1 && subjectPageCounts[2] > 1, 'crowded subjects paginate without shrinking details below 8pt');
     assert.match(await page.locator('#paymentStatus').innerText(), new RegExp(`已生成 ${totalPages} 页，共 3 个付款主体`));
     assert.match(await page.locator('#paymentPages').innerText(), /已自动分页/);
     await save('docx', 'stress'); const pdfPath = await save('pdf', 'stress');

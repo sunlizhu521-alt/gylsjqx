@@ -43,7 +43,7 @@ test('blank optional total is allowed but does not supply output total', () => {
 test('slash and blank fields stay distinct from zero; bank text stays exact', () => {
   const bank='收款银行\n账号 0012 3456\n行号 123456';
   const a=C.analyze(C.required,[row({开户银行及账号:bank})]);
-  assert.equal(a.groups[0].rows[0].已付金额,'/');assert.equal(a.groups[0].rows[0].备注,'');assert.equal(a.groups[0].rows[0].开户银行及账号,bank);
+  assert.equal(a.groups[0].rows[0].已付金额,'/');assert.equal(a.groups[0].rows[0].备注,'测试人');assert.equal(a.groups[0].rows[0].开户银行及账号,bank);
 });
 test('conflicting subject information requires a new choice rather than first row wins', () => {
   const a=C.analyze(C.required,[row(),row({_row:3,经办人:'另一人'})]);
@@ -88,7 +88,7 @@ test('blank contract and paid amounts become slashes without changing zero or so
     assert.equal(source['合同总金额'], value);
     assert.equal(source['已付金额'], value);
     assert.equal(output['开户银行及账号'], '');
-    assert.equal(output['备注'], '');
+    assert.equal(output['备注'], '测试人');
   }
 });
 test('invoice status is always issued and source records stay unchanged', () => {
@@ -210,11 +210,11 @@ test('付款总金额列可以完全缺失，总额仅取本次申请付款金�
  const b=C.analyze([...C.required,'付款总金额'],[row({付款总金额:'#DIV/0!'})]);assert.deepEqual(b.errors,[]);assert.equal(b.groups[0].total,220500n);
 });
 
-test('付款分类与对接人合并到备注，不使用旧备注、空值不加连接符且不修改原始记录',()=>{
- for(const [note,contact,expected] of [['加急','张三','加急-张三'],['','张三','张三'],['加急','','加急'],[null,undefined,''],['  加急  ',' 张三 ','加急-张三'],[0,'张三','0-张三'],['/','张三','/-张三']]){
-  const source=row({付款分类:note,对接人:contact,备注:'原备注不输出'});
+test('备注按付款分类、经办人、原备注连接，空值不加连接符且不修改原始记录',()=>{
+ for(const [note,handler,original,expected] of [['正常付款','张三','第一批','正常付款-张三-第一批'],['','张三','原备注','张三-原备注'],['加急','','说明','加急-说明'],[null,undefined,null,''],['  加急  ',' 张三 ','  原备注  ','加急-张三-原备注'],[0,'张三',0,'0-张三-0'],['/','张三','/','/-张三-/'],['加急','张三','','加急-张三'],['','','原备注\n第二行','原备注\n第二行']]){
+  const source=row({付款分类:note,经办人:handler,对接人:'不使用的对接人',备注:original});
   const result=C.analyze([...C.required,'付款分类','对接人'],[source]);
-  assert.deepEqual(result.errors,[]);assert.equal(result.groups[0].rows[0].备注,expected);assert.equal(source.付款分类,note);assert.equal(source.备注,'原备注不输出');
+  assert.deepEqual(result.errors,[]);assert.equal(result.groups[0].rows[0].备注,expected);assert.equal(source.付款分类,note);assert.equal(source.经办人,handler);assert.equal(source.备注,original);
   assert.equal(C.analyze([...C.required,'付款分类','对接人'],[source]).groups[0].rows[0].备注,expected);
  }
 });

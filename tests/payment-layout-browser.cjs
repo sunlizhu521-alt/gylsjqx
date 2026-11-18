@@ -12,11 +12,11 @@ function rows(count, subject, prefix, long = false) {
     开户银行及账号: long
       ? '收款单位\n排版测试供应商有限公司\n收款账号\n0012 3456 7890 1234'
       : '单位:测试供应商\n账号:0012345678901234',
-    合同编号: long ? `HT-${prefix}-${String(i + 1).padStart(4, '0')}` : '/',
+    合同编号: long ? `MDST-DGFK202611${String(i + 1).padStart(5, '0')}` : '/',
     合同总金额: '/', 已付金额: '/', 本次申请付款金额: '1.10', 票据状态: '已开票',
     付款事由: long ? '采购配件及运输费用，按已确认对账单支付本批货款。' : '货款',
     付款分类: long ? `正常付款 AP${String(i + 1).padStart(8, '0')}（￥1.10）` : '',
-    对接人: `${prefix}-记录-${String(i + 1).padStart(3, '0')}`, 备注: '',
+    对接人: '不使用的对接人', 备注: `${prefix}-记录-${String(i + 1).padStart(3, '0')}`,
   }));
 }
 
@@ -52,6 +52,8 @@ function rows(count, subject, prefix, long = false) {
           title: text(paragraphs[0]), date: text(paragraphs[1]), metadata: text(tables[0]),
           headers: children(detailRows[0], 'tc').map(text),
           rows: dataRows.map(row => children(row, 'tc').map(text)),
+          singleLineFields: dataRows.every(row => [1,3,6,9].every(col=>children(row, 'tc')[col].getElementsByTagNameNS(ns, 'noWrap').length === 1)),
+          singleLineBreaks: dataRows.reduce((n,row) => n + [1,3,6,9].reduce((count,col)=>count + children(row, 'tc')[col].getElementsByTagNameNS(ns, 'br').length, 0), 0),
           detailSizes: sizes(tables[1]), totalRows: totalRows.map(text),
           footerTables: tables.slice(2).map(text), footerSizes: tables.slice(2).flatMap(sizes),
           footerTitles: paragraphs.filter(p => /审批意见|财务办结记录/.test(text(p))).map(p => ({ text: text(p), sizes: sizes(p) })),
@@ -93,8 +95,9 @@ function rows(count, subject, prefix, long = false) {
     });
 
     const fixtures = [
-      { name: 'single', rows: rows(1, '单条主体', 'S'), singlePage: true, targetSize: 10.5 },
+      { name: 'single', rows: rows(1, '单条主体', 'S'), singlePage: true, targetSize: 9 },
       { name: 'medium', rows: rows(8, '中等明细主体', 'M'), singlePage: true },
+      { name: 'contract', rows: rows(2, '合同编号单行主体', 'C', true).map((r,i)=>({...r,合同编号:r.合同编号+'\n',合同总金额:i?'123456789.01':'/',已付金额:i?'0.00':'/',备注:'原付款备注保留'})), singlePage: true },
       { name: 'long-30', rows: rows(30, '长明细主体', 'L', true), singlePage: false },
       { name: 'short-45', rows: rows(45, '短明细主体', 'T'), singlePage: false },
     ];
@@ -108,6 +111,9 @@ function rows(count, subject, prefix, long = false) {
         group.info['计划付款日期'] = '2026-11-06';
         const layouts = await D.layout(qa.template, group);
         if (!Array.isArray(layouts) || !layouts.length) throw new Error('PaymentDocument.layout must return a nonempty array');
+        for (const layout of layouts) for (const row of layout.blocks.filter(b=>b.type==='table')[1].rows) {
+          for (const cell of row.cells.filter(c=>c.noWrap)) if (cell.ps.some(p=>p.lines.length!==1 || p.overflow)) throw new Error('单行字段发生换行或溢出');
+        }
         qa.cases[fixture.name] = { group, layouts };
         const docx = await D.docx(qa.template, layouts), pdf = await D.pdf(layouts);
         const doc = await qa.inspectDocx(docx), parsedPdf = await PDFLib.PDFDocument.load(await pdf.arrayBuffer());
@@ -149,8 +155,10 @@ function rows(count, subject, prefix, long = false) {
         if (result.pages.length > 1) assert.match(current.date, new RegExp(`第${i + 1}[/／]${result.pages.length}页`));
         for (const value of ['采购履约部', '排版测试人', result.total, result.upper]) assert.ok(current.metadata.includes(value), `${fixture.name} page ${i + 1}: missing metadata ${value}`);
         assert.deepEqual(current.headers, result.expectedHeader, `${fixture.name}: detail headers repeat on every page`);
+        assert.equal(current.singleLineFields, true, `${fixture.name}: supplier, contract, amount and remarks forbid wrapping`);
+        assert.equal(current.singleLineBreaks, 0, `${fixture.name}: single-line fields have no line breaks`);
         assert.ok(current.rows.length > 0, `${fixture.name}: no empty trailing approval page`);
-        assert.ok(current.detailSizes.length > 0 && current.detailSizes.every(size => size >= 9 && size <= 10.5), `${fixture.name}: detail text must stay between 9 and 10.5 pt`);
+        assert.ok(current.detailSizes.length > 0 && current.detailSizes.every(size => size >= 8 && size <= 9), `${fixture.name}: detail text must stay between 8 and 9 pt`);
         if (fixture.targetSize) assert.ok(current.detailSizes.every(size => size === fixture.targetSize), `${fixture.name}: use the clear target font while space is available`);
         assert.equal(current.totalRows.length, last ? 1 : 0, `${fixture.name}: detail total only belongs on the final page`);
         assert.deepEqual(current.footerTables, last ? result.originalFooter : [], `${fixture.name}: original approval and settlement text only belong on the final page`);
@@ -176,7 +184,7 @@ function rows(count, subject, prefix, long = false) {
     await fs.writeFile(path.join(out, 'combined-76-rows.pdf'), Buffer.from(combined.pdf, 'base64'));
     assert.deepEqual(combined.pages, ['single', 'long-30', 'short-45'].flatMap(name => validatedPages.get(name)), 'combined Word preserves all 76 rows and every validated page in subject order');
     assert.equal(combined.pages.flatMap(page => page.rows).length, 76);
-    assert.equal(combined.sections, reports.filter(r => r.name !== 'medium').reduce((sum, r) => sum + r.pages, 0));
+    assert.equal(combined.sections, reports.filter(r => ['single','long-30','short-45'].includes(r.name)).reduce((sum, r) => sum + r.pages, 0));
     assert.equal(combined.pdfPages, combined.sections);
     assert.equal(combined.pages.filter(page => page.footerTables.length).length, 3);
 
@@ -191,6 +199,11 @@ function rows(count, subject, prefix, long = false) {
     }, oversized);
     assert.match(failure, /单条|单行|第\s*2\s*行/, 'an oversized individual row must be identified explicitly');
     assert.match(failure, /无法|过长|过多|超|容纳|拆分/, 'an oversized row must fail instead of shrinking below the readable minimum');
+    for (const field of ['供应商全称','合同编号','备注']) {
+      const input=rows(1,'单行过长测试','U');input[0][field]='过长内容'.repeat(100);
+      const message=await page.evaluate(async input=>{const group=PaymentCore.analyze([...PaymentCore.required,'付款分类','对接人'],input).groups[0];try{await PaymentDocument.layout(window.paymentLayoutQa.template,group);return '';}catch(e){return e.message;}},input);
+      assert.match(message,new RegExp(field));assert.match(message,/8 磅.*无法单行/);
+    }
     assert.deepEqual(errors, []);
     // DOCX sections encode intended pages; render the saved Word files to verify physical pagination.
     const report = { status: 'PASS', cases: reports, combinedRows: 76, combinedDocxSections: combined.sections, combinedPdfPages: combined.pdfPages, oversizedRowError: failure, output: out };

@@ -5,6 +5,7 @@
   const C = PaymentCore;
   const FONT = '"SimSun", "Songti SC", "STSong", serif';
   const PAGE = { width: 841.9, height: 595.3 };
+  const SINGLE_LINE_COLUMNS = new Set([1, 3, 6, 9]);
   const children = (e, name) => [...e.children].filter(c => c.namespaceURI === W && c.localName === name);
   const all = (e, name) => [...e.getElementsByTagNameNS(W, name)];
   const attr = (e, name) => e?.getAttributeNS(W, name);
@@ -113,7 +114,7 @@
     group.rows.forEach((r, i) => {
       const tr = proto.cloneNode(true);
       const values = [String(rowOffset + i + 1), ...C.fields.map(f => f === '本次申请付款金额' ? C.money(r._cents) : f === '开户银行及账号' ? C.bankSummary(r._resolvedBank ?? r[f], r['供应商全称']).value : C.text(r[f]))];
-      children(tr, 'tc').forEach((cell, j) => putText(cell, values[j]));
+      children(tr, 'tc').forEach((cell, j) => putText(cell, SINGLE_LINE_COLUMNS.has(j) ? values[j].replace(/\r\n|[\r\n]/g, ' ') : values[j]));
       ts[1].insertBefore(tr, total);
     });
     putText(children(total, 'tc')[1], `本次申请付款合计（小写）￥${C.money(group.total)}`);
@@ -135,34 +136,35 @@
     }
     return lines;
   }
-  function paragraphModel(p, size, line, width, context, title = false) {
+  function paragraphModel(p, size, line, width, context, title = false, noWrap = false) {
     size = Math.max(1, Math.floor(size * 2) / 2);
     line = Math.ceil(line * 20) / 20;
     const value = paragraphText(p);
     const bold = title || all(p, 'b').some(e => attr(e, 'val') !== '0');
     context.font = `${bold ? 'bold ' : ''}${size}px ${FONT}`;
     const measure = s => context.measureText(s).width;
-    const lines = wrap(value, width * .92, measure);
+    const lines = noWrap ? [value] : wrap(value, width * .92, measure);
     const align = title ? 'center' : attr(all(p, 'jc')[0], 'val') || 'left';
-    return { element: p, value, size, line, bold, align, lines, height: lines.length * line };
+    return { element: p, value, size, line, bold, align, lines, height: lines.length * line, overflow: noWrap && measure(value) > width * .92 };
   }
   function detailWidths(table, width, config, ctx) {
     const rows = children(table, 'tr').slice(0, -1);
     ctx.font = `bold ${Math.max(1, Math.floor(config.table * 2) / 2)}px ${FONT}`;
     const measure = value => Math.max(...String(value).split('\n').map(line => ctx.measureText(line).width));
     const headers = children(rows[0], 'tc');
-    const minimum = headers.map(cell => measure(cellText(cell)) / .92 + config.pad * 2 + 2);
-    const demand = minimum.map((min, col) => {
-      const longest = Math.max(min, ...rows.slice(1).map(row => measure(cellText(children(row, 'tc')[col])) / .92 + config.pad * 2));
-      return Math.sqrt(Math.max(0, longest - min));
-    });
+    const headerWidths = headers.map(cell => measure(cellText(cell)) / .92 + config.pad * 2 + 2);
+    const longest = headerWidths.map((min, col) => Math.max(min, ...rows.slice(1).map(row => measure(cellText(children(row, 'tc')[col])) / .92 + config.pad * 2 + 2)));
+    // Single-line fields reserve their full contents; total/paid columns receive no spare width.
+    const compact = new Set([...SINGLE_LINE_COLUMNS, 4, 5]);
+    const minimum = headerWidths.map((min, col) => compact.has(col) ? longest[col] : min);
+    const demand = minimum.map((min, col) => compact.has(col) ? 0 : Math.sqrt(Math.max(0, longest[col] - min)));
     const base = minimum.reduce((a, b) => a + b, 0), total = demand.reduce((a, b) => a + b, 0);
-    if (base >= width) return minimum.map(v => width * v / base);
-    return minimum.map((v, i) => v + (width - base) * (total ? demand[i] / total : 1 / minimum.length));
+    if (base >= width) return minimum;
+    return minimum.map((v, i) => v + (width - base) * (total ? demand[i] / total : compact.has(i) ? 0 : 1 / (minimum.length - compact.size)));
   }
   function measureLayout(filled, config) {
     const ctx = document.createElement('canvas').getContext('2d');
-    const width = PAGE.width - config.mx * 2, blocks = [];
+    const width = PAGE.width - config.mx * 2, blocks = [], overflowFields = new Set();
     let height = 0, tableIndex = 0, paragraphIndex = 0;
     for (const el of filled.body.children) {
       if (el.localName === 'p') {
@@ -178,14 +180,18 @@
           : tableIndex >= 2 ? { ...config, table: config.footer, tableLine: config.footerLine } : config;
         const raw = children(children(el, 'tblGrid')[0], 'gridCol').map(e => Number(attr(e, 'w')));
         const sum = raw.reduce((a, b) => a + b, 0), grid = tableIndex === 1 ? config.detailGrid || detailWidths(el, width, tableConfig, ctx) : raw.map(w => width * w / sum);
+        if (tableIndex === 1 && grid.reduce((n,w) => n + w, 0) > width + .01) for (const col of SINGLE_LINE_COLUMNS) overflowFields.add(C.fields[col - 1]);
         const rows = children(el, 'tr').map(row => {
           let col = 0;
           const cells = children(row, 'tc').map(cell => {
             const span = Number(attr(all(cell, 'gridSpan')[0], 'val') || 1);
+            const noWrap = tableIndex === 1 && SINGLE_LINE_COLUMNS.has(col) && span === 1;
+            const field = ['序号', ...C.fields][col];
             const cw = grid.slice(col, col + span).reduce((a, b) => a + b, 0); col += span;
-            const ps = children(cell, 'p').map(p => paragraphModel(p, tableConfig.table, tableConfig.tableLine, cw - config.pad * 2, ctx));
+            const ps = children(cell, 'p').map(p => paragraphModel(p, tableConfig.table, tableConfig.tableLine, cw - config.pad * 2, ctx, false, noWrap));
+            if (ps.some(p => p.overflow)) overflowFields.add(field);
             const fill = attr(all(cell, 'shd')[0], 'fill');
-            return { element: cell, span, width: cw, ps, height: ps.reduce((a, p) => a + p.height, 0), fill: fill && /^[0-9a-f]{6}$/i.test(fill) ? '#' + fill : '#ffffff' };
+            return { element: cell, span, width: cw, noWrap, ps, height: ps.reduce((a, p) => a + p.height, 0), fill: fill && /^[0-9a-f]{6}$/i.test(fill) ? '#' + fill : '#ffffff' };
           });
           const minimum = tableIndex >= 2 ? tableConfig.tableLine * 1.1 : tableConfig.tableLine;
           const contentHeight = Math.max(minimum, ...cells.map(c => c.height)) + config.pad * 2 + tableConfig.tableLine * .15;
@@ -198,13 +204,13 @@
         tableIndex++;
       }
     }
-    return { doc: filled.doc, domBody: filled.body, ...config, blocks, width, height };
+    return { doc: filled.doc, domBody: filled.body, ...config, blocks, width, height, overflowFields: [...overflowFields] };
   }
   async function layout(template, group) {
     await document.fonts.ready;
-    let config = { body: 12, table: 11, bodyLine: 15, tableLine: 14, detail: 10.5, detailLine: 13,
+    let config = { body: 12, table: 11, bodyLine: 15, tableLine: 14, detail: 9, detailLine: 11.5,
       footer: 7.5, footerLine: 9, mx: 17.01, my: 14.17, pad: 1.4 };
-    const fits = result => result.height <= PAGE.height - result.my * 2 - 24;
+    const fits = result => !result.overflowFields.length && result.height <= PAGE.height - result.my * 2 - 24;
     function page(start, end, final = true) {
       const filled = fill(template, { ...group, rows: group.rows.slice(start, end) }, start);
       if (!final) {
@@ -217,13 +223,14 @@
     }
     let result = page(0, group.rows.length);
     if (fits(result)) return [result];
-    // Compact supporting sections first; detail text never drops below 9 pt.
+    // Compact supporting sections first; detail text never drops below 8 pt.
     config = { ...config, footer: 6.5, footerLine: 8, mx: 11.34, my: 11.34, pad: 1 };
-    for (const detail of [10.5, 10, 9.5, 9]) {
+    for (const detail of [9, 8.5, 8]) {
       config = { ...config, detail, detailLine: detail + 2.5 };
       result = page(0, group.rows.length);
       if (fits(result)) return [result];
     }
+    if (result.overflowFields.length) throw new Error(`付款明细的${result.overflowFields.join('、')}内容过长，8 磅仍无法单行排入 A4。请缩短对应内容后重新生成；未截断内容。`);
     // Fixed columns keep continuation pages aligned and page-height search monotonic.
     config = { ...config, detailGrid: result.blocks.filter(b => b.type === 'table')[1].grid };
     const pages = [];
@@ -290,6 +297,7 @@
         prop(rp, 'trHeight', { val: Math.ceil((row.contentHeight - result.pad * 2) * 20), hRule: 'atLeast' });
         for (const cell of row.cells) {
           const cp = prop(cell.element, 'tcPr'); remove(cp, ['tcMar', 'noWrap', 'tcFitText']);
+          if (cell.noWrap) prop(cp, 'noWrap');
           prop(cp, 'tcW', { w: Math.floor(cell.width * 20), type: 'dxa' });
           prop(cp, 'vAlign', { val: 'center' });
           cell.ps.forEach(styleParagraph);

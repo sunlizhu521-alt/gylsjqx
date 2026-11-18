@@ -167,7 +167,7 @@
       const row = { ...record };
       for (const field of ['合同总金额', '已付金额']) if (!text(row[field]).trim()) row[field] = '/';
       row['票据状态'] = '已开票';
-      row['备注'] = [record['付款分类'], record['对接人']].map(v => text(v).trim()).filter(Boolean).join('-');
+      row['备注'] = [record['付款分类'], record['经办人'], record['备注']].map(v => text(v).trim()).filter(Boolean).join('-');
       try {
         const due = text(record['应付时间'] ?? record['应付款时间']).trim();
         const parsed = due && due !== '/' ? date(due.replace(/[ T]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/, '')) : '';
