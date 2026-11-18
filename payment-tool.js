@@ -292,7 +292,8 @@
     if (!a) { host.replaceChildren(); return; }
     if (a.errors.length) { host.innerHTML = `<div class="payment-error"><strong>请先修正以下问题后重新上传：</strong><ul>${a.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>`; return; }
     host.innerHTML = a.groups.map((g, i) => `<section class="payment-group" data-group="${i}">
-      <h3>${esc(g.subject)} <small>${g.rows.length} 笔 · 合计 ￥${C.money(g.total)}</small></h3>
+      <h3>${g.subject === '待核对' ? '核对付款主体' : esc(g.subject)} <small>${g.rows.length} 笔 · 合计 ￥${C.money(g.total)}</small></h3>
+      ${g.subject === '待核对' ? `<p class="payment-warning">请核对原表第 ${g.rows.map(r => esc(r._row)).join('、')} 行的“付款主体”，填写实际付款公司后重新上传。</p>` : ''}
       <p>大写：${C.upper(g.total)}</p>
       <div class="payment-info-grid">${[...C.infoFields, '计划付款日期'].map(f => `<label>${f}<input data-field="${f}" type="${f.includes('日期') ? 'date' : 'text'}" value="${esc(g.info[f])}" ${f !== '计划付款日期' ? 'required' : ''} />${g.choices[f]?.length > 1 ? `<span class="payment-error">源表不一致：${g.choices[f].map(v => esc(v || '空白')).join('、')}。请填写统一值。</span>` : ''}</label>`).join('')}</div>
       ${g.bankChecks?.length ? `<div class="payment-warning">${g.bankChecks.map(esc).join('<br>')}<label><input type="checkbox" data-bank-confirm ${g.bankConfirmed ? 'checked' : ''} />已对照下方原始明细和引用银行信息，确认使用供应商名录</label></div>` : ''}
