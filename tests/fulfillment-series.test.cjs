@@ -16,7 +16,7 @@ function orders(items){
  return {rows:items.map(item=>C.COLUMNS.map(key=>{const value=({...defaults,...item})[key]??'';return typeof value==='object'?{...value}:{t:typeof value==='number'?'n':'s',v:value};})),sources:items.map(item=>item.source),counts:[],warnings:[]};
 }
 
-test('系列对比按五维联合键精确汇总并按差异降序排序，不改输入',()=>{
+test('系列对比按五维联合键精确汇总，同人集中并在人员内按差异降序，不改输入',()=>{
  assert.deepEqual(C.SERIES_COLUMNS,HEADERS);
  const before=snapshot([
   ['甲','国内事业部','店铺','S',0.1],['甲','国内事业部','店铺','S',0.2],
@@ -30,10 +30,11 @@ test('系列对比按五维联合键精确汇总并按差异降序排序，不�
  ]);
  const original=structuredClone({before,current}),rows=C.seriesComparison(before,current);
  assert.deepEqual(values(rows).map(row=>row.slice(0,9)),[
-  ['丙','国内事业部','店铺','','S',0,5,5,''],['甲','国内事业部','店铺','','新系列',0,4,4,''],
+  ['甲','国内事业部','店铺','','新系列',0,4,4,''],
   ['甲','国内事业部','新渠道','','S',0,3,3,''],['甲','海外事业一部','店铺','','S',0,2,2,''],
   ['甲','国内事业部','店铺','','S',0.3,0.5,0.2,''],
-  ['乙','国内事业部','店铺','','S',5,0,-5,''],['甲','国内事业部','店铺','','旧系列',7,0,-7,'']
+  ['甲','国内事业部','店铺','','旧系列',7,0,-7,''],['丙','国内事业部','店铺','','S',0,5,5,''],
+  ['乙','国内事业部','店铺','','S',5,0,-5,'']
  ]);
  assert.deepEqual({before,current},original);
  for(const row of rows){assert(row.slice(0,5).every(c=>c.t==='s'));assert(row.slice(5,8).every(c=>c.t==='n'));assert.equal(row[8].t,'s');assert.equal(row[8].v,'');assert.equal(row[9].t,'s');if(row[7].v>0)assert(row[9].v.trim());else assert.equal(row[9].v,'');}
@@ -325,6 +326,22 @@ test('差异按正负和小数值降序，同值顺序稳定，无上期仍保�
  assert.deepEqual(X.utils.sheet_to_json(saved.Sheets.系列对比,{header:1,defval:''}).slice(1).map(row=>row[7]),[2,2,0.2,-1,-2]);
  const close=snapshot([['甲','部','渠','较小','900719925474090.2'],['甲','部','渠','较大','900719925474090.3']]);
  assert.deepEqual(C.seriesComparison(snapshot([]),close).map(row=>row[4].v),['较大','较小'],'相邻十进制值即使Number结果相同，也按原精确差值排序');
+});
+
+test('交错采购人按首次出现分组，组内差异降序，同值及首期顺序稳定，空人和上期独有人员保留',()=>{
+ const previous=snapshot([['操思敏','部','渠','旧',3]]);
+ const current=snapshot([
+  ['李奇','部','渠','低',1],['徐英','部','渠','高',10],[' 李奇 ','部','渠','小数',2.5],
+  ['','部','渠','负',-3],['徐英','部','渠','低',-1],['李奇','部','渠','同值',2.5],['','部','渠','正',4]
+ ]);
+ const input=structuredClone({previous,current}),rows=C.seriesComparison(previous,current);
+ assert.deepEqual(rows.map(row=>[row[0].v,row[4].v,row[7].v]),[
+  ['李奇','小数',2.5],['李奇','同值',2.5],['李奇','低',1],['徐英','高',10],['徐英','低',-1],['','正',4],['','负',-3],['操思敏','旧',-3]
+ ]);
+ assert.deepEqual(C.seriesComparison(null,current).map(row=>[row[0].v,row[4].v]),[
+  ['李奇','低'],['李奇','小数'],['李奇','同值'],['徐英','高'],['徐英','低'],['','负'],['','正']
+ ]);
+ assert.deepEqual({previous,current},input);
 });
 
 test('系列对比按指定十列导出，供应商在渠道后，保留数字、空白上期与差异、I备注和J判断及普通筛选',()=>{

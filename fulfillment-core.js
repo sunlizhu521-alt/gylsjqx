@@ -203,7 +203,13 @@ function seriesComparison(previous,current){
   return [{units,scale,row:[...(b||a).labels.map(v=>({t:'s',v,z:'@'})),previousQuantity,currentQuantity,difference,
    {t:'s',v:'',z:'@'},{t:'s',v:previous&&units>0n?judgment(a,b,scale,units):'',z:'@'}]}];
  });
- if(previous)comparisons.sort((a,b)=>{const scale=Math.max(a.scale,b.scale),left=a.units*10n**BigInt(scale-a.scale),right=b.units*10n**BigInt(scale-b.scale);return left>right?-1:left<right?1:0;});
+ const owners=[...new Set([...after.values(),...before.values()].map(group=>group.labels[0]))];
+ const ownerOrder=new Map(owners.map((owner,index)=>[owner,index]));
+ comparisons.sort((a,b)=>{
+  const order=ownerOrder.get(a.row[0].v)-ownerOrder.get(b.row[0].v);
+  if(order||!previous)return order;
+  const scale=Math.max(a.scale,b.scale),left=a.units*10n**BigInt(scale-a.scale),right=b.units*10n**BigInt(scale-b.scale);return left>right?-1:left<right?1:0;
+ });
  return comparisons.map(item=>item.row);
 }
 function aggregate(result){
