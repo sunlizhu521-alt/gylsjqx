@@ -1,6 +1,23 @@
 (()=>{'use strict';const C=FulfillmentCore,V=FulfillmentValidation,$=id=>document.getElementById(id);let result=null,filename='',sourceBytes=null,validation=null,formulaInfo=null,busy=false;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const divisionButtons=[...document.querySelectorAll('[data-download-division]')];
+const purchaseInput=$('purchase-file'),purchaseReference=$('purchase-reference'),purchaseClear=$('purchase-clear');
+purchaseInput.disabled=false;
+purchaseInput.onchange=async()=>{
+ const file=purchaseInput.files[0];if(!file)return;
+ purchaseInput.disabled=true;purchaseClear.hidden=true;purchaseReference.textContent='正在读取采购订单：'+file.name;
+ try{
+  if(!/\.(xlsx|xls)$/i.test(file.name))throw Error('请选择 .xlsx 或 .xls 文件');
+  if(!file.size)throw Error('文件为空');
+  if(file.size>60*1024*1024)throw Error('文件超过60MB，请缩小后重试');
+  const book=XLSX.read(await file.arrayBuffer(),{type:'array',bookSheets:true});
+  if(!book.SheetNames?.length)throw Error('文件中没有工作表');
+  purchaseReference.textContent=file.name+'\n引用时间：'+new Date().toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
+  purchaseClear.hidden=false;
+ }catch(e){purchaseInput.value='';purchaseReference.textContent='采购订单读取失败：'+file.name+'；'+e.message;}
+ finally{purchaseInput.disabled=false;}
+};
+purchaseClear.onclick=()=>{purchaseInput.value='';purchaseReference.textContent='尚未选择采购订单';purchaseClear.hidden=true;};
 const versionKey='gylsjqx-fulfillment-export-versions',memoryVersions=Object.create(null);
 function savedVersions(){
  const raw=localStorage.getItem(versionKey);
