@@ -1,6 +1,6 @@
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright'),assert=require('node:assert/strict'),fs=require('node:fs/promises');
 const X=require('../vendor/xlsx.full.min.js'),C=require('../fulfillment-core.js');
-const divisions=['海外事业一部','海外事业二部','国内事业部'];
+const divisions=['海外事业一部','海外事业二部','国内事业部','全球招商部'];
 function fixture(departments){
  const book=X.utils.book_new();
  for(const name of [...C.SHEETS,'孙立柱']){
@@ -16,7 +16,7 @@ function fixture(departments){
   await page.goto(new URL('fulfillment.html',process.env.QA_URL||'http://127.0.0.1:8940/').href);
   await page.waitForFunction(()=>!document.getElementById('file').disabled);
   for(const d of divisions)assert(await page.locator('[data-download-division="'+d+'"]').isDisabled());
-  const departments=[...divisions,divisions[0],'海外事业一部附属',''];
+  const departments=[...divisions,divisions[0],'全球招商部','海外事业一部附属','全球招商部附属',''];
   await page.locator('#file').setInputFiles({name:'订单2026.10.23更新版.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:fixture(departments)});
   await page.waitForFunction(()=>!document.getElementById('download').disabled);
   await page.reload();await page.waitForFunction(()=>!document.getElementById('download').disabled);
@@ -50,8 +50,15 @@ function fixture(departments){
   assert.equal(w.Sheets.徐英.Q2.v,'10月陆续交货','原工作表交期保留原文字，汇总表才展开为完整日期');
   await page.locator('#file').setInputFiles({name:'仅国内.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:fixture(['国内事业部'])});
   await page.waitForFunction(()=>!document.getElementById('file').disabled);
-  assert(await page.locator('[data-download-division="海外事业一部"]').isDisabled());assert(await page.locator('[data-download-division="海外事业二部"]').isDisabled());
-  assert(!(await page.locator('[data-download-division="国内事业部"]').isDisabled()));assert.deepEqual(errors,[]);
-  console.log('PASS division-only downloads, exact matching, row order, zero/date/style, cache restore, full export and empty groups');
+  for(const d of divisions.filter(d=>d!=='国内事业部'))assert(await page.locator('[data-download-division="'+d+'"]').isDisabled());
+  assert(!(await page.locator('[data-download-division="国内事业部"]').isDisabled()));
+  const invalid=X.read(fixture(['全球招商部']),{type:'buffer'});
+  invalid.Sheets.徐英[X.utils.encode_cell({r:1,c:C.COLUMNS.indexOf('未交付数量')})]={t:'s',v:'数量不明'};
+  await page.locator('#file').setInputFiles({name:'数量异常.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from(X.write(invalid,{type:'buffer',bookType:'xlsx'}))});
+  await page.waitForFunction(()=>!document.getElementById('file').disabled);
+  assert.match(await page.locator('#quantityStatus').innerText(),/未通过/);
+  for(const d of divisions)assert(await page.locator('[data-download-division="'+d+'"]').isDisabled());
+  assert.deepEqual(errors,[]);
+  console.log('PASS four division-only downloads including 全球招商部, exact matching, row order, zero/date/style, cache restore, full export, empty groups and failed quantity validation');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
