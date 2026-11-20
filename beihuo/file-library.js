@@ -51,6 +51,7 @@ const DETAIL_COLUMNS = [
   { key: "purchaseOrderNo", label: "采购单订单号" },
   { key: "requiredReadyDate", label: "要求货好时间" },
   { key: "minimumOrderQuantity", label: "起订量" },
+  { key: "productionCycle", label: "生产周期" },
   { key: "minimumOrderStatus", label: "起订量是否满足" },
   { key: "stockReason", label: "备货原因" },
 ];
@@ -490,6 +491,7 @@ async function buildDemandAllocationRows(records) {
         quantity,
         requiredReadyDate,
         minimumOrderQuantity,
+        productionCycle: joinUnique(buyerRows.map(item => item.productionCycle)),
         minimumOrderStatus,
         quantityNumber,
         sourceFile: source.fileName,
@@ -652,6 +654,7 @@ function buildPurchaseDivisionIndex(tables) {
     });
     columnMap.materialCode = findOaMaterialCodeColumn(rows[headerIndex], TABLE_FIELD_ALIASES.divisionMaterialCode);
     const correctCodeColumn = findExactHeaderColumnIndex(rows[headerIndex], "正确物料编码");
+    columnMap.productionCycle = findExactHeaderColumnIndex(rows[headerIndex], "生产周期");
     const correctedFormat = correctCodeColumn !== undefined || findExactHeaderColumnIndex(rows[headerIndex], "备货OA物料编码") !== undefined;
     usesCorrectedCodes ||= correctedFormat;
     if (columnMap.materialCode === undefined) return;
@@ -673,6 +676,7 @@ function buildPurchaseDivisionIndex(tables) {
         buyer: getCellValue(row, columnMap.buyer),
         supplierShortName: getCellValue(row, columnMap.supplierShortName),
         supplierName: getCellValue(row, columnMap.supplierName),
+        productionCycle: getCellValue(row, columnMap.productionCycle),
       };
       materialCodes.add(materialKey);
       pushMapArray(byMaterial, materialKey, item);
@@ -1502,6 +1506,7 @@ function getExportColumnWidth(key) {
     quantity: 12,
     requiredReadyDate: 18,
     minimumOrderQuantity: 12,
+    productionCycle: 14,
     minimumOrderStatus: 14,
   }[key] || 14;
 }

@@ -135,15 +135,16 @@ test('original purchase group resolves division candidates and merged codes reta
   context.records = {
     category: allocationRecord([['物料编码', '采购组'], ['OA-X', '组二']], '商品'),
     purchaseDivision: allocationRecord([
-      ['备货OA物料编码', '正确物料编码', '采购组', '采购下单人', '供应商'],
-      ['OA-X', '0001', '组一', '采购一', '供应商甲'],
-      ['OA-X', '0002', '组二', '采购二', '供应商乙'],
-      ['0002', '0002', '其他组', '无关采购', '无关供应商'],
+      ['备货OA物料编码', '正确物料编码', '采购组', '采购下单人', '供应商', '生产周期'],
+      ['OA-X', '0001', '组一', '采购一', '供应商甲', '15天'],
+      ['OA-X', '0002', '组二', '采购二', '供应商乙', '30天'],
+      ['0002', '0002', '其他组', '无关采购', '无关供应商', '60天'],
     ], '产品线明细'),
     demand: allocationRecord([['物料编码', '数量'], ['OA-X', 2]]),
   };
   const rows = await run('buildDemandAllocationRows(records)');
   assert.deepEqual(Array.from(rows, row => [row.materialCode, row.buyer, row.supplierShortName, row.quantityNumber]), [['0002', '采购二', '供应商乙', 2]]);
+  assert.equal(rows[0].productionCycle, '30天', 'cycle follows the original OA code and matching purchase group');
   context.rows = [{ materialCode: '0002', quantityNumber: 2, supplierNames: ['供应商甲'], salesSeries: '系列甲' }, { materialCode: '0002', quantityNumber: 3, supplierNames: ['供应商乙'], salesSeries: '系列甲' }];
   const merged = run('mergeDemandRowsByMaterial(rows)');
   assert.deepEqual(Array.from(merged[0].supplierNames), ['供应商甲', '供应商乙']);
@@ -247,7 +248,7 @@ test('preview and export table headers, rendered values and exported cells follo
     ['物料名称', 'materialName'], ['数量', 'quantity'], ['OA备货流程号', 'oaProcessNo'],
     ['采购分工明细是否存在', 'materialCodeValid'],
     ['今天日期', 'todayDate'], ['天数', 'deliveryDays'], ['供应商反馈交期', 'supplierDeliveryDate'], ['采购单订单号', 'purchaseOrderNo'], ['要求货好时间', 'requiredReadyDate'], ['起订量', 'minimumOrderQuantity'],
-    ['起订量是否满足', 'minimumOrderStatus'], ['备货原因', 'stockReason'],
+    ['生产周期', 'productionCycle'], ['起订量是否满足', 'minimumOrderStatus'], ['备货原因', 'stockReason'],
   ];
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const header = html.match(/<table class="detail-table">([\s\S]*?)<\/thead>/)[1];
@@ -269,7 +270,7 @@ test('per-buyer workbooks preserve rows, reasons, formulas and WPS highlight',()
  context.rows=[{buyer:'甲',quantity:0,stockReason:'需要保留',todayDate:'2026-10-21',deliveryDays:2,supplierDeliveryDate:'2026-10-23'},{buyer:'甲',quantity:3,stockReason:'另一个原因'}];
  const output=run('buildDetailWorkbook(rows)');
  const w=XLSX.read(XLSX.write(output.workbook,{type:'buffer',bookType:'xlsx'}),{type:'buffer'});
- assert.equal(w.Custprops.KSOReadingLayout,true);assert.equal(w.Sheets.备货需求分配明细.S2.v,'需要保留');assert.equal(w.Sheets.备货需求分配明细.J2.v,0);assert.equal(w.Sheets.备货需求分配明细.N2.f,'IF(M2="","",TEXT(DATE(VALUE(LEFT(L2,4)),VALUE(MID(L2,6,2)),VALUE(RIGHT(L2,2)))+M2,"yyyy-mm-dd"))');assert.equal(w.Sheets.备货需求分配明细['!ref'],'A1:S3');
+ assert.equal(w.Custprops.KSOReadingLayout,true);assert.equal(w.Sheets.备货需求分配明细.T2.v,'需要保留');assert.equal(w.Sheets.备货需求分配明细.J2.v,0);assert.equal(w.Sheets.备货需求分配明细.N2.f,'IF(M2="","",TEXT(DATE(VALUE(LEFT(L2,4)),VALUE(MID(L2,6,2)),VALUE(RIGHT(L2,2)))+M2,"yyyy-mm-dd"))');assert.equal(w.Sheets.备货需求分配明细['!ref'],'A1:T3');
 });
 
 test('all exported sheets use single-line text, full-text widths and no-wrap centered styles', () => {
@@ -281,10 +282,10 @@ test('all exported sheets use single-line text, full-text widths and no-wrap cen
   ];
   for (const split of [false, true]) {
     const { workbook } = run(`buildDetailWorkbook(rows, ${split})`);
-    assert.equal(workbook.Sheets[workbook.SheetNames[0]]['!cols'][split ? 19 : 18].wch, 223);
+    assert.equal(workbook.Sheets[workbook.SheetNames[0]]['!cols'][split ? 20 : 19].wch, 223);
     const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer', cellStyles: true });
     const data = reopened.SheetNames.flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1 }).slice(1));
-    assert.deepEqual(data.map(row => [row[6], row[7], row[8], row[9], row[split ? 19 : 18]]), [
+    assert.deepEqual(data.map(row => [row[6], row[7], row[8], row[9], row[split ? 20 : 19]]), [
       ['0001', 'SKU 型号', '第一段 第二段', 0, reason.replace(/\r\n/, ' ')],
       ['0002', '', '一 二 三', 1.5, ''],
     ]);
@@ -335,7 +336,7 @@ test('export borders cover active row/column intersections, including blank cell
   const {workbook}=run('buildDetailWorkbook(rows)'),cell=workbook.Sheets.备货需求分配明细.N2;
   assert.equal(cell.v,'');assert.equal(cell.t,'s');assert.ok(cell.f.includes('TEXT(DATE('));
   context.values=Object.fromEntries(Object.entries(workbook.Sheets.备货需求分配明细).filter(([address])=>/^[A-Z]+\d+$/.test(address)).map(([address,cell])=>[address,cell.v]));
-  const workbookAxes=run('detailExportContentAxes(values,{rowCount:2,columnCount:19})');
+  const workbookAxes=run('detailExportContentAxes(values,{rowCount:2,columnCount:20})');
   assert(workbookAxes.rows.has(2)&&workbookAxes.columns.has(14),'cached-empty date formula is within the active row/header column intersection');
   assert.equal(run('detailExportStyle(2,"supplierDeliveryDate",true)'),'5');
 });
@@ -356,7 +357,7 @@ test('one workbook splits buyers into sheets with complete rows and sheet-local 
   assert.deepEqual([li.G2.v, li.G3.v, xu.G2.v, reopened.Sheets.未填写下单人.G2.v], ['0001', '0003', '0002', '0004']);
   assert.equal(li.H2.v, '001');
   assert.deepEqual([li.J2.t, li.J2.v, li.J2.z, xu.J2.v, li.J3.v], ['n', 0, '0', 1.5, '']);
-  assert.equal(li.T3.v, '原因三');
+  assert.equal(li.U3.v, '原因三');
   assert.equal(li.L2.f, 'TEXT(TODAY(),"yyyy-mm-dd")');
   assert.equal(li.N2.f, 'IF(M2="","",TEXT(DATE(VALUE(LEFT(L2,4)),VALUE(MID(L2,6,2)),VALUE(RIGHT(L2,2)))+M2,"yyyy-mm-dd"))');
   assert.equal(li.N3.f, 'IF(M3="","",TEXT(DATE(VALUE(LEFT(L3,4)),VALUE(MID(L3,6,2)),VALUE(RIGHT(L3,2)))+M3,"yyyy-mm-dd"))');
@@ -365,9 +366,9 @@ test('one workbook splits buyers into sheets with complete rows and sheet-local 
   assert.equal(xu.N2.t, 's');assert.equal(li.L2.t, 's');
   reopened.SheetNames.forEach((name, index) => {
     const sheet = reopened.Sheets[name];
-    assert.equal(sheet['!cols'].length, 20);
+    assert.equal(sheet['!cols'].length, 21);
     assert.equal(sheetShapes[index].rowCount, XLSX.utils.decode_range(sheet['!ref']).e.r + 1);
-    assert.equal(sheetShapes[index].columnCount, 20);
+    assert.equal(sheetShapes[index].columnCount, 21);
   });
 });
 
@@ -677,11 +678,34 @@ test('交期按北京时间加自然日，覆盖零、空值、跨月跨年闰�
 
 test('下载日期为文字且保留TODAY及加天数公式，空值和0均保留，重开不丢失',()=>{
  const {context,run}=loadApp();context.sheet={};context.rows=[{todayDate:'2026-10-15',deliveryDays:20,supplierDeliveryDate:'2026-11-04'},{todayDate:'2026-10-15',deliveryDays:'',supplierDeliveryDate:''},{todayDate:'2026-10-15',deliveryDays:0,supplierDeliveryDate:'2026-10-15'}];
- run('addDeliveryFormulas(sheet,rows)');context.sheet['!ref']='A1:S4';
+ run('addDeliveryFormulas(sheet,rows)');context.sheet['!ref']='A1:T4';
  const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,context.sheet,'测试');const sheet=XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true}).Sheets.测试;
  assert.equal(sheet.L2.f,'TEXT(TODAY(),"yyyy-mm-dd")');assert.equal(sheet.N2.f,'IF(M2="","",TEXT(DATE(VALUE(LEFT(L2,4)),VALUE(MID(L2,6,2)),VALUE(RIGHT(L2,2)))+M2,"yyyy-mm-dd"))');assert.equal(sheet.N3.f,'IF(M3="","",TEXT(DATE(VALUE(LEFT(L3,4)),VALUE(MID(L3,6,2)),VALUE(RIGHT(L3,2)))+M3,"yyyy-mm-dd"))');assert.equal(sheet.N3.v,'');assert.equal(sheet.N4.v,sheet.L4.v);assert.equal(sheet.N2.v,'2026-11-04');assert.equal(sheet.N2.t,'s');assert.equal(sheet.L2.t,'s');assert.equal(sheet.N2.z,'@');assert.equal(sheet.L2.z,'@');
 });
 
+
+test('production cycle follows its exact header and preserves blank, zero and source text in both exports', async () => {
+  const { context, run } = loadApp();
+  const values = ['30天', 0, '', '/', 45];
+  context.records = { demand: allocationRecord([['物料编码', '数量'], ...values.map((_, i) => [`00${i}`, 1])]) };
+  for (const header of ['生产周期', '生产周期备注']) {
+    const division = [['起订量', header, '物料编码', '采购下单人'], ...values.map((value, i) => [5, value, `00${i}`, i % 2 ? '徐英' : '李奇'])];
+    context.records.purchaseDivision = allocationRecord(division, '产品线明细');
+    context.rows = await run('buildDemandAllocationRows(records)');
+    const expected = values.map(value => header === '生产周期' ? String(value) : '');
+    assert.deepEqual(Array.from(context.rows, row => row.productionCycle), expected);
+    for (const split of [false, true]) {
+      const { workbook } = run(`buildDetailWorkbook(rows, ${split})`);
+      const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
+      for (const sheet of Object.values(reopened.Sheets)) {
+        const [headers, ...data] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        const cycle = headers.indexOf('生产周期');
+        assert.equal(cycle, headers.indexOf('起订量') + 1);
+        for (const row of data) assert.equal(row[cycle], expected[Number(row[headers.indexOf('正确物料编码')])]);
+      }
+    }
+  }
+});
 
 test('起订量按表头识别，列移动、零值、空白及异常不会误判', () => {
  const {context,run}=loadApp();

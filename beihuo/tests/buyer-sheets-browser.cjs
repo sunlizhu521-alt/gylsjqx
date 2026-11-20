@@ -22,7 +22,7 @@ function uploadFile(rows, sheetName, name) {
 
     const longPrefix = '非常长的采购下单人名称用于验证工作表名称截断后仍然不会发生重名';
     const buyers = [...Array(23).fill('李奇'), '徐英', '', '甲/乙', '甲:乙', longPrefix + '甲', longPrefix + '乙'];
-    const records = buyers.map((buyer, index) => ({ buyer, code: `00${String(index + 1).padStart(4, '0')}`, purchaseEntity: index % 2 ? '' : '原采购主体', quantity: index === 0 ? 0 : index === 1 ? 1.5 : index === 2 ? '' : index + 1, reason: `合成原因-${index + 1}\n第二段` }));
+    const records = buyers.map((buyer, index) => ({ buyer, productionCycle: ['30天', '', 0, 45][index % 4], code: `00${String(index + 1).padStart(4, '0')}`, purchaseEntity: index % 2 ? '' : '原采购主体', quantity: index === 0 ? 0 : index === 1 ? 1.5 : index === 2 ? '' : index + 1, reason: `合成原因-${index + 1}\n第二段` }));
     const categoryHeader = Array(22).fill('');
     for (const [index, label] of [[0, '物料编码'], [2, 'SKU'], [3, '物料名称'], [6, '销售产品线'], [7, '销售系列'], [21, '采购组']]) categoryHeader[index] = label;
     const categoryRows = records.map((record, index) => {
@@ -32,7 +32,7 @@ function uploadFile(rows, sheetName, name) {
     });
     const uploads = [
       uploadFile([categoryHeader, ...categoryRows], 'Dim-YL医疗器械商品分类', '合成商品分类.xlsx'),
-      uploadFile([['物料编码', '采购下单人', '供应商简称', '采购组', '起订量'], ...records.map(record => [record.code, record.buyer, '测试供应商', '测试组', 10])], '产品线明细', '合成采购分工.xlsx'),
+      uploadFile([['生产周期', '物料编码', '采购下单人', '供应商简称', '采购组', '起订量'], ...records.map(record => [record.productionCycle, record.code, record.buyer, '测试供应商', '测试组', 10])], '产品线明细', '合成采购分工.xlsx'),
       uploadFile([['姓名', '一级部门'], ['测试申请人', '测试事业部']], '花名册', '合成花名册.xlsx'),
       uploadFile([['识别码', '数量', '创建人', '流程号', '备货原因', '采购主体', '要求货好时间'], ...records.map((record, index) => [record.code, record.quantity, '测试申请人', `TEST-OA-${index + 1}`, record.reason, record.purchaseEntity, '2026-12-01'])], '备货需求', '合成备货需求.xlsx'),
     ];
@@ -47,6 +47,8 @@ function uploadFile(rows, sheetName, name) {
     await page.locator('#purchaseEntityInput').fill('手填采购主体');
     const headers = await page.locator('.detail-table th').allTextContents();
     assert.equal(headers.indexOf('采购主体') + 1, headers.indexOf('供应商简称'));
+    assert.equal(headers.indexOf('起订量') + 1, headers.indexOf('生产周期'));
+    assert.deepEqual(await page.locator(`#detailTableBody tr td:nth-child(${headers.indexOf('生产周期') + 1})`).allTextContents(), records.slice(0, 20).map(record => String(record.productionCycle)));
     assert.deepEqual(await page.locator('#detailTableBody tr td:nth-child(5)').allTextContents(), records.slice(0, 20).map(record => record.purchaseEntity || '手填采购主体'));
     await page.locator('[data-delivery-days]').first().fill('2');
     await page.locator('[data-delivery-days]').first().press('Tab');
@@ -100,12 +102,12 @@ function uploadFile(rows, sheetName, name) {
     for (const name of workbook.SheetNames) {
       const sheet = workbook.Sheets[name];
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-      assert.equal(rows[0].length, 20);
+      assert.equal(rows[0].length, 21);
       assert.equal(rows[0][1], '是否新加坡公司下单');
       assert.equal(rows[0][0], '采购单订单下单人');
       assert.deepEqual(rows[0].slice(4, 6), ['采购主体', '供应商简称']);
       assert.equal(rows[0][6], '正确物料编码');
-      assert.equal(rows[0][19], '备货原因');
+      assert.equal(rows[0][20], '备货原因');
       assert.equal(rows[0][14], '采购单订单号');
       assert.equal(rows[0][15], '备货OA的物料编码');
       assert(!rows[0].includes('采购分工明细是否存在'));
@@ -120,7 +122,9 @@ function uploadFile(rows, sheetName, name) {
         assert.equal(row[15], source.code, 'legacy source code is retained');
         assert.equal(sheet[`P${index + 2}`].t, 's');
         assert.equal(row[17], '10');
-        assert.equal(row[19], source.reason.replace(/\n/g, ' '));
+        assert.equal(rows[0][18], '生产周期');
+        assert.equal(row[18], String(source.productionCycle));
+        assert.equal(row[20], source.reason.replace(/\n/g, ' '));
         assert(row.every(value => typeof value !== 'string' || !/[\r\n\u2028\u2029]/.test(value)));
         assert.equal(row[1], '', 'optional Singapore source is not uploaded');
         const r = index + 2;
@@ -138,7 +142,7 @@ function uploadFile(rows, sheetName, name) {
     assert.equal(xmls.length, 7);
     for (const { text } of xmls) {
       assert.match(text, /<c[^>]*r="A1"[^>]*s="1"/);
-      assert.match(text, /<c[^>]*r="T2"[^>]*s="3"/);
+      assert.match(text, /<c[^>]*r="U2"[^>]*s="3"/);
       assert.match(text, /<c[^>]*r="P2"[^>]*s="2"/);
       assert.match(text, /<c[^>]*r="J2"[^>]*s="4"/);
     }
@@ -157,7 +161,11 @@ function uploadFile(rows, sheetName, name) {
     assert.equal(separateRows.length, 7);
     for (const rows of separateRows) {
       assert.deepEqual(rows[0].slice(4, 6), ['采购主体', '供应商简称']);
-      for (const row of rows.slice(1)) assert.equal(row[4], records.find(record => record.code === row[6]).purchaseEntity || '手填采购主体');
+      for (const row of rows.slice(1)) {
+        const source = records.find(record => record.code === row[6]);
+        assert.equal(row[4], source.purchaseEntity || '手填采购主体');
+        assert.equal(row[rows[0].indexOf('生产周期')], String(source.productionCycle));
+      }
     }
 
     await page.locator('[data-filter-button="buyer"]').click();
@@ -170,6 +178,7 @@ function uploadFile(rows, sheetName, name) {
     await page.reload();
     await page.waitForFunction(count => state.filteredRows.length === count, records.length);
     assert.deepEqual(await page.evaluate(() => state.filteredRows.map(row => row.purchaseEntity)), records.map(record => record.purchaseEntity));
+    assert.deepEqual(await page.evaluate(() => state.filteredRows.map(row => row.productionCycle)), records.map(record => String(record.productionCycle)));
     assert.equal(await page.locator('#downloadBuyerWorkbookButton').isDisabled(), false);
     await page.setViewportSize({ width: 390, height: 844 });
     for (const selector of ['#downloadDetailButton', '#downloadBuyerWorkbookButton']) {
@@ -189,11 +198,15 @@ function uploadFile(rows, sheetName, name) {
     for (const sheet of Object.values(homepageWorkbook.Sheets)) {
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
       assert.deepEqual(rows[0].slice(4, 6), ['采购主体', '供应商简称']);
-      for (const row of rows.slice(1)) assert.equal(row[4], records.find(record => record.code === row[6]).purchaseEntity);
+      for (const row of rows.slice(1)) {
+        const source = records.find(record => record.code === row[6]);
+        assert.equal(row[4], source.purchaseEntity);
+        assert.equal(row[rows[0].indexOf('生产周期')], String(source.productionCycle));
+      }
     }
     assert.equal(homepageWorkbook.SheetNames.reduce((count, name) => count + XLSX.utils.decode_range(homepageWorkbook.Sheets[name]['!ref']).e.r, 0), records.length);
     assert.deepEqual(errors, []);
-    console.log('PASS four uploads, one XLSX with seven buyer sheets, 29 rows beyond pagination, blank/invalid/long names, formulas/styles/MOQ/reasons, manual entity, filtering, cache restoration, phone buttons and homepage embedded download');
+    console.log('PASS four uploads, one XLSX with seven buyer sheets, 29 rows beyond pagination, blank/invalid/long names, production cycle/formulas/styles/MOQ/reasons, manual entity, filtering, cache restoration, phone buttons and homepage embedded download');
   } finally {
     await browser.close();
   }
