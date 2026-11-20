@@ -323,10 +323,10 @@ function columnWidth(key){return key==='物料名称'?42:['下单日期','合同
 function exportFilename(input){const base=String(input??'').trim().replace(/\.xlsx?$/i,'').trim().replace(/[_-]V\d+$/i,'')||'订单履约表';return (/更新版$/.test(base)?base.replace(/更新版$/,'汇总版'):/汇总版$/.test(base)?base:base+'汇总版')+'.xlsx';}
 function workbook(result){const rows=summaryRows(result.rows,result.sources);const s=X.utils.aoa_to_sheet([SUMMARY_COLUMNS]);rows.forEach((row,r)=>row.forEach((cell,c)=>s[X.utils.encode_cell({r:r+1,c})]={...cell}));s['!ref']=`A1:${X.utils.encode_col(SUMMARY_COLUMNS.length-1)}${rows.length+1}`;s['!autofilter']={ref:s['!ref']};s['!cols']=SUMMARY_COLUMNS.map((key,col)=>({wch:[key,...rows.map(row=>formatCell(row[col]))].reduce((max,text)=>Math.max(max,[...text].reduce((width,ch)=>width+(ch.charCodeAt(0)>255?2:1),0)+4),columnWidth(key))}));const w=X.utils.book_new();X.utils.book_append_sheet(w,s,'汇总表');if(result.review)X.utils.book_append_sheet(w,reviewSheet(result.review),'合并核对');
  if(result.seriesComparison){
-  const series=X.utils.aoa_to_sheet([SERIES_COLUMNS]);
+  const columns=result.seriesColumns||SERIES_COLUMNS,series=X.utils.aoa_to_sheet([columns]);
   result.seriesComparison.forEach((row,r)=>row.forEach((cell,c)=>series[X.utils.encode_cell({r:r+1,c})]={...cell}));
-  series['!ref']=`A1:${X.utils.encode_col(SERIES_COLUMNS.length-1)}${result.seriesComparison.length+1}`;series['!autofilter']={ref:series['!ref']};
-  series['!cols']=SERIES_COLUMNS.map((key,col)=>({wch:[key,...result.seriesComparison.map(row=>formatCell(row[col]))].reduce((width,text)=>Math.max(width,[...text].reduce((n,ch)=>n+(ch.charCodeAt(0)>255?2:1),4)),20)}));
+  series['!ref']=`A1:${X.utils.encode_col(columns.length-1)}${result.seriesComparison.length+1}`;series['!autofilter']={ref:series['!ref']};
+  series['!cols']=columns.map((key,col)=>({wch:[key,...result.seriesComparison.map(row=>formatCell(row[col]))].reduce((width,text)=>Math.max(width,[...text].reduce((n,ch)=>n+(ch.charCodeAt(0)>255?2:1),4)),20)}));
   X.utils.book_append_sheet(w,series,'系列对比');
  }
  return w;

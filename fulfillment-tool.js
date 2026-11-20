@@ -6,24 +6,26 @@ function showFileReference(name,message,savedAt){
 }
 $('choose-file').onclick=()=>{if(!$('file').disabled&&!busy)$('file').click();};
 const purchaseInput=$('purchase-file'),purchaseReference=$('purchase-reference'),purchaseClear=$('purchase-clear');
+let purchaseData=null,purchaseBusy=false,seriesBase=[],seriesPrevious=null;
 purchaseInput.disabled=false;
 purchaseInput.onchange=async()=>{
  const file=purchaseInput.files[0];if(!file)return;
- purchaseInput.disabled=true;purchaseClear.hidden=true;purchaseReference.textContent='正在读取采购订单：'+file.name;
+ purchaseBusy=true;updateDownloads();purchaseClear.hidden=true;purchaseReference.textContent='正在读取采购订单：'+file.name;
  try{
   if(!/\.(xlsx|xls)$/i.test(file.name))throw Error('请选择 .xlsx 或 .xls 文件');
   if(!file.size)throw Error('文件为空');
   if(file.size>60*1024*1024)throw Error('文件超过60MB，请缩小后重试');
-  const book=XLSX.read(await file.arrayBuffer(),{type:'array',bookSheets:true});
+  const book=XLSX.read(await file.arrayBuffer(),{type:'array',cellNF:true,cellFormula:true});
   if(!book.SheetNames?.length)throw Error('文件中没有工作表');
-  purchaseReference.textContent=file.name+'\n引用时间：'+new Date().toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
+  purchaseData=FulfillmentPurchase.parse({filename:file.name,book});
+  purchaseReference.textContent=file.name+'\n引用时间：'+new Date().toLocaleString('sv-SE',{timeZone:'Asia/Shanghai',hour12:false})+'\n已读取 '+purchaseData.records.length+' 条采购明细。';
   purchaseClear.hidden=false;
- }catch(e){purchaseInput.value='';purchaseReference.textContent='采购订单读取失败：'+file.name+'；'+e.message;}
- finally{purchaseInput.disabled=false;}
+ }catch(e){purchaseData={filename:file.name,error:e.message,records:[]};purchaseInput.value='';purchaseReference.textContent='采购订单读取失败：'+file.name+'；'+e.message;purchaseClear.hidden=false;}
+ finally{purchaseBusy=false;if(result)render();updateDownloads();}
 };
-purchaseClear.onclick=()=>{purchaseInput.value='';purchaseReference.textContent='尚未选择采购订单';purchaseClear.hidden=true;};
+purchaseClear.onclick=()=>{purchaseData=null;purchaseInput.value='';purchaseReference.textContent='尚未选择采购订单';purchaseClear.hidden=true;if(result)render();};
 const divisionInput=$('supplier-division-file'),divisionReference=$('supplier-division-reference'),divisionClear=$('supplier-division-clear');
-let supplierDivision=null,divisionCachePresent=false;
+let supplierDivision=null,divisionCachePresent=false,divisionBusy=true;
 function checkDivisionFile(file){
  if(!/\.(xlsx|xls)$/i.test(file?.name||''))throw Error('请选择 .xlsx 或 .xls 文件');
  if(!(file.bytes instanceof ArrayBuffer)||!file.bytes.byteLength)throw Error('文件为空或缓存内容无效');
@@ -41,26 +43,26 @@ function showDivisionFile(note=''){
 }
 divisionInput.onchange=async()=>{
  const file=divisionInput.files[0];if(!file)return;
- divisionInput.disabled=true;divisionClear.disabled=true;divisionReference.textContent='正在读取并缓存：'+file.name;
+ divisionBusy=true;updateDownloads();divisionReference.textContent='正在读取并缓存：'+file.name;
  try{
   if(file.size>60*1024*1024)throw Error('文件超过60MB，请缩小后重试');
   const next={name:file.name,bytes:await file.arrayBuffer(),lastModified:file.lastModified,savedAt:new Date().toISOString()};
   checkDivisionFile(next);await FulfillmentCache.saveSupplierDivision(next);supplierDivision=next;divisionCachePresent=true;showDivisionFile();
  }catch(e){showDivisionFile('新文件未保存：'+file.name+'；'+e.message+(supplierDivision?'。继续保留上次成功上传的文件。':''));}
- finally{divisionInput.disabled=false;divisionClear.disabled=false;}
+ finally{divisionBusy=false;if(result)render();updateDownloads();}
 };
 divisionClear.onclick=async()=>{
- divisionInput.disabled=true;divisionClear.disabled=true;
+ divisionBusy=true;updateDownloads();
  try{await FulfillmentCache.removeSupplierDivision();supplierDivision=null;divisionCachePresent=false;showDivisionFile('已移除供应商分工明细并清除缓存');}
  catch(e){showDivisionFile('缓存清除失败：'+e.message+'。原文件仍保留，请重试。');}
- finally{divisionInput.disabled=false;divisionClear.disabled=false;}
+ finally{divisionBusy=false;if(result)render();updateDownloads();}
 };
 divisionReference.textContent='正在恢复供应商分工明细缓存…';
 FulfillmentCache.getSupplierDivision().then(file=>{
  if(file){divisionCachePresent=true;checkDivisionFile(file);supplierDivision=file;}showDivisionFile(file?'已从浏览器缓存恢复。':'');
 }).catch(e=>{
  divisionInput.value='';divisionReference.textContent='分工明细缓存恢复失败：'+e.message+'。请重新上传或清除缓存。';divisionClear.hidden=!divisionCachePresent;supplierDivision=null;
-}).finally(()=>{divisionInput.disabled=false;});
+}).finally(()=>{divisionBusy=false;if(result)render();updateDownloads();});
 const versionKey='gylsjqx-fulfillment-export-versions',memoryVersions=Object.create(null);
 function savedVersions(){
  const raw=localStorage.getItem(versionKey);
@@ -81,8 +83,10 @@ function rememberDownload({base,version}){
 }
 const divisionResult=division=>{const rows=[],sources=[];for(const [i,row]of(result?.rows||[]).entries())if(String(row[C.COLUMNS.indexOf('事业部')]?.v??'').trim()===division){rows.push(row);sources.push(result.sources?.[i]);}return {rows,sources};};
 function updateDownloads(){
- const blocked=busy||$('file').disabled||!validation?.passed;
- $('choose-file').disabled=busy||$('file').disabled;
+ const loading=busy||$('file').disabled||purchaseBusy||divisionBusy,blocked=loading||!validation?.passed;
+ $('choose-file').disabled=loading;
+ purchaseInput.disabled=loading;purchaseClear.disabled=loading;
+ divisionInput.disabled=loading;divisionClear.disabled=loading;
  $('download').disabled=blocked||!result||!sourceBytes;
  $('replace-previous').disabled=blocked||!result||!sourceBytes;
  $('previous-file').disabled=$('replace-previous').disabled;
@@ -90,9 +94,15 @@ function updateDownloads(){
 }
 const conversionInfo=p=>({formulaCount:p.formulaCount,correctedCount:p.correctedCount,preservedAuxiliaryCount:p.preservedAuxiliaryCount||0,imageCount:p.imageCount,converted:p.converted,clearedFilterCount:p.clearedFilterCount||0,normalizedSheetCount:p.normalizedSheetCount||0,failed:p.issues.length>0});
 function checkPrepared(prepared,merged){const check=V.validate(prepared.book,merged,C);if(prepared.issues.length){check.passed=false;check.issues.unshift(...prepared.issues);}return check;}
-function resetCurrent(){result=null;sourceBytes=null;validation=null;formulaInfo=null;$('result').hidden=true;$('quantityValidation').hidden=true;$('mergeReview').hidden=true;$('warnings').textContent='';updateDownloads();}
+function resetCurrent(){result=null;sourceBytes=null;validation=null;formulaInfo=null;seriesBase=[];seriesPrevious=null;$('seriesComparisonSection').hidden=true;$('result').hidden=true;$('quantityValidation').hidden=true;$('mergeReview').hidden=true;$('warnings').textContent='';updateDownloads();}
 function render(){
  result.review=C.reviewRows(result,validation);
+ const directory=supplierDivision&&purchaseData?{filename:supplierDivision.name,book:XLSX.read(supplierDivision.bytes,{type:'array',cellNF:true,cellFormula:true})}:null;
+ const purchase=validation?.passed?FulfillmentPurchase.enrich({filename,comparison:seriesBase,current:result,previous:seriesPrevious,purchase:purchaseData,directory}):null;
+ if(purchase){
+  result.seriesComparison=purchase.rows;result.seriesColumns=purchase.columns;
+  result.review.push(...purchase.issues.map(issue=>C.REVIEW_COLUMNS.map(column=>({t:'s',v:({'核对类型':'新增采购数量','来源工作表':'采购订单','来源位置':issue.source,'物料编码':issue.code,'核对字段':'采购日期／采购数量／系列归属','原值':[issue.supplier,issue.order,issue.qty==null?'':'采购数量 '+issue.qty].filter(Boolean).join('；'),'结果':'待核对','需要处理':issue.reason})[column]||'',z:'@'}))));
+ }
  const number=value=>value==null?'待核验':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:12});
  const groupedIssues=new Map();
  for(const issue of validation?.issues||[]){const key=[issue.sheet,issue.cell,issue.field].join('\0');if(!groupedIssues.has(key))groupedIssues.set(key,{...issue,messages:[]});const group=groupedIssues.get(key);if(!group.messages.includes(issue.message))group.messages.push(issue.message);}
@@ -107,6 +117,13 @@ function render(){
  $('warnings').textContent=result.warnings.join('\n');
  $('count').textContent=`共 ${result.rows.length} 条，预览前 ${Math.min(100,result.rows.length)} 条；下载将汇总表放在首位，并保留合并核对、系列对比和其余原工作表，不再保留单独的“差异”表，所有单元格公式均转为值。`;
  const table=(columns,rows)=>'<table><thead><tr>'+columns.map(v=>'<th>'+esc(v)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(0,100).map(row=>'<tr>'+row.map(c=>'<td>'+esc(C.formatCell(c))+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+ $('seriesComparisonSection').hidden=!purchase;
+ if(purchase){
+  $('series-preview').innerHTML=table(purchase.columns,purchase.rows);
+  $('purchase-status').textContent=(purchase.range?`采购日期范围：${purchase.range.start} 至 ${purchase.range.end}（含首尾）。`:'履约文件名需要包含日期区间，例如2026.11.13-11.19。')+(purchaseData?`已对应 ${purchase.stats.matchedRows||0} 条采购明细；${purchase.issues.length} 项待核对，来源见下方。`:'请上传采购订单后统计新增采购数量；刷新后需重新选择采购订单。');
+  $('purchase-issues').innerHTML=table(['来源','单据编号','物料编码','供应商','采购数量','需要处理'],purchase.issues.map(i=>[i.source,i.order,i.code,i.supplier,i.qty,i.reason].map(v=>({v:v??''}))));
+  $('purchase-issues-details').hidden=!purchase.issues.length;
+ }
  $('preview').innerHTML=table(C.SUMMARY_COLUMNS,C.summaryRows(result.rows,result.sources));$('diff-preview').innerHTML=validation?.passed?table(C.DIFF_COLUMNS,result.differences):'<p>本次数量未通过校验，未更新历史和差异。</p>';
  $('mergeReview').hidden=false;$('reviewStatus').textContent=`事业部、渠道及日期范围需核对 ${result.review.filter(row=>['事业部／渠道','日期范围'].includes(row[0].v)).length} 项；原值未修改。核对表包含全部数量校验结果，页面预览前 100 条。`;$('review-preview').innerHTML=table(C.REVIEW_COLUMNS,result.review);
  $('result').hidden=false;updateDownloads();
@@ -124,7 +141,8 @@ async function show(history,restored=false){
    if(validation.passed)await FulfillmentCache.replace(history);
   }
  }else validation=null;
- result={...history.current.result,differences:validation?.passed?C.difference(history.previous?.result,history.current.result):[],seriesComparison:validation?.passed?C.seriesComparison(history.previous?.result,history.current.result):[]};
+ seriesPrevious=history.previous?.result||null;seriesBase=validation?.passed?C.seriesComparison(seriesPrevious,history.current.result):[];
+ result={...history.current.result,differences:validation?.passed?C.difference(seriesPrevious,history.current.result):[],seriesComparison:seriesBase};
  const describe=s=>`${s.filename}（${new Date(s.savedAt).toLocaleString('zh-CN')}）`;
  $('history').textContent=`本次：${describe(history.current)}\n上次：${history.previous?describe(history.previous)+'【已固定】':'尚无，可点击“替换上一版”选择上周文件；或继续上传本次文件，将当前版本设为固定基准'}\n${validation?.passed?`差异：${result.differences.length} 个物料；数量为本次减上次。`:'缓存数据需通过数量校验后才能继续使用。'}`;
  $('status').textContent=result.counts.map(x=>`${x.sheet}：${x.count} 条`).join('　');
