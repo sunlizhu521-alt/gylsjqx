@@ -17,6 +17,15 @@ function enrich({items=[{}],records=[order()],filename=FILENAME,comparison,previ
 const rowFor=(result,labels)=>result.rows.find(row=>labels.every((value,index)=>value===undefined||row[index].v===value));
 const note=result=>JSON.stringify(result.issues);
 
+test('相同履约数据换下一周日期仍更新当前标题期间，固定上期和重复同期间不推进',()=>{
+ const result=current(),period={start:'2026-11-13',end:'2026-11-19'},source={filename:FILENAME,result,comparisonPeriod:period};
+ const old={version:1,previous:null,current:source};
+ assert.equal(C.advance(old,{...source}),old);
+ const next={...source,filename:'履约2026.11.20-11.26.xlsx',comparisonPeriod:{start:'2026-11-20',end:'2026-11-26'}},updated=C.advance(old,next);
+ assert.equal(updated.current,next);assert.equal(updated.previous,null);
+ const previous={filename:'固定上一版.xlsx',result:current([{'未交付数量':5}])};assert.equal(C.advance({...old,previous},next).previous,previous);
+});
+
 test('有日期和数量但身份字段全空的采购行仍进入核对，只有明确合计或空行跳过',()=>{
  const source=input([order(),{'采购日期':'2026-11-14','采购数量':99},{'供应商':'合计','采购数量':249},{}]);
  const parsed=P.parse(source);assert.equal(parsed.records.length,2);

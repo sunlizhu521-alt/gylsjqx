@@ -66,7 +66,7 @@ function purchase(){
   await s.upload('purchase-file','采购订单.xlsx',po);assert.equal(await s.quantity(),'350');
   await s.open(true);assert.equal(await s.quantity(),'未上传采购订单','刷新不把未恢复的采购订单当成已上传');assert.match(await s.frame.locator('#supplier-division-reference').innerText(),/缓存.*恢复/);assert.deepEqual(await s.snapshot(),stable);
   await s.upload('purchase-file','采购订单.xlsx',po);assert.equal(await s.quantity(),'350');
-  await s.upload('file',nextName,fulfillment(12));assert.equal(await s.quantity(),'55');await s.download(55,'11.20-11.26新增采购订单');
+  await s.upload('file',nextName,fulfillment(10));assert.equal(await s.quantity(),'55','仅日期变动也更新列名和期间，不把新周期当旧副本');await s.download(55,'11.20-11.26新增采购订单');
   const s2=await session();await s2.upload('purchase-file','采购订单.xlsx',po);await s2.upload('supplier-division-file','供应商分工.xlsx',catalog);await s2.upload('file',currentName,fulfillment(10));assert.equal(await s2.quantity(),'350','先上传采购订单后上传履约也可统计');await s2.download(350,'11.13-11.19新增采购订单');
   assert.deepEqual(errors,[]);console.log(JSON.stringify({status:'PASS',base,periodQuantity:350,nextPeriodQuantity:55,duplicateLinesCounted:true,originalQuantityNotRemaining:true,directoryRecalculation:true,uploadOrderIndependent:true,previewDownloadMatch:true,historyUnchangedByReferences:true,refreshRequiresPurchaseReupload:true}));
   await s2.context.close();await s.context.close();

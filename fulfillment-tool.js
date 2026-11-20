@@ -164,7 +164,8 @@ $('file').onchange=async()=>{
   if(!merged.rows.length)throw Error('没有可合并的数据，未更新历史');
   validation=checkPrepared(prepared,merged);
   if(!validation.passed){sourceBytes=prepared.bytes;result={...merged,differences:[]};$('status').textContent='数量校验未通过，请查看下方差异。';showFileReference(filename,'数量校验未通过，暂不能下载。请查看下方核对明细；已保存的历史保持不变。');$('history').textContent='本次文件未保存为历史基准，上次和本次已保存的历史保持不变。';render();return;}
-  const history=await FulfillmentCache.save({filename:file.name,savedAt:new Date().toISOString(),result:merged,sourceBytes:prepared.bytes,formulaInfo});
+  const range=FulfillmentPurchase.dateRange(file.name),comparisonPeriod=range?{start:range.start,end:range.end}:null;
+  const history=await FulfillmentCache.save({filename:file.name,savedAt:new Date().toISOString(),result:merged,sourceBytes:prepared.bytes,formulaInfo,comparisonPeriod});
   await show(history);
  }catch(e){resetCurrent();$('status').textContent='处理失败：'+e.message+'。保留原有历史，请重新上传。';showFileReference(filename,$('status').textContent);}
  finally{$('file').disabled=false;$('file').value='';updateDownloads();}

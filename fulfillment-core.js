@@ -246,6 +246,7 @@ function difference(previous,current){
 function advance(history,current){
  aggregate(current.result);
  if(history&&JSON.stringify(history.current.result.rows)===JSON.stringify(current.result.rows)){
+  if(current.comparisonPeriod&&JSON.stringify(current.comparisonPeriod)!==JSON.stringify(history.current.comparisonPeriod))return {...history,current};
   const old=history.current.sourceBytes,next=current.sourceBytes,oldView=old?new Uint8Array(old):null;
   if(next&&(!old||old.byteLength!==next.byteLength||new Uint8Array(next).some((v,i)=>v!==oldView[i])))return {...history,current};
   return history;
