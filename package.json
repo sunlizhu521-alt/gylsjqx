@@ -10,6 +10,7 @@
     "test:fulfillment-series-browser": "node tests/fulfillment-series-browser.cjs && node tests/fulfillment-series-export-browser.cjs",
     "test:fulfillment-versions-browser": "node tests/fulfillment-versions-browser.cjs",
     "test:fulfillment-baseline-browser": "node tests/fulfillment-baseline-browser.cjs",
+    "test:fulfillment-upload-status-browser": "node tests/fulfillment-upload-status-browser.cjs",
     "test:fulfillment-supplier-cache-browser": "node tests/fulfillment-supplier-cache-browser.cjs",
     "test:funds-ledger-amount-review-browser": "node tests/funds-ledger-amount-review-browser.cjs",
     "test:funds-browser": "node tests/funds-browser.cjs",

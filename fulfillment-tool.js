@@ -1,6 +1,10 @@
 (()=>{'use strict';const C=FulfillmentCore,V=FulfillmentValidation,$=id=>document.getElementById(id);let result=null,filename='',sourceBytes=null,validation=null,formulaInfo=null,busy=false;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const divisionButtons=[...document.querySelectorAll('[data-download-division]')];
+function showFileReference(name,message,savedAt){
+ $('file-reference').textContent=(name?'当前文件：'+name+'\n':'')+message+(savedAt?'\n处理时间：'+new Date(savedAt).toLocaleString('sv-SE',{timeZone:'Asia/Shanghai',hour12:false}):'');
+}
+$('choose-file').onclick=()=>{if(!$('file').disabled&&!busy)$('file').click();};
 const purchaseInput=$('purchase-file'),purchaseReference=$('purchase-reference'),purchaseClear=$('purchase-clear');
 purchaseInput.disabled=false;
 purchaseInput.onchange=async()=>{
@@ -78,6 +82,7 @@ function rememberDownload({base,version}){
 const divisionResult=division=>{const rows=[],sources=[];for(const [i,row]of(result?.rows||[]).entries())if(String(row[C.COLUMNS.indexOf('事业部')]?.v??'').trim()===division){rows.push(row);sources.push(result.sources?.[i]);}return {rows,sources};};
 function updateDownloads(){
  const blocked=busy||$('file').disabled||!validation?.passed;
+ $('choose-file').disabled=busy||$('file').disabled;
  $('download').disabled=blocked||!result||!sourceBytes;
  $('replace-previous').disabled=blocked||!result||!sourceBytes;
  $('previous-file').disabled=$('replace-previous').disabled;
@@ -106,8 +111,8 @@ function render(){
  $('mergeReview').hidden=false;$('reviewStatus').textContent=`事业部、渠道及日期范围需核对 ${result.review.filter(row=>['事业部／渠道','日期范围'].includes(row[0].v)).length} 项；原值未修改。核对表包含全部数量校验结果，页面预览前 100 条。`;$('review-preview').innerHTML=table(C.REVIEW_COLUMNS,result.review);
  $('result').hidden=false;updateDownloads();
 }
-async function show(history){
- if(!history){$('status').textContent='等待首次上传';$('history').textContent='尚无历史数据。可先上传上周版本，再上传本次文件；建立上一版后将固定不变。';return;}
+async function show(history,restored=false){
+ if(!history){showFileReference('','尚未上传订单履约表');$('status').textContent='等待首次上传';$('history').textContent='尚无历史数据。可先上传上周版本，再上传本次文件；建立上一版后将固定不变。';return;}
  filename=history.current.filename;sourceBytes=history.current.sourceBytes||null;formulaInfo=history.current.formulaInfo||null;
  if(sourceBytes){
   const prepared=await FulfillmentValues.prepare(sourceBytes),converted=prepared.formulaCount||prepared.clearedFilterCount||prepared.normalizedSheetCount,rebuilt=converted||history.current.result.sources?.length!==history.current.result.rows.length||history.current.result.sources?.some(source=>!source?.sheet||!Number.isInteger(source.row)),merged=rebuilt?C.merge(prepared.book,filename):C.refreshQuantities(history.current.result,prepared.book),quantityChanged=JSON.stringify(merged.rows)!==JSON.stringify(history.current.result.rows);
@@ -123,24 +128,27 @@ async function show(history){
  const describe=s=>`${s.filename}（${new Date(s.savedAt).toLocaleString('zh-CN')}）`;
  $('history').textContent=`本次：${describe(history.current)}\n上次：${history.previous?describe(history.previous)+'【已固定】':'尚无，可点击“替换上一版”选择上周文件；或继续上传本次文件，将当前版本设为固定基准'}\n${validation?.passed?`差异：${result.differences.length} 个物料；数量为本次减上次。`:'缓存数据需通过数量校验后才能继续使用。'}`;
  $('status').textContent=result.counts.map(x=>`${x.sheet}：${x.count} 条`).join('　');
+ showFileReference(filename,(restored?'已从浏览器缓存恢复。\n':'')+(validation?.passed?`处理完成：共 ${result.rows.length} 条，数量校验通过，可以下载。`:validation?'数量校验未通过，请查看下方核对明细。':'缓存缺少原文件，请重新上传后校验。'),history.current.savedAt);
  render();
 }
 $('file').disabled=true;$('status').textContent='正在读取历史数据…';
-const ready=FulfillmentCache.get().then(show).catch(e=>{resetCurrent();$('status').textContent='历史读取失败：'+e.message;}).finally(()=>{$('file').disabled=false;updateDownloads();});
+showFileReference('','正在恢复订单履约表缓存…');
+const ready=FulfillmentCache.get().then(history=>show(history,true)).catch(e=>{resetCurrent();$('status').textContent='历史读取失败：'+e.message;showFileReference('','缓存恢复失败：'+e.message+'。请重新上传。');}).finally(()=>{$('file').disabled=false;updateDownloads();});
 $('file').onchange=async()=>{
  await ready;const file=$('file').files[0];if(!file)return;
  resetCurrent();filename=file.name;
- if(file.size>60*1024*1024){$('status').textContent='文件超过60MB，请缩小后重试';return;}
+ if(file.size>60*1024*1024){$('status').textContent='文件超过60MB，请缩小后重试';showFileReference(filename,'处理失败：'+$('status').textContent+'。已保存的历史保持不变。');$('file').value='';return;}
  $('status').textContent='正在计算公式、校验数量并保存历史…';$('file').disabled=true;updateDownloads();
+ showFileReference(filename,'正在处理：计算公式、校验数量并保存历史…');
  try{
   const prepared=await FulfillmentValues.prepare(await file.arrayBuffer()),merged=C.merge(prepared.book,file.name);
   formulaInfo=conversionInfo(prepared);
   if(!merged.rows.length)throw Error('没有可合并的数据，未更新历史');
   validation=checkPrepared(prepared,merged);
-  if(!validation.passed){sourceBytes=prepared.bytes;result={...merged,differences:[]};$('status').textContent='数量校验未通过，请查看下方差异。';$('history').textContent='本次文件未保存为历史基准，上次和本次已保存的历史保持不变。';render();return;}
+  if(!validation.passed){sourceBytes=prepared.bytes;result={...merged,differences:[]};$('status').textContent='数量校验未通过，请查看下方差异。';showFileReference(filename,'数量校验未通过，暂不能下载。请查看下方核对明细；已保存的历史保持不变。');$('history').textContent='本次文件未保存为历史基准，上次和本次已保存的历史保持不变。';render();return;}
   const history=await FulfillmentCache.save({filename:file.name,savedAt:new Date().toISOString(),result:merged,sourceBytes:prepared.bytes,formulaInfo});
   await show(history);
- }catch(e){resetCurrent();$('status').textContent='处理失败：'+e.message+'。保留原有历史，请重新上传。';}
+ }catch(e){resetCurrent();$('status').textContent='处理失败：'+e.message+'。保留原有历史，请重新上传。';showFileReference(filename,$('status').textContent);}
  finally{$('file').disabled=false;$('file').value='';updateDownloads();}
 };
 $('replace-previous').onclick=()=>{if(!$('replace-previous').disabled)$('previous-file').click();};
