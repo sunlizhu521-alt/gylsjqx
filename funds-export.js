@@ -644,11 +644,6 @@ window.FundsExport = async function(sourceBytes, result) {
   for(const override of elements(types,'Override'))if(!zip.file(override.getAttribute('PartName').replace(/^\//,'')))override.remove();
   save('[Content_Types].xml',types);
   if(zip.file('docProps/app.xml')){const app=await parse(zip,'docProps/app.xml');for(const title of elements(app,'TitlesOfParts')){const vector=first(title,'vector');if(vector){vector.setAttribute('size',plan.length);vector.replaceChildren();for(const {name} of plan){const text=app.createElementNS(vector.namespaceURI,'vt:lpstr');text.textContent=name;vector.append(text);}}}const pairs=first(app,'HeadingPairs');if(pairs){const count=first(pairs,'i4');if(count)count.textContent=plan.length;}save('docProps/app.xml',app);}
-  let output=await FundsCleanup(zip);
-  if(result.negotiated.headerBands?.length){
-    // Remove trailing blank formatting before insertion so it cannot overflow Excel's last row.
-    zip=await JSZip.loadAsync(output);await FundsMonthHeader(zip,result.negotiated);
-    output=await zip.generateAsync({type:'uint8array',compression:'DEFLATE'});
-  }
+  const output=await FundsCleanup(zip);
   return new Blob([output],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 };

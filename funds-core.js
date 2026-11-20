@@ -524,7 +524,7 @@ function build(inputs,decisions={}){
   }
   planDates.set(c,parsed);
  }
- const headerBands=FundsTotalValidation.paymentHeaderBands(negotiated,money);
+ const headerBands=FundsTotalValidation.paymentHeaderBands(negotiated);
  const batchPlansByRow=new Map(),batchPlans=[];
  const merges=negotiated.sheet['!merges']||[],mergedAt=(r,c)=>merges.find(m=>r>=m.s.r&&r<=m.e.r&&c>=m.s.c&&c<=m.e.c&&(m.s.r!==m.e.r||m.s.c!==m.e.c));
  for(const target of negotiatedObjects){
@@ -544,7 +544,7 @@ function build(inputs,decisions={}){
   }
  }
  const applicationBatchNumber=r=>applicationBatch(['核对说明','备注'].map(h=>str(r.values[h]?.v)).join('\n'));
- const originalBatchMatches=new Map();
+ const originalBatchMatches=new Map(),relocatedBatchMatches=new Map();
  for(const r of applications.records){
   if(!eligibleApplication(r,false))continue;
   const amount=money(r.values['申请付款金额']).cents,ids=applicationIds(r),dates=submissionDates(r.values['申请日期'],r.date1904)||[],candidates=[];
@@ -556,7 +556,7 @@ function build(inputs,decisions={}){
   if(candidates.length===1)originalBatchMatches.set(r,candidates[0]);
  }
  function submissionKey(r){
-  const ids=applicationIds(r),info=classification(r),negotiatedApplication=eligibleApplication(r,false)&&(applicationTypes.has(r)||negotiatedObjects.some(t=>classification(t.record).name===info.name&&(info.key===classification(t.record).key||ids.some(id=>oas(t.record).includes(id))))),batch=negotiatedApplication?applicationBatchNumber(r):'',original=originalBatchMatches.get(r);return (ids.length||batch||original)&&info.key?JSON.stringify([applicationTypes.get(r)||'',[...new Set(ids)].sort(),info.key,batch||original||'']):null;
+  const relocated=relocatedBatchMatches.get(r),ids=applicationIds(r),info=classification(r),negotiatedApplication=eligibleApplication(r,false)&&(applicationTypes.has(r)||negotiatedObjects.some(t=>classification(t.record).name===info.name&&(info.key===classification(t.record).key||ids.some(id=>oas(t.record).includes(id))))),batch=negotiatedApplication?applicationBatchNumber(r):'',original=relocated?.batch.address||originalBatchMatches.get(r);return (ids.length||batch||original)&&info.key?JSON.stringify([applicationTypes.get(r)||'',[...new Set(ids)].sort(),info.key,batch||original||'']):null;
  }
  function uniqueSubmissions(matched){
   const seen=new Set();return matched.filter(r=>{const key=submissionKey(r);if(!key)return true;if(seen.has(key))return false;seen.add(key);return true;});
@@ -568,7 +568,7 @@ function build(inputs,decisions={}){
   const actions={
    '申请金额为空、异常或非正数':'核实申请表“本次申请付款金额”，修正空值、异常金额或公式结果后重新上传',
    '未找到金额相等的分批':'核实申请表“本次申请付款金额”；若填错，修改申请表；若金额正确，核实谈判表该行是否漏列或错列分批日期和金额，有误再修正并重新上传',
-   '同额分批已全部对应其他申请':'核实申请表是否重复申请；若为新增的一次申请，核实谈判表是否漏列该批付款计划，修正后重新上传',
+   '同额分批已全部对应其他申请':'核对本次对应的付款批次、流程编码和原申请日期批注；相同金额不代表重复申请，不要覆盖已对应其他申请的批次',
    '分批日期无法识别，不能按日期排序':'将谈判表候选日期表头核实为完整年月日，再重新上传',
    '分批金额或日期表头位于合并单元格，归属不清':'人工确认该合并金额或日期对应的付款批次；本工具保留合并结构，请确认后在导出表标记对应金额',
    '最早日期存在多个同额批次，归属不清':'核实同日同额批次是否重复；若为独立批次，请确认本次对应哪一批，并在导出表标记该金额',
@@ -577,6 +577,16 @@ function build(inputs,decisions={}){
    '明确批号与原申请日期批注冲突':'核实申请批号及原批注申请日期，使其唯一对应同一金额格'
   };
   function reviewCandidates(application,reason,exact){
+   const info=classification(application),subject=entity(value(application,'付款主体'));
+   const alternatives=['未找到金额相等的分批','同额分批已全部对应其他申请'].includes(reason)&&info.name&&subject?negotiatedObjects.filter(t=>t!==target&&classification(t.record).name===info.name&&entity(value(t.record,'付款主体'))===subject).flatMap(t=>(batchPlansByRow.get(t.record.r)||[]).filter(b=>b.valid&&!b.merged&&b.amount===info.cents).map(b=>({target:t,batch:b}))):[];
+   if(alternatives.length){
+    const oldNotes=exact.flatMap(b=>(negotiated.sheet[b.address]?.c||[]).map(c=>b.address+'：'+str(c.t))).join('；');
+    reviewApplication(target,'申请批次及OA号核对：申请金额 '+amountText(application.values['申请付款金额'])+'；申请流程编码 '+(str(value(application,applicationOAField))||'空白')+'。申请来源：'+sourceLabel(application)+'。'+
+     '该编号对应原谈判记录 '+sourceLabel(target.record)+'，申请总金额 '+amountText(target.values['申请付款金额'])+'。'+(oldNotes?'原批注：'+oldNotes+'。':'')+
+     '其他同供应商、同付款主体、同分批金额记录：'+alternatives.map(({target:t,batch:b})=>sourceLabel(t.record)+'，OA号 '+(str(value(t.record,'对公付款0A流程号'))||'空白')+'，'+b.label).join('；')+'。'+
+     '需要处理：核对申请表该行流程编码及实际付款批次；确认后修正申请表并重新上传。候选金额已存在，但归属尚未唯一确认，本次保留原编号、批注和底色。',[application],true);
+    return;
+   }
    // Keep every candidate while staying below Excel's maximum row height.
    for(let start=0;start<Math.max(1,exact.length);start+=10){
     const end=Math.min(start+10,exact.length),label=exact.length>10?'候选日期（'+(start+1)+'-'+end+'/'+exact.length+'）':'候选日期';
@@ -591,7 +601,8 @@ function build(inputs,decisions={}){
    const requestedDates=new Set(group.flatMap(r=>submissionDates(r.values['申请日期'],r.date1904)||[]));
    const dated=exact.filter(b=>batchCommentPayment(negotiated.sheet[b.address],amount).applicationDates.some(d=>requestedDates.has(d))),numbered=batch?exact.filter(b=>b.ordinal===Number(batch)):[];
    const evidenceConflict=!!batch&&(numbered.length!==1||dated.length>0&&!dated.includes(numbered[0]));
-   const identified=!evidenceConflict?(batch?numbered[0]:dated.length===1?dated[0]:exact.length===1?exact[0]:null):null;
+   const relocated=relocatedBatchMatches.get(application)?.batch;
+   const identified=!evidenceConflict?(relocated|| (batch?numbered[0]:dated.length===1?dated[0]:exact.length===1?exact[0]:null)):null;
    const remaining=exact.filter(b=>!highlightedNegotiated.has(b.address)).sort((a,b)=>a.date-b.date||a.c-b.c),first=identified&&!highlightedNegotiated.has(identified.address)?identified:remaining[0];
    const identityCompatible=group.every(r=>classification(r).name===classification(target.record).name&&compatible(r,target.record,'付款主体'));
    const unique=!!identified&&first===identified&&!ambiguous.length&&identityCompatible;
@@ -843,12 +854,36 @@ function build(inputs,decisions={}){
  }
  const submissions=new Map(negotiatedObjects.map(t=>[t,{rows:[],ambiguous:[],reasons:[]}]));
  const references=new Map(negotiatedObjects.map(t=>[t,oas(t.record)]));
+ const batchRelocationReviews=[];
+ function availableApplicationBatches(application,target){
+  const info=classification(application),subject=application.values['付款主体'],other=target.record.values['付款主体'],dates=submissionDates(application.values['申请日期'],application.date1904)||[];
+  if(!info.name||info.cents===undefined||info.cents<=0n||!dates.length||!usable(subject)||!usable(other)||entity(subject.v)!==entity(other.v)||classification(target.record).name!==info.name||supplierConflicts.has(target)||norm(value(target.record,'对公付款0A流程号'))==='不支付')return [];
+  return (batchPlansByRow.get(target.record.r)||[]).filter(b=>{
+   if(!b.valid||b.merged||b.amount!==info.cents||applicationBatchNumber(application)&&b.ordinal!==Number(applicationBatchNumber(application)))return false;
+   const source=negotiated.sheet[b.address],original=batchCommentPayment(source,b.amount);
+   if(original.applicationDates.length)return original.applicationDates.some(d=>dates.includes(d));
+   // Existing marks reserve a batch; color alone never proves payment or authorizes overwriting it.
+   const rgb=String(source?.s?.fgColor?.rgb||source?.s?.fill?.fgColor?.rgb||'').slice(-6).toUpperCase();
+   const noted=(source?.c||[]).some(c=>/批次归属待核对|付款时间[（(](?:付款节奏跟进|资金整理)[）)][:：](?!未记录|未付款)/.test(str(c.t)));
+   return !original.paid&&!original.conflict&&!noted&&!['FF0000','FFFF00'].includes(rgb);
+  });
+ }
  for(const application of applications.records.filter(r=>eligibleApplication(r,false))){
   const ids=applicationIds(application);
   let possible=negotiatedObjects.filter(t=>!supplierConflicts.has(t)&&ids.some(id=>references.get(t).includes(id)));
   const applicationKey=classification(application).key;
   const byOA=possible.length>0;
   if(possible.length>1&&applicationKey){const exact=possible.filter(t=>classification(t.record).key===applicationKey);if(exact.length===1)possible=exact;}
+  if(ids.length===1&&byOA&&possible.length===1&&!availableApplicationBatches(application,possible[0]).length){
+   const original=possible[0],candidates=negotiatedObjects.filter(t=>t!==original).flatMap(t=>availableApplicationBatches(application,t).filter(batch=>!applications.records.some(r=>r!==application&&eligibleApplication(r,false)&&applicationIds(r).some(id=>references.get(t).includes(id))&&availableApplicationBatches(r,t).some(b=>b.address===batch.address))).map(batch=>({target:t,batch})));
+   const anchored=candidates.filter(({batch})=>batchCommentPayment(negotiated.sheet[batch.address],batch.amount).applicationDates.length);
+   const choices=anchored.length?anchored:candidates;
+   if(choices.length){
+    batchRelocationReviews.push({application,original,candidates:choices});
+    if(choices.length===1){relocatedBatchMatches.set(application,choices[0]);possible=[choices[0].target];}
+    else continue;
+   }
+  }
   if(!byOA&&applicationKey&&application.values[applicationOAField]?.t!=='e')possible=negotiatedObjects.filter(t=>!supplierConflicts.has(t)&&(!ids.length||!references.get(t).length)&&t.record.values['对公付款0A流程号']?.t!=='e'&&classification(t.record).key===applicationKey);
   if(possible.length>1){for(const t of possible){const group=submissions.get(t);group.ambiguous.push(application);group.reasons.push(byOA?'同一流程对应多笔付款，请核对归属。':'同一供应商和金额对应多笔付款，请核对归属。');}continue;}
   if(possible.length===1){
@@ -856,6 +891,12 @@ function build(inputs,decisions={}){
    if(ids.length>1&&(!byOA||ids.some(id=>!references.get(target).includes(id)))){group.ambiguous.push(application);group.reasons.push('申请含多个流程，请核对金额归属。');}
    else group.rows.push(application);
   }
+ }
+ const relocationClaims=new Map();
+ for(const [application,match]of relocatedBatchMatches){const address=match.batch.address;if(!relocationClaims.has(address))relocationClaims.set(address,[]);relocationClaims.get(address).push(application);}
+ for(const claims of relocationClaims.values())if(new Set(claims.map(submissionKey)).size>1)for(const application of claims){
+  const group=submissions.get(relocatedBatchMatches.get(application).target);group.rows=group.rows.filter(r=>r!==application);
+  relocatedBatchMatches.delete(application);batchRelocationReviews.find(r=>r.application===application).collision=true;
  }
  for(const target of negotiatedObjects){
   const group=submissions.get(target),matched=group.rows,info=classification(target.record);
@@ -881,6 +922,13 @@ function build(inputs,decisions={}){
   }
   checkApplicationDates(target,matched);
   highlightBatches(target,matched);
+ }
+ for(const {application,original,candidates,collision}of batchRelocationReviews){
+  const matched=relocatedBatchMatches.get(application),source=application.source;
+  const details=candidates.map(({target,batch})=>target.record.source.file+' / '+target.record.source.sheet+'!'+batch.address+'，OA号 '+(str(value(target.record,'对公付款0A流程号'))||'空白')+'，'+batch.label).join('；');
+  reviewApplication(matched?.target||original,'申请批次OA号核对：申请金额 '+amountText(application.values['申请付款金额'])+'；申请流程编码 '+applicationIds(application).join('、')+'。申请来源：'+source.file+' / '+source.sheet+' 第 '+source.row+' 行。'+
+   (matched?'已按供应商、付款主体、金额及原批注唯一匹配到新批次：':collision?'同一候选批次对应多笔不同申请，尚未匹配：':'旧编号对应的批次金额不同或已有其他申请批注、标记；另有多个同额候选，尚未匹配：')+details+'。'+
+   '需要处理：'+(matched?'核对并修正申请表该行的流程编码；本次已匹配批次，原编号保留。':'确认本次申请对应哪一批并填写正确流程编码；原批注及底色保留，不判断为重复申请。'),[application],true);
  }
  // Scan the full application source once, independently of payment targets and their review exclusions.
  const duplicateApplications=new Map();

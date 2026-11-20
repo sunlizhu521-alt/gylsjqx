@@ -55,40 +55,15 @@ function isMonthBandLabel(value){
  const label=norm(value),match=/^(\d{4})年(\d{1,2})月(?:付款)?$/.exec(label);
  return label==='付款月份待核对'||!!(match&&day(+match[1],+match[2],1));
 }
-function paymentHeaderBands(table,money){
- const {dateColumns,monthColumns}=selectColumns(table);
- if(!dateColumns.length||!monthColumns.length&&table.headerTopRow==null)return [];
- const head=c=>table.sheet[column(c)+(table.headerRow+1)],years=new Map(),dateYears=new Map();
- const remember=(map,date)=>{if(!map.has(date.month))map.set(date.month,new Set());map.get(date.month).add(date.year);};
- for(const c of monthColumns)remember(years,monthHeader(head(c)));
- for(const c of dateColumns)remember(dateYears,headerDate(head(c),table.date1904));
- const evidence=new Map(dateColumns.map(c=>[c,{months:new Set(),uncertain:false}]));
- const merged=(r,c)=>(table.sheet['!merges']||[]).some(m=>r>=m.s.r&&r<=m.e.r&&c>=m.s.c&&c<=m.e.c&&(m.s.r!==m.e.r||m.s.c!==m.e.c));
- const counts=values=>{const map=new Map();for(const value of values)map.set(value.cents,(map.get(value.cents)||0)+1);return map;};
- for(const record of table.records){
-  const plans=dateColumns.map(c=>{
-   const source=table.sheet[column(c)+(record.r+1)];
-   return {c,...(invalid(source)||merged(record.r,c)||merged(table.headerRow,c)?{invalid:true}:money(source))};
-  }).filter(p=>!p.blank&&p.cents!==0n);
-  if(!plans.length)continue;
-  const c=table.map['谈判明细'],source=c===undefined?null:table.sheet[column(c)+(record.r+1)];
-  const parsed=c!==undefined&&!invalid(source)&&!merged(record.r,c)&&typeof source?.v==='string'&&text(source.v)?
-   parseDetailLines(source.v,month=>years.get(month)||dateYears.get(month)||new Set(),money,column(c)+(record.r+1)):null;
-  const payments=parsed?.payments.filter(p=>p.cents!==0n)||[],planCounts=counts(plans),paymentCounts=counts(payments);
-  // Repeated amounts cannot consume the same installment twice; unmatched groups stay visible for review.
-  const complete=parsed?.complete&&plans.every(p=>p.cents!==undefined&&p.cents>=0n)&&payments.every(p=>p.cents>=0n)&&
-   planCounts.size===paymentCounts.size&&[...planCounts].every(([amount,count])=>paymentCounts.get(amount)===count);
-  for(const plan of plans){
-   const entry=evidence.get(plan.c),months=complete?new Set(payments.filter(p=>p.cents===plan.cents).map(monthKey)):new Set();
-   if(months.size===1)entry.months.add([...months][0]);else entry.uncertain=true;
-  }
- }
- const bands=[];
- for(const c of dateColumns){
-  const entry=evidence.get(c),known=!entry.uncertain&&entry.months.size===1,key=known?[...entry.months][0]:null;
-  const label=key?key.slice(0,4)+'年'+Number(key.slice(5))+'月付款':'付款月份待核对',previous=bands.at(-1);
-  if(known&&previous?.endCol===c-1&&previous.label===label)previous.endCol=c;
-  else bands.push({startCol:c,endCol:c,label});
+function paymentHeaderBands(table){
+ // Preview only: keep the uploaded month labels and merges without deriving new ones.
+ if(table.headerTopRow==null)return [];
+ const bands=[],seen=new Set();
+ for(const c of selectColumns(table).dateColumns){
+  const merge=(table.sheet['!merges']||[]).find(m=>m.s.r===table.headerTopRow&&m.e.r===table.headerTopRow&&m.s.c<=c&&m.e.c>=c);
+  const startCol=merge?.s.c??c,endCol=merge?.e.c??c;
+  if(seen.has(startCol))continue;
+  seen.add(startCol);bands.push({startCol,endCol,label:text(table.sheet[column(startCol)+(table.headerTopRow+1)]?.v)});
  }
  return bands;
 }

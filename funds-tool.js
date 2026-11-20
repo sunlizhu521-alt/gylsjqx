@@ -163,7 +163,7 @@
         const totalRows=result.totalValidation.rows.map((_,r)=>result.totalValidation.headers.map((_,c)=>totalSheet[XLSX.utils.encode_cell({r:r+1,c})]));
         preview('totalValidationPreview',result.totalValidation.headers,totalRows);
         const sheet = saved.Sheets['谈判付款'];
-        const exportedHeaderRow=result.negotiated.headerRow+(result.negotiated.headerBands?.length&&result.negotiated.headerTopRow==null?1:0);
+        const exportedHeaderRow=result.negotiated.headerRow;
         const rows = result.negotiated.rows.map((_,index)=>result.negotiated.headers.map((_,col)=>sheet[XLSX.utils.encode_cell({r:index+exportedHeaderRow+1,c:col})]));
         preview('negotiatedPreview',negotiatedHeaders,rows,Boolean(saved.Workbook?.WBProps?.date1904));
         preparedBlob = blob;
