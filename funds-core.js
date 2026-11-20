@@ -28,6 +28,17 @@ const OA_FIELDS=['流程编号','收款单位','付款金额',...FLOW_FIELDS];
 const OA_PROGRESS_FIELDS=['签字意见','业务所属公司'];
 const DATE_FORMAT='yyyy"年"m"月"d"日"';
 const norm=v=>String(v??'').normalize('NFKC').replace(/\s+/g,'').trim();
+function applicationClass(raw){
+ const label=norm(raw).replace(/[－—]/g,'-');
+ const classes={
+  '谈判付款':['谈判付款','谈判付款表'],
+  '正常付款':['正常付款','资金台账'],
+  '谈判付款-谈判付款表':['谈判付款','谈判付款表'],
+  '正常付款-谈判付款表':['正常付款','谈判付款表'],
+  '正常付款-正常对账表':['正常付款','资金台账']
+ };
+ const entry=Object.hasOwn(classes,label)?classes[label]:null;return entry?{label,kind:entry[0],source:entry[1]}:null;
+}
 // User-confirmed supplier alias; canonicalize matching keys without rewriting source names.
 const supplierKey=v=>{const name=norm(v);return name==='中山荣杰医疗器器材工业有限公司'?'中山荣杰医疗器械工业有限公司':name;};
 const str=v=>String(v??'').trim();
@@ -358,17 +369,16 @@ function build(inputs,decisions={}){
  const applicationTypes=new Map();
  for(const r of applications.records){
   if(applications.map['付款分类']===undefined)continue; // Legacy exports without this column retain their previous matching rules.
-  let type=r.values['付款分类']?.t==='e'?'':norm(value(r,'付款分类'));
-  if(!['谈判付款','正常付款'].includes(type)){
-   const answer=issue('application-type:'+r.id,'application-classification','付款申请的付款分类为空或异常，请确认分类；确认前不参与提交状态匹配。',r,[{value:'negotiated',label:'确认谈判付款'},{value:'normal',label:'确认正常付款'},{value:'keep',label:'保留原文件，本次不匹配此申请'}])[0];
-   type=answer==='negotiated'?'谈判付款':answer==='normal'?'正常付款':'';
+  const raw=r.values['付款分类'];let type=raw?.t==='e'||raw?.f&&(raw.t==='z'||raw.v==null||raw.v==='')?'':applicationClass(raw?.v)?.label||'';
+  if(!type){
+   const original=raw?.t==='e'?raw.w||'Excel错误':raw?.f&&(raw.t==='z'||raw.v==null||raw.v==='')?'公式结果不可用':str(raw?.v)||'空白';
+   issue('application-type:'+r.id,'application-classification','申请汇总“付款分类”为“'+original+'”，无法识别。请在来源文件该行填写有效付款分类后重新上传；本次不匹配该申请，不从台账或谈判表推断分类。',r,[{value:'keep',label:'保留源值，本次不匹配此申请'}]);
   }
   applicationTypes.set(r,type);
  }
- const eligibleApplication=(r,normal)=>!applicationTypes.has(r)||applicationTypes.get(r)===(normal?'正常付款':'谈判付款');
- const applicationNegotiatedIds=new Set(applications.records.filter(r=>applicationTypes.get(r)==='谈判付款').flatMap(applicationIds));
+ const eligibleApplication=(r,normal)=>!applicationTypes.has(r)||applicationClass(applicationTypes.get(r))?.source===(normal?'资金台账':'谈判付款表');
+ const applicationNegotiatedIds=new Set(applications.records.filter(r=>applicationClass(applicationTypes.get(r))?.source==='谈判付款表').flatMap(applicationIds));
  const isApplicationNegotiated=r=>oas(r).some(id=>applicationNegotiatedIds.has(id));
- const negotiatedKeys=new Set(negotiated.records.map(r=>classification(r).key).filter(Boolean));
  const missingClassification=new Set(ledgerTables.filter(t=>t.map['是否谈判付款']===undefined).map(t=>t.sheetName));
  const normal=[];let negotiatedLedgerRows=0,excludedNormalRows=0;
  for(const r of ledger){
@@ -546,7 +556,7 @@ function build(inputs,decisions={}){
   if(candidates.length===1)originalBatchMatches.set(r,candidates[0]);
  }
  function submissionKey(r){
-  const ids=applicationIds(r),info=classification(r),negotiatedApplication=eligibleApplication(r,false)&&(applicationTypes.has(r)||negotiatedObjects.some(t=>classification(t.record).name===info.name&&(info.key===classification(t.record).key||ids.some(id=>oas(t.record).includes(id))))),batch=negotiatedApplication?applicationBatchNumber(r):'',original=originalBatchMatches.get(r);return (ids.length||batch||original)&&info.key?JSON.stringify([[...new Set(ids)].sort(),info.key,batch||original||'']):null;
+  const ids=applicationIds(r),info=classification(r),negotiatedApplication=eligibleApplication(r,false)&&(applicationTypes.has(r)||negotiatedObjects.some(t=>classification(t.record).name===info.name&&(info.key===classification(t.record).key||ids.some(id=>oas(t.record).includes(id))))),batch=negotiatedApplication?applicationBatchNumber(r):'',original=originalBatchMatches.get(r);return (ids.length||batch||original)&&info.key?JSON.stringify([applicationTypes.get(r)||'',[...new Set(ids)].sort(),info.key,batch||original||'']):null;
  }
  function uniqueSubmissions(matched){
   const seen=new Set();return matched.filter(r=>{const key=submissionKey(r);if(!key)return true;if(seen.has(key))return false;seen.add(key);return true;});
@@ -878,7 +888,7 @@ function build(inputs,decisions={}){
   if(isReapplication(application))continue;
   const type=applicationTypes.get(application),ids=applicationIds(application),info=classification(application);
   if(!type||!ids.length||!info.key)continue;
-  const key=JSON.stringify([type,submissionKey(application)]);
+  const key=submissionKey(application);
   if(!duplicateApplications.has(key))duplicateApplications.set(key,[]);
   duplicateApplications.get(key).push(application);
  }
@@ -1003,8 +1013,7 @@ function build(inputs,decisions={}){
   const action=comment?.conflict?'核实谈判表 '+comment.source+' 的人工批注及本批实际支付金额；批注有误请修正后重新上传，存在退汇等情况时同步核对出纳记录。':'请先确认是否为分批付款，再确认本次申请对应的批次及是否实际支付；核对该批出纳付款金额、时间，记录不完整时重新导出OA签字意见。';
   return {paid:false,evidence:'分批付款待核对：'+reason,review:'分批付款核对：申请金额 '+amountText(application.values['申请付款金额'])+(applicationBatch(batchText(application))?'；第'+applicationBatch(batchText(application))+'批':'')+'。\n'+reason+'。\n出纳记录：'+evidence+'。\n需要处理：'+action};
  }
- // Read the manual classification without adding its column to the managed export range.
- const installmentColumns=negotiated.headers.flatMap((header,c)=>norm(header)==='是否谈判分批'?[c]:[]);
+ // Application classification and payable date are authoritative for progress rows.
  const progressRows=applications.records.map(application=>{
   let paymentEvidence='';
   const notes=[],ids=applicationIds(application),info=classification(application),reference=application.values[applicationOAField];
@@ -1020,6 +1029,7 @@ function build(inputs,decisions={}){
    return parsed;
   }
   values['申请日期']=readDate(application,'申请日期','申请日期');
+  values['应付时间']=readDate(application,'应付款时间','应付时间');
   function locate(records,label,reportMissing=true){
    let matches=info.name?records.filter(r=>classification(r).name===info.name&&compatible(application,r,'付款主体')&&r.values['对公付款0A流程号']?.t!=='e'):[];
    if(ids.length)matches=matches.filter(r=>ids.length===1&&oas(r).length===1&&oas(r)[0]===ids[0]);
@@ -1032,24 +1042,14 @@ function build(inputs,decisions={}){
   // Missing ledger metadata stays blank; actual ambiguity and payment-evidence problems still need review.
   const ledgerMatch=locate(ledger,'跟单员/资金台账',false);
   if(ledgerMatch)values['跟单员']=cell(ledgerMatch.owner);
-  let type=applicationTypes.get(application),dueRecord;
+  let type=applicationTypes.get(application);
   if(applications.map['付款分类']===undefined){
    const negotiatedMatch=negotiatedObjects.some(t=>info.key&&classification(t.record).key===info.key||ids.length===1&&oas(t.record).includes(ids[0])&&classification(t.record).name===info.name&&compatible(application,t.record,'付款主体'));
    type=negotiatedMatch||norm(value(ledgerMatch||{values:{}},'是否谈判付款'))==='是'?'谈判付款':ledgerMatch?'正常付款':'';
   }
-  if(type==='正常付款'&&ledgerMatch&&(norm(value(ledgerMatch,'是否谈判付款'))==='是'||isApplicationNegotiated(ledgerMatch)||negotiatedKeys.has(classification(ledgerMatch).key))){
-   type='谈判付款';notes.push('申请分类与现有款项分类不同，应付时间按谈判表读取，请核实付款分类');
-  }
-  values['付款来源']=cell(type==='谈判付款'?'谈判付款表':type==='正常付款'?'资金台账':'');
-  if(type==='谈判付款')dueRecord=locate(negotiatedObjects.map(t=>t.record),'应付时间/谈判付款');
-  else if(type==='正常付款')dueRecord=ledgerMatch;
-  else notes.push('付款分类未确认，无法确定应付时间来源，请核实申请汇总付款分类');
-  if(type==='谈判付款'&&dueRecord&&installmentColumns.length===1){
-   const flag=negotiated.sheet[X.utils.encode_cell({r:dueRecord.r,c:installmentColumns[0]})];
-   const valid=flag?.t!=='e'&&!(flag?.f&&(flag.t==='z'||flag.v==null||flag.v===''));
-   if(valid&&['是','否'].includes(norm(flag?.v)))values['付款来源']=cell('谈判付款表-'+(norm(flag.v)==='是'?'谈判付款':'正常付款'));
-  }
-  if(dueRecord)values['应付时间']=readDate(dueRecord,'应付款时间','应付时间');
+  const category=applicationClass(type),fromNegotiated=category?.source==='谈判付款表';
+  values['付款来源']=cell(category?(fromNegotiated&&category.label.includes('-')?'谈判付款表-'+category.kind:category.source):'');
+  if(!category)notes.push('申请汇总付款分类为空或异常，请修正来源分类后重新上传');
   const flowValues=Object.fromEntries(FLOW_FIELDS.map(h=>[h,[]]));let paymentStatus='待核对';
   if(!ids.length)notes.push('对公付款OA号为空或无法识别，请补充申请汇总流程编码');
   if(ids.length>1)notes.push('一笔申请含多个 OA号，请核实各流程付款进度及金额归属');
@@ -1064,7 +1064,7 @@ function build(inputs,decisions={}){
    const matched=versions[0],invalid=FLOW_FIELDS.filter(h=>matched.values[h]?.t==='e'||(matched.values[h]?.f&&(matched.values[h].v==null||matched.values[h].v==='')));
    for(const h of FLOW_FIELDS)flowValues[h].push(prefix+sourceText(matched.values[h]));
    const status=norm(value(matched,'流程状态')),executing=norm(value(matched,'当前节点'))==='办理人执行';
-   const payment=type!=='谈判付款'&&ids.length===1&&!isReapplication(application)?batchPayment(application,id):null;
+   const payment=category&&!fromNegotiated&&ids.length===1&&!isReapplication(application)?batchPayment(application,id):null;
    if(invalid.length)notes.push('流程 '+id+' 的'+invalid.join('、')+'为空或异常，请核实 '+sourcePosition(matched));
    else if(payment){
     paymentStatus=payment.paid?'已付款':'待核对';paymentEvidence=payment.evidence;
@@ -1072,12 +1072,13 @@ function build(inputs,decisions={}){
    }else if(!executing&&!['归档','未归档'].includes(status))notes.push('流程 '+id+' 的流程状态为空或异常，请核实 '+sourcePosition(matched));
    else if(ids.length===1)paymentStatus=executing||status==='归档'?'已付款':'未付款';
   }
-  if(type==='谈判付款'){
+  if(fromNegotiated){
    const event=applicationEvent(application,'是否已付款');
    paymentStatus=event.state==='done'?'已付款':event.state==='no'?'未付款':'待核对';
    paymentEvidence='申请汇总是否已付款：'+event.text+'｜'+sourcePosition(application);
    if(event.state==='invalid')notes.push('申请汇总“是否已付款”无法识别，请核实 '+sourcePosition(application)+' 的原值：'+event.text);
   }
+  if(!category)paymentStatus='待核对';
   for(const h of FLOW_FIELDS)values[h]=cell(flowValues[h].join('\n'));
   values['是否已付款']=cell(isReapplication(application)?'重新申请':paymentStatus);
   progressEvidence.push(isReapplication(application)?'核对说明：重新申请':paymentEvidence);
@@ -1086,5 +1087,5 @@ function build(inputs,decisions={}){
  });
  return {totalValidation:FundsTotalValidation.build(negotiated,money),progressHeaders:[...PROGRESS_HEADERS],progressRows,progressEvidence,normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,batchComments,applicationBatchMatches,highlights:{negotiatedCells:[...highlightedNegotiated],negotiatedPaidCells:[...highlightedPaid],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,headerTopRow:negotiated.headerTopRow,headerBands,sourceRange:negotiated.range,batchLayout,batchPlans,batchYearAdjustments,headers:negHeaders,rows,updates,columnOrder,managedColumns},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
 }
-return {PEOPLE,PROGRESS_HEADERS,OUTPUT_SHEETS,TOTAL_VALIDATION_HEADERS,outputSheetPlan,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText};
+return {PEOPLE,PROGRESS_HEADERS,OUTPUT_SHEETS,TOTAL_VALIDATION_HEADERS,outputSheetPlan,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText,applicationClass};
 });

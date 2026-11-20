@@ -40,7 +40,8 @@ function fixture(owner='李奇'){
  const negotiated=book('10月谈判付款主表',NH,[n]);negotiated.Sheets[negotiated.SheetNames[0]].M2={t:'n',v:100,f:'G2'};
  const appRows=[main,normal].map(r=>({'申请日期':'2026-10-10','供应商全称':r['供应商名称'],'付款主体':r['付款主体'],'合同号':r['对公付款0A流程号'],'合同金额':r['合同总金额'],'已付金额':0,'付款事由':r['摘要'],'备注':r['单据号【财务应付单】'],'本次申请付款金额':r['申请付款金额']}));
  const oaRows=[main,normal].map(r=>({'流程编号':r['对公付款0A流程号'],'当前节点':'财务审核','未操作者':'测试人员','流程状态':'未归档','申请人':'李奇','收款单位':r['供应商名称'],'付款金额':r['申请付款金额']}));
- return {ledger:{book:ledger,name:'资金.xlsx'},negotiated:{book:negotiated,name:'谈判.xlsx'},applications:{book:book('付款申请汇总',AH,appRows),name:'申请.xlsx'},oa:{book:book('Sheet0',OH,oaRows),name:'OA.xlsx'}};
+ const applications=book('付款申请汇总',AH,appRows);X.utils.sheet_add_aoa(applications.Sheets.付款申请汇总,[['应付时间'],['2026-10-31'],['2026-10-31']],{origin:'Z1'});
+ return {ledger:{book:ledger,name:'资金.xlsx'},negotiated:{book:negotiated,name:'谈判.xlsx'},applications:{book:applications,name:'申请.xlsx'},oa:{book:book('Sheet0',OH,oaRows),name:'OA.xlsx'}};
 }
 test('孙立柱以对账时间替代开票时间时忽略缺列表头，输出开票时间仍留空且保留来源日期',()=>{
  for(const suffix of ['', '1102']){
@@ -91,7 +92,7 @@ test('正常付款七个常用字段相邻，改名后金额日期与公式仍�
  const row=Object.fromEntries(r.normalHeaders.map((h,c)=>[h,r.normalRows[0][c]]));
  assert.equal(row['摘要'].v,'九月货款');assert.equal(row['本次申请付款金额'].v,100);assert.equal(row['本次申请付款金额'].t,'n');assert.equal(row['本次申请付款金额'].z,'#,##0.00');
  assert.equal(row['应付时间'].t,'n');assert.equal(X.SSF.format(row['应付时间'].z,row['应付时间'].v),'2026年10月25日');assert.equal(row['剩余金额'].f,undefined);assert.equal(row['剩余金额'].v,row['本次申请付款金额'].v-row['已付金额'].v);
- const progress=r.progressRows.find(row=>row[C.PROGRESS_HEADERS.indexOf('供应商名称')].v==='测试供应商乙');assert.equal(X.SSF.format(C.DATE_FORMAT,progress[C.PROGRESS_HEADERS.indexOf('应付时间')].v),'2026年10月31日','付款进度整理继续使用源台账应付日期');
+ const progress=r.progressRows.find(row=>row[C.PROGRESS_HEADERS.indexOf('供应商名称')].v==='测试供应商乙');assert.equal(X.SSF.format(C.DATE_FORMAT,progress[C.PROGRESS_HEADERS.indexOf('应付时间')].v),'2026年10月31日','付款进度整理使用申请汇总应付日期，不做25日调整');
  const s=i.ledger.book.Sheets['对账明细-李奇'];s[X.utils.encode_cell({r:0,c:LH.indexOf('申请付款金额')})].v='本次申请付款金额';s[X.utils.encode_cell({r:0,c:LH.indexOf('应付款时间')})].v='应付时间';
  assert.deepEqual(C.build(i).normalRows,r.normalRows);assert.deepEqual(C.build(i).progressRows,r.progressRows);
 });
@@ -952,11 +953,12 @@ test('付款分类隔离OA归集、名称金额回退及冲突候选，不跨类
  s.J3={t:'s',v:'谈判付款'};s.D3={t:'s',v:''};r=C.build(i);assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('是否提交付款申请单')].v,'未申请','正常付款不能借用谈判申请的名称金额');
  s.J2={t:'s',v:' 谈判付款 '};r=C.build(i);assert.equal(negotiatedValue(r,'是否提交付款申请单'),'已经提交全部');
 });
-test('付款分类为空或异常须确认，分类决定仅用于本次匹配且原文件不变',()=>{
+test('付款分类为空或异常时修正源表，不允许人工改分类绕过来源',()=>{
  for(const type of ['', '其他', {t:'e',v:23,w:'#REF!'}]){
   const i=fixture(),s=i.applications.book.Sheets.付款申请汇总;X.utils.sheet_add_aoa(s,[['付款分类'],[type],['正常付款']],{origin:'J1'});const before=JSON.stringify(i);
   const r=C.build(i),problem=r.issues.find(x=>x.kind==='application-classification');assert(problem);assert.equal(r.stats.pending,1);assert.equal(negotiatedValue(r,'是否提交付款申请单'),'未提交');
-  for(const choice of ['negotiated','normal','keep']){const confirmed=C.build(i,{[problem.id]:[choice]});assert.equal(confirmed.stats.pending,0);assert.equal(negotiatedValue(confirmed,'是否提交付款申请单'),choice==='negotiated'?'已经提交全部':'未提交');}
+  assert.match(problem.message,/来源文件该行/);assert.deepEqual(problem.choices.map(c=>c.value),['keep']);
+  for(const choice of ['negotiated','normal','keep']){const confirmed=C.build(i,{[problem.id]:[choice]});assert.equal(confirmed.stats.pending,choice==='keep'?0:1);assert.equal(negotiatedValue(confirmed,'是否提交付款申请单'),'未提交');}
   assert.equal(JSON.stringify(i),before);
  }
 });

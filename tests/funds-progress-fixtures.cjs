@@ -22,6 +22,7 @@ function fixture(){
   ['2026-11-02','合成供应商2','迈德斯特',ID(2),200,'正常付款'],
   ['2026-11-03','合成供应商1','迈德斯特',ID(1),40,'谈判付款'],
   ['2026-11-04','未进入原表供应商','迈德斯特',ID(4),0,'正常付款']]);
+ X.utils.sheet_add_aoa(applications.Sheets.付款申请汇总,[['应付时间'],['2026-11-06'],['2026-11-09'],['2026-11-06'],['2026-11-10']],{origin:'Z1'});
  const oa=book('Sheet0',[OH,...[1,2,3,4].map(n=>[ID(n),n===4?'未进入原表供应商':'合成供应商'+n,n===4?0:n*100,'财务审批','合成审核人',n===1?'归档':'未归档','OA申请人',n===1?PAID40:'']),[ID(1),'合成供应商1',100,'财务审批','合成审核人','归档','OA申请人',PAID40]]);
  return Object.fromEntries(Object.entries({ledger,applications,negotiated,oa}).map(([k,book])=>[k,{book,name:k+'.xlsx'}]));
 }
