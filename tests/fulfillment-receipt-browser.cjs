@@ -28,6 +28,10 @@ function receipt(onlyZero=false){
  ];
  X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([headers,...records]),'入库明细');return write(book);
 }
+function uncertainReceipt(){
+ const book=X.utils.book_new(),headers=['入库日期','单据编号','订单单号','供应商','物料编码','实收数量'];
+ X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([headers,['2026-11-13','CGRK-CONFIRMED','CGDD000001',fullSupplier,'001',20],['2026-11-14','CGRK-REVIEW','CGDD000001','供应商冲突','001',30]]),'入库核对');return write(book);
+}
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
  try{
@@ -43,7 +47,7 @@ function receipt(onlyZero=false){
    const snapshot=()=>frame.evaluate(async()=>JSON.stringify(await FulfillmentCache.get(),(_,value)=>value instanceof ArrayBuffer?Array.from(new Uint8Array(value)):value));
    const preview=()=>frame.locator('#series-preview').evaluate(el=>({headers:[...el.querySelectorAll('thead th')].map(c=>c.textContent),rows:[...el.querySelectorAll('tbody tr')].map(tr=>[...tr.cells].map(c=>c.textContent))}));
    const quantities=async()=>{const view=await preview();assert.equal(view.rows.length,1);return view.rows[0].slice(8,10);};
-   async function download(expected,period='11.13-11.19'){
+   async function download(expected,period='11.13-11.19',receiptNote=''){
     const view=await preview();assert.equal(view.headers[7],'差异数量');assert.deepEqual(view.headers.slice(8),[period+'新增采购订单',period+'采购入库单数量','备注','判断']);assert.deepEqual(view.rows[0].slice(8,10),expected.map(String));
     const pending=page.waitForEvent('download');await frame.locator('#download').click();const saved=await pending;await ready();assert.match(saved.suggestedFilename(),/_V\d+\.xlsx$/);
     const book=X.read(await fs.readFile(await saved.path()),{type:'buffer',cellNF:true}),sheet=book.Sheets.系列对比,grid=X.utils.sheet_to_json(sheet,{header:1,defval:''});
@@ -53,7 +57,9 @@ function receipt(onlyZero=false){
     assert.equal(sheet['!autofilter'].ref,'A1:L2');assert.equal(sheet.K2?.v??'','');
     for(const data of Object.values(book.Sheets))for(const [address,cell]of Object.entries(data))if(/^[A-Z]+\d+$/.test(address))assert.equal(cell.f,undefined,'下载工作簿不保留公式');
     const original=await frame.evaluate(async()=>{const h=await FulfillmentCache.get();return FulfillmentCore.seriesComparison(h.previous?.result,h.current.result).map(row=>row.map(c=>c.v));});
-    assert.deepEqual(grid[1].slice(0,8),original[0].slice(0,8));assert.deepEqual(grid[1].slice(10),original[0].slice(8),'插入两列不改原备注和判断');
+    assert.deepEqual(grid[1].slice(0,8),original[0].slice(0,8));assert.equal(grid[1][10],original[0][8],'备注原样保留');
+    if(receiptNote){assert(String(grid[1][11]).startsWith(original[0][9]));assert(String(grid[1][11]).includes(receiptNote));assert.equal((String(grid[1][11]).match(/入库核对：/g)||[]).length,1);}
+    else assert.equal(grid[1][11],original[0][9],'没有入库待核对时保持原判断');
     return {book,name:saved.suggestedFilename()};
    }
    await open();return {context,page,get frame(){return frame;},open,ready,upload,snapshot,preview,quantities,download};
@@ -70,6 +76,12 @@ function receipt(onlyZero=false){
   await s.frame.locator('#receipt-issues-details > summary').click();assert.match(await s.frame.locator('#receipt-issues').innerText(),/CGDD099999/,'入库单据号不冒充采购订单号');
   const first=await s.download([350,80.4]);assert(X.utils.sheet_to_json(first.book.Sheets.合并核对).some(row=>String(row.来源工作表).includes('入库')&&String(row.原值).includes('CGDD099999')),'未归属入库来源进入合并核对');
   const second=await s.download([350,80.4]);assert.equal(Number(/_V(\d+)\.xlsx$/.exec(second.name)[1]),Number(/_V(\d+)\.xlsx$/.exec(first.name)[1])+1);
+  await s.upload('receipt-file','待核对入库.xlsx',uncertainReceipt());assert.deepEqual(await s.quantities(),['350','待核对']);
+  const pendingJudgment=(await s.preview()).rows[0][11];
+  for(const text of ['已确认入库数量：20','待核对候选数量：30','实收数量：30','CGRK-REVIEW','CGDD000001','入库核对!F3','冲突','不能计作本组入库'])assert(pendingJudgment.includes(text),text);
+  await s.download([350,'待核对'],'11.13-11.19','待核对候选数量：30');
+  await s.upload('supplier-division-file','供应商分工.xlsx',catalog);assert.equal((await s.preview()).rows[0][11],pendingJudgment,'重新渲染不重复追加判断');assert.deepEqual(await s.snapshot(),stable);
+  await s.upload('receipt-file','采购入库单.xlsx',received);assert.deepEqual(await s.quantities(),['350','80.4']);assert(!(await s.preview()).rows[0][11].includes('入库核对：'),'替换来源后清除旧核对说明');
   await s.page.locator('button[data-tool="payment"]').click();await s.page.locator('button[data-tool="fulfillment"]').click();assert.deepEqual(await s.quantities(),['350','80.4'],'切换工具保留入库和采购来源');
   await s.frame.locator('#receipt-clear').click();await s.ready();assert.deepEqual(await s.quantities(),['350','未上传采购入库单']);
   await s.upload('receipt-file','采购入库单.xlsx',received);assert.deepEqual(await s.quantities(),['350','80.4']);

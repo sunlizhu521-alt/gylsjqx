@@ -95,3 +95,58 @@ test('未上传无期间或读取失败均有独立提示，列名跨月跨年�
  const result=enrich({comparison}),book=C.workbook({...now,seriesComparison:result.rows,seriesColumns:result.columns}),saved=X.read(X.write(book,{type:'buffer',bookType:'xlsx'})),sheet=saved.Sheets.系列对比;
  assert.equal(sheet.I1.v,'11.13-11.19采购入库单数量');assert.equal(sheet.I2.t,'n');assert.equal(sheet.I2.v,12);assert.equal(sheet.J2.v,'人工备注');assert.equal(sheet.K2.v,'原判断');assert.equal(sheet['!autofilter'].ref,'A1:K2');
 });
+
+test('待核对判断区分已确认与候选入库数量，保留原判断备注并列明单号来源和原因',()=>{
+ const items=[{}, {}, {'采购订单号':'CGDD888888','系列':'AX35'}],now=current(items),comparison=C.seriesComparison(null,now);
+ comparison[0][8]=cell('人工备注保留');comparison[0][9]=cell('原差异原因');
+ const records=[receipt({'实收数量':20,'单据编号':'CGRK_CONFIRMED'}),receipt({'订单单号':'CGDD999999','实收数量':30,'单据编号':'CGRK_PENDING'})];
+ const result=enrich({items,comparison,records}),first=result.rows.find(r=>r[4].v==='AX25'),second=result.rows.find(r=>r[4].v==='AX35');
+ assert.equal(first[8].v,'待核对');assert.equal(second[8].v,'待核对');assert.equal(first[9].v,'人工备注保留');
+ for(const row of [first,second]){
+  const note=row[10].v;assert.match(note,/入库核对/);assert.match(note,/待核对候选数量：30/);assert.match(note,/实收数量：30/);
+  assert.match(note,/CGRK_PENDING/);assert.match(note,/CGDD999999/);assert.match(note,/入库明细!G3/);assert.match(note,/多个系列分组/);assert.match(note,/不能计作本组入库/);
+ }
+ assert.match(first[10].v,/原差异原因/);assert.match(first[10].v,/已确认入库数量：20/);assert.match(second[10].v,/已确认入库数量：0/);
+ assert.deepEqual(enrich({items,comparison,records}).rows,result.rows,'同一基础结果重复重算不重复追加说明');
+ const book=C.workbook({...now,seriesComparison:result.rows,seriesColumns:result.columns}),saved=X.read(X.write(book,{type:'buffer',bookType:'xlsx'}));
+ assert.equal(saved.Sheets.系列对比.K2.v,result.rows[0][10].v);assert.equal(saved.Sheets.系列对比.J2.v,'人工备注保留');assert.equal(saved.Sheets.系列对比.K2.f,undefined);
+});
+
+test('候选重复入库行逐行计算，小数精确相加且零数量仍明确显示',()=>{
+ const items=[{}, {'采购订单号':'CGDD888888','系列':'AX35'}];
+ const result=enrich({items,records:[0,0.1,0.2,0.1].map(qty=>receipt({'订单单号':'CGDD999999','实收数量':qty}))});
+ for(const row of result.rows){
+  assert.equal(row[8].v,'待核对');assert.match(row[10].v,/待核对候选数量：0\.4(?:\D|$)/);assert.match(row[10].v,/实收数量：0(?:\D|$)/);
+  for(const source of ['G2','G3','G4','G5'])assert(row[10].v.includes('入库明细!'+source));
+  assert.doesNotMatch(row[10].v,/0\.400000000000/);
+ }
+ const zero=enrich({items,records:[receipt({'订单单号':'CGDD999999','实收数量':0})]});
+ assert(zero.rows.every(row=>row[8].v==='待核对'&&row[10].v.includes('待核对候选数量：0')));
+});
+
+test('无效候选实收数量明确无法确定，已确认数量仍保留且不能拿应收数量补齐',()=>{
+ for(const qty of ['',{t:'e',v:23},{t:'n',f:'SUM(G99:G100)'}]){
+  const result=enrich({records:[receipt({'实收数量':20}),receipt({'实收数量':qty,'单据编号':'CGRK_INVALID'})]}),note=result.rows[0][10].v;
+  assert.equal(result.rows[0][8].v,'待核对');assert.match(note,/已确认入库数量：20/);assert.match(note,/实收数量无法确定/);
+  assert.match(note,/CGRK_INVALID/);assert.match(note,/入库明细!G3/);assert.doesNotMatch(note,/待核对候选数量：(?:88|99)(?:\D|$)/);
+ }
+ const badDate=enrich({records:[receipt({'入库日期':'2026-02-30','实收数量':12})]});
+ assert.match(badDate.rows[0][10].v,/实收数量：12/);assert.match(badDate.rows[0][10].v,/入库日期为空或无效/);
+});
+
+test('首期及负差异原判断为空时仍显示入库核对，范围外冲突与确定数值组不新增说明',()=>{
+ for(const previous of [null,current([{'未交付数量':20}])]){
+  const result=enrich({previous,records:[receipt({'供应商':'其他供应商','实收数量':30})]});
+  assert.equal(result.rows[0][8].v,'待核对');assert.match(result.rows[0][10].v,/入库核对/);assert.match(result.rows[0][10].v,/实收数量：30/);assert.match(result.rows[0][10].v,/冲突/);
+ }
+ const now=current(),comparison=C.seriesComparison(null,now);comparison[0][9]=cell('原判断保留');
+ const result=enrich({comparison,records:[receipt({'实收数量':20}),receipt({'入库日期':'2026-11-20','供应商':'其他供应商','实收数量':999})]});
+ assert.equal(result.rows[0][8].v,20);assert.equal(result.rows[0][10].v,'原判断保留');assert.deepEqual(result.issues,[]);
+});
+
+test('采购订单待核对仍保持原判断，不混入采购入库核对说明',()=>{
+ const now=current(),comparison=C.seriesComparison(null,now);comparison[0][9]=cell('原采购差异原因');
+ const source=input([{'采购日期':'2026-11-13','单据编号':'CGDD015712','供应商':'其他供应商','物料编码':'001','采购数量':30}],['采购日期','单据编号','供应商','物料编码','采购数量']);
+ const result=P.enrich({filename:FILENAME,current:now,comparison,purchase:P.parse(source)});
+ assert.equal(result.rows[0][8].v,'待核对');assert.equal(result.rows[0][10].v,'原采购差异原因');
+});

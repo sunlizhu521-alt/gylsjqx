@@ -123,7 +123,7 @@ function render(){
  if(purchase){
   const additions=[purchase,receipt].filter(source=>source.columns.length>C.SERIES_COLUMNS.length);
   result.seriesColumns=[...C.SERIES_COLUMNS.slice(0,8),...additions.map(source=>source.columns[8]),...C.SERIES_COLUMNS.slice(8)];
-  result.seriesComparison=seriesBase.map((row,i)=>[...row.slice(0,8),...additions.map(source=>source.rows[i][8]),...row.slice(8)]);
+  result.seriesComparison=seriesBase.map((row,i)=>[...row.slice(0,8),...additions.map(source=>source.rows[i][8]),row[8],receipt.rows[i].at(-1)]);
   result.review.push(...purchase.issues.map(issue=>C.REVIEW_COLUMNS.map(column=>({t:'s',v:({'核对类型':'新增采购数量','来源工作表':'采购订单','来源位置':issue.source,'物料编码':issue.code,'核对字段':'采购日期／采购数量／系列归属','原值':[issue.supplier,issue.order,issue.qty==null?'':'采购数量 '+issue.qty].filter(Boolean).join('；'),'结果':'待核对','需要处理':issue.reason})[column]||'',z:'@'}))));
   result.review.push(...receipt.issues.map(issue=>C.REVIEW_COLUMNS.map(column=>({t:'s',v:({'核对类型':'采购入库数量','来源工作表':'采购入库单','来源位置':issue.source,'物料编码':issue.code,'核对字段':'入库日期／实收数量／系列归属','原值':[issue.supplier,issue.document,issue.order,issue.qty==null?'':'实收数量 '+issue.qty].filter(Boolean).join('；'),'结果':'待核对','需要处理':issue.reason})[column]||'',z:'@'}))));
  }
