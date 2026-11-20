@@ -18,6 +18,45 @@ purchaseInput.onchange=async()=>{
  finally{purchaseInput.disabled=false;}
 };
 purchaseClear.onclick=()=>{purchaseInput.value='';purchaseReference.textContent='尚未选择采购订单';purchaseClear.hidden=true;};
+const divisionInput=$('supplier-division-file'),divisionReference=$('supplier-division-reference'),divisionClear=$('supplier-division-clear');
+let supplierDivision=null,divisionCachePresent=false;
+function checkDivisionFile(file){
+ if(!/\.(xlsx|xls)$/i.test(file?.name||''))throw Error('请选择 .xlsx 或 .xls 文件');
+ if(!(file.bytes instanceof ArrayBuffer)||!file.bytes.byteLength)throw Error('文件为空或缓存内容无效');
+ if(file.bytes.byteLength>60*1024*1024)throw Error('文件超过60MB，请缩小后重试');
+ if(!XLSX.read(file.bytes,{type:'array',bookSheets:true}).SheetNames?.length)throw Error('文件中没有工作表');
+}
+function showDivisionFile(note=''){
+ divisionInput.value='';
+ if(supplierDivision){
+  // The filename alone is insufficient: restore the original bytes for the selected file.
+  try{const transfer=new DataTransfer();transfer.items.add(new File([supplierDivision.bytes],supplierDivision.name,{lastModified:supplierDivision.lastModified}));divisionInput.files=transfer.files;}catch(_){}
+  divisionReference.textContent='当前引用：'+supplierDivision.name+'\n引用时间：'+new Date(supplierDivision.savedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})+'\n'+(note||'已自动缓存，刷新后恢复。');
+ }else divisionReference.textContent=note||'尚未选择供应商分工明细';
+ divisionClear.hidden=!divisionCachePresent;
+}
+divisionInput.onchange=async()=>{
+ const file=divisionInput.files[0];if(!file)return;
+ divisionInput.disabled=true;divisionClear.disabled=true;divisionReference.textContent='正在读取并缓存：'+file.name;
+ try{
+  if(file.size>60*1024*1024)throw Error('文件超过60MB，请缩小后重试');
+  const next={name:file.name,bytes:await file.arrayBuffer(),lastModified:file.lastModified,savedAt:new Date().toISOString()};
+  checkDivisionFile(next);await FulfillmentCache.saveSupplierDivision(next);supplierDivision=next;divisionCachePresent=true;showDivisionFile();
+ }catch(e){showDivisionFile('新文件未保存：'+file.name+'；'+e.message+(supplierDivision?'。继续保留上次成功上传的文件。':''));}
+ finally{divisionInput.disabled=false;divisionClear.disabled=false;}
+};
+divisionClear.onclick=async()=>{
+ divisionInput.disabled=true;divisionClear.disabled=true;
+ try{await FulfillmentCache.removeSupplierDivision();supplierDivision=null;divisionCachePresent=false;showDivisionFile('已移除供应商分工明细并清除缓存');}
+ catch(e){showDivisionFile('缓存清除失败：'+e.message+'。原文件仍保留，请重试。');}
+ finally{divisionInput.disabled=false;divisionClear.disabled=false;}
+};
+divisionReference.textContent='正在恢复供应商分工明细缓存…';
+FulfillmentCache.getSupplierDivision().then(file=>{
+ if(file){divisionCachePresent=true;checkDivisionFile(file);supplierDivision=file;}showDivisionFile(file?'已从浏览器缓存恢复。':'');
+}).catch(e=>{
+ divisionInput.value='';divisionReference.textContent='分工明细缓存恢复失败：'+e.message+'。请重新上传或清除缓存。';divisionClear.hidden=!divisionCachePresent;supplierDivision=null;
+}).finally(()=>{divisionInput.disabled=false;});
 const versionKey='gylsjqx-fulfillment-export-versions',memoryVersions=Object.create(null);
 function savedVersions(){
  const raw=localStorage.getItem(versionKey);

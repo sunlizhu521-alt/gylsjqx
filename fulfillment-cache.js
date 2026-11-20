@@ -14,5 +14,23 @@ function run(current,replacement,previous){return new Promise((resolve,reject)=>
   tx.onabort=tx.onerror=()=>{db.close();reject(error||tx.error||Error('历史保存失败，请检查浏览器存储空间'));};
  };
 });}
-window.FulfillmentCache={get:()=>run(),save:current=>run(current),replace:history=>run(null,history),replacePrevious:previous=>run(null,null,previous)};
+function supplierDivision(action,value){return new Promise((resolve,reject)=>{
+ const request=indexedDB.open('gylsjqx-fulfillment-history',1);
+ request.onupgradeneeded=()=>request.result.createObjectStore('snapshots');
+ request.onerror=()=>reject(request.error);
+ request.onblocked=()=>reject(Error('分工文件缓存被其他窗口占用，请关闭其他窗口后重试'));
+ request.onsuccess=()=>{
+  const db=request.result;db.onversionchange=()=>db.close();
+  try{
+   const tx=db.transaction('snapshots',action==='get'?'readonly':'readwrite'),store=tx.objectStore('snapshots');
+   // Keep the uploaded file separate from the fixed fulfillment comparison baseline.
+   const operation=action==='get'?store.get('supplier-division'):action==='put'?store.put(value,'supplier-division'):store.delete('supplier-division');
+   let result;operation.onsuccess=()=>{result=operation.result;};
+   tx.oncomplete=()=>{db.close();resolve(result);};
+   tx.onerror=tx.onabort=()=>{db.close();reject(tx.error||Error('分工文件缓存失败，请检查浏览器存储空间'));};
+  }catch(e){db.close();reject(e);}
+ };
+});}
+window.FulfillmentCache={get:()=>run(),save:current=>run(current),replace:history=>run(null,history),replacePrevious:previous=>run(null,null,previous),
+ getSupplierDivision:()=>supplierDivision('get'),saveSupplierDivision:file=>supplierDivision('put',file),removeSupplierDivision:()=>supplierDivision('delete')};
 })();
