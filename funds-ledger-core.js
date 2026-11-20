@@ -1,7 +1,7 @@
 (function(root,factory){if(typeof module==='object'&&module.exports)module.exports=factory(require('./vendor/xlsx.full.min.js'));else root.FundsLedgerCore=factory(root.XLSX);})(typeof globalThis!=='undefined'?globalThis:this,function(X){
 'use strict';
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
-const HEADERS=['采购跟单员','供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款','申请付款月份','需要提交付款审单的日期','是否提交纸质付款审单'];
+const HEADERS=['采购跟单员','供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款','付款月份','申请付款月份','需要提交付款审单的日期','是否提交纸质付款审单'];
 const FIELDS={
  supplier:['供应商名称','供应商'],entity:['付款主体'],oa:['对公付款0A流程号','对公付款OA流程号','OA'],
  amount:['申请付款金额','本次申请付款金额'],summary:['摘要'],due:['应付款时间','应付时间'],estimate:['预估付款时间','预估付款月份'],
@@ -188,7 +188,12 @@ function build(book,filename='资金台账.xlsx',options={}){
   }
  }
  rows.sort((a,b)=>b.row[12].v.localeCompare(a.row[12].v,'zh-CN-u-co-pinyin'));
- return {sheets:[{name:'正常付款',headers:[...HEADERS],rows:rows.map(record=>[{t:'s',v:selected.get(record.source.sheet),z:'@'},...record.row]),sources:rows.map(record=>record.source)}],counts,warnings};
+ return {sheets:[{name:'正常付款',headers:[...HEADERS],rows:rows.map(record=>[{t:'s',v:selected.get(record.source.sheet),z:'@'},...record.row.slice(0,10),paymentMonth(record.row[5]),...record.row.slice(10)]),sources:rows.map(record=>record.source)}],counts,warnings};
+}
+function paymentMonth(cell){
+ if(text(cell)==='未对账待定')return {t:'s',v:'未对账待定',z:'@'};
+ const parts=cell?.t==='n'?X.SSF.parse_date_code(cell.v):null;
+ return parts&&parts.y>=1900&&parts.y<=9999?{t:'s',v:parts.y+'年'+String(parts.m).padStart(2,'0')+'月',z:'@'}:blank();
 }
 function mondayStamp(parts){
  const stamp=Date.UTC(parts.y,parts.m-1,parts.d);
@@ -248,7 +253,7 @@ function workbook(result){
  for(const source of result.sheets){
   const sheet=X.utils.aoa_to_sheet([source.headers,...source.rows.map(row=>row.map(copy))]);
   const width=value=>String(value).split(/\r?\n/).reduce((max,line)=>Math.max(max,Array.from(line).reduce((n,ch)=>n+(ch.charCodeAt(0)>255?2:1),0)),0);
-  const limits=[16,50,40,52,28,72,34,42,42,32,32,24,34,32];
+  const limits=[16,50,40,52,28,72,34,42,42,32,32,24,24,34,32];
   sheet['!cols']=source.headers.map((header,c)=>{
    const contentWidth=source.rows.reduce((max,row)=>Math.max(max,width(formatCell(row[c]))),0);
    return {wch:Math.max(12,width(header)+4,Math.min(limits[c],contentWidth+2))};
