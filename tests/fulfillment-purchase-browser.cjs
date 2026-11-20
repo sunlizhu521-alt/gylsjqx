@@ -16,7 +16,8 @@ function directory(buyer='徐英'){
 function purchase(){
  const book=X.utils.book_new(),headers=['采购日期','创建人','事业部','单据编号','供应商','物料编码','采购数量','剩余入库数量','关闭状态'];
  const row=(date,qty,supplier=fullSupplier,order='CGDD015712',remaining=1,closed='未关闭')=>[date,'孙立柱',channel,order,supplier,'001',qty,remaining,closed];
- X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([headers,row('2026-11-13',150),row('2026-11-19 23:59:59',200,fullSupplier,'CGDD015712',0,'已关闭'),row('2026-11-12',1000),row('2026-11-20',55),row('2026-11-15',999,'其他供应商有限公司','CGDD015799')]),'采购明细');return write(book);
+ const relevant=row('2026-11-15',123,fullSupplier,'CGDD099998');relevant[5]='999';
+ X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([headers,row('2026-11-13',150),row('2026-11-19 23:59:59',200,fullSupplier,'CGDD015712',0,'已关闭'),row('2026-11-12',1000),row('2026-11-20',55),row('2026-11-15',999,'其他供应商有限公司','CGDD015799'),relevant]),'采购明细');return write(book);
 }
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
@@ -54,8 +55,8 @@ function purchase(){
   await s.frame.evaluate(()=>{const original=File.prototype.arrayBuffer;File.prototype.arrayBuffer=function(){File.prototype.arrayBuffer=original;return new Promise(resolve=>{window.releasePurchaseRead=()=>resolve(original.call(this));});};});
   await s.frame.locator('#purchase-file').setInputFiles({name:'采购订单.xlsx',mimeType,buffer:po});await s.frame.waitForFunction(()=>typeof window.releasePurchaseRead==='function');
   try{assert(await s.frame.locator('#download').isDisabled());assert.match(await s.frame.locator('#purchase-reference').innerText(),/正在读取/);}finally{await s.frame.evaluate(()=>{window.releasePurchaseRead();delete window.releasePurchaseRead;});}
-  await s.ready();assert.equal(await s.quantity(),'350','原采购数量按首尾日期合计，重复订单物料两行均计入');await s.frame.locator('#purchase-issues-details > summary').click();assert.match(await s.frame.locator('#purchase-issues').innerText(),/其他供应商有限公司/);assert.deepEqual(await s.snapshot(),stable,'采购和分工上传不推进履约历史');
-  const first=await s.download(350,'11.13-11.19新增采购订单');assert(X.utils.sheet_to_json(first.Sheets.合并核对).some(row=>row.核对类型==='新增采购数量'&&String(row.原值).includes('其他供应商有限公司')),'未归属来源进入导出核对');
+  await s.ready();assert.equal(await s.quantity(),'350','原采购数量按首尾日期合计，重复订单物料两行均计入');await s.frame.locator('#purchase-issues-details > summary').click();assert.match(await s.frame.locator('#purchase-issues').innerText(),/CGDD099998/);assert.doesNotMatch(await s.frame.locator('#purchase-issues').innerText(),/其他供应商有限公司/);assert.deepEqual(await s.snapshot(),stable,'采购和分工上传不推进履约历史');
+  const first=await s.download(350,'11.13-11.19新增采购订单'),reviews=X.utils.sheet_to_json(first.Sheets.合并核对).filter(row=>row.核对类型==='新增采购数量');assert.equal(reviews.length,1);assert(String(reviews[0].原值).includes('CGDD099998'),'相关供应商的未匹配物料保留核对');assert(!reviews.some(row=>String(row.原值).includes('其他供应商有限公司')),'不涉及的供应商不进入合并核对');
   await s.frame.locator('#supplier-division-clear').click();await s.ready();assert.notEqual(await s.quantity(),'350','清除目录后不能保留旧归属结果');assert.deepEqual(await s.snapshot(),stable);
   await s.upload('supplier-division-file','归属改为李奇.xlsx',directory('李奇'));assert.notEqual(await s.quantity(),'350','更换分工必须重新匹配，创建人不替代采购下单人');
   await s.upload('supplier-division-file','供应商分工.xlsx',catalog);assert.equal(await s.quantity(),'350');

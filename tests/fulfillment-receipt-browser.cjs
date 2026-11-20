@@ -26,6 +26,7 @@ function receipt(onlyZero=false){
   row('2026-11-15',0.1),row('2026-11-15',0.2),row('2026-11-15',0.1),row('2026-11-15',0),row('2026-11-20',30.5),
   row('2026-11-15',777,'CGDD099999','CGDD000001','未匹配供应商有限公司')
  ];
+ if(!onlyZero){const relevant=row('2026-11-15',123,'CGDD099998','CGRK-RELEVANT');relevant[5]='999';records.push(relevant);}
  X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([headers,...records]),'入库明细');return write(book);
 }
 function uncertainReceipt(){
@@ -73,13 +74,13 @@ function uncertainReceipt(){
   await s.frame.locator('#receipt-file').setInputFiles({name:'采购入库单.xlsx',mimeType,buffer:received});await s.frame.waitForFunction(()=>typeof window.releaseReceiptRead==='function');
   try{assert(await s.frame.locator('#download').isDisabled());assert(await s.frame.locator('#purchase-file').isDisabled());assert.match(await s.frame.locator('#receipt-reference').innerText(),/正在读取/);}finally{await s.frame.evaluate(()=>{window.releaseReceiptRead();delete window.releaseReceiptRead;});}
   await s.ready();assert.deepEqual(await s.quantities(),['350','80.4'],'采购与实收入库各自合计；首尾包含、同单多行和小数不丢失');assert.deepEqual(await s.snapshot(),stable);
-  await s.frame.locator('#receipt-issues-details > summary').click();assert.match(await s.frame.locator('#receipt-issues').innerText(),/CGDD099999/,'入库单据号不冒充采购订单号');
-  const first=await s.download([350,80.4]);assert(X.utils.sheet_to_json(first.book.Sheets.合并核对).some(row=>String(row.来源工作表).includes('入库')&&String(row.原值).includes('CGDD099999')),'未归属入库来源进入合并核对');
+  await s.frame.locator('#receipt-issues-details > summary').click();assert.match(await s.frame.locator('#receipt-issues').innerText(),/CGDD099998/);assert.doesNotMatch(await s.frame.locator('#receipt-issues').innerText(),/CGDD099999/,'不相关供应商不显示；入库单据号不冒充采购订单号');
+  const first=await s.download([350,80.4]),reviews=X.utils.sheet_to_json(first.book.Sheets.合并核对).filter(row=>row.核对类型==='采购入库数量');assert.equal(reviews.length,1);assert(String(reviews[0].原值).includes('CGDD099998'),'相关供应商的未匹配物料保留');assert(!reviews.some(row=>String(row.原值).includes('未匹配供应商有限公司')),'不涉及的供应商不进入合并核对');
   const second=await s.download([350,80.4]);assert.equal(Number(/_V(\d+)\.xlsx$/.exec(second.name)[1]),Number(/_V(\d+)\.xlsx$/.exec(first.name)[1])+1);
   await s.upload('receipt-file','待核对入库.xlsx',uncertainReceipt());assert.deepEqual(await s.quantities(),['350','待核对']);
   const pendingJudgment=(await s.preview()).rows[0][11];
   for(const text of ['已确认入库数量：20','待核对候选数量：30','实收数量：30','CGRK-REVIEW','CGDD000001','入库核对!F3','冲突','不能计作本组入库'])assert(pendingJudgment.includes(text),text);
-  await s.download([350,'待核对'],'11.13-11.19','待核对候选数量：30');
+  const conflict=await s.download([350,'待核对'],'11.13-11.19','待核对候选数量：30');assert(X.utils.sheet_to_json(conflict.book.Sheets.合并核对).some(row=>row.核对类型==='采购入库数量'&&String(row.原值).includes('供应商冲突')),'当前订单物料的供应商冲突仍需核对');
   await s.upload('supplier-division-file','供应商分工.xlsx',catalog);assert.equal((await s.preview()).rows[0][11],pendingJudgment,'重新渲染不重复追加判断');assert.deepEqual(await s.snapshot(),stable);
   await s.upload('receipt-file','采购入库单.xlsx',received);assert.deepEqual(await s.quantities(),['350','80.4']);assert(!(await s.preview()).rows[0][11].includes('入库核对：'),'替换来源后清除旧核对说明');
   await s.page.locator('button[data-tool="payment"]').click();await s.page.locator('button[data-tool="fulfillment"]').click();assert.deepEqual(await s.quantities(),['350','80.4'],'切换工具保留入库和采购来源');

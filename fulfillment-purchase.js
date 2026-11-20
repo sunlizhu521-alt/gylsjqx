@@ -65,11 +65,13 @@ function parse(input,kind='purchase'){
 function enrich({filename,comparison=[],current,previous,purchase,directory,kind='purchase'}){
  const receipt=kind==='receipt',range=dateRange(filename),label=receipt?'采购入库单数量':'新增采购订单';
  if(receipt&&range)range.label=range.label.replace(/新增采购订单$/,label);
- if(!range&&!purchase)return {columns:C.SERIES_COLUMNS,rows:comparison,issues:[],stats:{},range};
+ if(!range&&!purchase)return {columns:C.SERIES_COLUMNS,rows:comparison,issues:[],reviewIssues:[],stats:{},range};
  const columns=[...C.SERIES_COLUMNS.slice(0,8),range?.label||label+'（日期待确认）',...C.SERIES_COLUMNS.slice(8)];
  const issues=[],stats={periodRows:0,matchedRows:0,unmatchedRows:0,uncertainRows:0},totals=new Map(),uncertain=new Set(),receiptIssues=new Map();
- const recordIssue=(issue,candidates)=>{
+ const currentLinkedIssues=new Set();let includeReview=()=>true;
+ const recordIssue=(issue,candidates,currentMatch=false)=>{
   issues.push(issue);
+  if(currentMatch)currentLinkedIssues.add(issue);
   for(const k of candidates){uncertain.add(k);if(receipt){if(!receiptIssues.has(k))receiptIssues.set(k,[]);receiptIssues.get(k).push(issue);}}
  };
  const receiptJudgment=k=>{
@@ -88,7 +90,7 @@ function enrich({filename,comparison=[],current,previous,purchase,directory,kind
   const note=receipt?(placeholder&&/待核对|日期待确认/.test(placeholder)?'入库核对：实收数量无法确定；'+issues.map(issue=>[issue.source,issue.reason].filter(Boolean).join('：')).join('；'):receiptJudgment(k)):'';
   if(note)tail[1]=cell([String(tail[1]?.v??''),note].filter(Boolean).join('\n'));
   return [...row.slice(0,8),placeholder?cell(placeholder):uncertain.has(k)?cell('待核对'):numeric(totals.get(k)),...tail];
- }),issues,stats,range});
+ }),issues,reviewIssues:issues.filter(includeReview),stats,range});
  if(!range){issues.push({source:filename,reason:'文件名中没有唯一有效日期区间，请使用例如2026.11.13-11.19'});return finish('日期待确认');}
  if(!purchase)return finish(receipt?'未上传采购入库单':'未上传采购订单');
  if(purchase.error){issues.push({source:purchase.filename,reason:purchase.error});return finish(receipt?'入库文件待核对':'采购文件待核对');}
@@ -106,6 +108,10 @@ function enrich({filename,comparison=[],current,previous,purchase,directory,kind
  const identity=v=>catalog.identity(v)||norm(v),sameSupplier=(a,b)=>identity(a)===identity(b);
  const collect=snapshot=>(snapshot?.rows||[]).map((row,i)=>({labels:[0,1,2,4,6].map(c=>text(row[c]?.v)),code:norm(row[7]?.v),orders:Check.orders(row[22]?.v).ids,source:snapshot.sources?.[i]}));
  const now=collect(current),before=collect(previous),all=[...now,...before];
+ const currentNames=new Set(now.map(row=>norm(row.labels[3])).filter(Boolean)),reviewNames=new Set(currentNames);
+ // Expand only names present in the current workbook; shared aliases do not merge company identities.
+ for(const [full,entry]of catalog.full)if(currentNames.has(full)||[...entry.shorts.keys()].some(name=>currentNames.has(name))){reviewNames.add(full);for(const name of entry.shorts.keys())reviewNames.add(name);}
+ includeReview=issue=>!norm(issue.supplier)||reviewNames.has(norm(issue.supplier))||currentLinkedIssues.has(issue);
  const department=(value,labels)=>{const v=norm(value),division=norm(labels[1]),channel=norm(labels[2]);return v&&v!=='NA'&&(v===division||v===channel||channel===division&&v.startsWith(division+'*'));};
  for(const record of purchase.records){
   if(record.date!==null&&(record.date<range.startSerial||record.date>range.endSerial))continue;
@@ -114,7 +120,7 @@ function enrich({filename,comparison=[],current,previous,purchase,directory,kind
   const consistent=e=>sameSupplier(record.supplier,e.labels[3])&&(!record.buyer||norm(record.buyer)===norm(e.labels[0]))&&(!supplierOwners||supplierOwners.has(e.labels[0]))&&(!record.series||norm(record.series)===norm(e.labels[4]))&&(!record.channel||norm(record.channel)===norm(e.labels[2]));
   const ids=Check.orders(record.order).ids;
   const exact=scope=>scope.filter(e=>e.code===norm(record.code)&&ids.length===1&&e.orders.includes(ids[0]));
-  let matches=exact(now);if(!matches.length)matches=exact(before);
+  const currentMatches=exact(now);let matches=currentMatches.length?currentMatches:exact(before);
   let reason='';
   if(matches.length){
    if(matches.some(e=>!sameSupplier(record.supplier,e.labels[3])||record.department&&norm(record.department)!=='NA'&&!department(record.department,e.labels)||record.buyer&&norm(record.buyer)!==norm(e.labels[0])||record.channel&&norm(record.channel)!==norm(e.labels[2])||record.series&&norm(record.series)!==norm(e.labels[4])||supplierOwners&&!supplierOwners.has(e.labels[0]))){reason='同单号和物料的供应商、采购下单人、事业部／渠道或系列信息冲突或对应关系未确认，请核实分工明细';}
@@ -126,10 +132,10 @@ function enrich({filename,comparison=[],current,previous,purchase,directory,kind
   const candidates=[...new Set(matches.map(e=>key(e.labels)))];
   if(candidates.length!==1||record.issues.length||reason){
    if(candidates.length)stats.uncertainRows++;else stats.unmatchedRows++;
-   recordIssue({source:record.source,order:record.order,...(receipt?{document:record.document}:{}),code:record.code,supplier:record.supplier,qty:record.qty,reason:[...record.issues,reason||(!candidates.length?'未找到供应商、物料和事业部／渠道一致的系列分组':'对应多个系列分组，未分配数量')].filter(Boolean).join('；')},candidates);continue;
+   recordIssue({source:record.source,order:record.order,...(receipt?{document:record.document}:{}),code:record.code,supplier:record.supplier,qty:record.qty,reason:[...record.issues,reason||(!candidates.length?'未找到供应商、物料和事业部／渠道一致的系列分组':'对应多个系列分组，未分配数量')].filter(Boolean).join('；')},candidates,currentMatches.length>0);continue;
   }
   const k=candidates[0],beforeTotal=totals.get(k);
-  try{add(totals,k,record.qty);numeric(totals.get(k));stats.matchedRows++;}catch(e){if(beforeTotal)totals.set(k,beforeTotal);else totals.delete(k);stats.uncertainRows++;recordIssue({source:record.source,...(receipt?{document:record.document,order:record.order,supplier:record.supplier,qty:record.qty}:{}),code:record.code,reason:e.message},[k]);}
+  try{add(totals,k,record.qty);numeric(totals.get(k));stats.matchedRows++;}catch(e){if(beforeTotal)totals.set(k,beforeTotal);else totals.delete(k);stats.uncertainRows++;recordIssue({source:record.source,...(receipt?{document:record.document,order:record.order,supplier:record.supplier,qty:record.qty}:{}),code:record.code,reason:e.message},[k],currentMatches.length>0);}
  }
  return finish();
 }
