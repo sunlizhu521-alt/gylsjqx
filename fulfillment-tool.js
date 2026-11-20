@@ -24,6 +24,25 @@ purchaseInput.onchange=async()=>{
  finally{purchaseBusy=false;if(result)render();updateDownloads();}
 };
 purchaseClear.onclick=()=>{purchaseData=null;purchaseInput.value='';purchaseReference.textContent='尚未选择采购订单';purchaseClear.hidden=true;if(result)render();};
+const receiptInput=$('receipt-file'),receiptReference=$('receipt-reference'),receiptClear=$('receipt-clear');
+let receiptData=null,receiptBusy=false;
+receiptInput.disabled=false;
+receiptInput.onchange=async()=>{
+ const file=receiptInput.files[0];if(!file)return;
+ receiptBusy=true;updateDownloads();receiptClear.hidden=true;receiptReference.textContent='正在读取采购入库单：'+file.name;
+ try{
+  if(!/\.(xlsx|xls)$/i.test(file.name))throw Error('请选择 .xlsx 或 .xls 文件');
+  if(!file.size)throw Error('文件为空');
+  if(file.size>60*1024*1024)throw Error('文件超过60MB，请缩小后重试');
+  const book=XLSX.read(await file.arrayBuffer(),{type:'array',cellNF:true,cellFormula:true});
+  if(!book.SheetNames?.length)throw Error('文件中没有工作表');
+  receiptData=FulfillmentPurchase.parse({filename:file.name,book},'receipt');
+  receiptReference.textContent=file.name+'\n引用时间：'+new Date().toLocaleString('sv-SE',{timeZone:'Asia/Shanghai',hour12:false})+'\n已读取 '+receiptData.records.length+' 条入库明细。';
+  receiptClear.hidden=false;
+ }catch(e){receiptData={filename:file.name,error:e.message,records:[]};receiptInput.value='';receiptReference.textContent='采购入库单读取失败：'+file.name+'；'+e.message;receiptClear.hidden=false;}
+ finally{receiptBusy=false;if(result)render();updateDownloads();}
+};
+receiptClear.onclick=()=>{receiptData=null;receiptInput.value='';receiptReference.textContent='尚未选择采购入库单';receiptClear.hidden=true;if(result)render();};
 const divisionInput=$('supplier-division-file'),divisionReference=$('supplier-division-reference'),divisionClear=$('supplier-division-clear');
 let supplierDivision=null,divisionCachePresent=false,divisionBusy=true;
 function checkDivisionFile(file){
@@ -83,9 +102,10 @@ function rememberDownload({base,version}){
 }
 const divisionResult=division=>{const rows=[],sources=[];for(const [i,row]of(result?.rows||[]).entries())if(String(row[C.COLUMNS.indexOf('事业部')]?.v??'').trim()===division){rows.push(row);sources.push(result.sources?.[i]);}return {rows,sources};};
 function updateDownloads(){
- const loading=busy||$('file').disabled||purchaseBusy||divisionBusy,blocked=loading||!validation?.passed;
+ const loading=busy||$('file').disabled||purchaseBusy||receiptBusy||divisionBusy,blocked=loading||!validation?.passed;
  $('choose-file').disabled=loading;
  purchaseInput.disabled=loading;purchaseClear.disabled=loading;
+ receiptInput.disabled=loading;receiptClear.disabled=loading;
  divisionInput.disabled=loading;divisionClear.disabled=loading;
  $('download').disabled=blocked||!result||!sourceBytes;
  $('replace-previous').disabled=blocked||!result||!sourceBytes;
@@ -97,11 +117,15 @@ function checkPrepared(prepared,merged){const check=V.validate(prepared.book,mer
 function resetCurrent(){result=null;sourceBytes=null;validation=null;formulaInfo=null;seriesBase=[];seriesPrevious=null;$('seriesComparisonSection').hidden=true;$('result').hidden=true;$('quantityValidation').hidden=true;$('mergeReview').hidden=true;$('warnings').textContent='';updateDownloads();}
 function render(){
  result.review=C.reviewRows(result,validation);
- const directory=supplierDivision&&purchaseData?{filename:supplierDivision.name,book:XLSX.read(supplierDivision.bytes,{type:'array',cellNF:true,cellFormula:true})}:null;
+ const directory=supplierDivision&&(purchaseData||receiptData)?{filename:supplierDivision.name,book:XLSX.read(supplierDivision.bytes,{type:'array',cellNF:true,cellFormula:true})}:null;
  const purchase=validation?.passed?FulfillmentPurchase.enrich({filename,comparison:seriesBase,current:result,previous:seriesPrevious,purchase:purchaseData,directory}):null;
+ const receipt=validation?.passed?FulfillmentPurchase.enrich({filename,comparison:seriesBase,current:result,previous:seriesPrevious,purchase:receiptData,directory,kind:'receipt'}):null;
  if(purchase){
-  result.seriesComparison=purchase.rows;result.seriesColumns=purchase.columns;
+  const additions=[purchase,receipt].filter(source=>source.columns.length>C.SERIES_COLUMNS.length);
+  result.seriesColumns=[...C.SERIES_COLUMNS.slice(0,8),...additions.map(source=>source.columns[8]),...C.SERIES_COLUMNS.slice(8)];
+  result.seriesComparison=seriesBase.map((row,i)=>[...row.slice(0,8),...additions.map(source=>source.rows[i][8]),...row.slice(8)]);
   result.review.push(...purchase.issues.map(issue=>C.REVIEW_COLUMNS.map(column=>({t:'s',v:({'核对类型':'新增采购数量','来源工作表':'采购订单','来源位置':issue.source,'物料编码':issue.code,'核对字段':'采购日期／采购数量／系列归属','原值':[issue.supplier,issue.order,issue.qty==null?'':'采购数量 '+issue.qty].filter(Boolean).join('；'),'结果':'待核对','需要处理':issue.reason})[column]||'',z:'@'}))));
+  result.review.push(...receipt.issues.map(issue=>C.REVIEW_COLUMNS.map(column=>({t:'s',v:({'核对类型':'采购入库数量','来源工作表':'采购入库单','来源位置':issue.source,'物料编码':issue.code,'核对字段':'入库日期／实收数量／系列归属','原值':[issue.supplier,issue.document,issue.order,issue.qty==null?'':'实收数量 '+issue.qty].filter(Boolean).join('；'),'结果':'待核对','需要处理':issue.reason})[column]||'',z:'@'}))));
  }
  const number=value=>value==null?'待核验':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:12});
  const groupedIssues=new Map();
@@ -119,10 +143,13 @@ function render(){
  const table=(columns,rows)=>'<table><thead><tr>'+columns.map(v=>'<th>'+esc(v)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(0,100).map(row=>'<tr>'+row.map(c=>'<td>'+esc(C.formatCell(c))+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
  $('seriesComparisonSection').hidden=!purchase;
  if(purchase){
-  $('series-preview').innerHTML=table(purchase.columns,purchase.rows);
+  $('series-preview').innerHTML=table(result.seriesColumns,result.seriesComparison);
   $('purchase-status').textContent=(purchase.range?`采购日期范围：${purchase.range.start} 至 ${purchase.range.end}（含首尾）。`:'履约文件名需要包含日期区间，例如2026.11.13-11.19。')+(purchaseData?`已对应 ${purchase.stats.matchedRows||0} 条采购明细；${purchase.issues.length} 项待核对，来源见下方。`:'请上传采购订单后统计新增采购数量；刷新后需重新选择采购订单。');
   $('purchase-issues').innerHTML=table(['来源','单据编号','物料编码','供应商','采购数量','需要处理'],purchase.issues.map(i=>[i.source,i.order,i.code,i.supplier,i.qty,i.reason].map(v=>({v:v??''}))));
   $('purchase-issues-details').hidden=!purchase.issues.length;
+  $('receipt-status').textContent=(receipt.range?`入库日期范围：${receipt.range.start} 至 ${receipt.range.end}（含首尾）。`:'履约文件名需要包含日期区间，例如2026.11.13-11.19。')+(receiptData?`已对应 ${receipt.stats.matchedRows||0} 条入库明细；${receipt.issues.length} 项待核对，来源见下方。`:'请上传采购入库单后统计本期实收数量；刷新后需重新选择采购入库单。');
+  $('receipt-issues').innerHTML=table(['来源','入库单号','采购订单号','物料编码','供应商','实收数量','需要处理'],receipt.issues.map(i=>[i.source,i.document,i.order,i.code,i.supplier,i.qty,i.reason].map(v=>({v:v??''}))));
+  $('receipt-issues-details').hidden=!receipt.issues.length;
  }
  $('preview').innerHTML=table(C.SUMMARY_COLUMNS,C.summaryRows(result.rows,result.sources));$('diff-preview').innerHTML=validation?.passed?table(C.DIFF_COLUMNS,result.differences):'<p>本次数量未通过校验，未更新历史和差异。</p>';
  $('mergeReview').hidden=false;$('reviewStatus').textContent=`事业部、渠道及日期范围需核对 ${result.review.filter(row=>['事业部／渠道','日期范围'].includes(row[0].v)).length} 项；原值未修改。核对表包含全部数量校验结果，页面预览前 100 条。`;$('review-preview').innerHTML=table(C.REVIEW_COLUMNS,result.review);

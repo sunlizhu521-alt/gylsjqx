@@ -11,6 +11,7 @@ function dateRange(filename){
  return {start,end,startSerial:a.v,endSerial:b.v,label};
 }
 const fields={date:['采购日期','下单日期'],order:['单据编号','采购订单号'],supplier:['供应商','供应商全称','供应商名称'],code:['物料编码'],qty:['采购数量'],department:['事业部'],buyer:['采购下单人'],channel:['销售分渠道','销售分渠道部'],short:['供应商简称'],series:['系列','销售系列']};
+const receiptFields={...fields,date:['入库日期'],order:['订单单号','采购订单号'],document:['单据编号','入库单号'],qty:['实收数量','入库数量']};
 function tables(input,aliases,required){
  const found=[];
  for(const name of input.book.SheetNames){
@@ -34,25 +35,26 @@ function reader(input){
   const address=X.utils.encode_cell(point),c=table.sheet[address];if(!c)return '';
   if(c.t==='e'||c.f&&(c.t==='z'||c.v==null||c.v===''))throw Error(`${table.name}!${address}：错误值或公式结果缺失`);
   if(c.f)return read(table.name,address);
-  return ['code','order'].includes(field)&&typeof c.v==='number'&&c.z&&c.z!=='General'?X.utils.format_cell(c):c.v??'';
+  return ['code','order','document'].includes(field)&&typeof c.v==='number'&&c.z&&c.z!=='General'?X.utils.format_cell(c):c.v??'';
  };
 }
-function parse(input){
- const selected=tables(input,fields,['date','order','supplier','code','qty']);
- if(!selected.length)throw Error('采购订单缺少采购日期、单据编号、供应商、物料编码或采购数量表头');
+function parse(input,kind='purchase'){
+ const receipt=kind==='receipt',aliases=receipt?receiptFields:fields,quantity=receipt?'实收数量':'采购数量',dateLabel=receipt?'入库日期':'采购日期';
+ const selected=tables(input,aliases,['date','order','supplier','code','qty']);
+ if(!selected.length)throw Error(receipt?'采购入库单缺少入库日期、订单单号、供应商、物料编码或实收数量表头':'采购订单缺少采购日期、单据编号、供应商、物料编码或采购数量表头');
  const records=[],read=reader(input),date1904=!!input.book.Workbook?.WBProps?.date1904;
  for(const table of selected)for(const r of table.rows){
   const values={},issues=[];
-  for(const field of Object.keys(fields))try{values[field]=read(table,r,field);}catch(e){values[field]='';issues.push(e.message);}
+  for(const field of Object.keys(aliases))try{values[field]=read(table,r,field);}catch(e){values[field]='';issues.push(e.message);}
   if(!Object.values(values).some(v=>norm(v))&&!issues.length)continue;
   if(!norm(values.code)&&!norm(values.order)&&[values.supplier,values.date,values.buyer].some(v=>/^(合计|总计|小计)$/.test(norm(v))))continue;
   const source=input.filename+' / '+table.name+'!'+X.utils.encode_cell({r,c:table.map.qty});
-  const date=C.dateCell({v:values.date},date1904);if(date.t!=='n'||!norm(values.date))issues.push('采购日期为空或无效');
+  const date=C.dateCell({v:values.date},date1904);if(date.t!=='n'||!norm(values.date))issues.push(dateLabel+'为空或无效');
   let qty=null;try{
-   qty=Check.number(values.qty);if(qty<0)throw Error('采购数量为负数');
+   qty=Check.number(values.qty);if(qty<0)throw Error(quantity+'为负数');
    if(typeof values.qty==='string'){
     const a=decimal(values.qty.normalize('NFKC').trim().replace(/(?<=\d),(?=\d{3}(?:\D|$))/g,'')),b=decimal(qty),scale=Math.max(a.scale,b.scale);
-    if(a.units*10n**BigInt(scale-a.scale)!==b.units*10n**BigInt(scale-b.scale))throw Error('采购数量超出精确计算范围');
+    if(a.units*10n**BigInt(scale-a.scale)!==b.units*10n**BigInt(scale-b.scale))throw Error(quantity+'超出精确计算范围');
    }
   }catch(e){issues.push(e.message);qty=null;}
   if(!norm(values.code))issues.push('物料编码为空');if(!norm(values.supplier))issues.push('供应商为空');
@@ -60,15 +62,16 @@ function parse(input){
  }
  return {filename:input.filename,records};
 }
-function enrich({filename,comparison=[],current,previous,purchase,directory}){
- const range=dateRange(filename);
+function enrich({filename,comparison=[],current,previous,purchase,directory,kind='purchase'}){
+ const receipt=kind==='receipt',range=dateRange(filename),label=receipt?'采购入库单数量':'新增采购订单';
+ if(receipt&&range)range.label=range.label.replace(/新增采购订单$/,label);
  if(!range&&!purchase)return {columns:C.SERIES_COLUMNS,rows:comparison,issues:[],stats:{},range};
- const columns=[...C.SERIES_COLUMNS.slice(0,8),range?.label||'新增采购订单（日期待确认）',...C.SERIES_COLUMNS.slice(8)];
+ const columns=[...C.SERIES_COLUMNS.slice(0,8),range?.label||label+'（日期待确认）',...C.SERIES_COLUMNS.slice(8)];
  const issues=[],stats={periodRows:0,matchedRows:0,unmatchedRows:0,uncertainRows:0},totals=new Map(),uncertain=new Set();
  const finish=placeholder=>({columns,rows:comparison.map(row=>[...row.slice(0,8),placeholder?cell(placeholder):uncertain.has(key(row.slice(0,5).map(c=>c.v)))?cell('待核对'):numeric(totals.get(key(row.slice(0,5).map(c=>c.v)))),...row.slice(8)]),issues,stats,range});
  if(!range){issues.push({source:filename,reason:'文件名中没有唯一有效日期区间，请使用例如2026.11.13-11.19'});return finish('日期待确认');}
- if(!purchase)return finish('未上传采购订单');
- if(purchase.error){issues.push({source:purchase.filename,reason:purchase.error});return finish('采购文件待核对');}
+ if(!purchase)return finish(receipt?'未上传采购入库单':'未上传采购订单');
+ if(purchase.error){issues.push({source:purchase.filename,reason:purchase.error});return finish(receipt?'入库文件待核对':'采购文件待核对');}
  let catalog,owners=new Map();
  try{
   catalog=Check.supplierDirectory(directory);
@@ -97,17 +100,17 @@ function enrich({filename,comparison=[],current,previous,purchase,directory}){
    if(matches.some(e=>!sameSupplier(record.supplier,e.labels[3])||record.department&&norm(record.department)!=='NA'&&!department(record.department,e.labels)||record.buyer&&norm(record.buyer)!==norm(e.labels[0])||record.channel&&norm(record.channel)!==norm(e.labels[2])||record.series&&norm(record.series)!==norm(e.labels[4])||supplierOwners&&!supplierOwners.has(e.labels[0]))){reason='同单号和物料的供应商、采购下单人、事业部／渠道或系列信息冲突或对应关系未确认，请核实分工明细';}
   }else{
    const complete=record.buyer&&record.channel&&record.series;
-   matches=all.filter(e=>(complete||e.code===norm(record.code))&&consistent(e)&&department(record.department,e.labels));
+   matches=all.filter(e=>(!receipt&&complete||e.code===norm(record.code))&&consistent(e)&&(receipt&&!record.department||department(record.department,e.labels)));
    if(supplierOwners?.size>1)reason='供应商分工明细对应多个采购下单人，归属待核对';
   }
   const candidates=[...new Set(matches.map(e=>key(e.labels)))];
   if(candidates.length!==1||record.issues.length||reason){
    for(const k of candidates)uncertain.add(k);
    if(candidates.length)stats.uncertainRows++;else stats.unmatchedRows++;
-   issues.push({source:record.source,order:record.order,code:record.code,supplier:record.supplier,qty:record.qty,reason:[...record.issues,reason||(!candidates.length?'未找到供应商、物料和事业部／渠道一致的系列分组':'对应多个系列分组，未分配数量')].filter(Boolean).join('；')});continue;
+   issues.push({source:record.source,order:record.order,...(receipt?{document:record.document}:{}),code:record.code,supplier:record.supplier,qty:record.qty,reason:[...record.issues,reason||(!candidates.length?'未找到供应商、物料和事业部／渠道一致的系列分组':'对应多个系列分组，未分配数量')].filter(Boolean).join('；')});continue;
   }
   const k=candidates[0];
-  try{add(totals,k,record.qty);numeric(totals.get(k));stats.matchedRows++;}catch(e){uncertain.add(k);stats.uncertainRows++;issues.push({source:record.source,code:record.code,reason:e.message});}
+  try{add(totals,k,record.qty);numeric(totals.get(k));stats.matchedRows++;}catch(e){uncertain.add(k);stats.uncertainRows++;issues.push({source:record.source,...(receipt?{document:record.document,order:record.order,supplier:record.supplier,qty:record.qty}:{}),code:record.code,reason:e.message});}
  }
  return finish();
 }
@@ -122,7 +125,7 @@ function add(totals,key,value){
 }
 function numeric(value){
  let {units=0n,scale=0}=value||{};while(scale&&units%10n===0n){units/=10n;scale--;}
- if(units>BigInt(Number.MAX_SAFE_INTEGER))throw Error('新增采购数量合计超出精确计算范围');
+ if(units>BigInt(Number.MAX_SAFE_INTEGER))throw Error('数量合计超出精确计算范围');
  return {t:'n',v:Number(units.toString()+'e-'+scale),z:scale>250?'0.0000000000000000E+00':scale?'0.'+'0'.repeat(scale):'0'};
 }
 return {dateRange,parse,enrich};

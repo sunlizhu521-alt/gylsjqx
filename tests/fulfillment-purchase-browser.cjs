@@ -34,14 +34,14 @@ function purchase(){
    const preview=()=>frame.locator('#series-preview').evaluate(el=>({headers:[...el.querySelectorAll('thead th')].map(c=>c.textContent),rows:[...el.querySelectorAll('tbody tr')].map(tr=>[...tr.cells].map(c=>c.textContent))}));
    const quantity=async()=>{const view=await preview();assert.equal(view.rows.length,1);return view.rows[0][8];};
    async function download(expected,label){
-    const view=await preview();assert.equal(view.headers[7],'差异数量');assert.equal(view.headers[8],label);assert.deepEqual(view.headers.slice(9),['备注','判断']);assert.equal(view.rows[0][8],String(expected));
+    const view=await preview();assert.equal(view.headers[7],'差异数量');assert.equal(view.headers[8],label);assert.deepEqual(view.headers.slice(9),[label.replace('新增采购订单','采购入库单数量'),'备注','判断']);assert.equal(view.rows[0][8],String(expected));
     const pending=page.waitForEvent('download');await frame.locator('#download').click();const saved=await pending;assert.match(saved.suggestedFilename(),/_V\d+\.xlsx$/);
     const book=X.read(await fs.readFile(await saved.path()),{type:'buffer',cellNF:true}),sheet=book.Sheets.系列对比,grid=X.utils.sheet_to_json(sheet,{header:1,defval:''});
     assert.deepEqual(grid[0],view.headers);assert.equal(grid.length-1,view.rows.length);
     for(let r=0;r<view.rows.length;r++)for(let c=0;c<view.headers.length;c++)assert.equal(X.utils.format_cell(sheet[X.utils.encode_cell({r:r+1,c})]),view.rows[r][c],'预览与实际下载一致');
-    assert.equal(sheet.I2.v,expected);if(typeof expected==='number')assert.equal(sheet.I2.t,'n');assert.equal(sheet.I2.f,undefined);assert.equal(sheet['!autofilter'].ref,'A1:K2');assert.equal(sheet.J2?.v??'','');
+    assert.equal(sheet.I2.v,expected);if(typeof expected==='number')assert.equal(sheet.I2.t,'n');assert.equal(sheet.I2.f,undefined);assert.equal(sheet['!autofilter'].ref,'A1:L2');assert.equal(sheet.J2.v,'未上传采购入库单');assert.equal(sheet.K2?.v??'','');
     const expectedBase=await frame.evaluate(async()=>{const h=await FulfillmentCache.get();return FulfillmentCore.seriesComparison(h.previous?.result,h.current.result).map(row=>row.map(c=>c.v));});
-    assert.deepEqual(grid[1].slice(0,8),expectedBase[0].slice(0,8));assert.equal(grid[1][9],expectedBase[0][8]);assert.equal(grid[1][10],expectedBase[0][9],'备注与判断后移后原值保留');
+    assert.deepEqual(grid[1].slice(0,8),expectedBase[0].slice(0,8));assert.equal(grid[1][10],expectedBase[0][8]);assert.equal(grid[1][11],expectedBase[0][9],'备注与判断后移后原值保留');
     return book;
    }
    await open();return {context,page,get frame(){return frame;},open,ready,upload,snapshot,preview,quantity,download};
