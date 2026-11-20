@@ -1013,7 +1013,7 @@ function build(inputs,decisions={}){
   const action=comment?.conflict?'核实谈判表 '+comment.source+' 的人工批注及本批实际支付金额；批注有误请修正后重新上传，存在退汇等情况时同步核对出纳记录。':'请先确认是否为分批付款，再确认本次申请对应的批次及是否实际支付；核对该批出纳付款金额、时间，记录不完整时重新导出OA签字意见。';
   return {paid:false,evidence:'分批付款待核对：'+reason,review:'分批付款核对：申请金额 '+amountText(application.values['申请付款金额'])+(applicationBatch(batchText(application))?'；第'+applicationBatch(batchText(application))+'批':'')+'。\n'+reason+'。\n出纳记录：'+evidence+'。\n需要处理：'+action};
  }
- // Application classification and payable date are authoritative for progress rows.
+ // Application classification is authoritative; the new payable-date source starts on 2026-11-19.
  const progressRows=applications.records.map(application=>{
   let paymentEvidence='';
   const notes=[],ids=applicationIds(application),info=classification(application),reference=application.values[applicationOAField];
@@ -1025,11 +1025,10 @@ function build(inputs,decisions={}){
   if(amount.cents===undefined||amount.cents<0n)notes.push('申请付款金额为空或异常，请核实本次申请付款金额');
   function readDate(record,header,output){
    const raw=record.values[header],parsed=date(raw,record.date1904);
-   if(parsed.invalid||parsed.v===''||raw?.t==='e'||(raw?.f&&(raw.v==null||raw.v===''))){notes.push(output+'为空或无法识别，请核实 '+sourcePosition(record));return cell(sourceText(raw));}
+   if(parsed.invalid||parsed.v===''||raw?.t==='e'||(raw?.f&&(raw.t==='z'||raw.v==null||raw.v===''))){notes.push(output+'为空或无法识别，请核实 '+sourcePosition(record));return cell(sourceText(raw));}
    return parsed;
   }
   values['申请日期']=readDate(application,'申请日期','申请日期');
-  values['应付时间']=readDate(application,'应付款时间','应付时间');
   function locate(records,label,reportMissing=true){
    let matches=info.name?records.filter(r=>classification(r).name===info.name&&compatible(application,r,'付款主体')&&r.values['对公付款0A流程号']?.t!=='e'):[];
    if(ids.length)matches=matches.filter(r=>ids.length===1&&oas(r).length===1&&oas(r)[0]===ids[0]);
@@ -1050,6 +1049,13 @@ function build(inputs,decisions={}){
   const category=applicationClass(type),fromNegotiated=category?.source==='谈判付款表';
   values['付款来源']=cell(category?(fromNegotiated&&category.label.includes('-')?'谈判付款表-'+category.kind:category.source):'');
   if(!category)notes.push('申请汇总付款分类为空或异常，请修正来源分类后重新上传');
+  if(values['申请日期'].t==='n'){
+   if(X.SSF.format('yyyy-mm-dd',values['申请日期'].v)>='2026-11-19')values['应付时间']=readDate(application,'应付款时间','应付时间');
+   else{
+    const dueRecord=fromNegotiated?locate(negotiatedObjects.map(t=>t.record),'应付时间/谈判付款'):category?ledgerMatch:null;
+    if(dueRecord)values['应付时间']=readDate(dueRecord,'应付款时间','应付时间');
+   }
+  }
   const flowValues=Object.fromEntries(FLOW_FIELDS.map(h=>[h,[]]));let paymentStatus='待核对';
   if(!ids.length)notes.push('对公付款OA号为空或无法识别，请补充申请汇总流程编码');
   if(ids.length>1)notes.push('一笔申请含多个 OA号，请核实各流程付款进度及金额归属');

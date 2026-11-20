@@ -15,7 +15,7 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
   const frame=page.frameLocator('iframe[data-tool="funds"]');await frame.locator('#ledgerFile').waitFor();
   const input=fixture(),apps=input.applications.book.Sheets.付款申请汇总;
   function sourceClasses(){for(const row of [2,4])set(input,'applications','付款分类',row,'谈判付款-谈判付款表');set(input,'applications','付款分类',3,'正常付款-正常对账表');}
-  sourceClasses();let expectedDates=['2026年11月6日','2026年11月9日','2026年11月6日','2026年11月10日'];
+  sourceClasses();let expectedDates=['2026年11月6日','2026年11月9日','2026年11月6日',''];
   const negotiatedSource=input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]];
   X.utils.sheet_add_aoa(negotiatedSource,[['是否谈判分批'],['是']],{origin:'O1'});negotiatedSource.O2.f='"是"';negotiatedSource.O2.c=[{a:'人工',t:'保留分批标记说明'}];
   X.utils.sheet_add_aoa(apps,[['核对说明','是否OA备注','是否已付款'],['','2026-11-03 10:30','2026-11-05'],['','',''],['','是','2026-11-05'],['','','']],{origin:'G1'});
@@ -62,7 +62,7 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
   const note=initial.Sheets.谈判付款.M2.c[0].t;assert.match(note,/共2批，第1批/);assert.match(note,/申请日期（付款节奏跟进）：2026年11月1日；2026年11月3日/);assert.match(note,/OA备注时间（付款节奏跟进）：.*2026年11月3日.*10:30/);assert.match(note,/付款时间（付款节奏跟进）：2026年11月5日/);
   const before=await snapshot('progressPreview');await page.locator('.tool-tab[data-tool="payment"]').click();await page.locator('.tool-tab[data-tool="funds"]').click();assert.deepEqual(await snapshot('progressPreview'),before);
   // Latest application data, not archived OA or a prior generated note, controls negotiated payment status.
-  await upload('negotiated',first);set(input,'applications','应付时间',2,'2026-12-31');set(input,'applications','应付时间',4,'2027-01-08');expectedDates=['2026年12月31日','2026年11月9日','2027年1月8日','2026年11月10日'];for(const row of [2,4])set(input,'applications','是否已付款',row,'');await upload('applications');await analyze();
+  await upload('negotiated',first);set(input,'applications','应付时间',2,'2026-12-31');set(input,'applications','应付时间',4,'2027-01-08');expectedDates=['2026年11月6日','2026年11月9日','2026年11月6日',''];for(const row of [2,4])set(input,'applications','是否已付款',row,'');await upload('applications');await analyze();
   await verify(await download(2),['待核对','未付款','待核对','未付款','待核对','待核对','待核对'],{M2:'FFFF00',N2:''});
   for(const row of [2,4])set(input,'applications','是否已付款',row,'否');await upload('applications');await analyze();
   await verify(await download(3),['未付款','未付款','未付款','未付款','待核对','待核对','待核对'],{M2:'FFFF00',N2:''});
@@ -72,7 +72,7 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
   append(input,'applications',['2026-11-08','合成供应商1','迈德斯特',ID(1),60,'谈判付款','第2批','2026-11-09','2026-11-10']);set(input,'oa','当前节点',3,'办理人执行');await upload('oa');await upload('applications');await analyze();
   const paid=await download(5);await verify(paid,['已付款','已付款','已付款','未付款','待核对','待核对','待核对','已付款'],{M2:'FF0000',N2:'FF0000'});assert.match(X.read(paid).Sheets.谈判付款.N2.c[0].t,/共2批，第2批/);
   set(input,'applications','核对说明',9,'重新申请');await upload('applications');await analyze();await verify(await download(6),['已付款','已付款','已付款','未付款','待核对','待核对','待核对','重新申请'],{M2:'FF0000'});
-  input.applications.book=fixture().applications.book;sourceClasses();expectedDates=['2026年11月6日','2026年11月9日','2026年11月6日','2026年11月10日'];await upload('applications');for(const row of [2,6])set(input,'oa','签字意见',row,PAID40);await upload('oa');await analyze();
+  input.applications.book=fixture().applications.book;sourceClasses();expectedDates=['2026年11月6日','2026年11月9日','2026年11月6日',''];await upload('applications');for(const row of [2,6])set(input,'oa','签字意见',row,PAID40);await upload('oa');await analyze();
   await verify(await download(7),['待核对','已付款','待核对','未付款'],{M2:'FFFF00'});
   if(process.env.QA_OUT){await fs.mkdir(process.env.QA_OUT,{recursive:true});await fs.writeFile(process.env.QA_OUT+'/payment-progress.xlsx',paid);await frame.locator('#progressPreviewSection').scrollIntoViewIfNeeded();await frame.locator('#progressPreviewSection').screenshot({path:process.env.QA_OUT+'/payment-progress.png'});await frame.locator('#negotiatedPreviewSection').scrollIntoViewIfNeeded();await frame.locator('#negotiatedPreview').evaluate(e=>{e.scrollLeft=e.scrollWidth;});await frame.locator('#negotiatedPreviewSection').screenshot({path:process.env.QA_OUT+'/batch-colors.png'});}
   // A guessed yellow cell must not become paid merely by re-uploading its generated date note.
@@ -84,11 +84,17 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
   await upload('negotiated',ambiguous);await analyze();const repeated=X.read(await download(9),{cellStyles:true});
   assert.equal(fill(repeated.Sheets.谈判付款.M2),'FFFF00');assert.notEqual(fill(repeated.Sheets.谈判付款.N2),'FF0000');
   X.utils.sheet_add_aoa(input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]],[['是否谈判分批'],['否']],{origin:'O1'});
-  for(const row of [2,4])set(input,'applications','付款分类',row,'正常付款-谈判付款表');set(input,'applications','应付时间',2,'2027-01-26');set(input,'applications','应付时间',3,'');await upload('applications');await upload('negotiated');await analyze();const normalSource=X.read(await download(10)),progressRecords=X.utils.sheet_to_json(normalSource.Sheets.付款进度整理);
+  for(const row of [2,4])set(input,'applications','付款分类',row,'正常付款-谈判付款表');set(input,'applications','申请日期',2,'2026-11-19');set(input,'applications','申请日期',3,'2026-11-20');set(input,'applications','应付时间',2,'2027-01-26');set(input,'applications','应付时间',3,'');await upload('applications');await upload('negotiated');await analyze();const normalSource=X.read(await download(10)),progressRecords=X.utils.sheet_to_json(normalSource.Sheets.付款进度整理);
   assert.equal(progressRecords[0].付款来源,'谈判付款表-正常付款');assert.equal(progressRecords[0].是否已付款,'已付款');
   const finalPreview=await snapshot('progressPreview');assert.equal(finalPreview.rows[0][1].text,'谈判付款表-正常付款');
   assert.equal(normalSource.Sheets.谈判付款.O2.v,'否');assert.equal(progressRecords[0].应付时间,'2027年1月26日');assert.equal(progressRecords[1].应付时间,'');assert.equal(finalPreview.rows[0][7].text,'2027年1月26日');assert.equal(finalPreview.rows[1][7].text,'');
   assert.match(JSON.stringify(X.utils.sheet_to_json(normalSource.Sheets.付款申请核对)),/应付时间为空或无法识别/);
+  // Moving back across the cutoff must restore the legacy source, not the last generated date.
+  set(input,'applications','申请日期',2,'2026-11-18');set(input,'applications','申请日期',3,'2026-11-18');await upload('applications');await analyze();
+  const legacy=X.read(await download(11)),legacyRows=X.utils.sheet_to_json(legacy.Sheets.付款进度整理),legacyPreview=await snapshot('progressPreview');
+  assert.equal(legacyRows[0].应付时间,'2026年11月6日');assert.equal(legacyRows[1].应付时间,'2026年11月9日');
+  assert.equal(legacyPreview.rows[0][7].text,'2026年11月6日');assert.equal(legacyPreview.rows[1][7].text,'2026年11月9日');
+  assert(!X.utils.sheet_to_json(legacy.Sheets.付款申请核对).some(r=>r.来源文件==='applications.xlsx'&&[2,3].includes(r.来源行号)&&/应付时间为空或无法识别/.test(r.核对说明)));
   assert.deepEqual(errors,[]);console.log(JSON.stringify({base,progressColumns:13,sheets:C.OUTPUT_SHEETS,latestApplicationStatus:true,fourNotes:true,yellowRed:true,normalPreserved:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
