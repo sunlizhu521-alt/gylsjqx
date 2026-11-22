@@ -22,7 +22,7 @@ function synthetic(){const b=X.utils.book_new(),rows=[];for(let i=0;i<70;i++)row
    assert.deepEqual(await options('previewMonth'),[...new Set(groups.filter(r=>r.buyer===g.buyer&&r.supplier===g.supplier).map(r=>r.month))]);
    assert.equal(await frame.locator('#previewContext').innerText(),`${g.buyer} / ${g.supplier} / ${g.month.slice(0,4)}年${Number(g.month.slice(5))}月`);
   }
-  await checkSelection(0);
+  await checkSelection(0);assert.equal(await frame.locator('#receipts,#afterSales').count(),0);
   // Observe the actual model supplied to the renderer, not only selector labels.
   await frame.locator('body').evaluate(()=>{const draw=InternalStatementDocument.draw;InternalStatementDocument.draw=(model,p,canvas)=>{window.__lastStatementDraw={key:model.group.key,page:p,pages:model.pages.length,note:model.settings.note,date:model.settings.reconcileDate};return draw(model,p,canvas);};});
   async function checkDraw(index,p=0){const actual=await frame.locator('body').evaluate(()=>window.__lastStatementDraw);assert.equal(actual.key,expected.groups[index].key);assert.equal(actual.page,p);assert.equal(actual.date,expectedDate(expected.groups[index].month));assert(await frame.locator('#preview').isVisible());assert.equal(await frame.locator('#pageInfo').innerText(),`第 ${p+1} / ${actual.pages} 页`);}
@@ -46,13 +46,13 @@ function synthetic(){const b=X.utils.book_new(),rows=[];for(let i=0;i<70;i++)row
   await frame.locator('#previous').click();await checkDraw(0);await frame.locator('#next').click();
   await frame.locator('#statement').selectOption('1');await checkDraw(1);assert(await frame.locator('#previous').isDisabled());
   await frame.locator('#statement').selectOption('0');await checkDraw(0);
-  await frame.locator('#receipts').fill('金额异常');await frame.locator('#update').click();
+  await frame.locator('#invoiced').fill('金额异常');await frame.locator('#update').click();
   assert(await frame.locator('#preview').isHidden());assert.equal(await frame.locator('#pageInfo').innerText(),'');assert(await frame.locator('#next').isDisabled());
   assert(await frame.locator('#downloadAllPdf').isDisabled());
-  assert((await frame.locator('#previewMessage').innerText()).includes('本期收款'));
+  assert((await frame.locator('#previewMessage').innerText()).includes('已开票欠款'));
   assert(await frame.locator('#preview').evaluate(c=>!c.getContext('2d').getImageData(0,0,c.width,c.height).data.some(v=>v!==0)),'失败时画布实际清空');
   await frame.locator('#statement').selectOption('1');await checkSelection(1);assert(await frame.locator('#preview').isHidden());
-  await frame.locator('#statement').selectOption('0');await frame.locator('#receipts').fill('');await frame.locator('#update').click();await checkDraw(0);
+  await frame.locator('#statement').selectOption('0');await frame.locator('#invoiced').fill('');await frame.locator('#update').click();await checkDraw(0);
   // Switching saves the previous form even if an autofill did not emit input.
   await frame.locator('#note').evaluate(el=>{el.value='自动填充保留';});await frame.locator('#statement').selectOption('1');assert.equal(await frame.locator('#note').inputValue(),'');
   await frame.locator('#statement').selectOption('0');assert.equal(await frame.locator('#note').inputValue(),'自动填充保留');await frame.locator('#note').fill('');
@@ -76,7 +76,8 @@ function synthetic(){const b=X.utils.book_new(),rows=[];for(let i=0;i<70;i++)row
        }
        subtotals[key]=r;assert.equal(s['A'+r].v,isReturn?'退货合计':'送货合计');assert.equal(s['D'+r].v,'/');assert.equal(s['E'+r].v,Number(g[key+'Quantity']));assert.equal(s['F'+r].v,Number(C.amountText(g[key+'Amount'])));assert.equal(s['F'+r].f,start<r?`SUM(F${start}:F${r-1})`:'0');assert(s['!merges'].some(m=>m.s.r===r-1&&m.s.c===0&&m.e.c===2));r++;
       }
-      const t=r;assert.equal(s['F'+t].v,Number(C.amountText(g.amount)));assert.equal(s['F'+t].f,`F${subtotals.delivery}+F${subtotals.return}`);assert.equal(s['E'+t].v,Number(g.quantity));assert.equal(s['D'+(t+1)].v,0);assert.equal(s['D'+(t+2)].v,Number(C.amountText(g.deliveryAmount)));assert.equal(s['D'+(t+5)].v,Number(C.amountText(g.returnAmount)));assert.equal(s['D'+(t+6)].v,Number(C.amountText(g.amount)));assert.equal(s['D'+(t+6)].f,`D${t+2}+D${t+5}`);assert(s['!merges'].some(m=>m.s.r===0&&m.e.c===6));
+      const t=r+3;assert.equal(s['D'+r].v,0);assert.equal(s['D'+(r+1)].v,Number(C.amountText(g.deliveryAmount)));assert.equal(s['D'+(r+1)].f,`F${subtotals.delivery}`);assert.equal(s['D'+(r+2)].v,Number(C.amountText(g.returnAmount)));assert.equal(s['D'+(r+2)].f,`F${subtotals.return}`);assert.equal(s['D'+t].v,Number(C.amountText(g.amount)));assert.equal(s['D'+t].f,`D${r+1}+D${r+2}`);assert(s['!merges'].some(m=>m.s.r===0&&m.e.c===6));
+      for(const cell of Object.values(s))if(cell?.t==='s')assert(!/数量及金额合计|本期收款|售后异常费用/.test(cell.v));
 
      }
     }else{
@@ -84,9 +85,9 @@ function synthetic(){const b=X.utils.book_new(),rows=[];for(let i=0;i<70;i++)row
     }
    }
   }
-  await frame.locator('#statement').selectOption('0');assert(await frame.locator('#balance').evaluate(el=>el.readOnly));assert(await frame.locator('#returns').evaluate(el=>el.readOnly));await frame.locator('#receipts').fill('20');await frame.locator('#afterSales').fill('0');await frame.locator('#note').fill('本次手动备注');await frame.locator('#reconcileDate').fill('2027-02-12');await frame.locator('#update').click();assert(!((await frame.locator('#status').innerText()).startsWith('请核实')));
+  await frame.locator('#statement').selectOption('0');assert(await frame.locator('#balance').evaluate(el=>el.readOnly));assert(await frame.locator('#returns').evaluate(el=>el.readOnly));await frame.locator('#invoiced').fill('20');await frame.locator('#note').fill('本次手动备注');await frame.locator('#reconcileDate').fill('2027-02-12');await frame.locator('#update').click();assert(!((await frame.locator('#status').innerText()).startsWith('请核实')));
   await page.locator('.tool-tab[data-tool="funds"]').click();await page.locator('.tool-tab[data-tool="internal-statement"]').click();assert.equal(await frame.locator('#note').inputValue(),'本次手动备注');await frame.locator('#statement').selectOption('1');await frame.locator('#statement').selectOption('0');assert.equal(await frame.locator('#reconcileDate').inputValue(),'2027-02-12');
-  const event=page.waitForEvent('download');await frame.locator('#buyers .buyer').first().locator('button[data-format="xlsx"]').click();const written=X.read(await fs.readFile(await(await event).path()));const s=written.Sheets[written.SheetNames[0]],t=expected.groups[0].items.length+8;assert.equal(s.A3.v,'对账日期：2027年2月12日');assert.equal(s['D'+(t+1)].v,0);assert.equal(s['D'+(t+6)].v,Number(C.amountText(expected.groups[0].amount)));assert.equal(s['A'+(t+11)].v,'备注：本次手动备注');
+  const event=page.waitForEvent('download');await frame.locator('#buyers .buyer').first().locator('button[data-format="xlsx"]').click();const written=X.read(await fs.readFile(await(await event).path()));const s=written.Sheets[written.SheetNames[0]],t=expected.groups[0].items.length+11;assert.equal(s.A3.v,'对账日期：2027年2月12日');assert.equal(s['D'+(t-3)].v,0);assert.equal(s['D'+t].v,Number(C.amountText(expected.groups[0].amount)));assert.equal(s['A'+(t+7)].v,'备注：本次手动备注');
   // A failure after the first PDF must not trigger a partial ZIP download.
   const batchDownloads=[],onBatchDownload=d=>batchDownloads.push(d);page.on('download',onBatchDownload);
   await frame.locator('body').evaluate(()=>{window.__originalPdf=InternalStatementDocument.pdf;let calls=0;InternalStatementDocument.pdf=async(...args)=>{if(++calls===2)throw Error('合成 PDF 导出失败');return window.__originalPdf(...args);};});

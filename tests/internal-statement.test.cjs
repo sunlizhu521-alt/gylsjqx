@@ -33,10 +33,10 @@ test('各对账月份默认次月10日，支持跨年及闰年，不依赖今天
  for(const [month,expected]of [['2026-06','2026-07-10'],['2026-11','2026-12-10'],['2026-12','2027-01-10'],['2024-02','2024-03-10'],['2026-02','2026-03-10']])assert.equal(C.defaults(month).reconcileDate,expected);
  assert.throws(()=>C.defaults('2026-13'),/日期无法识别/);
 });
-test('上期余额固定零、退货保留负数；可选手填内容不参与净额计算',()=>{
- const g={amount:'10001',deliveryAmount:'12002',returnAmount:'-2001'},f=C.defaults('2026-11');let d=C.footer(g,f);assert.equal(d.total,'100.01');assert.equal(d.balance,'0.00');assert.equal(d.returns,'-20.01');assert.equal(d.receipts,'');assert.equal(d.invoices[0].amount,'');
- Object.assign(f,{balance:'999',receipts:'20',afterSales:'5',returns:'999'});d=C.footer(g,f);assert.equal(d.total,'100.01');assert.equal(d.delivery,'120.02');assert.equal(d.receipts,'20.00');assert.equal(d.afterSales,'5.00');assert.equal(d.balance,'0.00');assert.equal(f.balance,'999');
- assert.throws(()=>C.footer(g,{...f,receipts:'金额不明'}),/有效数值/);assert.throws(()=>C.footer(g,{...f,reconcileDate:''}),/选择对账日期/);
+test('上期余额固定零、退货保留负数；发货退货金额取小计',()=>{
+ const g={amount:'10001',deliveryAmount:'12002',returnAmount:'-2001'},f=C.defaults('2026-11');let d=C.footer(g,f);assert.equal(d.total,'100.01');assert.equal(d.balance,'0.00');assert.equal(d.returns,'-20.01');assert.equal(f.receipts,undefined);assert.equal(f.afterSales,undefined);assert.equal(d.invoices[0].amount,'');
+ Object.assign(f,{balance:'999',returns:'999'});d=C.footer(g,f);assert.equal(d.total,'100.01');assert.equal(d.delivery,'120.02');assert.equal(d.balance,'0.00');assert.equal(f.balance,'999');
+ assert.throws(()=>C.footer(g,{...f,invoiced:'金额不明'}),/有效数值/);assert.throws(()=>C.footer(g,{...f,reconcileDate:''}),/选择对账日期/);
 });
 test('分组文件名采用双方明确简称和对账年月，未知公司保留全称',()=>{
  const groups=[

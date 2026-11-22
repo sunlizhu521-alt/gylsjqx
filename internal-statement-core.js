@@ -89,10 +89,10 @@ function parse(book,fileName){
 }
 function defaults(month){
  const next=new Date(date(month+'-01')+'T00:00:00Z');next.setUTCMonth(next.getUTCMonth()+1,10);
- return {reconcileDate:next.toISOString().slice(0,10),cutoff:'',terms:'票到90天付款',receipts:'',afterSales:'',invoiced:'',uninvoiced:'',note:'',phone:'',invoices:Array.from({length:5},()=>({month:'',status:'',amount:''}))};
+ return {reconcileDate:next.toISOString().slice(0,10),cutoff:'',terms:'票到90天付款',invoiced:'',uninvoiced:'',note:'',phone:'',invoices:Array.from({length:5},()=>({month:'',status:'',amount:''}))};
 }
 function footer(group,input){
- const data={...input},labels={receipts:'本期收款',afterSales:'售后费用',invoiced:'已开票欠款',uninvoiced:'未开票欠款'};
+ const data={...input},labels={invoiced:'已开票欠款',uninvoiced:'未开票欠款'};
  for(const [k,label]of Object.entries(labels)){const n=decimal(input[k],label,2);data[k]=n===null?'':amountText(n);}
  if(!input.reconcileDate)throw Error('请选择对账日期');data.reconcileDate=date(input.reconcileDate);if(input.cutoff)data.cutoff=date(input.cutoff);
  data.balance='0.00';data.delivery=amountText(group.deliveryAmount);data.returns=amountText(group.returnAmount);

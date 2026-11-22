@@ -1,5 +1,5 @@
 (()=>{'use strict';
-const $=id=>document.getElementById(id),C=InternalStatement,D=InternalStatementDocument,fields=['reconcileDate','cutoff','terms','phone','receipts','afterSales','invoiced','uninvoiced','note'];
+const $=id=>document.getElementById(id),C=InternalStatement,D=InternalStatementDocument,fields=['reconcileDate','cutoff','terms','phone','invoiced','uninvoiced','note'];
 let template,source=null,settings=new Map(),models=[],selected=0,page=0,busy=false;
 for(let i=0;i<5;i++){const tr=$('invoiceTable').tBodies[0].insertRow();for(const kind of ['month','status','amount']){const td=tr.insertCell(),input=document.createElement(kind==='status'?'select':'input');input.dataset.field=kind;input.setAttribute('aria-label',`货款汇总第 ${i+1} 行${{month:'月份',status:'是否开票',amount:'开具金额'}[kind]}`);if(kind==='status')for(const v of ['','是','否']){const o=document.createElement('option');o.textContent=v;o.value=v;input.append(o);}else if(kind==='month')input.type='month';else input.inputMode='decimal';td.append(input);}}
 function current(){return source?.groups[selected];}
@@ -30,7 +30,7 @@ async function download(buyer,format){
  try{
   const selected=models.filter(m=>m.group.buyer===buyer),name=C.fileName(buyer,selected.map(m=>m.group));$('status').textContent='正在生成 '+buyer+' 的 '+format.toUpperCase()+'…';
   const bytes=format==='pdf'?await D.pdf(selected,(done,total)=>{$('status').textContent=`正在生成 PDF：${done} / ${total} 页`;}):await D.xlsx(template,selected);
-  if(format==='xlsx'){const saved=XLSX.read(bytes,{type:'array',cellNF:true});if(saved.SheetNames.length!==selected.length)throw Error('导出工作表数量不一致');for(const [i,m]of selected.entries()){const s=saved.Sheets[saved.SheetNames[i]];if(s['F'+m.totalRow]?.v!==Number(C.amountText(m.group.amount))||s['F'+m.subtotalRows.delivery]?.v!==Number(C.amountText(m.group.deliveryAmount))||s['F'+m.subtotalRows.return]?.v!==Number(C.amountText(m.group.returnAmount))||s.A1?.v!==buyer)throw Error('导出金额或采购组织校验失败');}}
+  if(format==='xlsx'){const saved=XLSX.read(bytes,{type:'array',cellNF:true});if(saved.SheetNames.length!==selected.length)throw Error('导出工作表数量不一致');for(const [i,m]of selected.entries()){const s=saved.Sheets[saved.SheetNames[i]];if(s['D'+m.totalRow]?.v!==Number(C.amountText(m.group.amount))||s['F'+m.subtotalRows.delivery]?.v!==Number(C.amountText(m.group.deliveryAmount))||s['F'+m.subtotalRows.return]?.v!==Number(C.amountText(m.group.returnAmount))||s.A1?.v!==buyer)throw Error('导出金额或采购组织校验失败');}}
   save(bytes,name+'.'+format,format==='pdf'?'application/pdf':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');$('status').textContent='已生成：'+name+'.'+format;
  }catch(e){models=[];clearPreview('生成失败：'+e.message);$('status').textContent='生成失败：'+e.message;}finally{busy=false;document.querySelectorAll('input,select,textarea,button').forEach(el=>el.disabled=false);preview();}
 }

@@ -38,18 +38,16 @@ function layout(group,settings){
   const sum=col=>start<=end?`SUM(${col}${start}:${col}${end})`:'0';
   row(6,[isReturn?'退货合计':'送货合计','','','/',{...number(group[key+'Quantity']),f:sum('E')},{...money(C.amountText(group[key+'Amount'])),f:sum('F')}],[[0,2]],{bold:true,border:true});
  }
- const totalRow=rows.length+1;
- row(6,['数量及金额合计','','','/',{...number(group.quantity),f:`E${subtotalRows.delivery}+E${subtotalRows.return}`},{...money(C.amountText(group.amount)),f:`F${subtotalRows.delivery}+F${subtotalRows.return}`}],[[0,2]],{bold:true,border:true});
- const footerStart=rows.length;
+ const footerStart=rows.length,totalRow=footerStart+4;
  const val=s=>s===''?'':money(s),footerFormulaRow=footerStart+1;
  const invoiceAt=index=>{const a=f.invoices[index];return [a.month?a.month.replace('-','年')+'月':'',a.status,val(a.amount)];};
  row(44,['上期余额：','','',val(f.balance)],[[0,2]]);
  row(45,['加：本期发货金额：','','',{...money(f.delivery),f:`F${subtotalRows.delivery}`},'货款汇总表'],[[0,2],[4,6]],{invoice:true});
- row(46,['本期收款（仅展示）：','','',val(f.receipts),'月份','是否开票','开具金额'],[[0,2]],{invoice:true});
- row(47,['售后异常费用（仅展示）：','','',val(f.afterSales),...invoiceAt(0)],[[0,2]],{invoice:true});
- row(48,['减：本期退货金额：','','',{...money(f.returns),f:`F${subtotalRows.return}`},...invoiceAt(1)],[[0,2]],{invoice:true});
+ row(46,['减：本期退货金额：','','',{...money(f.returns),f:`F${subtotalRows.return}`},'月份','是否开票','开具金额'],[[0,2]],{invoice:true});
  const r=footerFormulaRow;
- row(49,['合计：','','',{...money(f.total),f:`D${r+1}+D${r+4}`},...invoiceAt(2)],[[0,2]],{bold:true,invoice:true});
+ row(47,['合计：','','',{...money(f.total),f:`D${r+1}+D${r+2}`},...invoiceAt(0)],[[0,2]],{bold:true,invoice:true});
+ row(48,['','','','',...invoiceAt(1)],[],{invoice:true});
+ row(49,['','','','',...invoiceAt(2)],[],{invoice:true});
  row(50,['','','','',...invoiceAt(3)],[],{invoice:true});
  row(51,[`截止${f.cutoff?C.dateLabel(f.cutoff):'____年__月__日'}，贵司尚欠我司已开票货款￥${f.invoiced}`,'','','',...invoiceAt(4)],[[0,3]],{invoice:true});
  row(52,['未开票货款￥'+f.uninvoiced],[[0,3]]);
