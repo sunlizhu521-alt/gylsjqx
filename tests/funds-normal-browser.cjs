@@ -98,10 +98,21 @@ function fixture() {
     const xu=corrected.Sheets['对账明细-徐英'];delete xu.W1;X.utils.sheet_add_aoa(xu,[['账期'],[30],[0]],{origin:'X1'});
     corrected.Sheets['对账明细-李奇'].I2={t:'s',v:'2026-12-01'};
     await upload('ledger',corrected);await analyze();
+    const dateIssue=frame.locator('[data-issue-id^="normal-payment-date:"]').filter({hasText:'零额缺日期'}),dateInput=dateIssue.locator('input[type=date]');
+    assert.equal(await dateIssue.count(),1);assert(await frame.locator('#download').isDisabled());assert.equal(await dateIssue.locator('select').count(),0);
+    await dateInput.fill('2026-12-15');assert(await frame.locator('#download').isDisabled(),'填写但未确认不能下载');
+    await dateIssue.getByRole('button',{name:'确认付款日期'}).click();
     const refreshed=await download(),latest=X.utils.sheet_to_json(refreshed.Sheets.正常付款,{defval:''});
     assert.equal(latest.length,9);assert.equal(latest.find(row=>row.供应商名称==='空OA唯一候选').应付时间,'2026年12月1日','替换台账采用最新本行日期');
-    assert.equal(latest.find(row=>row.供应商名称==='零额缺日期').预估时间,'2026年12月15日','移除预估列后按月末＋15天＋零账期重算，不用旧文件日期');
-    assert.equal(latest.find(row=>row.供应商名称==='零额缺日期')['申请付款的日期'],'2026/12/07周','按账期推算的预估日期同样生成申请周');
+    assert.equal(latest.find(row=>row.供应商名称==='零额缺日期').预估时间,'2026年12月15日','没有预估列也必须手工填写，不能按账期自动放行');
+    assert.equal(latest.find(row=>row.供应商名称==='零额缺日期')['申请付款的日期'],'2026/12/07周','人工日期同步生成申请周');
+    await frame.locator('#onlyPending').uncheck();await dateInput.fill('');
+    assert(await frame.locator('#download').isDisabled());assert.equal(await frame.locator('#pendingCount').innerText(),'1');
+    await dateIssue.getByRole('button',{name:'确认付款日期'}).click();assert(await frame.locator('#download').isDisabled());
+    await dateInput.fill('2026-12-28');await dateIssue.getByRole('button',{name:'确认付款日期'}).click();
+    const amended=X.utils.sheet_to_json((await download()).Sheets.正常付款,{defval:''}).find(row=>row.供应商名称==='零额缺日期');
+    assert.equal(amended.预估时间,'2026年12月28日');assert.equal(amended['申请付款的日期'],'2026/12/14周');
+    await upload('ledger',corrected);await analyze();assert(await frame.locator('#download').isDisabled());assert.equal(await dateInput.inputValue(),'','重复上传不能套用上次人工日期');
     const months=X.read(encode(data.ledger),{cellNF:true}),li=months.Sheets['对账明细-李奇'];
     for(const row of [2,6,7])li['I'+row]={t:'s',v:''};
     li.W2={t:'s',v:'2026年11月'};li.W7={t:'s',v:'2026-11'};
@@ -138,6 +149,6 @@ function fixture() {
     }
     assert.equal(concreteLi.W2.v,'2026-11-30','原预估日期不改写');assert.equal(await frame.locator('#pendingCount').innerText(),'0');
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({status:'PASS',base,normalRows:9,classification:'merged 是 applies to every source row before filtering; 否/blank included',emptyOA:'fixed 未提交OA and five blank flow fields even with candidates',due:'normal due day capped at 25; month-only, exact and derived estimates use day 25 cap for previous-week application date and stable sort; preview/export text dates agree; source/negotiated/progress due unchanged',financial:'李奇合同口径原值保留/no false overpayment; others zero/settled/formulas/highlights',invalidClassification:'error/value/missing column excluded with review'}));
+    console.log(JSON.stringify({status:'PASS',base,normalRows:9,manualDateRequired:true,clearingBlocksDownload:true,reuploadClearsManualDate:true,classification:'merged 是 applies to every source row before filtering; 否/blank included',emptyOA:'fixed 未提交OA and five blank flow fields even with candidates',due:'normal due day capped at 25; month-only, exact and manually confirmed estimates use day 25 cap for previous-week application date and stable sort; preview/export text dates agree; source/negotiated/progress due unchanged',financial:'李奇合同口径原值保留/no false overpayment; others zero/settled/formulas/highlights',invalidClassification:'error/value/missing column excluded with review'}));
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

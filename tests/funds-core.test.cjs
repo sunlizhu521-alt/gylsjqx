@@ -414,9 +414,9 @@ test('已有追加字段不重复新增，源表空行和非授权字段保持�
 test('1904来源日期转换为1900体系，原表不变',()=>{
  const i=fixture();i.ledger.book.Workbook={WBProps:{date1904:true}};set(i,'ledger','开票时间',3,{t:'n',v:44834,z:'yyyy-mm-dd'});const r=C.build(i);assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('开票时间')].v,44834+1462);assert.equal(i.ledger.book.Sheets['对账明细-李奇'].E3.v,44834);
 });
-test('登记月份和应付款时间无法识别时完整保留原文，不产生日期核对阻断',()=>{
+test('登记月份和应付款时间无法识别保留原文，双空记录要求补付款日期',()=>{
  for(const [month,due] of [['10月登记',' 月底前付款\n以通知为准 '],['2026-13','2026-02-30'],['/','待定'],['','']]){
-  const i=fixture();set(i,'ledger','月份',3,month);set(i,'ledger','应付款时间',3,due);const before=JSON.stringify(i),r=C.build(i);assert.equal(r.normalRows[0][0].v,month);assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('应付时间')].v,due);assert.equal(r.normalRows[0][0].t,'s');assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('应付时间')].t,'s');assert.equal(r.issues.some(x=>x.kind==='date'),due==='');assert.equal(r.stats.pending,due===''?1:0);assert.equal(JSON.stringify(i),before);
+  const i=fixture();set(i,'ledger','月份',3,month);set(i,'ledger','应付款时间',3,due);const before=JSON.stringify(i),r=C.build(i);assert.equal(r.normalRows[0][0].v,month);assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('应付时间')].v,due);assert.equal(r.normalRows[0][0].t,'s');assert.equal(r.normalRows[0][C.NORMAL_HEADERS.indexOf('应付时间')].t,'s');assert.equal(r.issues.some(x=>x.kind==='payment-date'),due==='');assert.equal(r.stats.pending,due===''?1:0);assert.equal(JSON.stringify(i),before);
  }
 });
 test('登记月份和应付款时间有效时仍导出真实Excel日期及相应格式',()=>{
