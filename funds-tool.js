@@ -6,6 +6,29 @@
   let result = null, preparedBlob = null, busy = false;
   let sourceRevision = 0, resultRevision = -1;
   const memoryVersions = {};
+  const dateHistoryKey = 'gylsjqx-funds-payment-date-history-v1';
+  let dateHistoryMemory = {};
+  function historyWarning(message) {
+    $('dateHistoryStatus').textContent=message;$('dateHistoryStatus').hidden=!message;
+  }
+  function readDateHistory() {
+    try {
+      const saved=JSON.parse(localStorage.getItem(dateHistoryKey)||'{}');
+      if(!saved||typeof saved!=='object'||Array.isArray(saved))throw Error('invalid history');
+      const combined={...saved};
+      for(const [key,entry] of Object.entries(dateHistoryMemory))if(!saved[key]||Date.parse(entry.confirmedAt)>Date.parse(saved[key].confirmedAt))combined[key]=entry;
+      return combined;
+    } catch (_) {
+      historyWarning('浏览器未能读取付款日期历史，本次仍可手工确认日期。');return dateHistoryMemory;
+    }
+  }
+  function rememberDate(issue,paymentDate) {
+    if(!issue.historyKey)return;
+    const saved={...readDateHistory(),[issue.historyKey]:{paymentDate,confirmedAt:new Date().toISOString()}};
+    dateHistoryMemory=saved;
+    try {localStorage.setItem(dateHistoryKey,JSON.stringify(saved));historyWarning('');}
+    catch (_) {historyWarning('本次日期已确认，但浏览器未能保存历史；刷新后需要重新填写。');}
+  }
   const dateNow = () => new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   const timeNow = () => new Intl.DateTimeFormat('zh-CN', {timeZone:'Asia/Shanghai',dateStyle:'short',timeStyle:'medium'}).format(new Date());
   function nextDownload() {
@@ -88,6 +111,7 @@
   function showIssues() {
     const list = $('issueList'), scroll = list.scrollTop, fragment = document.createDocumentFragment();
     const issues = result.issues.filter(issue => !$('onlyPending').checked || !issue.resolved);
+    const history=issues.some(issue=>issue.inputType==='date')?readDateHistory():{};
     for (const issue of issues) {
       const card = document.createElement('div'); card.className = 'issue'+(issue.resolved?' resolved':''); card.dataset.issueId = issue.id;
       const heading = document.createElement('h3'); heading.textContent = (issue.resolved?'已确认 · ':'') + (issue.targetLabel || '记录核对');
@@ -99,16 +123,33 @@
         label.textContent='补填付款日期';input.type='date';input.required=true;input.min='1900-01-01';input.max='9999-12-31';input.dataset.decision=issue.id;
         input.setAttribute('aria-label',(issue.targetLabel||'')+' 补填付款日期');input.value=dateDrafts[issue.id]??decisions[issue.id]?.[0]??'';
         confirm.type='button';confirm.textContent='确认付款日期';confirm.dataset.decision=issue.id;
-        input.addEventListener('input',()=>{
+        const edit=()=>{
           dateDrafts[issue.id]=input.value;delete decisions[issue.id];issue.resolved=false;issue.selected=[];preparedBlob=null;
           card.classList.remove('resolved');heading.textContent=issue.targetLabel||'记录核对';$('pendingCount').textContent=pending();
           $('status').textContent='付款日期已修改，请点击“确认付款日期”后再下载。';controls();
-        });
-        confirm.addEventListener('click',()=>{
-          if(!input.reportValidity())return;
-          decisions[issue.id]=[input.value];analyze(true);
-        });
-        label.append(input);card.append(heading,message,source,label,confirm);fragment.append(card);continue;
+        };
+        input.addEventListener('input',edit);
+        const accept=()=>{
+          if(!input.reportValidity()||!FundsCore.parsePaymentDate(input.value))return;
+          if(!currentSources()){invalidate();$('status').textContent='来源文件已更换，请重新上传并整理。';return;}
+          decisions[issue.id]=[input.value];rememberDate(issue,input.value);analyze(true);
+        };
+        confirm.addEventListener('click',accept);
+        const match=document.createElement('p');match.className='issue-source';
+        match.textContent=issue.historyKey?'历史匹配：同供应商、同申请付款金额、同所属月份（'+issue.historyMonth+'）。':'供应商、申请付款金额或所属月份缺失或无效，本次可确认日期，但无法保存历史匹配。';
+        card.append(heading,message,source,match);
+        const previous=history[issue.historyKey];
+        if(previous&&FundsCore.parsePaymentDate(previous.paymentDate)&&typeof previous.confirmedAt==='string'&&Number.isFinite(Date.parse(previous.confirmedAt))){
+          const note=document.createElement('p'),reuse=document.createElement('button'),replace=document.createElement('button');
+          const stamp=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(previous.confirmedAt));
+          note.textContent='上次确认的付款日期：'+previous.paymentDate+'；确认时间：'+stamp+'（北京时间）。是否沿用？';
+          reuse.type=replace.type='button';reuse.dataset.decision=replace.dataset.decision=issue.id;
+          reuse.textContent='沿用上次付款日期';replace.textContent='重新填写';
+          reuse.addEventListener('click',()=>{input.value=previous.paymentDate;dateDrafts[issue.id]=input.value;accept();});
+          replace.addEventListener('click',()=>{input.value='';edit();input.focus();});
+          const actions=document.createElement('div');actions.className='actions';actions.append(reuse,replace);card.append(note,actions);
+        }
+        label.append(input);card.append(label,confirm);fragment.append(card);continue;
       }
       const label = document.createElement('label'), select = document.createElement('select');
       label.textContent = issue.multiple ? '选择处理方式或多笔匹配记录' : '选择处理方式';

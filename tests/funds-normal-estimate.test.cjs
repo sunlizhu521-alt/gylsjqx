@@ -10,6 +10,23 @@ function fixture(extra={},owner='李奇',reverse=false){
 }
 const display=c=>c?.z?X.SSF.format(c.z,c.v):c?.v;
 const result=i=>{const built=C.build(i);return {built,row:Object.fromEntries(C.NORMAL_HEADERS.map((h,c)=>[h,built.normalRows[0][c]]))};};
+test('付款日期历史按供应商、申请金额整数分和所属年月匹配，不受来源行及日期格式影响',()=>{
+ const issue=(extra={},owner='李奇',reverse=false)=>C.build(fixture(extra,owner,reverse)).issues.find(i=>i.kind==='payment-date');
+ const key=issue().historyKey;assert.deepEqual(JSON.parse(key),['合成供应商','10000','2026-10']);
+ for(const month of ['2026-10','2026/10/31','2026年10月',{t:'n',v:46311,z:'yyyy-mm-dd'}]){
+  assert.equal(issue({'所属月份':month,'申请付款金额':'￥100.00'},'徐英',true).historyKey,key);
+ }
+ const old=fixture({'所属月份':{t:'n',v:46311-1462,z:'yyyy-mm-dd'}});old.ledger.book.Workbook={WBProps:{date1904:true}};
+ assert.equal(C.build(old).issues.find(i=>i.kind==='payment-date').historyKey,key);
+ for(const extra of [{'供应商名称':'另一个供应商'},{'申请付款金额':100.01},{'所属月份':'2025-10'},{'所属月份':'2026-11'}])assert.notEqual(issue(extra).historyKey,key);
+ assert.equal(JSON.parse(issue({'申请付款金额':0}).historyKey)[1],'0');
+ for(const extra of [{'所属月份':''},{'所属月份':'历史订单'},{'所属月份':'2026-13'},{'所属月份':{t:'e',v:23}},{'申请付款金额':''},{'申请付款金额':'待定'},{'申请付款金额':{t:'n',f:'SUM(A1)'}}])assert.equal(issue(extra).historyKey,'');
+ assert.equal(issue().resolved,false,'历史匹配键本身不能替用户确认付款日期');
+});
+test('付款日期历史只接受完整且真实的日期',()=>{
+ for(const raw of ['2026-12-10','2028-02-29','1900-01-01','9999-12-31'])assert(C.parsePaymentDate(raw));
+ for(const raw of ['',null,46366,'2026-12','2026-02-29','2026-12-32','1899-12-31','待确认','2026-12-10T00:00:00Z'])assert.equal(C.parsePaymentDate(raw),null);
+});
 test('应付与预估均空必须人工补完整日期，不能保留空白或按账期自动放行',()=>{
  for(const extra of [{},{'预估时间':''},{'预估付款时间':'　 '},{'预估付款月份':''}]){
   const input=fixture(extra),before=JSON.stringify(input),built=C.build(input),pending=built.issues.find(i=>i.kind==='payment-date');

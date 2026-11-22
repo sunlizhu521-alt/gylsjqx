@@ -113,6 +113,32 @@ function fixture() {
     const amended=X.utils.sheet_to_json((await download()).Sheets.正常付款,{defval:''}).find(row=>row.供应商名称==='零额缺日期');
     assert.equal(amended.预估时间,'2026年12月28日');assert.equal(amended['申请付款的日期'],'2026/12/14周');
     await upload('ledger',corrected);await analyze();assert(await frame.locator('#download').isDisabled());assert.equal(await dateInput.inputValue(),'','重复上传不能套用上次人工日期');
+    assert.match(await dateIssue.innerText(),/上次确认的付款日期：2026-12-28；确认时间：\d{4}-\d{2}-\d{2}/);
+    await dateIssue.getByRole('button',{name:'沿用上次付款日期'}).click();
+    assert.equal(X.utils.sheet_to_json((await download()).Sheets.正常付款,{defval:''}).find(row=>row.供应商名称==='零额缺日期').预估时间,'2026年12月28日');
+    await page.reload({waitUntil:'networkidle'});
+    for(const role of ['ledger','applications','oa','negotiated'])await upload(role,role==='ledger'?corrected:data[role]);
+    await analyze();assert(await frame.locator('#download').isDisabled());
+    assert.match(await dateIssue.innerText(),/上次确认的付款日期：2026-12-28/);
+    if(process.env.QA_SCREENSHOT)await dateIssue.screenshot({path:process.env.QA_SCREENSHOT});
+    await dateIssue.getByRole('button',{name:'重新填写',exact:true}).click();
+    assert.equal(await dateInput.inputValue(),'');assert(await frame.locator('#download').isDisabled());
+    await dateInput.fill('2027-01-10');await dateIssue.getByRole('button',{name:'确认付款日期'}).click();await download();
+    for(const [address,value] of [['A3','2026-12-01'],['B3','其他零额供应商'],['H3',0.01]]){
+      const changed=X.read(encode(corrected),{cellNF:true});changed.Sheets['对账明细-徐英'][address]={t:typeof value==='number'?'n':'s',v:value};
+      await upload('ledger',changed);await analyze();
+      assert.equal(await frame.locator('[data-issue-id^="normal-payment-date:"] button').filter({hasText:'沿用上次付款日期'}).count(),0,'供应商、金额、所属月份任一变化都不复用');
+    }
+    await upload('ledger',corrected);await analyze();assert.match(await dateIssue.innerText(),/上次确认的付款日期：2027-01-10/);
+    await frame.locator('body').evaluate(()=>{const write=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==='gylsjqx-funds-payment-date-history-v1')throw new DOMException('Storage full','QuotaExceededError');return write.call(this,k,v);};});
+    await dateInput.fill('2027-01-15');await dateIssue.getByRole('button',{name:'确认付款日期'}).click();await download();
+    assert.match(await frame.locator('#dateHistoryStatus').innerText(),/未能保存历史/);
+    await page.evaluate(()=>localStorage.setItem('gylsjqx-funds-payment-date-history-v1','broken json'));
+    await page.reload({waitUntil:'networkidle'});
+    for(const role of ['ledger','applications','oa','negotiated'])await upload(role,role==='ledger'?corrected:data[role]);
+    await analyze();assert(await frame.locator('#download').isDisabled());assert.equal(await dateIssue.getByRole('button',{name:'沿用上次付款日期'}).count(),0);
+    assert.match(await frame.locator('#dateHistoryStatus').innerText(),/未能读取付款日期历史/);
+    await dateInput.fill('2027-01-20');await dateIssue.getByRole('button',{name:'确认付款日期'}).click();await download();
     const months=X.read(encode(data.ledger),{cellNF:true}),li=months.Sheets['对账明细-李奇'];
     for(const row of [2,6,7])li['I'+row]={t:'s',v:''};
     li.W2={t:'s',v:'2026年11月'};li.W7={t:'s',v:'2026-11'};

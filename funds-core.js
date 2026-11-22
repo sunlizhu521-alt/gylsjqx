@@ -84,6 +84,10 @@ function date(c,date1904,month=false){
  let serial=(t-Date.UTC(1899,11,30))/86400000;if(serial<61)serial--;
  return {t:'n',v:serial,z:month?'yyyy"年"m"月"':DATE_FORMAT};
 }
+function parsePaymentDate(raw){
+ if(typeof raw!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(raw))return null;
+ const parsed=date(cell(raw),false);return !parsed.invalid&&parsed.t==='n'?parsed:null;
+}
 function normalDueDate(c,date1904){
  const parsed=date(c,date1904);
  if(!parsed.invalid&&parsed.t==='n'){
@@ -956,9 +960,12 @@ function build(inputs,decisions={}){
  function manualPaymentDate(record){
   const id='normal-payment-date:'+record.id,requested=decisions[id];
   const raw=Array.isArray(requested)&&requested.length===1&&typeof requested[0]==='string'?requested[0]:'';
-  const parsed=/^\d{4}-\d{2}-\d{2}$/.test(raw)?date(cell(raw),false):null;
-  const resolved=!!parsed&&!parsed.invalid&&parsed.t==='n';
-  issues.push({id,kind:'payment-date',inputType:'date',message:'应付时间和预估付款时间均为空（含缺少预估列）。请补填明确的付款日期并确认；日期写入本次导出的“预估时间”，原台账不修改，未补全不能下载。',source:record.source,targetLabel:recordLabel(record),choices:[],multiple:false,resolved,selected:resolved?[raw]:[]});
+  const parsed=parsePaymentDate(raw),resolved=!!parsed;
+  const supplier=record.values['供应商名称'],amount=money(record.values['申请付款金额']),month=record.values['登记月份'];
+  const period=date(typeof month?.v==='string'?{...month,v:str(month.v).replace(/月$/,'')}:month,record.date1904,true);
+  const historyMonth=!period.invalid&&period.t==='n'?X.SSF.format('yyyy-mm',period.v):'';
+  const historyKey=supplier?.t!=='e'&&norm(supplier?.v)&&amount.cents!==undefined&&historyMonth?JSON.stringify([norm(supplier.v),amount.cents.toString(),historyMonth]):'';
+  issues.push({id,kind:'payment-date',inputType:'date',historyKey,historyMonth,message:'应付时间和预估付款时间均为空（含缺少预估列）。请补填明确的付款日期并确认；日期写入本次导出的“预估时间”，原台账不修改，未补全不能下载。',source:record.source,targetLabel:recordLabel(record),choices:[],multiple:false,resolved,selected:resolved?[raw]:[]});
   return resolved?parsed:empty();
  }
  function normalEstimate(target){
@@ -1133,5 +1140,5 @@ function build(inputs,decisions={}){
  });
  return {totalValidation:FundsTotalValidation.build(negotiated,money),progressHeaders:[...PROGRESS_HEADERS],progressRows,progressEvidence,normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,batchComments,applicationBatchMatches,highlights:{negotiatedCells:[...highlightedNegotiated],negotiatedPaidCells:[...highlightedPaid],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,headerTopRow:negotiated.headerTopRow,headerBands,sourceRange:negotiated.range,batchLayout,batchPlans,batchYearAdjustments,headers:negHeaders,rows,updates,columnOrder,managedColumns},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
 }
-return {PEOPLE,PROGRESS_HEADERS,OUTPUT_SHEETS,TOTAL_VALIDATION_HEADERS,outputSheetPlan,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText,applicationClass};
+return {PEOPLE,PROGRESS_HEADERS,OUTPUT_SHEETS,TOTAL_VALIDATION_HEADERS,outputSheetPlan,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText,applicationClass,parsePaymentDate};
 });
