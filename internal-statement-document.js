@@ -1,7 +1,7 @@
 /* The XLSX and PDF share values, row heights and page boundaries. */
 window.InternalStatementDocument=(()=>{
 'use strict';
-const C=InternalStatement,W=595.28,H=841.89,M=24,widths=[78,66,139,60,48,74,82.28],FONT='"Songti SC","SimSun","Noto Serif CJK SC",serif';
+const C=InternalStatement,W=595.28,H=841.89,M=24,widths=[82,62,139,60,48,74,82.28],FONT='"Songti SC","SimSun","Noto Serif CJK SC",serif';
 const measure=document.createElement('canvas').getContext('2d');
 function wrap(value,width,font){
  measure.font=font+'px '+FONT;const lines=[];
@@ -21,7 +21,7 @@ function layout(group,settings){
    const single=config.detail&&[1,3,4,5].includes(c);let size=font;
    if(single){measure.font=size+'px '+FONT;size=Math.min(size,(width-8)/Math.max(1,measure.measureText(value).width)*size);if(size<7)throw Error('第 '+(rows.length+1)+' 行的入库单号、物料编码或数值过长，无法完整排版');}
    const lines=wrap(value,width-8,size);if(value!=='')height=Math.max(height,lines.length*(size*1.25)+4);
-   objects.push({c,span,value,lines,font:size,single,bold:!!config.bold,align:config.labelRight&&c===0?'right':config.align||(config.detail?(c===2||c===6?'left':c<=1?'center':'right'):'left'),border:!!config.border||!!config.invoice&&c>=4});
+   objects.push({c,span,value,lines,font:size,single,bold:!!config.bold,align:config.align||(config.detail?(c===2||c===6?'left':c<=1?'center':'right'):'left'),border:!!config.border||!!config.invoice&&c>=4});
   }
   rows.push({sourceRow,cells,merges,height,objects});
  }
@@ -41,11 +41,11 @@ function layout(group,settings){
  const footerStart=rows.length,totalRow=footerStart+4;
  const val=s=>s===''?'':money(s),footerFormulaRow=footerStart+1;
  const invoiceAt=index=>{const a=f.invoices[index];return [a.month?a.month.replace('-','年')+'月':'',a.status,val(a.amount)];};
- row(44,['上期余额：','',val(f.balance)],[[0,1],[2,3]],{labelRight:true});
- row(45,['加：本期发货金额：','',{...money(f.delivery),f:`F${subtotalRows.delivery}`},'','货款汇总表'],[[0,1],[2,3],[4,6]],{invoice:true,labelRight:true});
- row(46,['减：本期退货金额：','',{...money(f.returns),f:`F${subtotalRows.return}`},'','月份','是否开票','开具金额'],[[0,1],[2,3]],{invoice:true,labelRight:true});
+ row(44,['上期余额：',val(f.balance)],[[1,3]]);
+ row(45,['加：本期发货金额：',{...money(f.delivery),f:`F${subtotalRows.delivery}`},'','','货款汇总表'],[[1,3],[4,6]],{invoice:true});
+ row(46,['减：本期退货金额：',{...money(f.returns),f:`F${subtotalRows.return}`},'','','月份','是否开票','开具金额'],[[1,3]],{invoice:true});
  const r=footerFormulaRow;
- row(47,['合计：','',{...money(f.total),f:`C${r+1}+C${r+2}`},'',...invoiceAt(0)],[[0,1],[2,3]],{bold:true,invoice:true,labelRight:true});
+ row(47,['合计：',{...money(f.total),f:`B${r+1}+B${r+2}`},'','',...invoiceAt(0)],[[1,3]],{bold:true,invoice:true});
  row(48,['','','','',...invoiceAt(1)],[],{invoice:true});
  row(49,['','','','',...invoiceAt(2)],[],{invoice:true});
  row(50,['','','','',...invoiceAt(3)],[],{invoice:true});
