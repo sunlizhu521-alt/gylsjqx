@@ -1,61 +1,68 @@
 /* The XLSX and PDF share values, row heights and page boundaries. */
 window.InternalStatementDocument=(()=>{
 'use strict';
-const C=InternalStatement,W=595.28,H=841.89,M=24,widths=[70,160,65,50,80,122.28],FONT='"Songti SC","SimSun","Noto Serif CJK SC",serif';
+const C=InternalStatement,W=595.28,H=841.89,M=24,widths=[78,66,139,60,48,74,82.28],FONT='"Songti SC","SimSun","Noto Serif CJK SC",serif';
 const measure=document.createElement('canvas').getContext('2d');
 function wrap(value,width,font){
  measure.font=font+'px '+FONT;const lines=[];
  for(const paragraph of String(value??'').split(/\r?\n/)){let line='';for(const ch of paragraph){if(line&&measure.measureText(line+ch).width>width){lines.push(line);line=ch;}else line+=ch;}lines.push(line);}
  return lines;
 }
-const amount=value=>value===''?'':Number(value),number=value=>({v:Number(value),t:'n',format:'0'+(String(value).includes('.')?'.'+'0'.repeat(String(value).split('.')[1].length):'')}),money=value=>({v:Number(value),t:'n',format:'#,##0.00'});
+const number=value=>({v:Number(value),t:'n',format:'0'+(String(value).includes('.')?'.'+'0'.repeat(String(value).split('.')[1].length):'')}),money=value=>({v:Number(value),t:'n',format:'#,##0.00'});
 function layout(group,settings){
  const f=C.footer(group,settings),rows=[];
  function row(sourceRow,values,merges=[],config={}){
-  const cells=Array.from({length:6},(_,i)=>{const v=values[i]??'';return v&&typeof v==='object'?{...v}:{v:String(v),t:'s'};});
+  const cells=Array.from({length:7},(_,i)=>{const v=values[i]??'';return v&&typeof v==='object'?{...v}:{v:String(v),t:'s'};});
   const font=config.font||(sourceRow>=44?8:9),objects=[];let height=config.height||(config.detail?16:sourceRow>=44?14:18);
-  for(let c=0;c<6;c++){
+  for(let c=0;c<7;c++){
    const merged=merges.find(([a,b])=>c>=a&&c<=b);if(merged&&merged[0]!==c)continue;
    const span=(merged?.[1]??c)-c+1,width=widths.slice(c,c+span).reduce((a,b)=>a+b,0),cell=cells[c];
    const value=cell.t==='n'?XLSX.SSF.format(cell.format||'General',cell.v):cell.v;
-   const single=config.detail&&[0,2,3,4].includes(c);let size=font;
-   if(single){measure.font=size+'px '+FONT;size=Math.min(size,(width-8)/Math.max(1,measure.measureText(value).width)*size);if(size<7)throw Error('物料 '+group.items[rows.length-5]?.code+' 的编码或数值过长，无法完整排版');}
+   const single=config.detail&&[1,3,4,5].includes(c);let size=font;
+   if(single){measure.font=size+'px '+FONT;size=Math.min(size,(width-8)/Math.max(1,measure.measureText(value).width)*size);if(size<7)throw Error('第 '+(rows.length+1)+' 行的入库单号、物料编码或数值过长，无法完整排版');}
    const lines=wrap(value,width-8,size);if(value!=='')height=Math.max(height,lines.length*(size*1.25)+4);
-   objects.push({c,span,value,lines,font:size,single,bold:!!config.bold,align:config.align||(config.detail?(c===1||c===5?'left':c===0?'center':'right'):'left'),border:!!config.border||!!config.invoice&&c>=3});
+   objects.push({c,span,value,lines,font:size,single,bold:!!config.bold,align:config.align||(config.detail?(c===2||c===6?'left':c<=1?'center':'right'):'left'),border:!!config.border||!!config.invoice&&c>=4});
   }
   rows.push({sourceRow,cells,merges,height,objects});
  }
- row(1,[group.buyer],[[0,5]],{font:15,bold:true,align:'center',height:27,border:true});
- row(2,[`${group.month.slice(0,4)}年${Number(group.month.slice(5))}月 交易明细对帐单`],[[0,5]],{font:12,bold:true,align:'center',height:22,border:true});
- row(3,['对账日期：'+C.dateLabel(f.reconcileDate)],[[0,5]],{align:'right',height:18,border:true});
- row(4,['供应商名称：'+group.supplier,'','','','付款方式：'+f.terms],[[0,3],[4,5]],{border:true});
+ row(1,[group.buyer],[[0,6]],{font:15,bold:true,align:'center',height:27,border:true});
+ row(2,[`${group.month.slice(0,4)}年${Number(group.month.slice(5))}月 交易明细对帐单`],[[0,6]],{font:12,bold:true,align:'center',height:22,border:true});
+ row(3,['对账日期：'+C.dateLabel(f.reconcileDate)],[[0,6]],{align:'right',height:18,border:true});
+ row(4,['供应商名称：'+group.supplier,'','','','','付款方式：'+f.terms],[[0,4],[5,6]],{border:true});
  row(5,C.HEADERS,[],{bold:true,align:'center',border:true});
- for(const item of group.items)row(6,[item.code,item.name,{...number(item.price),format:'0.00'},number(item.quantity),money(C.amountText(item.amount)),item.note],[],{detail:true,border:true});
+ const subtotalRows={};
+ for(const isReturn of [false,true]){
+  const start=rows.length+1;
+  for(const item of group.items.filter(item=>item.isReturn===isReturn))row(6,[item.sourceNo,item.code,item.name,{...number(item.price),format:'0.00'},number(item.quantity),money(C.amountText(item.amount)),item.note],[],{detail:true,border:true});
+  const end=rows.length,key=isReturn?'return':'delivery';subtotalRows[key]=end+1;
+  const sum=col=>start<=end?`SUM(${col}${start}:${col}${end})`:'0';
+  row(6,[isReturn?'退货合计':'送货合计','','','/',{...number(group[key+'Quantity']),f:sum('E')},{...money(C.amountText(group[key+'Amount'])),f:sum('F')}],[[0,2]],{bold:true,border:true});
+ }
  const totalRow=rows.length+1;
- row(43,['数量及金额合计','','',{...number(group.quantity),f:`SUM(D6:D${totalRow-1})`},{...money(C.amountText(group.amount)),f:`SUM(E6:E${totalRow-1})`}],[[0,2]],{bold:true,border:true});
+ row(6,['数量及金额合计','','','/',{...number(group.quantity),f:`E${subtotalRows.delivery}+E${subtotalRows.return}`},{...money(C.amountText(group.amount)),f:`F${subtotalRows.delivery}+F${subtotalRows.return}`}],[[0,2]],{bold:true,border:true});
  const footerStart=rows.length;
  const val=s=>s===''?'':money(s),footerFormulaRow=footerStart+1;
  const invoiceAt=index=>{const a=f.invoices[index];return [a.month?a.month.replace('-','年')+'月':'',a.status,val(a.amount)];};
- row(44,['上期余额：','',val(f.balance)],[[0,1]]);
- row(45,['加：本期发货金额：','',{...money(C.amountText(group.amount)),f:`E${totalRow}`},'货款汇总表'],[[0,1],[3,5]],{invoice:true});
- row(46,['减：本期收款：','',val(f.receipts),'月份','是否开票','开具金额'],[[0,1]],{invoice:true});
- row(47,['减：售后异常费用：','',val(f.afterSales),...invoiceAt(0)],[[0,1]],{invoice:true});
- row(48,['减：本期退货金额：','',val(f.returns),...invoiceAt(1)],[[0,1]],{invoice:true});
+ row(44,['上期余额：','','',val(f.balance)],[[0,2]]);
+ row(45,['加：本期发货金额：','','',{...money(f.delivery),f:`F${subtotalRows.delivery}`},'货款汇总表'],[[0,2],[4,6]],{invoice:true});
+ row(46,['本期收款（仅展示）：','','',val(f.receipts),'月份','是否开票','开具金额'],[[0,2]],{invoice:true});
+ row(47,['售后异常费用（仅展示）：','','',val(f.afterSales),...invoiceAt(0)],[[0,2]],{invoice:true});
+ row(48,['减：本期退货金额：','','',{...money(f.returns),f:`F${subtotalRows.return}`},...invoiceAt(1)],[[0,2]],{invoice:true});
  const r=footerFormulaRow;
- row(49,['合计：','',{v:amount(f.total),t:f.total===''?'str':'n',format:'#,##0.00',f:`IF(COUNT(C${r},C${r+2}:C${r+4})=4,C${r}+C${r+1}-SUM(C${r+2}:C${r+4}),"")`},...invoiceAt(2)],[[0,1]],{bold:true,invoice:true});
- row(50,['','','',...invoiceAt(3)],[],{invoice:true});
- row(51,[`截止${f.cutoff?C.dateLabel(f.cutoff):'____年__月__日'}，贵司尚欠我司已开票货款￥${f.invoiced}`,'','',...invoiceAt(4)],[[0,2]],{invoice:true});
- row(52,['未开票货款￥'+f.uninvoiced],[[0,2]]);
+ row(49,['合计：','','',{...money(f.total),f:`D${r+1}+D${r+4}`},...invoiceAt(2)],[[0,2]],{bold:true,invoice:true});
+ row(50,['','','','',...invoiceAt(3)],[],{invoice:true});
+ row(51,[`截止${f.cutoff?C.dateLabel(f.cutoff):'____年__月__日'}，贵司尚欠我司已开票货款￥${f.invoiced}`,'','','',...invoiceAt(4)],[[0,3]],{invoice:true});
+ row(52,['未开票货款￥'+f.uninvoiced],[[0,3]]);
  row(53,[],[],{height:8});
- row(54,['备注：'+f.note],[[0,5]]);
+ row(54,['备注：'+f.note],[[0,6]]);
  row(55,[],[],{height:8});
- row(56,['注：1.货已发到贵司请查收'],[[0,5]]);
- row(57,['2.数量、金额如有误请在空白之处注明'],[[0,5]]);
- row(58,['3.如对以上对账内容无异议，请回传确认；如有异议请电询。 TEL：'+f.phone],[[0,5]]);
+ row(56,['注：1.货已发到贵司请查收'],[[0,6]]);
+ row(57,['2.数量、金额如有误请在空白之处注明'],[[0,6]]);
+ row(58,['3.如对以上对账内容无异议，请回传确认；如有异议请电询。 TEL：'+f.phone],[[0,6]]);
  row(59,[],[],{height:10});
- row(60,['客户确认（盖章）：'],[[0,5]],{height:20});
- row(61,['经收人（签名）：'],[[0,5]],{height:20});
- row(62,['日期：'],[[0,5]],{height:20});
+ row(60,['客户确认（盖章）：'],[[0,6]],{height:20});
+ row(61,['经收人（签名）：'],[[0,6]],{height:20});
+ row(62,['日期：'],[[0,6]],{height:20});
  const headerHeight=rows.slice(0,5).reduce((n,r)=>n+r.height,0),max=H-M-18,pages=[],breaks=[];
  let page=[],y=M;const pushHeader=()=>{page=[];y=M;for(let i=0;i<5;i++){page.push({row:rows[i],index:i,y});y+=rows[i].height;}};pushHeader();
  const footerHeight=rows.slice(footerStart).reduce((n,r)=>n+r.height,0);
@@ -66,7 +73,7 @@ function layout(group,settings){
   }
   page.push({row,index:i,y});y+=row.height;
  }
- pages.push(page);return {group,settings:f,rows,pages,breaks,totalRow};
+ pages.push(page);return {group,settings:f,rows,pages,breaks,totalRow,subtotalRows};
 }
 function draw(model,pageIndex,canvas){
  const scale=2.5;canvas.width=Math.ceil(W*scale);canvas.height=Math.ceil(H*scale);const ctx=canvas.getContext('2d');ctx.scale(scale,scale);ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);ctx.fillStyle='#111';ctx.strokeStyle='#333';ctx.lineWidth=.5;
@@ -112,8 +119,8 @@ async function xlsx(templateBytes,models){
   const merges=first(doc,'mergeCells');merges.replaceChildren();
   for(const [r,row]of model.rows.entries()){
    const tr=create(doc,'row',{r:r+1,ht:row.height,customHeight:1});
-   for(let c=0;c<6;c++){
-    const cell=row.cells[c],obj=row.objects.find(o=>c>=o.c&&c<o.c+o.span),address=XLSX.utils.encode_cell({r,c}),source=XLSX.utils.encode_col(c)+row.sourceRow;
+   for(let c=0;c<7;c++){
+    const cell=row.cells[c],obj=row.objects.find(o=>c>=o.c&&c<o.c+o.span),address=XLSX.utils.encode_cell({r,c}),source=XLSX.utils.encode_col(Math.max(0,c-1))+row.sourceRow;
     const el=create(doc,'c',{r:address,s:styleFor(source,obj,cell)});
     if(cell.f){const f=create(doc,'f');f.textContent=cell.f;el.append(f);}
     if(cell.t==='n'){const v=create(doc,'v');v.textContent=cell.v;el.append(v);}else if(cell.f){el.setAttribute('t','str');const v=create(doc,'v');v.textContent=cell.v;el.append(v);}else{el.setAttribute('t','inlineStr');const is=create(doc,'is'),t=create(doc,'t');t.setAttributeNS('http://www.w3.org/XML/1998/namespace','xml:space','preserve');t.textContent=cell.v;is.append(t);el.append(is);}
@@ -121,7 +128,7 @@ async function xlsx(templateBytes,models){
    }
    data.append(tr);for(const [a,b]of row.merges)merges.append(create(doc,'mergeCell',{ref:`${XLSX.utils.encode_col(a)}${r+1}:${XLSX.utils.encode_col(b)}${r+1}`}));
   }
-  merges.setAttribute('count',merges.children.length);first(doc,'dimension').setAttribute('ref','A1:F'+model.rows.length);
+  merges.setAttribute('count',merges.children.length);first(doc,'dimension').setAttribute('ref','A1:G'+model.rows.length);
   const cols=first(doc,'cols');cols.replaceChildren();widths.forEach((w,c)=>cols.append(create(doc,'col',{min:c+1,max:c+1,width:(w*96/72-5)/7,customWidth:1})));
   const setup=first(doc,'pageSetup');setup.removeAttribute('scale');setup.setAttribute('fitToWidth','1');setup.setAttribute('fitToHeight','0');setup.setAttribute('orientation','portrait');setup.setAttribute('paperSize','9');
   const sheetPr=first(doc,'sheetPr');let pagePr=first(sheetPr,'pageSetUpPr');if(!pagePr){pagePr=create(doc,'pageSetUpPr');sheetPr.append(pagePr);}pagePr.setAttribute('fitToPage','1');
@@ -131,7 +138,7 @@ async function xlsx(templateBytes,models){
   const entry=create(wb,'sheet',{name,sheetId:index+1});entry.setAttributeNS(R,'r:id','internal'+index);first(wb,'sheets').append(entry);
   const rel=rels.createElementNS(rels.documentElement.namespaceURI,'Relationship');for(const [k,v]of Object.entries({Id:'internal'+index,Type:R+'/worksheet',Target:'worksheets/sheet'+(index+1)+'.xml'}))rel.setAttribute(k,v);rels.documentElement.append(rel);
   const type=types.createElementNS(types.documentElement.namespaceURI,'Override');type.setAttribute('PartName','/xl/worksheets/sheet'+(index+1)+'.xml');type.setAttribute('ContentType','application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml');types.documentElement.append(type);
-  for(const [key,value]of [['_xlnm.Print_Area',`'${name.replace(/'/g,"''")}'!$A$1:$F$${model.rows.length}`],['_xlnm.Print_Titles',`'${name.replace(/'/g,"''")}'!$1:$5`]]){const n=create(wb,'definedName',{name:key,localSheetId:index});n.textContent=value;names.append(n);}
+  for(const [key,value]of [['_xlnm.Print_Area',`'${name.replace(/'/g,"''")}'!$A$1:$G$${model.rows.length}`],['_xlnm.Print_Titles',`'${name.replace(/'/g,"''")}'!$1:$5`]]){const n=create(wb,'definedName',{name:key,localSheetId:index});n.textContent=value;names.append(n);}
   zip.file('xl/worksheets/sheet'+(index+1)+'.xml',serialize(doc));
  }
  for(const list of [xfs,fonts,numFmts])list.setAttribute('count',list.children.length);

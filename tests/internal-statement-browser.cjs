@@ -2,15 +2,15 @@ const fs=require('node:fs/promises'),assert=require('node:assert/strict'),X=requ
 const JSZip=require('../vendor/jszip.min.js'),{PDFDocument}=require('../vendor/pdf-lib.min.js'),{createHash}=require('node:crypto');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const expectedDate=month=>new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5)),10)).toISOString().slice(0,10);
-const headers=['供应商','采购组织','单据编号','入库日期','物料编码','物料名称','实收数量','含税单价','价税合计','金额','备注'];
-function synthetic(){const b=X.utils.book_new(),rows=[];for(let i=0;i<70;i++)rows.push(['合成供应商甲','合成采购组织甲','RK'+i,'2026/6/30','001'+String(i).padStart(4,'0'),'内部交易合成物料'+i,2,0.1695,0.34,0.3,'采购备注 '+i+'；完整保留规格及中文说明']);rows.push([...rows[0]],[...rows[1]]);rows.push(['合成供应商乙','合成采购组织甲','RK72','2026/6/29','00001','另一个供应商',-1,1.23,-1.23,-1,'退货']);rows.push(['合成供应商甲','合成采购组织乙','RK73','2026/6/29','00001','另一个采购组织',10,1.23,12.3,10,'']);rows.push(['合成供应商甲','合成采购组织甲','RK74','2026/12/1','00001','年末入库',3,1.23,3.69,3,'跨年']);X.utils.book_append_sheet(b,X.utils.aoa_to_sheet([headers,...rows]),'Sheet1');return Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));}
+const headers=['供应商','采购组织','源单编号','业务日期','物料编码','物料名称','计价数量','含税单价','价税合计','金额','备注'];
+function synthetic(){const b=X.utils.book_new(),rows=[];for(let i=0;i<70;i++)rows.push(['合成供应商甲','合成采购组织甲',i===0?'AP00026828,AP00026694,AP00026545,AP00026371,AP0002':'RK'+i,'2026/6/30','001'+String(i).padStart(4,'0'),'内部交易合成物料'+i,2,0.1695,0.34,0.3,'采购备注 '+i+'；完整保留规格及中文说明']);rows.push([...rows[0]],[...rows[1]]);rows.push(['合成供应商乙','合成采购组织甲','RK72','2026/6/29','00001','另一个供应商',-1,1.23,-1.23,-1,'退货']);rows.push(['合成供应商甲','合成采购组织乙','RK73','2026/6/29','00001','另一个采购组织',10,1.23,12.3,10,'']);rows.push(['合成供应商甲','合成采购组织甲','RK74','2026/12/1','00001','年末入库',3,1.23,3.69,3,'跨年']);X.utils.book_append_sheet(b,X.utils.aoa_to_sheet([headers,...rows]),'Sheet1');return Buffer.from(X.write(b,{type:'buffer',bookType:'xlsx'}));}
 (async()=>{
  const base=process.env.QA_URL||'http://127.0.0.1:8940/';if(process.env.QA_SOURCE&&!/^http:\/\/(127\.0\.0\.1|localhost):/.test(base))throw Error('真实文件仅限本地验收');
- const bytes=process.env.QA_SOURCE?await fs.readFile(process.env.QA_SOURCE):synthetic(),expected=C.parse(X.read(bytes),'入库明细.xlsx');
+ const bytes=process.env.QA_SOURCE?await fs.readFile(process.env.QA_SOURCE):synthetic(),expected=C.parse(X.read(bytes),'应付单列表.xlsx');
  const browser=await chromium.launch({headless:true,executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
  try{
   const page=await browser.newPage({viewport:{width:1500,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(base,{waitUntil:'networkidle'});
-  await page.locator('.tool-tab[data-tool="internal-statement"]').click();const frame=page.frameLocator('iframe[data-tool="internal-statement"]');await frame.locator('#sourceFile:not([disabled])').setInputFiles({name:'入库明细.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:bytes});
+  await page.locator('.tool-tab[data-tool="internal-statement"]').click();const frame=page.frameLocator('iframe[data-tool="internal-statement"]');await frame.locator('#sourceFile:not([disabled])').setInputFiles({name:'应付单列表.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:bytes});
   await frame.locator('#buyers button:not([disabled])').first().waitFor();assert.equal(await frame.locator('#statement option').count(),expected.groups.length);const status=await frame.locator('#status').innerText();assert(status.includes(expected.count+' 条明细'));assert(status.includes(C.amountText(expected.amount)));
   const buyers=[...new Set(expected.groups.map(g=>g.buyer))];assert.equal(await frame.locator('#buyers .buyer').count(),buyers.length);
   const options=id=>frame.locator('#'+id+' option').evaluateAll(nodes=>nodes.map(n=>n.value));
@@ -67,18 +67,26 @@ function synthetic(){const b=X.utils.book_new(),rows=[];for(let i=0;i<70;i++)row
     if(format==='xlsx'){
      const saved=X.read(output,{cellStyles:true,cellNF:true});assert.equal(saved.SheetNames.length,groups.length);
      for(const [index,g]of groups.entries()){
-      const s=saved.Sheets[saved.SheetNames[index]];assert.equal(s.A1.v,buyer);assert.equal(s.A3.v,'对账日期：'+C.dateLabel(expectedDate(g.month)));assert(s.A4.v.includes(g.supplier));assert.equal(s.A5.v,'物料编码');
-      for(const [n,item]of g.items.entries()){const r=n+6;assert.equal(s['A'+r].v,item.code);assert.equal(s['A'+r].t,'s');assert.equal(s['A'+r].z,'@');assert.equal(s['B'+r].v,item.name);assert.equal(s['C'+r].v,Number(item.price));assert.equal(s['C'+r].z,'0.00');assert.equal(s['C'+r].w,X.SSF.format('0.00',Number(item.price)));assert.equal(s['D'+r].v,Number(item.quantity));assert.equal(s['D'+r].w,item.quantity);assert.equal(s['E'+r].v,Number(C.amountText(item.amount)));assert.equal(s['F'+r].v,item.note);}
-      const t=g.items.length+6;assert.equal(s['E'+t].v,Number(C.amountText(g.amount)));assert.equal(s['E'+t].f,'SUM(E6:E'+(t-1)+')');assert.equal(s['D'+t].v,Number(g.quantity));assert.equal(s['C'+(t+1)].v,'');assert.equal(s['C'+(t+6)].v,'');assert(s['C'+(t+6)].f.includes('COUNT('));assert(s['!merges'].some(m=>m.s.r===0&&m.e.c===5));
+      const s=saved.Sheets[saved.SheetNames[index]];assert.equal(s.A1.v,buyer);assert.equal(s.A3.v,'对账日期：'+C.dateLabel(expectedDate(g.month)));assert(s.A4.v.includes(g.supplier));assert.deepEqual(Array.from({length:7},(_,c)=>s[X.utils.encode_col(c)+'5'].v),C.HEADERS);
+      let r=6;const subtotals={};
+      for(const isReturn of [false,true]){
+       const start=r,key=isReturn?'return':'delivery';
+       for(const item of g.items.filter(i=>i.isReturn===isReturn)){
+        assert.equal(s['A'+r].v,item.sourceNo);assert.equal(s['A'+r].t,'s');assert.equal(s['B'+r].v,item.code);assert.equal(s['B'+r].z,'@');assert.equal(s['C'+r].v,item.name);assert.equal(s['D'+r].v,Number(item.price));assert.equal(s['D'+r].z,'0.00');assert.equal(s['D'+r].w,X.SSF.format('0.00',Number(item.price)));assert.equal(s['E'+r].v,Number(item.quantity));assert.equal(s['E'+r].w,item.quantity);assert.equal(s['F'+r].v,Number(C.amountText(item.amount)));assert.equal(s['G'+r].v,item.note);r++;
+       }
+       subtotals[key]=r;assert.equal(s['A'+r].v,isReturn?'退货合计':'送货合计');assert.equal(s['D'+r].v,'/');assert.equal(s['E'+r].v,Number(g[key+'Quantity']));assert.equal(s['F'+r].v,Number(C.amountText(g[key+'Amount'])));assert.equal(s['F'+r].f,start<r?`SUM(F${start}:F${r-1})`:'0');assert(s['!merges'].some(m=>m.s.r===r-1&&m.s.c===0&&m.e.c===2));r++;
+      }
+      const t=r;assert.equal(s['F'+t].v,Number(C.amountText(g.amount)));assert.equal(s['F'+t].f,`F${subtotals.delivery}+F${subtotals.return}`);assert.equal(s['E'+t].v,Number(g.quantity));assert.equal(s['D'+(t+1)].v,0);assert.equal(s['D'+(t+2)].v,Number(C.amountText(g.deliveryAmount)));assert.equal(s['D'+(t+5)].v,Number(C.amountText(g.returnAmount)));assert.equal(s['D'+(t+6)].v,Number(C.amountText(g.amount)));assert.equal(s['D'+(t+6)].f,`D${t+2}+D${t+5}`);assert(s['!merges'].some(m=>m.s.r===0&&m.e.c===6));
+
      }
     }else{
      const meta=await frame.locator('body').evaluate(async(_,data)=>{const pdf=await PDFLib.PDFDocument.load(Uint8Array.from(data));return {pages:pdf.getPageCount(),sizes:pdf.getPages().map(p=>[p.getWidth(),p.getHeight()])};},[...output]);assert(meta.pages>=groups.length);assert(meta.sizes.every(([w,h])=>Math.abs(w-595.28)<.01&&Math.abs(h-841.89)<.01));result.push({buyer,pages:meta.pages});
     }
    }
   }
-  await frame.locator('#statement').selectOption('0');await frame.locator('#balance').fill('0');await frame.locator('#receipts').fill('20');await frame.locator('#afterSales').fill('0');await frame.locator('#returns').fill('1.23');await frame.locator('#note').fill('本次手动备注');await frame.locator('#reconcileDate').fill('2027-02-12');await frame.locator('#update').click();assert(!((await frame.locator('#status').innerText()).startsWith('请核实')));
+  await frame.locator('#statement').selectOption('0');assert(await frame.locator('#balance').evaluate(el=>el.readOnly));assert(await frame.locator('#returns').evaluate(el=>el.readOnly));await frame.locator('#receipts').fill('20');await frame.locator('#afterSales').fill('0');await frame.locator('#note').fill('本次手动备注');await frame.locator('#reconcileDate').fill('2027-02-12');await frame.locator('#update').click();assert(!((await frame.locator('#status').innerText()).startsWith('请核实')));
   await page.locator('.tool-tab[data-tool="funds"]').click();await page.locator('.tool-tab[data-tool="internal-statement"]').click();assert.equal(await frame.locator('#note').inputValue(),'本次手动备注');await frame.locator('#statement').selectOption('1');await frame.locator('#statement').selectOption('0');assert.equal(await frame.locator('#reconcileDate').inputValue(),'2027-02-12');
-  const event=page.waitForEvent('download');await frame.locator('#buyers .buyer').first().locator('button[data-format="xlsx"]').click();const written=X.read(await fs.readFile(await(await event).path()));const s=written.Sheets[written.SheetNames[0]],t=expected.groups[0].items.length+6;assert.equal(s.A3.v,'对账日期：2027年2月12日');assert.equal(s['C'+(t+1)].v,0);assert.equal(s['C'+(t+6)].v,Number(C.amountText(BigInt(expected.groups[0].amount)-2123n)));assert.equal(s['A'+(t+11)].v,'备注：本次手动备注');
+  const event=page.waitForEvent('download');await frame.locator('#buyers .buyer').first().locator('button[data-format="xlsx"]').click();const written=X.read(await fs.readFile(await(await event).path()));const s=written.Sheets[written.SheetNames[0]],t=expected.groups[0].items.length+8;assert.equal(s.A3.v,'对账日期：2027年2月12日');assert.equal(s['D'+(t+1)].v,0);assert.equal(s['D'+(t+6)].v,Number(C.amountText(expected.groups[0].amount)));assert.equal(s['A'+(t+11)].v,'备注：本次手动备注');
   // A failure after the first PDF must not trigger a partial ZIP download.
   const batchDownloads=[],onBatchDownload=d=>batchDownloads.push(d);page.on('download',onBatchDownload);
   await frame.locator('body').evaluate(()=>{window.__originalPdf=InternalStatementDocument.pdf;let calls=0;InternalStatementDocument.pdf=async(...args)=>{if(++calls===2)throw Error('合成 PDF 导出失败');return window.__originalPdf(...args);};});
