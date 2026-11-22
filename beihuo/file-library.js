@@ -1245,7 +1245,7 @@ function buildDetailWorkbook(rows, splitIntoSheets = false) {
   // WPS saves its native row/column reading highlight in this boolean custom property.
   workbook.Custprops = { KSOReadingLayout: true };
   workbook.Workbook = { CalcPr: { calcMode: "auto", fullCalcOnLoad: true, forceFullCalc: true } };
-  const groups = splitIntoSheets ? groupRowsByBuyer(rows) : [["备货需求分配明细", rows]];
+  const groups = splitIntoSheets ? [["汇总", rows], ...groupRowsByBuyer(rows)] : [["备货需求分配明细", rows]];
   const usedSheetNames = new Set();
   const sheetShapes = [];
   for (const [name, buyerRows] of groups) {

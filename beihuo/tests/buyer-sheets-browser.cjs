@@ -93,8 +93,11 @@ function uploadFile(rows, sheetName, name) {
     }
 
     const { workbook, xmls } = await downloadCombined();
-    assert.equal(workbook.SheetNames.length, 7);
-    assert.equal(new Set(workbook.SheetNames.map(name => name.toLowerCase())).size, 7);
+    assert.equal(workbook.SheetNames.length, 8);
+    assert.equal(workbook.SheetNames[0], '汇总');
+    const summaryRows = XLSX.utils.sheet_to_json(workbook.Sheets.汇总, { header: 1, defval: '' });
+    assert.deepEqual(summaryRows.slice(1).map(row => row[6]), await page.evaluate(() => state.filteredRows.map(row => row.materialCode)));
+    assert.equal(new Set(workbook.SheetNames.map(name => name.toLowerCase())).size, 8);
     assert(workbook.SheetNames.includes('未填写下单人'));
     assert(workbook.SheetNames.every(name => name.length <= 31 && !/[\[\]:*?/\\]/.test(name)));
     assert.equal(workbook.Custprops.KSOReadingLayout, true);
@@ -111,7 +114,7 @@ function uploadFile(rows, sheetName, name) {
       assert.equal(rows[0][14], '采购单订单号');
       assert.equal(rows[0][15], '备货OA的物料编码');
       assert(!rows[0].includes('采购分工明细是否存在'));
-      assert.equal(new Set(rows.slice(1).map(row => row[0])).size, 1, `one buyer per sheet: ${name}`);
+      if (name !== '汇总') assert.equal(new Set(rows.slice(1).map(row => row[0])).size, 1, `one buyer per sheet: ${name}`);
       assert(sheet['!cols'].every(column => column.width > 0));
       for (const [index, row] of rows.slice(1).entries()) {
         const source = records.find(record => record.code === row[6]);
@@ -133,13 +136,13 @@ function uploadFile(rows, sheetName, name) {
         assert.equal(sheet[`N${r}`].z, '@');assert.equal(sheet[`N${r}`].t,'s');assert.equal(sheet[`L${r}`].t,'s');
         assert.equal(sheet[`J${r}`].z, '0');
         if (source.quantity !== '') assert.equal(sheet[`J${r}`].t, 'n');
-        seen.push(row[6]);
+        if (name !== '汇总') seen.push(row[6]);
       }
     }
     assert.deepEqual([...seen].sort(), records.map(record => record.code).sort());
     assert.equal(XLSX.utils.decode_range(workbook.Sheets['李奇']['!ref']).e.r, 23, 'include rows beyond the first preview page');
     assert.equal(workbook.Sheets['李奇'].M2.v, 2);
-    assert.equal(xmls.length, 7);
+    assert.equal(xmls.length, 8);
     for (const { text } of xmls) {
       assert.match(text, /<c[^>]*r="A1"[^>]*s="1"/);
       assert.match(text, /<c[^>]*r="U2"[^>]*s="3"/);
@@ -172,7 +175,8 @@ function uploadFile(rows, sheetName, name) {
     await page.locator('[data-filter-key="buyer"][value="徐英"]').check();
     await page.waitForFunction(() => state.filteredRows.length === 1);
     const filtered = await downloadCombined();
-    assert.deepEqual(filtered.workbook.SheetNames, ['徐英']);
+    assert.deepEqual(filtered.workbook.SheetNames, ['汇总', '徐英']);
+    assert.deepEqual(XLSX.utils.sheet_to_json(filtered.workbook.Sheets.汇总, { header: 1 }), XLSX.utils.sheet_to_json(filtered.workbook.Sheets.徐英, { header: 1 }));
     assert.equal(filtered.workbook.Sheets['徐英'].G2.v, records[23].code);
     await page.locator('#clearFiltersButton').click();
     await page.reload();
@@ -194,7 +198,9 @@ function uploadFile(rows, sheetName, name) {
     await embeddedButton.click();
     const homepageDownload = await homepageEvent;
     const homepageWorkbook = XLSX.read(await fs.readFile(await homepageDownload.path()), { type: 'buffer' });
-    assert.equal(homepageWorkbook.SheetNames.length, 7);
+    assert.equal(homepageWorkbook.SheetNames.length, 8);
+    assert.equal(homepageWorkbook.SheetNames[0], '汇总');
+    assert.equal(XLSX.utils.decode_range(homepageWorkbook.Sheets.汇总['!ref']).e.r, records.length);
     for (const sheet of Object.values(homepageWorkbook.Sheets)) {
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
       assert.deepEqual(rows[0].slice(4, 6), ['采购主体', '供应商简称']);
@@ -204,9 +210,9 @@ function uploadFile(rows, sheetName, name) {
         assert.equal(row[rows[0].indexOf('生产周期')], String(source.productionCycle));
       }
     }
-    assert.equal(homepageWorkbook.SheetNames.reduce((count, name) => count + XLSX.utils.decode_range(homepageWorkbook.Sheets[name]['!ref']).e.r, 0), records.length);
+    assert.equal(homepageWorkbook.SheetNames.slice(1).reduce((count, name) => count + XLSX.utils.decode_range(homepageWorkbook.Sheets[name]['!ref']).e.r, 0), records.length);
     assert.deepEqual(errors, []);
-    console.log('PASS four uploads, one XLSX with seven buyer sheets, 29 rows beyond pagination, blank/invalid/long names, production cycle/formulas/styles/MOQ/reasons, manual entity, filtering, cache restoration, phone buttons and homepage embedded download');
+    console.log('PASS four uploads, one XLSX with summary plus seven buyer sheets, 29 rows beyond pagination, blank/invalid/long names, production cycle/formulas/styles/MOQ/reasons, manual entity, filtering, cache restoration, phone buttons and homepage embedded download');
   } finally {
     await browser.close();
   }

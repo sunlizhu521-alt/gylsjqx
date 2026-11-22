@@ -67,7 +67,7 @@ test('division OA-to-correct mapping drives allocation and exports without mixin
     for (const combined of [false, true]) {
       const { workbook } = run(`buildDetailWorkbook(rows, ${combined})`);
       const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
-      const output = reopened.SheetNames.flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1 }).slice(1));
+      const output = reopened.SheetNames.filter(name => name !== '汇总').flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1 }).slice(1));
       assert.deepEqual(output.map(row => [row[6], row[9]]).sort(), [['0002', 1], ['1935010018', 5.5]]);
       for (const sheet of Object.values(reopened.Sheets)) {
         assert.equal(sheet.G2.t, 's');
@@ -233,7 +233,7 @@ test('新加坡判定读取分工全称和商品系列，合并及两种导出�
   for (const split of [false, true]) {
     const { workbook } = run(`buildDetailWorkbook(getFilteredDemandRows(), ${split})`);
     const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
-    const data = reopened.SheetNames.flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1 }).slice(1));
+    const data = reopened.SheetNames.filter(name => name !== '汇总').flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1 }).slice(1));
     assert.deepEqual(data.map(row => [row[6], row[4], row[1]]), [['001', '原采购主体', '是'], ['002', '原采购主体', '否']]);
   }
   context.records.singapore = null;
@@ -284,7 +284,7 @@ test('all exported sheets use single-line text, full-text widths and no-wrap cen
     const { workbook } = run(`buildDetailWorkbook(rows, ${split})`);
     assert.equal(workbook.Sheets[workbook.SheetNames[0]]['!cols'][split ? 20 : 19].wch, 223);
     const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer', cellStyles: true });
-    const data = reopened.SheetNames.flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1 }).slice(1));
+    const data = reopened.SheetNames.filter(name => name !== '汇总').flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1 }).slice(1));
     assert.deepEqual(data.map(row => [row[6], row[7], row[8], row[9], row[split ? 20 : 19]]), [
       ['0001', 'SKU 型号', '第一段 第二段', 0, reason.replace(/\r\n/, ' ')],
       ['0002', '', '一 二 三', 1.5, ''],
@@ -341,7 +341,7 @@ test('export borders cover active row/column intersections, including blank cell
   assert.equal(run('detailExportStyle(2,"supplierDeliveryDate",true)'),'5');
 });
 
-test('one workbook splits buyers into sheets with complete rows and sheet-local formulas', () => {
+test('combined workbook starts with all summary rows then buyer sheets with sheet-local formulas', () => {
   const { context, run } = loadApp();
   context.rows = [
     { buyer: '李奇', materialCode: '0001', sku: '001', quantityNumber: 0, stockReason: '原因一', todayDate: '2026-11-05', deliveryDays: 2, supplierDeliveryDate: '2026-11-07' },
@@ -351,7 +351,12 @@ test('one workbook splits buyers into sheets with complete rows and sheet-local 
   ];
   const { workbook, sheetShapes } = run('buildDetailWorkbook(rows, true)');
   const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer', cellNF: true, cellStyles: true });
-  assert.equal(reopened.SheetNames.length, 3);
+  assert.equal(reopened.SheetNames.length, 4);
+  assert.equal(reopened.SheetNames[0], '汇总');
+  const summary = reopened.Sheets.汇总;
+  const summaryData = XLSX.utils.sheet_to_json(summary, { header: 1, defval: '' });
+  assert.deepEqual(summaryData.slice(1).map(row => [row[0], row[6], row[9]]), [['李奇', '0001', 0], ['徐英', '0002', 1.5], ['李奇', '0003', ''], ['', '0004', 4]]);
+  assert.equal(summary.N4.f, 'IF(M4="","",TEXT(DATE(VALUE(LEFT(L4,4)),VALUE(MID(L4,6,2)),VALUE(RIGHT(L4,2)))+M4,"yyyy-mm-dd"))');
   const li = reopened.Sheets.李奇, xu = reopened.Sheets.徐英;
   assert.equal(reopened.Custprops.KSOReadingLayout, true);
   assert.deepEqual([li.G2.v, li.G3.v, xu.G2.v, reopened.Sheets.未填写下单人.G2.v], ['0001', '0003', '0002', '0004']);
@@ -374,16 +379,18 @@ test('one workbook splits buyers into sheets with complete rows and sheet-local 
 
 test('buyer sheet names stay valid and unique without merging distinct buyers', () => {
   const { context, run } = loadApp();
-  context.rows = ['', '未填写下单人', '甲/乙', '甲:乙', 'Buyer', 'buyer', '长'.repeat(40) + '甲', '长'.repeat(40) + '乙', "'名字'", '[]:?*\\/'].map((buyer, index) => ({ buyer, materialCode: String(index) }));
+  context.rows = ['汇总', '', '未填写下单人', '甲/乙', '甲:乙', 'Buyer', 'buyer', '长'.repeat(40) + '甲', '长'.repeat(40) + '乙', "'名字'", '[]:?*\\/'].map((buyer, index) => ({ buyer, materialCode: String(index) }));
   const output = run('buildDetailWorkbook(rows, true)');
   const reopened = XLSX.read(XLSX.write(output.workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
-  assert.equal(reopened.SheetNames.length, context.rows.length);
-  assert.equal(new Set(reopened.SheetNames.map(name => name.toLowerCase())).size, context.rows.length);
+  assert.equal(reopened.SheetNames.length, context.rows.length + 1);
+  assert.equal(new Set(reopened.SheetNames.map(name => name.toLowerCase())).size, context.rows.length + 1);
   for (const name of reopened.SheetNames) {
     assert(name.length <= 31);
     assert(!/[\[\]:*?/\\\x00-\x1f']/.test(name));
   }
-  assert.deepEqual(reopened.SheetNames.map(name => reopened.Sheets[name].G2.v).sort(), context.rows.map(row => row.materialCode).sort());
+  assert.equal(reopened.SheetNames[0], '汇总');
+  assert.equal(reopened.Sheets.汇总_2.A2.v, '汇总');
+  assert.deepEqual(reopened.SheetNames.slice(1).map(name => reopened.Sheets[name].G2.v).sort(), context.rows.map(row => row.materialCode).sort());
 });
 
 test('combined download exports only filtered rows and guards empty selection', async () => {
@@ -397,7 +404,8 @@ test('combined download exports only filtered rows and guards empty selection', 
   context.rows = [{ buyer: '李奇', materialCode: '保留' }, { buyer: '徐英', materialCode: '排除' }];
   run('state.demandRows = rows; state.filteredRows = rows.slice(0, 1)');
   await run('downloadDetailWorkbook(true)');
-  assert.deepEqual(exported.SheetNames, ['李奇']);
+  assert.deepEqual(exported.SheetNames, ['汇总', '李奇']);
+  assert.deepEqual(XLSX.utils.sheet_to_json(exported.Sheets.汇总, { header: 1 }), XLSX.utils.sheet_to_json(exported.Sheets.李奇, { header: 1 }));
   assert.equal(exported.Sheets.李奇.G2.v, '保留');
   assert.match(fileName, /^\d{4}-\d{2}-\d{2}-备货分配分配\.xlsx$/);
 });
@@ -521,7 +529,7 @@ test('business unit and corrected code jointly determine rows, quantities, MOQ a
   for (const combined of [false, true]) {
     const { workbook } = run(`buildDetailWorkbook(rows, ${combined})`);
     const reopened = XLSX.read(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
-    const data = reopened.SheetNames.flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1, defval: '' }).slice(1));
+    const data = reopened.SheetNames.filter(name => name !== '汇总').flatMap(name => XLSX.utils.sheet_to_json(reopened.Sheets[name], { header: 1, defval: '' }).slice(1));
     assert.deepEqual(data.map(r => [r[2], r[6], r[9]]), expected);
   }
   run('state.demandRows = rows; state.filters.set("businessUnit", new Set(["国内事业部"]))');
