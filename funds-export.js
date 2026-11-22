@@ -1,6 +1,7 @@
 /* Keep the negotiated worksheet's native XML and patch only approved fields. */
 window.FundsExport = async function(sourceBytes, result) {
   'use strict';
+  if(result.issues?.some(issue=>issue.kind==='payment-date'&&!issue.resolved))throw Error('请先逐条补填并确认付款日期，再下载付款节奏跟进表。');
   window.FundsExport.lastWarnings=[];
   const S='http://schemas.openxmlformats.org/spreadsheetml/2006/main';
   const R='http://schemas.openxmlformats.org/officeDocument/2006/relationships';

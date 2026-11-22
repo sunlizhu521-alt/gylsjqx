@@ -2,7 +2,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const kinds = ['ledger', 'applications', 'negotiated', 'oa'];
-  const inputs = {}, revisions = {}, decisions = {};
+  const inputs = {}, revisions = {}, decisions = {}, dateDrafts = {};
   let result = null, preparedBlob = null, busy = false;
   let sourceRevision = 0, resultRevision = -1;
   const memoryVersions = {};
@@ -31,6 +31,7 @@
     $('negotiatedSheet').disabled = busy || !inputs.negotiated;
     $('analyze').disabled = busy || !kinds.every(kind => inputs[kind]) || !$('negotiatedSheet').value;
     $('download').disabled = busy || !result || !preparedBlob || pending() > 0;
+    if(result)$('stats').textContent=$('stats').textContent.replace(/待处理 \d+ 项/,'待处理 '+pending()+' 项');
     document.querySelectorAll('[data-decision]').forEach(select => { select.disabled = busy; });
     $('filenameHint').textContent = nextDownload().name;
   }
@@ -39,6 +40,7 @@
     result = null; preparedBlob = null;
     $('sourceVersion').textContent = '';
     for (const id of Object.keys(decisions)) delete decisions[id];
+    for (const id of Object.keys(dateDrafts)) delete dateDrafts[id];
     for (const id of ['results','negotiatedPreviewSection','normalPreviewSection','reviewPreviewSection','progressPreviewSection','totalValidationPreviewSection']) $(id).hidden = true;
     for (const id of ['issueList','normalPreview','negotiatedPreview','reviewPreview','progressPreview','totalValidationPreview']) $(id).replaceChildren();
     controls();
@@ -92,6 +94,22 @@
       const message = document.createElement('p'); message.textContent = issue.message;
       const source = document.createElement('p'); source.className = 'issue-source';
       source.textContent = [issue.source?.file, issue.source?.sheet, issue.source?.row ? '第 '+issue.source.row+' 行' : ''].filter(Boolean).join(' / ');
+      if (issue.inputType === 'date') {
+        const label=document.createElement('label'),input=document.createElement('input'),confirm=document.createElement('button');
+        label.textContent='补填付款日期';input.type='date';input.required=true;input.min='1900-01-01';input.max='9999-12-31';input.dataset.decision=issue.id;
+        input.setAttribute('aria-label',(issue.targetLabel||'')+' 补填付款日期');input.value=dateDrafts[issue.id]??decisions[issue.id]?.[0]??'';
+        confirm.type='button';confirm.textContent='确认付款日期';confirm.dataset.decision=issue.id;
+        input.addEventListener('input',()=>{
+          dateDrafts[issue.id]=input.value;delete decisions[issue.id];issue.resolved=false;issue.selected=[];preparedBlob=null;
+          card.classList.remove('resolved');heading.textContent=issue.targetLabel||'记录核对';$('pendingCount').textContent=pending();
+          $('status').textContent='付款日期已修改，请点击“确认付款日期”后再下载。';controls();
+        });
+        confirm.addEventListener('click',()=>{
+          if(!input.reportValidity())return;
+          decisions[issue.id]=[input.value];analyze(true);
+        });
+        label.append(input);card.append(heading,message,source,label,confirm);fragment.append(card);continue;
+      }
       const label = document.createElement('label'), select = document.createElement('select');
       label.textContent = issue.multiple ? '选择处理方式或多笔匹配记录' : '选择处理方式';
       select.dataset.decision = issue.id; select.multiple = Boolean(issue.multiple);

@@ -10,6 +10,32 @@ function fixture(extra={},owner='李奇',reverse=false){
 }
 const display=c=>c?.z?X.SSF.format(c.z,c.v):c?.v;
 const result=i=>{const built=C.build(i);return {built,row:Object.fromEntries(C.NORMAL_HEADERS.map((h,c)=>[h,built.normalRows[0][c]]))};};
+test('应付与预估均空必须人工补完整日期，不能保留空白或按账期自动放行',()=>{
+ for(const extra of [{},{'预估时间':''},{'预估付款时间':'　 '},{'预估付款月份':''}]){
+  const input=fixture(extra),before=JSON.stringify(input),built=C.build(input),pending=built.issues.find(i=>i.kind==='payment-date');
+  assert(pending,'包括缺少预估列的记录');assert.equal(pending.resolved,false);assert.equal(pending.inputType,'date');assert.equal(built.stats.pending,1);
+  assert.equal(built.normalRows[0][C.NORMAL_HEADERS.indexOf('预估时间')].v,'');
+  for(const value of ['', 'keep', '2026-11', '2026-02-30', '2026-13-01', '1899-12-31', '未对账待定'])assert.equal(C.build(input,{[pending.id]:[value]}).stats.pending,1,value);
+  const resolved=C.build(input,{[pending.id]:['2026-12-08']}),row=Object.fromEntries(C.NORMAL_HEADERS.map((h,c)=>[h,resolved.normalRows[0][c]]));
+  assert.equal(resolved.stats.pending,0);assert.equal(row.应付时间.v,'');assert.equal(display(row.预估时间),'2026年12月8日');assert.equal(row['申请付款的日期'].v,'2026/11/30周');assert.equal(JSON.stringify(input),before);
+ }
+});
+test('同供应商同金额两行分别补日期，改日期后排序、清空后重新拦截，原记录不改',()=>{
+ const input=fixture({'预估时间':''}),sheet=input.ledger.book.Sheets['对账明细-李奇'];
+ X.utils.sheet_add_aoa(sheet,[X.utils.sheet_to_json(sheet,{header:1})[1]],{origin:-1});
+ const before=JSON.stringify(input),issues=C.build(input).issues.filter(i=>i.kind==='payment-date'),[first,second]=issues;
+ assert.equal(issues.length,2);assert.notEqual(first.id,second.id);
+ const decisions={[first.id]:['2026-12-15'],[second.id]:['2026-11-20']};
+ assert.equal(C.build(input,{[first.id]:decisions[first.id]}).stats.pending,1);
+ const complete=C.build(input,decisions),estimate=C.NORMAL_HEADERS.indexOf('预估时间');
+ assert.equal(complete.stats.pending,0);assert.deepEqual(complete.normalRows.map(r=>display(r[estimate])),['2026年11月20日','2026年12月15日']);
+ assert.equal(C.build(input,{...decisions,[first.id]:['']}).stats.pending,1);assert.equal(JSON.stringify(input),before);
+});
+test('导出函数再次拦截未补填日期，不依赖按钮禁用',async()=>{
+ const vm=require('node:vm'),fs=require('node:fs'),context={window:{}};
+ vm.runInNewContext(fs.readFileSync(require.resolve('../funds-export.js'),'utf8'),context);
+ await assert.rejects(()=>context.window.FundsExport(new Uint8Array(),C.build(fixture())),/逐条补填并确认付款日期/);
+});
 test('正常付款月底应付日调整为同月25日，申请周使用调整日期且源数据不变',()=>{
  const serial=(Date.UTC(2026,9,31)-Date.UTC(1899,11,30))/86400000;
  for(const [raw,expected,week,date1904] of [
@@ -68,31 +94,30 @@ test('正常付款日期互斥，应付优先，预估仅从本行表头读取�
   assert.equal(row.应付时间.v,'');assert.equal(display(row.预估时间),'2026年11月18日');assert(!row.预估时间.f);assert.equal(built.stats.pending,0);assert.equal(row['申请付款的日期'].v,'2026/11/09周');
  }
 });
-test('无预估列时从所属月最后一天加15天和账期，含跨年、闰年、零和月账期',()=>{
- for(const [month,terms,expected,week] of [
-  ['2026年10月',30,'2026年12月15日','2026/12/07周'],['2026-10-31','票到7天','2026年11月22日','2026/11/09周'],['2026/9',30,'2026年11月14日','2026/11/02周'],
-  ['2026-10',0,'2026年11月15日','2026/11/02周'],['2026-10',15,'2026年11月30日','2026/11/16周'],['2026-12',30,'2027年2月14日','2027/02/01周'],
-  ['2028-02',30,'2028年4月14日','2028/04/03周'],['2027-02',30,'2027年4月14日','2027/04/05周'],['2026-10','5个月账期（月底付款）50%承兑','2027年4月14日','2027/04/05周']
+test('人工补填跨月跨年及闰日，1904来源不偏移；原账期不再自动产生日期',()=>{
+ for(const date1904 of [false,true])for(const [day,expected,week] of [
+  ['2026-12-31','2026年12月31日','2026/12/14周'],['2027-01-01','2027年1月1日','2026/12/21周'],['2028-02-29','2028年2月29日','2028/02/14周']
  ]){
-  const i=fixture({'所属月份':month,'账期':terms}),before=JSON.stringify(i),{built,row}=result(i);
-  assert.equal(display(row.预估时间),expected);assert.equal(row['申请付款的日期'].v,week);assert.equal(row.应付时间.v,'');assert.equal(built.stats.pending,0);assert.equal(JSON.stringify(i),before);
+  const input=fixture({'申请付款金额':0,'是否结清':'是'});input.ledger.book.Workbook={WBProps:{date1904}};
+  const before=JSON.stringify(input),id=C.build(input).issues.find(i=>i.kind==='payment-date').id,built=C.build(input,{[id]:[day]});
+  const row=Object.fromEntries(C.NORMAL_HEADERS.map((h,c)=>[h,built.normalRows[0][c]]));
+  assert.equal(display(row.预估时间),expected);assert.equal(row['申请付款的日期'].v,week);assert.equal(row.应付时间.v,'');assert.equal(row.本次申请付款金额.v,0);assert.equal(built.stats.pending,0);assert.equal(JSON.stringify(input),before);
+  assert.equal(C.build(input,{[id]:['2027-02-29']}).stats.pending,1);
  }
- const i=fixture({'所属月份':{t:'n',v:44864,f:'DATE(2026,10,31)',z:'yyyy-mm'},'账期':{t:'n',v:30,f:'15+15'}});i.ledger.book.Workbook={WBProps:{date1904:true}};
- const {row}=result(i);assert.equal(display(row.预估时间),'2026年12月15日');assert.equal(row['申请付款的日期'].v,'2026/12/07周');
 });
 test('已有预估列空白不推算，年月保持精度，错误与不确定账期保留核对来源',()=>{
  for(const month of ['2026年12月','2026-12',{t:'n',v:46371,z:'yyyy年m月'}]){
   const {row}=result(fixture({'预估付款时间':month}));assert.equal(display(row.预估时间),'2026年12月');
  }
- const blank=result(fixture({'预估时间':''}));assert.equal(blank.row.预估时间.v,'');assert.match(blank.built.issues[0].message,/已有预估列不自动推算/);
+ const blank=result(fixture({'预估时间':''}));assert.equal(blank.row.预估时间.v,'');assert.equal(blank.built.issues[0].kind,'payment-date');
  for(const terms of ['',-30,'30至60天','30/60天','30天或60天','预付50%','先款后货','7个工作日','约30天']){
-  const {built,row}=result(fixture({'账期':terms}));assert.equal(row.预估时间.v,'');assert.equal(built.stats.pending,1);assert.match(built.issues[0].message,/账期/);assert.deepEqual(built.issues[0].source,{file:'本次台账.xlsx',sheet:'对账明细-李奇',row:2});
+  const {built,row}=result(fixture({'账期':terms}));assert.equal(row.预估时间.v,'');assert.equal(built.stats.pending,1);assert.equal(built.issues[0].kind,'payment-date');assert.deepEqual(built.issues[0].source,{file:'本次台账.xlsx',sheet:'对账明细-李奇',row:2});
  }
- for(const bad of [{t:'e',v:23,w:'#REF!'}, {t:'n',f:'A2+30'}, {t:'s',v:'',f:'A2+30'}])for(const h of ['预估时间','所属月份','账期']){
+ for(const bad of [{t:'e',v:23,w:'#REF!'}, {t:'n',f:'A2+30'}, {t:'s',v:'',f:'A2+30'}])for(const h of ['预估时间']){
   const {built}=result(fixture({[h]:bad}));assert(built.issues.some(q=>q.id.startsWith('normal-estimate:')&&q.kind==='formula'));assert(built.stats.pending>0);
  }
  for(const month of ['', '11月', '2026-13']){
-  const {built,row}=result(fixture({'所属月份':month}));assert.equal(row.预估时间.v,'');assert.match(built.issues.find(q=>q.id.startsWith('normal-estimate:')).message,/所属月份/);
+  const {built,row}=result(fixture({'所属月份':month}));assert.equal(row.预估时间.v,'');assert(built.issues.some(q=>q.kind==='payment-date'));
  }
  const source=result(fixture({'应付时间':'月底协商','预估时间':'2026-11-20'}));assert.equal(source.row.应付时间.v,'月底协商');assert.equal(source.row.预估时间.v,'');
  const bad=result(fixture({'预估时间':'2026-02-30'}));assert.equal(bad.row.预估时间.v,'2026-02-30');assert.equal(bad.built.stats.pending,1);
@@ -120,7 +145,7 @@ test('空白、非法预估日期或月份和无效公式缓存不产生申请�
  for(const raw of ['', '　 ', '2026-00', '2026-13', '11月', '2026-02-30', '月底协商', {t:'e',v:23,w:'#REF!'}, {t:'n',f:'DATE(2026,11,1)',z:'yyyy-mm'}, {t:'n',f:'DATE(2026,11,18)',z:'yyyy-mm-dd'}, {t:'s',v:'',f:'TEXT(A2,"yyyy-mm")'}]){
   const i=fixture({'预估时间':raw}),before=JSON.stringify(i),{built,row}=result(i);
   assert.equal(row['申请付款的日期'].v,'日期待确认');assert.equal(built.stats.pending,1);
-  assert(built.issues.some(q=>q.id.startsWith('normal-estimate:')));assert.equal(JSON.stringify(i),before);
+  assert(built.issues.some(q=>q.id.startsWith('normal-estimate:')||q.kind==='payment-date'));assert.equal(JSON.stringify(i),before);
   if(raw==='')assert.equal(row.预估时间.v,'','已有预估列空白仍不推算');
  }
 });
