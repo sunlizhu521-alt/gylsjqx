@@ -270,6 +270,7 @@ test('per-buyer workbooks preserve rows, reasons, formulas and WPS highlight',()
  context.rows=[{buyer:'甲',quantity:0,stockReason:'需要保留',todayDate:'2026-10-21',deliveryDays:2,supplierDeliveryDate:'2026-10-23'},{buyer:'甲',quantity:3,stockReason:'另一个原因'}];
  const output=run('buildDetailWorkbook(rows)');
  const w=XLSX.read(XLSX.write(output.workbook,{type:'buffer',bookType:'xlsx'}),{type:'buffer'});
+ assert.equal(w.Sheets.备货需求分配明细['!autofilter'].ref, 'A1:T3');
  assert.equal(w.Custprops.KSOReadingLayout,true);assert.equal(w.Sheets.备货需求分配明细.T2.v,'需要保留');assert.equal(w.Sheets.备货需求分配明细.J2.v,0);assert.equal(w.Sheets.备货需求分配明细.N2.f,'IF(M2="","",TEXT(DATE(VALUE(LEFT(L2,4)),VALUE(MID(L2,6,2)),VALUE(RIGHT(L2,2)))+M2,"yyyy-mm-dd"))');assert.equal(w.Sheets.备货需求分配明细['!ref'],'A1:T3');
 });
 
@@ -371,6 +372,7 @@ test('combined workbook starts with all summary rows then buyer sheets with shee
   assert.equal(xu.N2.t, 's');assert.equal(li.L2.t, 's');
   reopened.SheetNames.forEach((name, index) => {
     const sheet = reopened.Sheets[name];
+    assert.equal(sheet['!autofilter'].ref, sheet['!ref']);
     assert.equal(sheet['!cols'].length, 21);
     assert.equal(sheetShapes[index].rowCount, XLSX.utils.decode_range(sheet['!ref']).e.r + 1);
     assert.equal(sheetShapes[index].columnCount, 21);

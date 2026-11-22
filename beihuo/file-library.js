@@ -1269,6 +1269,7 @@ function buildDetailWorkbook(rows, splitIntoSheets = false) {
     }
     addDeliveryFormulas(worksheet, buyerRows, columns);
     worksheet["!cols"] = getAutoExportColumns(sheetRows, columns);
+    worksheet["!autofilter"] = { ref: worksheet["!ref"] };
     window.XLSX.utils.book_append_sheet(workbook, worksheet, makeUniqueSheetName(name, usedSheetNames));
     sheetShapes.push({ rowCount: sheetRows.length, columnCount: columns.length, columns });
   }

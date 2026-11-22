@@ -76,6 +76,7 @@ function uploadFile(rows, sheetName, name) {
       assert(xfs.slice(6).every(xf=>xf.includes('borderId="0"')));
       for(const [index,{text}] of xmls.entries()) {
         const sheet=workbook.Sheets[workbook.SheetNames[index]];
+        assert.equal(sheet['!autofilter'].ref, sheet['!ref'], `${workbook.SheetNames[index]} filter covers all columns and rows`);
         const activeRows=new Set(),activeColumns=new Set();
         for(const [address,cell] of Object.entries(sheet)) {
           if(!/^[A-Z]+\d+$/.test(address)||cell.v==null||String(cell.v).trim()==='')continue;
