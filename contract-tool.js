@@ -1325,6 +1325,15 @@
     }
   }
 
+  function excelColumnDigitWidth(styles) {
+    const font = all(styles, 'font', S)[0];
+    const size = Number(direct(font, 'sz', S)[0]?.getAttribute('val') || 11);
+    const name = direct(font, 'name', S)[0]?.getAttribute('val') || 'Arial';
+    const canvas = document.createElement('canvas').getContext('2d');
+    canvas.font = `${size * 4 / 3}px "${name}", "Songti SC", "Times New Roman", serif`;
+    return Math.max(7, ...[...'0123456789'].map(digit => canvas.measureText(digit).width));
+  }
+
   async function fitExcelRowHeights(zip, context) {
     const doc = context.sheetDoc;
     const styles = zip.file('xl/styles.xml') ? parseXml(await zip.file('xl/styles.xml').async('string')) : null;
@@ -1332,10 +1341,15 @@
     const strings = all(shared, 'si', S).map(node => all(node, 't', S).map(item => item.textContent).join(''));
     const xfs = direct(all(styles, 'cellXfs', S)[0], 'xf', S), fonts = direct(all(styles, 'fonts', S)[0], 'font', S);
     const columns = all(doc, 'col', S), merges = all(doc, 'mergeCell', S).map(node => XLSX.utils.decode_range(node.getAttribute('ref')));
+    const digitWidth = excelColumnDigitWidth(styles);
+    const defaultHeight = Number(all(doc, 'sheetFormatPr', S)[0]?.getAttribute('defaultRowHeight') || 15);
+    context.minimumRowHeights ||= new Map(direct(sheetData(doc), 'row', S).map(row => [row, Number(row.getAttribute('ht') || defaultHeight)]));
+    // Reflow from the template minima, not heights inflated by the previous narrow columns.
+    for (const [row, height] of context.minimumRowHeights) row.setAttribute('ht', String(height));
     const canvas = document.createElement('canvas').getContext('2d'), clonedStyles = new Map(), overflow = [], compactRows = new Set([...(context.compactTextRows || [])].map(rowNumberOf)), requiredHeights = new Map();
     const columnWidth = column => {
       const item = columns.find(node => column + 1 >= Number(node.getAttribute('min')) && column + 1 <= Number(node.getAttribute('max')));
-      return Number(item?.getAttribute('width') || 8.43) * 7 + 5;
+      return Number(item?.getAttribute('width') || 8.43) * digitWidth + 5;
     };
     for (const row of direct(sheetData(doc), 'row', S)) {
       if (row.getAttribute('hidden') === '1') continue;
@@ -1735,8 +1749,8 @@
     const layout = excelContractTermsLayout(target.address);
     writeCellValue(cell, CONTRACT_TERMS_TEXT);
     row.setAttribute('ht', String(layout.height)); row.setAttribute('customHeight', '1');
+    context.compactTextRows ||= new Set(); context.compactTextRows.add(row);
     await ensureExcelContractTermsStyle(zip, cell, layout.fontSize);
-    configureExcelContractPrint(context.sheetDoc, detailRecords().length <= 8);
     return true;
   }
 
@@ -1744,6 +1758,8 @@
     const doc = context.sheetDoc, worksheet = doc.documentElement;
     const shared = zip.file('xl/sharedStrings.xml') ? parseXml(await zip.file('xl/sharedStrings.xml').async('string')) : null;
     const strings = all(shared, 'si', S).map(n => all(n, 't', S).map(t => t.textContent).join(''));
+    const styleDoc = zip.file('xl/styles.xml') ? parseXml(await zip.file('xl/styles.xml').async('string')) : null;
+    const digitWidth = excelColumnDigitWidth(styleDoc);
     const rows = direct(sheetData(doc), 'row', S), boundaries = [];
     let appendixStarted = false;
     for (const row of rows) for (const cell of direct(row, 'c', S)) {
@@ -1756,7 +1772,7 @@
     const firstBoundary = Math.min(...boundaries.filter(n => n > 0), Infinity);
     let height = rows.filter(row => Number(row.getAttribute('r')) <= firstBoundary && row.getAttribute('hidden') !== '1')
       .reduce((sum, row) => sum + Number(row.getAttribute('ht') || 15), 0);
-    configureExcelContractPrint(doc, false);
+    configureExcelContractPrint(doc);
     const setup = direct(worksheet, 'pageSetup', S)[0];
     const landscape = setup.getAttribute('orientation') === 'landscape';
     let margins = direct(worksheet, 'pageMargins', S)[0];
@@ -1788,14 +1804,15 @@
     if (!columnList) { columnList = doc.createElementNS(S, 'cols'); worksheet.insertBefore(columnList, sheetData(doc)); }
     const oldColumns = direct(columnList, 'col', S);
     const widths = Array.from({ length: lastUsedColumn + 1 }, (_, i) => Number(oldColumns.find(n => i + 1 >= Number(n.getAttribute('min')) && i + 1 <= Number(n.getAttribute('max')))?.getAttribute('width') || 8.43));
-    const formWidth = widths.reduce((sum, width) => sum + (width * 7 + 5) * 0.75, 0);
-    const expand = height <= usableHeight / 0.65 ? Math.max(1, Math.min(2.5, height * usableWidth / Math.max(1, usableHeight * formWidth))) : 1;
+    const formWidth = widths.reduce((sum, width) => sum + (width * digitWidth + 5) * 0.75, 0);
+    // Tall forms also need the page width; cap widening at the readable print scale.
+    const expand = Math.max(1, Math.min(2.5, usableWidth / (0.65 * formWidth), height * usableWidth / Math.max(1, usableHeight * formWidth)));
     if (expand > 1.02) {
       const newColumns = widths.map((width, i) => {
         const original = oldColumns.find(n => i + 1 >= Number(n.getAttribute('min')) && i + 1 <= Number(n.getAttribute('max')));
         const column = original?.cloneNode(true) || doc.createElementNS(S, 'col');
         column.setAttribute('min', String(i + 1)); column.setAttribute('max', String(i + 1));
-        column.setAttribute('width', String(Math.min(255, ((width * 7 + 5) * expand - 5) / 7)));
+        column.setAttribute('width', String(Math.min(255, ((width * digitWidth + 5) * expand - 5) / digitWidth)));
         column.setAttribute('customWidth', '1'); return column;
       });
       // Keep formatting for columns beyond the printed form.
@@ -1803,11 +1820,8 @@
         const clone = n.cloneNode(true); clone.setAttribute('min', String(Math.max(lastUsedColumn + 2, Number(clone.getAttribute('min'))))); return clone;
       });
       columnList.replaceChildren(...newColumns, ...trailing);
-      // Column widening changes wrapping: recalculate continuation heights once more.
-      if (context.compactTextRows?.size) {
-        await fitExcelRowHeights(zip, context);
-        height = rows.filter(row => Number(row.getAttribute('r')) <= firstBoundary && row.getAttribute('hidden') !== '1').reduce((sum, row) => sum + Number(row.getAttribute('ht') || 15), 0);
-      }
+      await fitExcelRowHeights(zip, context);
+      height = rows.filter(row => Number(row.getAttribute('r')) <= firstBoundary && row.getAttribute('hidden') !== '1').reduce((sum, row) => sum + Number(row.getAttribute('ht') || 15), 0);
     }
     if (!boundaries.length) {
       // Fit a modest main form to one page; very large orders retain readable pagination.
@@ -1829,10 +1843,6 @@
     direct(direct(worksheet, 'sheetPr', S)[0], 'pageSetUpPr', S)[0].setAttribute('fitToPage', '0');
     const lastColumn = lastUsedColumn;
     const columns = all(doc, 'col', S);
-    const styleDoc = zip.file('xl/styles.xml') ? parseXml(await zip.file('xl/styles.xml').async('string')) : null;
-    const defaultFont = all(styleDoc, 'font', S)[0];
-    // Column units depend on the workbook's normal font, not a fixed 11-point font.
-    const digitWidth = Math.max(7, Number(direct(defaultFont, 'sz', S)[0]?.getAttribute('val') || 11) * 0.75);
     let width = 0;
     for (let c = 1; c <= lastColumn + 1; c++) {
       const column = columns.find(n => c >= Number(n.getAttribute('min')) && c <= Number(n.getAttribute('max')));
@@ -1863,7 +1873,7 @@
     }
   }
 
-  function configureExcelContractPrint(doc, fitOnePage) {
+  function configureExcelContractPrint(doc) {
     const worksheet = doc.documentElement;
     let sheetProperties = direct(worksheet, 'sheetPr', S)[0];
     if (!sheetProperties) { sheetProperties = doc.createElementNS(S, 'sheetPr'); worksheet.insertBefore(sheetProperties, worksheet.firstChild); }
@@ -1876,7 +1886,7 @@
       const margins = direct(worksheet, 'pageMargins', S)[0];
       worksheet.insertBefore(pageSetup, margins?.nextSibling || [...worksheet.children].find(n => ['headerFooter', 'rowBreaks', 'colBreaks', 'customProperties', 'cellWatches', 'ignoredErrors', 'smartTags', 'drawing', 'legacyDrawing', 'picture', 'oleObjects', 'controls', 'webPublishItems', 'tableParts', 'extLst'].includes(n.localName)) || null);
     }
-    pageSetup.setAttribute('paperSize', '9'); pageSetup.setAttribute('fitToWidth', '1'); pageSetup.setAttribute('fitToHeight', fitOnePage ? '1' : '0'); pageSetup.removeAttribute('scale');
+    pageSetup.setAttribute('paperSize', '9'); pageSetup.setAttribute('fitToWidth', '1'); pageSetup.setAttribute('fitToHeight', '0'); pageSetup.removeAttribute('scale');
   }
 
   async function ensureExcelContractTermsStyle(zip, cell, fontSize) {

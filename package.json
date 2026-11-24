@@ -25,6 +25,7 @@
     "test:browser": "node tests/payment-browser.cjs",
     "test:payment-layout-browser": "node tests/payment-layout-browser.cjs",
     "test:contract-browser": "node tests/contract-browser.cjs",
+    "test:contract-a4-browser": "node tests/contract-a4-browser.cjs",
     "test:internal-statement-browser": "node tests/internal-statement-browser.cjs",
     "test:quarter-budget-browser": "node tests/quarter-budget-browser.cjs",
     "test:funds-budget-summary-browser": "node tests/funds-budget-summary-browser.cjs",
