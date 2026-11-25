@@ -57,6 +57,13 @@ function rows(count, subject, prefix, long = false) {
           detailSizes: sizes(tables[1]), totalRows: totalRows.map(text),
           footerTables: tables.slice(2).map(text), footerSizes: tables.slice(2).flatMap(sizes),
           footerTitles: paragraphs.filter(p => /审批意见|财务办结记录/.test(text(p))).map(p => ({ text: text(p), sizes: sizes(p) })),
+          printBorders: tables.every(table => {
+            const borders = children(children(table, 'tblPr')[0], 'tblBorders')[0];
+            return ['top','left','bottom','right','insideH','insideV'].every(side => {
+              const edge = children(borders, side)[0];
+              return edge?.getAttributeNS(ns, 'val') === 'single' && edge.getAttributeNS(ns, 'color') === '000000' && Number(edge.getAttributeNS(ns, 'sz')) >= 6;
+            }) && !table.getElementsByTagNameNS(ns, 'tcBorders').length;
+          }),
         };
       }
       async function inspectDocx(blob) {
@@ -75,7 +82,9 @@ function rows(count, subject, prefix, long = false) {
           pages, sections: sections.length,
           landscape: sections.every(section => {
             const size = section.getElementsByTagNameNS(ns, 'pgSz')[0];
-            return size && size.getAttributeNS(ns, 'orient') === 'landscape' && size.getAttributeNS(ns, 'w') === '16838' && size.getAttributeNS(ns, 'h') === '11906';
+            const margins = section.getElementsByTagNameNS(ns, 'pgMar')[0];
+            return size && size.getAttributeNS(ns, 'orient') === 'landscape' && size.getAttributeNS(ns, 'w') === '16838' && size.getAttributeNS(ns, 'h') === '11906'
+              && ['top','bottom','left','right'].every(side => Number(margins.getAttributeNS(ns, side)) >= 453);
           }),
         };
       }
@@ -92,11 +101,39 @@ function rows(count, subject, prefix, long = false) {
         originalFooter: originalTables.slice(2).map(text),
         normalize: value => String(value).replace(/\s/g, ''),
       };
+      window.paymentLayoutQa.checkBorders = layout => {
+        const canvas = PaymentDocument.canvas(layout), ctx = canvas.getContext('2d');
+        const data = ctx.getImageData(0,0,canvas.width,canvas.height).data;
+        function edge(x,y,vertical) {
+          let dark = 0;
+          for (let offset = -2; offset <= 2; offset++) {
+            const px = Math.floor(x*3) + (vertical ? offset : 0), py = Math.floor(y*3) + (vertical ? 0 : offset);
+            const n = (py*canvas.width + px)*4;
+            if (data[n] < 128 && data[n+1] < 128 && data[n+2] < 128) dark++;
+          }
+          if (dark < 2) throw new Error(`Printed border is missing or too thin at ${x},${y}`);
+        }
+        let y = layout.my;
+        for (const block of layout.blocks) {
+          if (block.type === 'p') { y += block.height + block.gap; continue; }
+          for (const row of block.rows) {
+            let x = layout.mx;
+            for (const cell of row.cells) {
+              for (let sample = 2; sample < cell.width-2; sample += 5) edge(x+sample,y,false);
+              for (let sample = 2; sample < row.height-2; sample += 5) edge(x,y+sample,true);
+              x += cell.width;
+            }
+            for (let sample = 2; sample < row.height-2; sample += 5) edge(x,y+sample,true);
+            y += row.height;
+          }
+          for (let sample = 2; sample < layout.width-2; sample += 5) edge(layout.mx+sample,y,false);
+        }
+      };
     });
 
     const fixtures = [
       { name: 'single', rows: rows(1, '单条主体', 'S'), singlePage: true, targetSize: 9 },
-      { name: 'medium', rows: rows(8, '中等明细主体', 'M'), singlePage: true },
+      { name: 'medium', rows: rows(8, '中等明细主体', 'M'), singlePage: true, targetSize: 9 },
       { name: 'contract', rows: rows(2, '合同编号单行主体', 'C', true).map((r,i)=>({...r,合同编号:r.合同编号+'\n',合同总金额:i?'123456789.01':'/',已付金额:i?'0.00':'/',备注:'原付款备注保留'})), singlePage: true },
       { name: 'long-30', rows: rows(30, '长明细主体', 'L', true), singlePage: false },
       { name: 'short-45', rows: rows(45, '短明细主体', 'T'), singlePage: false },
@@ -110,6 +147,7 @@ function rows(count, subject, prefix, long = false) {
         const group = analysis.groups[0];
         group.info['计划付款日期'] = '2026-11-06';
         const layouts = await D.layout(qa.template, group);
+        layouts.forEach(qa.checkBorders);
         if (!Array.isArray(layouts) || !layouts.length) throw new Error('PaymentDocument.layout must return a nonempty array');
         for (const layout of layouts) for (const row of layout.blocks.filter(b=>b.type==='table')[1].rows) {
           for (const cell of row.cells.filter(c=>c.noWrap)) if (cell.ps.some(p=>p.lines.length!==1 || p.overflow)) throw new Error('单行字段发生换行或溢出');
@@ -128,6 +166,7 @@ function rows(count, subject, prefix, long = false) {
         document.body.append(output);
         return {
           ...doc, pdfPages: parsedPdf.getPageCount(), pdfSizes: parsedPdf.getPages().map(p => p.getSize()),
+          pdfTransforms: parsedPdf.getPages().map(p => new TextDecoder().decode(PDFLib.decodePDFRawStream(p.node.Contents().lookup(0)).decode())),
           expectedRows: group.rows.map((row, i) => [String(i + 1), ...C.fields.map(field => {
             const value = field === '本次申请付款金额' ? C.money(row._cents)
               : field === '开户银行及账号' ? C.bankSummary(row._resolvedBank ?? row[field], row['供应商全称']).value : C.text(row[field]);
@@ -146,7 +185,9 @@ function rows(count, subject, prefix, long = false) {
       assert.equal(result.pdfPages, result.pages.length, `${fixture.name}: planned DOCX pages and PDF pages agree`);
       assert.equal(result.landscape, true, `${fixture.name}: every DOCX section uses A4 landscape`);
       assert.ok(result.pdfSizes.every(size => Math.abs(size.width - 841.9) < .1 && Math.abs(size.height - 595.3) < .1));
+      assert.ok(result.pdfTransforms.every(content => content.includes('841.9 0 0 595.3 0 0 cm')), 'PDF must keep the preview print size, without shrinking fonts and borders again');
       assert.ok(fixture.singlePage ? result.pages.length === 1 : result.pages.length > 1, `${fixture.name}: unexpected pagination (${result.pages.length})`);
+      assert.ok(result.pages.length <= (fixture.singlePage ? 1 : 4), `${fixture.name}: print safety must not introduce unnecessary pages`);
       assert.deepEqual(result.pages.flatMap(p => p.rows), result.expectedRows, `${fixture.name}: all columns and continuous row numbers survive without omissions or duplication`);
       for (const [i, current] of result.pages.entries()) {
         const last = i === result.pages.length - 1;
@@ -156,6 +197,7 @@ function rows(count, subject, prefix, long = false) {
         for (const value of ['采购履约部', '排版测试人', result.total, result.upper]) assert.ok(current.metadata.includes(value), `${fixture.name} page ${i + 1}: missing metadata ${value}`);
         assert.deepEqual(current.headers, result.expectedHeader, `${fixture.name}: detail headers repeat on every page`);
         assert.equal(current.singleLineFields, true, `${fixture.name}: supplier, contract, amount and remarks forbid wrapping`);
+        assert.equal(current.printBorders, true, `${fixture.name}: all four tables have explicit continuous print borders`);
         assert.equal(current.singleLineBreaks, 0, `${fixture.name}: single-line fields have no line breaks`);
         assert.ok(current.rows.length > 0, `${fixture.name}: no empty trailing approval page`);
         assert.ok(current.detailSizes.length > 0 && current.detailSizes.every(size => size >= 8 && size <= 9), `${fixture.name}: detail text must stay between 8 and 9 pt`);

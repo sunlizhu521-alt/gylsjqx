@@ -87,7 +87,7 @@
       <div id="paymentStatus" role="status" aria-live="polite"></div>
       <div id="paymentGroups"></div>
       <div class="payment-actions"><button id="paymentGenerate" class="primary-button" ${state.busy ? 'disabled' : ''}>${state.busy ? '正在排版…' : '核对并生成预览'}</button><button id="paymentDownloadWord" class="secondary-button" ${state.busy ? 'disabled' : ''}>一键下载 Word</button><button class="secondary-button" data-payment-download="docx" disabled>下载 Word</button><button class="secondary-button" data-payment-download="pdf" disabled>下载 PDF 打印版</button></div>
-      <p class="payment-hint">PDF 已按 85% 缩放排入纸张，打印请选择“实际大小 / 100%”。Word 可编辑，不同 Word/WPS 的字体替换可能影响分页；固定打印请使用 PDF。</p>
+      <p class="payment-hint">Word 和 PDF 均为 A4 横向，已留打印边距。打印请选择 A4、横向、“实际大小 / 100%”；明细字号最低 8 磅，放不下时自动分页。Word/WPS 字体替换可能影响分页，固定打印可用 PDF。</p>
       <div id="paymentPages"></div>
     </div>`;
     root.querySelector('#paymentClearCache').addEventListener('click', clearCachedFiles);

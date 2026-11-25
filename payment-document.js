@@ -5,6 +5,8 @@
   const C = PaymentCore;
   const FONT = '"SimSun", "Songti SC", "STSong", serif';
   const PAGE = { width: 841.9, height: 595.3 };
+  const PRINT_MARGIN = 22.68; // 8 mm: keep table strokes inside the printable area.
+  const BORDER_WIDTH = .75;
   const SINGLE_LINE_COLUMNS = new Set([1, 3, 6, 9]);
   const children = (e, name) => [...e.children].filter(c => c.namespaceURI === W && c.localName === name);
   const all = (e, name) => [...e.getElementsByTagNameNS(W, name)];
@@ -108,8 +110,12 @@
     putText(typeCell, '☑ 采购货款    □ 服务费用    □ 模具款    □ 尾款    □ 预付款    □ 其他＿＿＿＿＿＿＿＿');
     putText(children(rs[2], 'tc')[1], `小写：￥${C.money(group.total)}\n大写：${C.upper(group.total)}`);
     const payment = children(rs[2], 'tc')[3];
-    putText(payment, `${displayDate(group.info['计划付款日期'])}\n付款方式：☑ 对公转账  □ 其他＿＿＿`);
+    putText(payment, `${displayDate(group.info['计划付款日期'])}\n付款方式：☑ 对公转账  □ 其他＿＿`);
     const rows = children(ts[1], 'tr'), proto = rows[1].cloneNode(true), total = rows.at(-1);
+    // Compact these two headings before reducing detail type or adding a page.
+    const headings = children(rows[0], 'tc');
+    putText(headings[4], '合同\n总金额');
+    putText(headings[5], '已付\n金额');
     rows.slice(1, -1).forEach(r => r.remove());
     group.rows.forEach((r, i) => {
       const tr = proto.cloneNode(true);
@@ -209,7 +215,7 @@
   async function layout(template, group) {
     await document.fonts.ready;
     let config = { body: 12, table: 11, bodyLine: 15, tableLine: 14, detail: 9, detailLine: 11.5,
-      footer: 7.5, footerLine: 9, mx: 17.01, my: 14.17, pad: 1.4 };
+      footer: 7.5, footerLine: 9, mx: PRINT_MARGIN, my: PRINT_MARGIN, pad: 1.4 };
     const fits = result => !result.overflowFields.length && result.height <= PAGE.height - result.my * 2 - 24;
     function page(start, end, final = true) {
       const filled = fill(template, { ...group, rows: group.rows.slice(start, end) }, start);
@@ -224,7 +230,7 @@
     let result = page(0, group.rows.length);
     if (fits(result)) return [result];
     // Compact supporting sections first; detail text never drops below 8 pt.
-    config = { ...config, footer: 6.5, footerLine: 8, mx: 11.34, my: 11.34, pad: 1 };
+    config = { ...config, body: 11, bodyLine: 13.5, table: 10, tableLine: 12.5, footer: 6.5, footerLine: 8, pad: 1 };
     for (const detail of [9, 8.5, 8]) {
       config = { ...config, detail, detailLine: detail + 2.5 };
       result = page(0, group.rows.length);
@@ -285,18 +291,23 @@
       remove(tp, ['tblpPr', 'tblInd', 'tblCellSpacing']);
       prop(tp, 'tblW', { w: Math.floor(result.width * 20), type: 'dxa' });
       prop(tp, 'tblLayout', { type: 'fixed' }); prop(tp, 'jc', { val: 'left' });
+      const borders = prop(tp, 'tblBorders');
+      borders.replaceChildren();
+      for (const side of ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']) {
+        borders.append(node(doc, side, { val: 'single', sz: BORDER_WIDTH * 8, color: '000000', space: 0 }));
+      }
       const margins = prop(tp, 'tblCellMar');
       for (const side of ['top', 'left', 'bottom', 'right']) prop(margins, side, { w: Math.floor(result.pad * 20), type: 'dxa' });
       children(children(b.element, 'tblGrid')[0], 'gridCol').forEach((c, i) => c.setAttributeNS(W, 'w:w', Math.floor(b.grid[i] * 20)));
       for (const row of b.rows) {
         // Template row margins must not override the padding used by measurement.
-        for (const exception of children(row.element, 'tblPrEx')) remove(exception, ['tblCellMar']);
+        for (const exception of children(row.element, 'tblPrEx')) remove(exception, ['tblCellMar', 'tblBorders']);
         const rp = prop(row.element, 'trPr'); remove(rp, ['trHeight']);
         prop(rp, 'cantSplit');
         // Word adds cell margins to the minimum row height; count padding only once.
         prop(rp, 'trHeight', { val: Math.ceil((row.contentHeight - result.pad * 2) * 20), hRule: 'atLeast' });
         for (const cell of row.cells) {
-          const cp = prop(cell.element, 'tcPr'); remove(cp, ['tcMar', 'noWrap', 'tcFitText']);
+          const cp = prop(cell.element, 'tcPr'); remove(cp, ['tcMar', 'noWrap', 'tcFitText', 'tcBorders']);
           if (cell.noWrap) prop(cp, 'noWrap');
           prop(cp, 'tcW', { w: Math.floor(cell.width * 20), type: 'dxa' });
           prop(cp, 'vAlign', { val: 'center' });
@@ -343,17 +354,33 @@
     let y = result.my;
     for (const b of result.blocks) {
       if (b.type === 'p') { drawP(b, result.mx, y, result.width); y += b.height + b.gap; continue; }
+      const top = y;
       for (const row of b.rows) {
         let x = result.mx;
         for (const cell of row.cells) {
           ctx.fillStyle = cell.fill; ctx.fillRect(x, y, cell.width, row.height);
-          ctx.strokeStyle = '#000000'; ctx.lineWidth = .45; ctx.strokeRect(x, y, cell.width, row.height);
           let py = y + (row.height - cell.height) / 2;
           for (const p of cell.ps) { drawP(p, x + result.pad, py, cell.width - 2 * result.pad); py += p.height; }
           x += cell.width;
         }
         y += row.height;
       }
+      // Draw borders last: the next cell's fill must not erase half the shared stroke.
+      let by = top;
+      ctx.strokeStyle = '#000000'; ctx.lineWidth = BORDER_WIDTH;
+      ctx.beginPath();
+      for (const row of b.rows) {
+        let x = result.mx;
+        ctx.moveTo(x, by); ctx.lineTo(x + result.width, by);
+        ctx.moveTo(x, by); ctx.lineTo(x, by + row.height);
+        for (const cell of row.cells) {
+          x += cell.width;
+          ctx.moveTo(x, by); ctx.lineTo(x, by + row.height);
+        }
+        by += row.height;
+      }
+      ctx.moveTo(result.mx, by); ctx.lineTo(result.mx + result.width, by);
+      ctx.stroke();
     }
     if (y > PAGE.height - result.my) throw new Error('页面溢出，已停止生成');
     return c;
@@ -362,9 +389,9 @@
     const pdf = await PDFLib.PDFDocument.create();
     pdf.setTitle('付款申请单'); pdf.setCreator('供应链数据清洗');
     for (const l of layouts) {
-      const image = await pdf.embedPng(canvas(l).toDataURL('image/png'));
+      const image = await pdf.embedPng(canvas(l, 300 / 72).toDataURL('image/png'));
       const page = pdf.addPage([PAGE.width, PAGE.height]);
-      page.drawImage(image, { x: PAGE.width * .075, y: PAGE.height * .075, width: PAGE.width * .85, height: PAGE.height * .85 });
+      page.drawImage(image, { x: 0, y: 0, width: PAGE.width, height: PAGE.height });
     }
     return new Blob([await pdf.save()], { type: 'application/pdf' });
   }
