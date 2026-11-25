@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>付款台账表格比对｜供应链数据清洗</title>
+  <link rel="stylesheet" href="styles-merge14.css?v=tools-cleanup-20261027-38">
+  <style>
+    main{max-width:1480px;margin:28px auto;padding:20px;min-width:0}
+    section{margin:18px 0;padding:22px;border:1px solid var(--line);border-radius:14px;background:var(--surface);min-width:0}
+    h2{font-size:1.15rem;margin:0 0 14px}p,small,li{line-height:1.7}
+    label{display:block;font-weight:600;margin-bottom:10px}input,button,select{font:inherit;max-width:100%}
+    input[type=file],select{width:100%}input::file-selector-button{padding:9px 14px;border:1px solid var(--line-strong);border-radius:7px;cursor:pointer;background:var(--surface-solid);color:var(--text);margin-right:12px}
+    select{padding:9px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface-solid);color:var(--text)}
+    small{display:block;color:var(--muted)}.file-reference,#status{white-space:pre-wrap;overflow-wrap:anywhere}
+    .file-reference{margin:12px 0;min-height:46px}#status{margin:0}.actions{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:18px}
+    .uploads-scroll{overflow-x:auto}.uploads{display:grid;grid-template-columns:repeat(2,minmax(270px,1fr));gap:14px}.upload{padding:14px;border:1px solid var(--line);border-radius:10px;min-width:0}
+    button{border:0;border-radius:8px;background:#315b9d;color:#fff;padding:11px 20px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}
+    .remove{padding:6px 0;margin-top:8px;border-radius:0;background:transparent;color:var(--muted);font-size:.9rem;text-decoration:underline}
+    details{margin-top:14px;color:var(--muted)}summary{width:fit-content;cursor:pointer;color:var(--accent);font-weight:600}ul{padding-left:22px}
+    .totals{display:flex;gap:12px 26px;flex-wrap:wrap;margin:0 0 10px}.totals span{white-space:nowrap}.totals strong{font-variant-numeric:tabular-nums}
+    .count,.empty{color:var(--muted)}.count{font-size:.95rem;font-weight:400}#counts{line-height:1.7}#incomplete{color:var(--text);margin:12px 0}
+    .preview{max-height:560px;overflow:auto}table{border-collapse:collapse;min-width:100%;font-size:13px}
+    th,td{border:1px solid #d6dee8;text-align:center;vertical-align:middle;padding:8px 12px;white-space:nowrap;min-width:110px}
+    th{position:sticky;top:0;background:#315b9d;color:#fff}td{background:#fff;color:#172033}
+    td.wrap{white-space:pre-wrap;min-width:220px;max-width:430px;overflow-wrap:anywhere}
+    #warnings{color:var(--text)}[hidden]{display:none!important}
+    @media(max-width:700px){main{padding:12px}section{padding:14px}.actions{align-items:stretch;flex-direction:column}}
+  </style>
+</head>
+<body><main>
+  <a href="index.html">← 返回工具箱</a>
+  <h1>付款台账表格比对</h1>
+  <p>选择不同日期的两版付款台账，比对增加、减少与不变记录，下载后填写变化原因。</p>
+  <section>
+    <div class="uploads-scroll"><div class="uploads">
+      <div class="upload">
+        <label for="oldFile">旧版付款台账（对比基准）</label><input id="oldFile" type="file" accept=".xlsx,.xls" disabled>
+        <small class="file-reference" id="oldReference">尚未引用文件</small>
+        <label for="oldSheet">旧版工作表</label><select id="oldSheet" disabled><option value="">请先上传文件</option></select>
+        <button class="remove" id="clear-old" hidden>移除旧版文件</button>
+      </div>
+      <div class="upload">
+        <label for="newFile">新版付款台账</label><input id="newFile" type="file" accept=".xlsx,.xls" disabled>
+        <small class="file-reference" id="newReference">尚未引用文件</small>
+        <label for="newSheet">新版工作表</label><select id="newSheet" disabled><option value="">请先上传文件</option></select>
+        <button class="remove" id="clear-new" hidden>移除新版文件</button>
+      </div>
+    </div></div>
+    <div class="actions"><button id="download" disabled>下载比对汇总</button><p id="status" role="status" aria-live="polite">正在加载工具…</p></div>
+    <details><summary>查看比对规则</summary><ul id="rules">
+      <li>旧版作为基准，新版与旧版比较。仅读取各自选中的工作表；存在多个有效工作表时需要明确选择。</li>
+      <li>无供应商、付款主体及OA业务身份的明确合计／小计／总计行不重复计入，提示中保留忽略行的来源；有业务身份的明细仍保留。</li>
+      <li>优先按“OA号＋供应商＋付款主体”对应；同组先将相同金额逐笔对应，剩余仅一条旧记录和一条新记录时再比较金额。多个候选分别保留，标为“待核对”，允许下载。</li>
+      <li>至少一边缺少OA号或为“未提交OA”时，可按“供应商＋付款主体＋金额”唯一对应；不跨不同有效OA号匹配，不模糊合并供应商名称，不去重原明细。</li>
+      <li>只有新版的记录为“增加”，只有旧版的记录为“减少”；同笔款项按“新版金额－旧版金额”判断增减，金额相同为“不变”。OA号补齐或摘要文字变化不计金额增减，在比对说明中列出。</li>
+      <li>比对结果保留增加、减少、不变及待核对记录；原备注单独保留，末尾“备注”列留空，下载后可填写变化原因。只导出约定业务字段，无表头辅助列及“上周五”等辅助列不导出。</li>
+      <li>金额按分比较，普通金额空白、异常或身份字段缺失时保留为“待核对”，不按零处理，允许下载。必要字段公式错误或缺少有效计算结果时，需重新计算并保存源文件后再比对。</li>
+      <li>合计存在无法识别的金额时明确提示不完整，不以零补齐；仍可下载比对结果并核实来源。</li>
+      <li>文件仅在本机浏览器处理，原文件不修改；切换工具保留本次内容，刷新后重新上传。</li>
+      <li>下载一张“比对汇总”，名称为“付款台账表格比对-日期-V版本号.xlsx”；日期按北京时间，同一天版本递增，生成失败不递增。</li>
+    </ul></details>
+    <details id="warning-panel" hidden><summary>需要留意（<span id="warning-count">0</span> 项）</summary><ul id="warnings"></ul></details>
+  </section>
+  <div id="result" hidden>
+    <section>
+      <h2><span id="sheet-title">比对汇总</span> <span class="count">（<span id="record-count">0</span> 条）</span></h2>
+      <div id="summary">
+        <div class="totals"><span>旧版金额：<strong id="oldAmount"></strong></span><span>新版金额：<strong id="newAmount"></strong></span><span>净变化：<strong id="difference"></strong></span></div>
+        <p id="incomplete" hidden>合计不完整：仅汇总可识别金额，不能视为全部金额；请核实待核对记录。</p>
+        <p id="counts"></p>
+      </div>
+      <div class="preview" id="preview"></div>
+    </section>
+  </div>
+</main>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="table-compare-core.js?v=20261126"></script>
+<script src="table-compare-export.js?v=20261126"></script>
+<script src="table-compare-tool.js?v=20261126"></script>
+</body>
+</html>
