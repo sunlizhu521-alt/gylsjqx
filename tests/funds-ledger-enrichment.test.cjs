@@ -7,10 +7,10 @@ function sheet(headers,rows,title=false){return X.utils.aoa_to_sheet([...(title?
 function ledger(rows){const b=X.utils.book_new();['李奇','徐英','邢芳芳','操思敏','孙立柱'].forEach((p,i)=>X.utils.book_append_sheet(b,sheet(LH,i?[]:rows),'对账明细-'+p));return b;}
 function oa(rows,headers=OH,name='Sheet0',title=false){const book=X.utils.book_new();X.utils.book_append_sheet(book,sheet(headers,rows,title),name);return {book,filename:'原始OA.xlsx'};}
 const build=(rows,source)=>C.build(ledger(rows),'台账.xlsx',{...(source?{oa:source}:{})});
-const extras=r=>r.sheets[0].rows.map(row=>row.slice(8,12).map(C.formatCell));
+const extras=r=>r.sheets[0].rows.map(row=>row.slice(9,13).map(C.formatCell));
 test('原始OA按编号精确匹配，金额/供应商/主体不参与，也不增付款行或改变原字段',()=>{
  const records=[ledgerRow(),ledgerRow({'申请付款金额':20}),ledgerRow({'供应商名称':'供应商乙','付款主体':'迈德斯特'})],source=oa([flow({'付款金额':999,'供应商':'另一供应商'})],[...OH,'付款金额','供应商']),l=ledger(records),before=JSON.stringify([l,source]),base=C.build(l,'台账.xlsx',{}),r=C.build(l,'台账.xlsx',{oa:source});
- assert.equal(r.sheets[0].rows.length,3);assert(extras(r).every(row=>JSON.stringify(row)===JSON.stringify(['出纳执行付款','人员甲','归档','已付款'])));assert.deepEqual(r.sheets[0].rows.map(row=>row.slice(0,8)),base.sheets[0].rows.map(row=>row.slice(0,8)));assert.deepEqual(r.sheets[0].sources,base.sheets[0].sources);assert.equal(JSON.stringify([l,source]),before);
+ assert.equal(r.sheets[0].rows.length,3);assert(extras(r).every(row=>JSON.stringify(row)===JSON.stringify(['出纳执行付款','人员甲','归档','已付款'])));assert.deepEqual(r.sheets[0].rows.map(row=>row.slice(0,9)),base.sheets[0].rows.map(row=>row.slice(0,9)));assert.deepEqual(r.sheets[0].sources,base.sheets[0].sources);assert.equal(JSON.stringify([l,source]),before);
 });
 test('归档/已归档才已付款，未归档未付款，其他状态待核对；办理人付款执行不能代替归档',()=>{
  for(const [state,expected]of [['归档','已付款'],['已归档','已付款'],['未归档','未付款'],['流程归档','待核对'],['','待核对'],['审批中','待核对']]){const r=build([ledgerRow()],oa([flow({'流程状态':state})]));assert.equal(extras(r)[0][3],expected);assert.equal(extras(r)[0][0],'出纳执行付款');}
@@ -44,7 +44,7 @@ test('数值OA按显示格式保留前导零匹配，新OA重算不遗留旧状�
  const changed=oa([flow({'流程编号':'000123','流程状态':'未归档'})]);assert.equal(extras(C.build(l,'台账.xlsx',{oa:changed}))[0][3],'未付款');assert.deepEqual(extras(C.build(l,'台账.xlsx',{})),[['','','','']]);
 });
 test('无效源OA提示来源不用于匹配，真实十七列表可回读并保留原生金额和日期',()=>{
- const source=oa([flow(),flow({'流程编号':'未匹配'})]),info=C.validateOA(source.book,source.filename);assert.equal(info.count,2);assert.match(info.warnings.join('\n'),/原始OA.xlsx.*第3行/);const r=build([ledgerRow()],source),out=C.workbook(r),roundtrip=X.read(X.write(out,{type:'buffer',bookType:'xlsx'}),{type:'buffer'}),s=roundtrip.Sheets['正常付款'];assert.deepEqual(roundtrip.SheetNames,['正常付款']);assert.equal(s['!ref'],'A1:Q2');assert.equal(s.G2.t,'n');assert.equal(s.H2.t,'n');assert.equal(s.L2.v,'已付款');
+ const source=oa([flow(),flow({'流程编号':'未匹配'})]),info=C.validateOA(source.book,source.filename);assert.equal(info.count,2);assert.match(info.warnings.join('\n'),/原始OA.xlsx.*第3行/);const r=build([ledgerRow()],source),out=C.workbook(r),roundtrip=X.read(X.write(out,{type:'buffer',bookType:'xlsx'}),{type:'buffer'}),s=roundtrip.Sheets['正常付款'];assert.deepEqual(roundtrip.SheetNames,['正常付款']);assert.equal(s['!ref'],'A1:Q2');assert.equal(s.G2.t,'n');assert.equal(s.I2.t,'n');assert.equal(s.M2.v,'已付款');
 });
 const applications=(rows,headers=['流程编码'],name='付款申请汇总')=>{const book=X.utils.book_new();X.utils.book_append_sheet(book,sheet(headers,rows),name);return {book,filename:'申请单.xlsx'};};
 const paper=(rows,source,options={})=>C.build(ledger(rows),'台账.xlsx',{...options,...(source?{applications:source}:{})});
@@ -60,7 +60,7 @@ test('纸质提交状态中文名称降序，同状态保持日期及同日来�
  const source=applications([{'流程编码':'OA001'}]),options={today:'2026-11-09',oa:oa([flow()])},base=paper(records,null,options),result=paper(records,source,options),out=result.sheets[0];
  assert.deepEqual(submitted(result),['已提交','已提交','已提交','未提交','待核对']);assert.deepEqual(out.rows.map(r=>r[5].v),['已提交早甲','已提交早乙','已提交晚','未提交','待核对']);assert.deepEqual(out.sources.map(s=>s.row),[5,6,4,3,2]);
  for(let i=0;i<out.rows.length;i++){const old=base.sheets[0].sources.findIndex(s=>s.row===out.sources[i].row);assert.deepEqual(out.rows[i].slice(0,16),base.sheets[0].rows[old].slice(0,16));}
- const book=C.workbook(result),read=X.read(X.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer'}),s=read.Sheets[read.SheetNames[0]];assert.deepEqual([s.F2.v,s.F3.v,s.F4.v,s.F5.v,s.F6.v],out.rows.map(r=>r[5].v));assert.equal(s.G2.v,0);assert.equal(s.L2.v,'已付款');assert.equal(s.Q2.v,'已提交');
+ const book=C.workbook(result),read=X.read(X.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer'}),s=read.Sheets[read.SheetNames[0]];assert.deepEqual([s.F2.v,s.F3.v,s.F4.v,s.F5.v,s.F6.v],out.rows.map(r=>r[5].v));assert.equal(s.G2.v,0);assert.equal(s.M2.v,'已付款');assert.equal(s.Q2.v,'已提交');
  assert.deepEqual(paper(records,null,options).sheets[0],base.sheets[0]);
 });
 test('已付款和已提交审单仍保留申请日期，流程和提交状态在新列之后不串位',()=>{
@@ -113,5 +113,5 @@ test('替换移除申请来源不遗留旧状态，空申请表可用，17列表
  const records=[ledgerRow()],first=applications([{'流程编码':'OA001'}]),empty=applications([]);
  assert.deepEqual(submitted(paper(records,first)),['已提交']);const result=paper(records,empty);assert.deepEqual(submitted(result),['未提交']);assert.deepEqual(submitted(paper(records)),['']);
  const book=C.workbook(result),sheet=book.Sheets[book.SheetNames[0]],out=X.read(X.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true});
- assert.equal(sheet['!cols'].length,17);assert(sheet['!cols'][16].wch>=24);assert.equal(sheet['!autofilter'].ref,'A1:Q2');assert.equal(out.Sheets[book.SheetNames[0]].Q2.v,'未提交');assert.equal(out.Sheets[book.SheetNames[0]].G2.t,'n');assert.equal(out.Sheets[book.SheetNames[0]].H2.t,'n');
+ assert.equal(sheet['!cols'].length,17);assert(sheet['!cols'][16].wch>=24);assert.equal(sheet['!autofilter'].ref,'A1:Q2');assert.equal(out.Sheets[book.SheetNames[0]].Q2.v,'未提交');assert.equal(out.Sheets[book.SheetNames[0]].G2.t,'n');assert.equal(out.Sheets[book.SheetNames[0]].I2.t,'n');
 });
