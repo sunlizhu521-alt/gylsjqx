@@ -6,7 +6,7 @@
   const width = text => [...String(text)].reduce((n, c) => n + (c.codePointAt(0) > 255 ? 2 : 1), 0);
   return async function(result) {
     const book = Core.workbook(result);
-    const dateHeaders = new Set(['应付款时间','申请付款月份','需要提交付款审单的日期']);
+    const dateHeaders = new Set(['应付款时间','付款日期','申请付款月份','需要提交付款审单的日期']);
     for (const [index,name] of book.SheetNames.entries()) {
       const sheet = book.Sheets[name], source = result.sheets[index];
       source.headers.forEach((header,c) => {
@@ -40,7 +40,7 @@
         contentRows.add(Number(match[2])); contentColumns.add(match[1]);
       }
       const paidColumn = result.sheets[index].headers.indexOf('是否已付款');
-      const noWrap = new Set(['采购跟单员','对公付款OA流程号','申请付款金额','应付款时间','付款月份','申请付款月份','需要提交付款审单的日期']);
+      const noWrap = new Set(['采购跟单员','对公付款OA流程号','申请付款金额','应付款时间','付款月份','付款日期','申请付款月份','需要提交付款审单的日期']);
       const wrapColumns = result.sheets[index].headers.map((name,c) => noWrap.has(name) ? -1 : c).filter(c => c >= 0);
       const path = `xl/worksheets/sheet${index + 1}.xml`;
       let xml = await zip.file(path).async('string');

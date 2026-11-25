@@ -20,7 +20,7 @@
     .preview{max-height:500px;overflow:auto}table{border-collapse:collapse;min-width:100%;font-size:13px}
     th,td{border:1px solid #d6dee8;text-align:center;vertical-align:middle;padding:8px 12px;white-space:pre-wrap;min-width:120px}
     th{white-space:nowrap;position:sticky;top:0;background:#315b9d;color:#fff}td{background:#fff;color:#172033;max-width:430px;overflow-wrap:anywhere}
-    td:nth-child(1),td:nth-child(4),td:nth-child(5),td:nth-child(7),td:nth-child(12),td:nth-child(13){white-space:nowrap;max-width:none;overflow-wrap:normal}
+    td:nth-child(1),td:nth-child(4),td:nth-child(5),td:nth-child(7),td:nth-child(12),td:nth-child(13),td:nth-child(14),td:nth-child(15){white-space:nowrap;max-width:none;overflow-wrap:normal}
     tr.paid td{background:#ff9999}
     .count{color:var(--muted);font-size:.95rem;font-weight:400}.empty{color:var(--muted)}#warnings{color:var(--text)}
     [hidden]{display:none!important}@media(max-width:700px){main{padding:12px}section{padding:14px}.actions{align-items:stretch;flex-direction:column}}
@@ -43,6 +43,7 @@
       <li>应付时间和预估时间都为空时，按所属月份最后一天＋账期天数＋7天推算，仅用于排序；应付款时间显示“未对账待定”。月账期按每月30天，5个月为150天。</li>
       <li>需要提交付款审单的日期：下周及以后的款项取应付日期上一周的周一；本周及逾期款取本周周一。按北京时间判断，已提交和已付款记录仍显示日期。应付时间只有年月或为“未对账待定”时留空并提示；下载时重新计算并同步预览。</li>
       <li>付款月份取整理表“应付款时间”所在月份，显示为“2026年12月”；应付款时间为“未对账待定”时原样显示。有效年月也可提取月份，其他无法识别的日期留空并保留核对提示。</li>
+      <li>付款月份后的“付款日期”与整理后的“应付款时间”一致，导出为日期文本；只有年月、空白或“未对账待定”等内容保持原值，不补造具体日期。</li>
       <li>申请付款月份取“需要提交付款审单的日期”所在月份，导出为年月文本；提交日期不明确时留空。</li>
       <li>每条明细单独保留。公式采用文件保存的有效结果，导出为值；原文件不修改。</li>
       <li>下载命名为“资金台账整理-日期-V版本号.xlsx”；日期按北京时间，同一天在当前浏览器内依次递增，生成失败不递增。</li>
@@ -61,8 +62,8 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-ledger-core.js?v=payment-month-20261120"></script>
-<script src="funds-ledger-export.js?v=payment-month-20261120"></script>
+<script src="funds-ledger-core.js?v=payment-date-20261125"></script>
+<script src="funds-ledger-export.js?v=payment-date-20261125"></script>
 <script src="funds-ledger-tool.js?v=20261109-follower-light-red"></script>
 </body>
 </html>
