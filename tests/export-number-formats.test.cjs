@@ -41,7 +41,7 @@ test('订单履约汇总和合并核对保留小数，整数不带末尾点', ()
   Fulfillment.QUANTITY_FIELDS.forEach((key, i) => {row[Fulfillment.COLUMNS.indexOf(key)] = {t:'n',v:values[i]};});
   const output = reopen(Fulfillment.workbook({rows:[row],sources:[{sheet:'李奇'}]})).Sheets.汇总表;
   Fulfillment.QUANTITY_FIELDS.forEach((key, i) => check(output[X.utils.encode_cell({r:1,c:Fulfillment.SUMMARY_COLUMNS.indexOf(key)})], values[i]));
-  assert.equal(output.J2.v, '000123');
+  assert.equal(output.K2.v, '000123');
   const reviewRows = Fulfillment.reviewRows({rows:[],sources:[]}, {checks:[{sheet:'李奇',field:'未交付数量',sourceTotal:1378,summaryTotal:1378,difference:0,status:'通过'}],issues:[]});
   const review = reopen({SheetNames:['核对'],Sheets:{核对:Fulfillment.reviewSheet(reviewRows)}});
   assert.equal(review.Sheets.核对.J2.v, 1378);

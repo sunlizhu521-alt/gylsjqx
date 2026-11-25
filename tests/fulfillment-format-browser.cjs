@@ -63,7 +63,9 @@ function fixture(delta = 0) {
 function checkSummary(sheet, expected) {
   assert.deepEqual(X.utils.sheet_to_json(sheet, { header: 1 })[0], C.SUMMARY_COLUMNS);
   assert.equal(sheet.E1.v, '下单月份');
-  assert.equal(C.SUMMARY_COLUMNS.length, 22);
+  assert.equal(sheet.F1.v, '采购订单号');
+  assert.equal(sheet.G1.v, 'OA流程号');
+  assert.equal(C.SUMMARY_COLUMNS.length, 23);
   assert.equal(X.utils.decode_range(sheet['!ref']).e.r, expected.length);
   for (const [index, row] of expected.entries()) {
     const cell = field => sheet[X.utils.encode_cell({ r: index + 1, c: C.SUMMARY_COLUMNS.indexOf(field) })];
@@ -71,7 +73,7 @@ function checkSummary(sheet, expected) {
     assert.equal(cell('下单月份').z, '@');
     assert.equal(cell('下单月份').v, row.month);
     assert.equal(cell('下单月份').w, row.month);
-    for (const field of ['物料编码', 'SKU']) {
+    for (const field of ['物料编码', 'SKU', '采购订单号']) {
       assert.equal(cell(field).t, 's');
       assert.equal(cell(field).z, '@');
       assert.equal(cell(field).v, row[field]);
@@ -100,7 +102,7 @@ function checkSummary(sheet, expected) {
     }
   }
   assert(sheet['!cols'][4].wch >= 12, '年月与表头完整显示');
-  assert.equal(sheet['!autofilter'].ref, `A1:V${expected.length + 1}`);
+  assert.equal(sheet['!autofilter'].ref, `A1:W${expected.length + 1}`);
 }
 
 function checkSourceSheets(sourceBytes, exported, expected) {
@@ -190,6 +192,9 @@ async function checkGeneratedBorders(bytes, sheetPaths) {
     await upload(baseline.bytes, '基准2026.10.16更新版.xlsx');
     await upload(current.bytes, '格式2026.10.23更新版.xlsx');
     assert.equal(await page.locator('#preview thead th').nth(4).innerText(), '下单月份');
+    assert.equal(await page.locator('#preview thead th').nth(5).innerText(), '采购订单号');
+    assert.equal(await page.locator('#preview thead th').nth(6).innerText(), 'OA流程号');
+    assert.deepEqual(await page.locator('#preview tbody tr td:nth-child(6)').allTextContents(), current.expected.map(r => r.采购订单号));
     assert.deepEqual(await page.locator('#preview tbody tr td:nth-child(5)').allTextContents(), current.expected.map(r => r.month));
     for (const field of quantities) {
       const column = C.SUMMARY_COLUMNS.indexOf(field) + 1;
@@ -247,6 +252,6 @@ async function checkGeneratedBorders(bytes, sheetPaths) {
     await page.screenshot({ path: path.join(out, 'preview.png'), fullPage: true });
     assert.deepEqual(errors, []);
     checkSourceSheets(current.bytes, restored.book, current.expected);
-    console.log(JSON.stringify({ status: 'PASS', url, rows: current.expected.length, summaryColumns: 22, downloads: 4, monthDates: 'passed', quantityFormats: 'passed', sourceFormatting: 'passed', sourceLayout: 'unchanged', seriesComparison: 'unchanged', differencePreview: 'preserved', previousSnapshot: 'unchanged', output: out }));
+    console.log(JSON.stringify({ status: 'PASS', url, rows: current.expected.length, summaryColumns: 23, downloads: 4, monthDates: 'passed', quantityFormats: 'passed', sourceFormatting: 'passed', sourceLayout: 'unchanged', seriesComparison: 'unchanged', differencePreview: 'preserved', previousSnapshot: 'unchanged', output: out }));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

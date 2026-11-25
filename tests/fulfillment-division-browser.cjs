@@ -4,7 +4,7 @@ const divisions=['海外事业一部','海外事业二部','国内事业部','�
 function fixture(departments){
  const book=X.utils.book_new();
  for(const name of [...C.SHEETS,'孙立柱']){
-  const rows=name==='徐英'?departments.map((d,i)=>C.COLUMNS.map(k=>({'事业部':d,'物料编码':'M'+i,'未交付数量':i,'下单日期':'2024年1月12日','下单月份':'2026年10月23日','合同约定交期':'10月陆续交货','OA备货单号':'OA'+i})[k]??'')):name==='孙立柱'?[C.COLUMNS.map(k=>({'事业部':divisions[0],'物料编码':'EXCLUDED','未交付数量':99})[k]??'')]:[];
+  const rows=name==='徐英'?departments.map((d,i)=>C.COLUMNS.map(k=>({'事业部':d,'物料编码':'M'+i,'未交付数量':i,'下单日期':'2024年1月12日','下单月份':'2026年10月23日','合同约定交期':'10月陆续交货','OA备货单号':'OA'+i,'采购订单号':'000-ORDER-'+i})[k]??'')):name==='孙立柱'?[C.COLUMNS.map(k=>({'事业部':divisions[0],'物料编码':'EXCLUDED','未交付数量':99})[k]??'')]:[];
   X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([C.COLUMNS,...rows]),name);
  }
  return Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
@@ -26,17 +26,19 @@ function fixture(departments){
    const w=X.read(await fs.readFile(await dl.path()),{type:'buffer',cellNF:true,cellStyles:true});
    assert.deepEqual(w.SheetNames,['汇总表']);
    const rows=X.utils.sheet_to_json(w.Sheets.汇总表,{header:1,defval:''});
-   assert.deepEqual(rows[0],C.SUMMARY_COLUMNS);assert.equal(rows[0][4],'下单月份');assert.equal(rows[0].length,22);
-   assert.deepEqual(rows.slice(1).map(r=>r[9]),departments.flatMap((name,i)=>name===d?['M'+i]:[]));
+   assert.deepEqual(rows[0],C.SUMMARY_COLUMNS);assert.equal(rows[0][4],'下单月份');assert.equal(rows[0].length,23);
+   assert.deepEqual(rows.slice(1).map(r=>r[10]),departments.flatMap((name,i)=>name===d?['M'+i]:[]));
+   assert.equal(rows[0][5],'采购订单号');assert.equal(rows[0][6],'OA流程号');
+   assert.deepEqual(rows.slice(1).map(r=>r[5]),departments.flatMap((name,i)=>name===d?['000-ORDER-'+i]:[]));
    assert(rows.slice(1).every(r=>r[1]===d && r[0]==='徐英'));assert.equal(w.Sheets.汇总表.E2.t,'s');assert.equal(w.Sheets.汇总表.E2.z,'@');assert.equal(w.Sheets.汇总表.E2.v,'2026年10月');
    for(let r=1;r<rows.length;r++)for(const [c,field]of C.SUMMARY_COLUMNS.entries()){
     const cell=w.Sheets.汇总表[X.utils.encode_cell({r,c})];
     if(C.QUANTITY_FIELDS.includes(field)){if(cell?.v!==''){assert.equal(cell.t,'n');assert.equal(cell.z,'0');}}
     else{assert.equal(cell.t,'s');assert.equal(cell.z,'@');}
    }
-   const delivery=w.Sheets.汇总表.S2;assert.equal(delivery.v,'2026年10月31日');assert.equal(delivery.t,'s');assert.equal(delivery.z,'@');
+   const delivery=w.Sheets.汇总表.T2;assert.equal(delivery.v,'2026年10月31日');assert.equal(delivery.t,'s');assert.equal(delivery.z,'@');
    assert.equal(w.Sheets.汇总表.A1.s.fgColor.rgb,'315B9D');
-   if(d===divisions[0])assert.equal(rows[1][12],0);
+   if(d===divisions[0])assert.equal(rows[1][13],0);
   }
   const full=page.waitForEvent('download');await page.locator('#download').click();const w=X.read(await fs.readFile(await(await full).path()),{type:'buffer',cellNF:true});
   assert.deepEqual(w.SheetNames,['汇总表','合并核对','系列对比',...C.SHEETS,'孙立柱']);

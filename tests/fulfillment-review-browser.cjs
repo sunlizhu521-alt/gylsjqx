@@ -61,7 +61,7 @@ function fixture({delta = 0, badQuantity = false, badFormula = false, placeholde
     await upload(fixture());
     assert.equal(await tool().locator('#download').isDisabled(), false);
     assert.equal(await tool().locator('#download-review').count(), 0);
-    assert.equal(await tool().locator('#preview thead th').count(), 22);
+    assert.equal(await tool().locator('#preview thead th').count(), 23);
     const owners = names.flatMap(name => [name, name]);
     assert.deepEqual(await tool().locator('#preview tbody tr td:first-child').allTextContents(), owners);
     const before = await history();
@@ -155,6 +155,6 @@ function fixture({delta = 0, badQuantity = false, badFormula = false, placeholde
     const boundarySummary = X.utils.sheet_to_json(boundary.book.Sheets.汇总表);
     for (const [code, month] of [['00000', '-'], ['00011', ' - '], ['00020', ' - ']]) assert.equal(boundarySummary.find(row => row.物料编码 === code).下单月份, month);
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({status: 'PASS', url: page.url(), summaryColumns: 22, quantityChecks: 30, downloads: 'full + 3 divisions', review: 'full workbook and page preview retained; standalone download removed', placeholderMonth: 'omitted from review; source and summary preserved; other checks retained', sourcePreserved: true, cache: 'rebuilt without advancing baseline', blockedQuantityAndFormula: true, output: out}));
+    console.log(JSON.stringify({status: 'PASS', url: page.url(), summaryColumns: 23, quantityChecks: 30, downloads: 'full + 3 divisions', review: 'full workbook and page preview retained; standalone download removed', placeholderMonth: 'omitted from review; source and summary preserved; other checks retained', sourcePreserved: true, cache: 'rebuilt without advancing baseline', blockedQuantityAndFormula: true, output: out}));
   } finally {await browser.close();}
 })().catch(error => {console.error(error); process.exitCode = 1;});
