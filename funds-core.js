@@ -7,7 +7,8 @@ const SUPPLEMENT_HEADERS=['对公付款0A流程号','付款主体','单据号【
 const NORMAL_HIDDEN_HEADERS=['OA合同编号','合同总金额','是否对账'];
 const REVIEW_HEADERS=['付款类别','供应商名称','付款主体','申请付款金额','是否提交付款申请单','核对说明','来源文件','来源工作表','来源行号','跟单员'];
 const PROGRESS_HEADERS=['申请日期','付款来源','跟单员','供应商名称','付款主体','对公付款OA号','申请付款金额','应付时间','当前节点','未操作者','流程状态','申请人','是否已付款'];
-const OUTPUT_SHEETS=['谈判付款','正常付款','付款申请核对','付款进度整理','总额校验核对'];
+const NEGOTIATED_SUMMARY_HEADERS=['分类','创跟单员','供应商','付款主体','对公付款0A流程号','摘要','OA-申请付款金额','付款日期','申请纸质单日期'];
+const OUTPUT_SHEETS=['谈判付款','谈判付款付款表付款节奏','正常付款','付款申请核对','付款进度整理','总额校验核对'];
 const TOTAL_VALIDATION_HEADERS=FundsTotalValidation.HEADERS;
 function outputSheetPlan(names,selected){
  if(!names.includes(selected))throw Error('未找到选中的谈判付款工作表');
@@ -268,7 +269,7 @@ const value=(r,k)=>r.values[k]?.v;
 const oas=r=>codes(value(r,'对公付款0A流程号'));
 const hasPaymentOA=r=>r.values['对公付款0A流程号']?.t!=='e'&&norm(value(r,'对公付款0A流程号'))!=='';
 const recordLabel=r=>`${r.source.file} / ${r.source.sheet} 第 ${r.source.row} 行；${str(value(r,'供应商名称'))}；${str(value(r,'付款主体'))}；申请 ${str(value(r,'申请付款金额'))}；${str(value(r,'对公付款0A流程号')||value(r,'OA合同编号'))}；${str(value(r,'摘要'))}；财务单 ${str(value(r,'单据号【财务应付单】')||value(r,'备注'))}；合同 ${str(value(r,'OA合同编号'))}`+(r.values['流程编码']?'；流程编码 '+str(value(r,'流程编码')):'');
-function negotiatedSheets(book){return (book?.SheetNames||[]).filter(n=>n.includes('谈判付款'));}
+function negotiatedSheets(book){return (book?.SheetNames||[]).filter(n=>n.includes('谈判付款')&&!OUTPUT_SHEETS.slice(1).includes(n));}
 // Reconcile original records independently of application status and later OA supplementation.
 function ledgerAmountAudit(negotiated,ledgerTables,targets){
  const invalid=c=>c?.t==='e'||c?.f&&(c.t==='z'||c.v==null||c.v==='');
@@ -1138,7 +1139,61 @@ function build(inputs,decisions={}){
   if(notes.length&&!isReapplication(application)){const source=application.source;reviewRows.push([cell(type||'待核对'),values['供应商名称'],values['付款主体'],values['申请付款金额'],cell('已提交'),cell('付款进度核对：'+(sourceText(reference)||'OA号空白')+'。\n'+[...new Set(notes.map(note=>note.replace(/[。；\s]+$/u,'')))].join('。\n')+'。'),cell(source.file),cell(source.sheet),cell(source.row),values['跟单员']]);}
   return PROGRESS_HEADERS.map(h=>values[h]);
  });
- return {totalValidation:FundsTotalValidation.build(negotiated,money),progressHeaders:[...PROGRESS_HEADERS],progressRows,progressEvidence,normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,batchComments,applicationBatchMatches,highlights:{negotiatedCells:[...highlightedNegotiated],negotiatedPaidCells:[...highlightedPaid],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,headerTopRow:negotiated.headerTopRow,headerBands,sourceRange:negotiated.range,batchLayout,batchPlans,batchYearAdjustments,headers:negHeaders,rows,updates,columnOrder,managedColumns},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
+ // Summary-only fields stay outside the managed source columns.
+ const summaryColumns=names=>negotiated.headers.flatMap((h,c)=>names.includes(norm(h))?[c]:[]);
+ const classificationColumns=summaryColumns(['是否谈判分批']),ownerColumns=summaryColumns(['创跟单员','跟单员','采购跟单员']);
+ if(negotiated.records.length&&classificationColumns.length!==1)issue('summary-classification-header:'+selected,'missing-header',(classificationColumns.length?'存在多个':'缺少')+'“是否谈判分批”列，新汇总表分类留空；请核实来源分类后重新上传，或确认保留空白。',headerRecord(negotiated),[{value:'keep',label:'新汇总表分类留空，保留全部记录'}]);
+ if(negotiated.records.length&&ownerColumns.length>1)issue('summary-owner-header:'+selected,'duplicate-header','跟单员存在多个别名列，新汇总表“创跟单员”留空，请核实唯一来源。',headerRecord(negotiated));
+ const summaryInvalid=c=>c?.t==='e'||c?.f&&(c.t==='z'||c.v==null||c.v==='');
+ const summaryYears=new Map();
+ for(let c=0;c<negotiated.headers.length;c++){
+  const header=negotiated.sheet[X.utils.encode_cell({r:negotiated.headerRow,c})],parts=FundsTotalValidation.monthHeader(header)||FundsTotalValidation.headerDate(header,negotiated.date1904);
+  if(parts){if(!summaryYears.has(parts.month))summaryYears.set(parts.month,new Set());summaryYears.get(parts.month).add(parts.year);}
+ }
+ const dateListCell=dates=>dates.length===1?{...date(cell(dates[0]),false),z:'yyyy-mm-dd'}:{...cell(dates.join('\n')),z:'@'};
+ function summaryDates(target){
+  const paymentDates=[],paperDates=[],notes=[],r=target.record.r,detailColumn=negotiated.map['谈判明细'];
+  if(detailColumn!==undefined){
+   const address=X.utils.encode_cell({r,c:detailColumn}),source=negotiated.sheet[address];
+   if(summaryInvalid(source)||mergedAt(r,detailColumn))notes.push(address+'谈判明细公式结果不可用或属于合并范围，付款日期未提取');
+   else if(str(source?.v)){
+    const parsed=FundsTotalValidation.parseDetailLines(str(source.v),month=>summaryYears.get(month)||new Set(),money,address);
+    notes.push(...parsed.issues);
+    for(const payment of parsed.payments){
+     if(payment.day===null){notes.push(address+'谈判明细 '+payment.year+'年'+payment.month+'月 缺少具体日，未自动补为某一天');continue;}
+     paymentDates.push(payment.year+'-'+String(payment.month).padStart(2,'0')+'-'+String(payment.day).padStart(2,'0'));
+    }
+   }
+  }
+  for(const batch of batchPlansByRow.get(r)||[]){
+   const headAddress=X.utils.encode_cell({r:negotiated.headerRow,c:batch.c}),header=negotiated.sheet[headAddress],parsed=date(header,negotiated.date1904);
+   if(batch.amount===undefined||batch.merged||summaryInvalid(header)||parsed.invalid||parsed.v===''){notes.push(batch.address+'付款计划金额、合并范围或表头 '+headAddress+' 日期需核实，申请纸质单日期未提取');continue;}
+   // Use the original plan header, not a year chosen only for installment sorting.
+   paperDates.push(X.SSF.format('yyyy-mm-dd',parsed.v));
+  }
+  if(notes.length)issue('summary-dates:'+target.record.id,'summary-date','新汇总表日期需核实；仅列出可明确提取的日期：\n'+[...new Set(notes)].join('\n'),target.record,[{value:'keep',label:'保留已识别日期，其余留空'}]);
+  return [dateListCell(paymentDates),dateListCell(paperDates)];
+ }
+ const negotiatedSummaryRows=negotiatedObjects.map(target=>{
+  const read=c=>negotiated.sheet[X.utils.encode_cell({r:target.record.r,c})];
+  const flag=classificationColumns.length===1?read(classificationColumns[0]):null,kind=summaryInvalid(flag)?'':norm(flag?.v);
+  if(classificationColumns.length===1&&!['是','否'].includes(kind))issue('summary-classification:'+target.record.id,'classification','“是否谈判分批”为空或异常，新汇总表分类留空；请核实本行，不能自动判为正常付款。',target.record,[{value:'keep',label:'新汇总表分类留空，保留本条记录'}]);
+  const fields=['跟单员','供应商名称','付款主体','对公付款0A流程号','摘要','申请付款金额'];
+  const values=fields.map(key=>{
+   const original=key==='跟单员'?(ownerColumns.length===1?read(ownerColumns[0]):null):target.values[key];
+   if(summaryInvalid(original)){
+    issue('summary-value:'+target.record.id+':'+key,'summary-value','“'+key+'”公式结果不可用，新汇总表保留错误提示；请重新计算并保存来源文件。',target.record);
+    return cell(original?.t==='e'?original.w||'源单元格错误':'公式结果不可用');
+   }
+   if(key==='申请付款金额'){
+    const amount=money(original);if(amount.cents!==undefined)return amountCell(amount.cents);
+    if(amount.invalid)issue('summary-value:'+target.record.id+':'+key,'summary-value','“申请付款金额”不是有效金额，新汇总表保留原文，不按零处理。',target.record);
+   }
+   return {t:'s',v:String(original?.v??''),z:'@'};
+  });
+  return [cell(kind==='是'?'谈判付款-谈判付款表':kind==='否'?'正常付款-谈判付款表':''),...values,...summaryDates(target)];
+ });
+ return {negotiatedSummaryHeaders:[...NEGOTIATED_SUMMARY_HEADERS],negotiatedSummaryRows,totalValidation:FundsTotalValidation.build(negotiated,money),progressHeaders:[...PROGRESS_HEADERS],progressRows,progressEvidence,normalHeaders:[...NORMAL_HEADERS],normalRows,reviewHeaders:[...REVIEW_HEADERS],reviewRows,applicationComments,batchComments,applicationBatchMatches,highlights:{negotiatedCells:[...highlightedNegotiated],negotiatedPaidCells:[...highlightedPaid],normalRows:[...highlightedNormal]},negotiated:{sheetName:selected,headerRow:negotiated.headerRow,headerTopRow:negotiated.headerTopRow,headerBands,sourceRange:negotiated.range,batchLayout,batchPlans,batchYearAdjustments,headers:negHeaders,rows,updates,columnOrder,managedColumns},issues,stats:{normalRows:normalRows.length,negotiatedRows:negotiated.records.length,ledgerRows:ledger.length,negotiatedLedgerRows,excludedNormalRows,unclassifiedLedgerRows:ledger.length-negotiatedLedgerRows-normalRows.length-excludedNormalRows,applications:applications.records.length,oaFlows:flows.size,oaConsistent,oaMatched,pending:issues.filter(i=>!i.resolved).length}};
 }
-return {PEOPLE,PROGRESS_HEADERS,OUTPUT_SHEETS,TOTAL_VALIDATION_HEADERS,outputSheetPlan,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText,applicationClass,parsePaymentDate};
+return {PEOPLE,PROGRESS_HEADERS,NEGOTIATED_SUMMARY_HEADERS,OUTPUT_SHEETS,TOTAL_VALIDATION_HEADERS,outputSheetPlan,NORMAL_HEADERS,NORMAL_HIDDEN_HEADERS,ADDED_HEADERS,FLOW_FIELDS,DATE_FORMAT,negotiatedSheets,build,money,formatReviewText,applicationClass,parsePaymentDate};
 });

@@ -2,7 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=r
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const X=require('../vendor/xlsx.full.min.js'),{fixtures}=require('./funds-fixtures.cjs');
 const MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',TITLE='付款节奏跟进';
-const SHEETS=['谈判付款','正常付款','付款申请核对','付款进度整理','总额校验核对','辅助说明','谈判付款-反馈'];
+const SHEETS=['谈判付款','谈判付款付款表付款节奏','正常付款','付款申请核对','付款进度整理','总额校验核对','辅助说明','谈判付款-反馈'];
 const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
 (async()=>{
  const base=process.env.BASE_URL||process.env.QA_URL||'http://127.0.0.1:8899/',out=process.env.OUT_DIR||process.env.QA_OUT||'/private/tmp/funds-rename-browser';

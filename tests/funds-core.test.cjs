@@ -4,15 +4,15 @@ const legacyReviews=result=>result.reviewRows.filter(row=>!row[5].v.startsWith('
 // Application/OA assertions exclude independent highlighting and paid-sync reviews, covered separately.
 const applicationAndOAReviews=result=>legacyReviews(result).filter(row=>!/^申请标红核对：|^已付金额同步核对：|^台账金额差异核对：/.test(row[5].v));
 const LH=['月份','供应商名称','付款主体','对公付款0A流程号','开票时间','开票金额','摘要','申请付款金额','应付款时间','单据号【财务应付单】','OA合同编号','合同总金额','已付款金额','是否结清','剩余付款金额','是否谈判付款','是否提交付款申请单'];
-const NH=['供应商','付款主体','对公付款0A流程号','合同总金额','已付金额','摘要','申请付款金额','单据号【财务应付单】','创建人','是否结清','剩余付款金额','原备注','付款计划'];
+const NH=['供应商','付款主体','对公付款0A流程号','合同总金额','已付金额','摘要','申请付款金额','单据号【财务应付单】','是否谈判分批','是否结清','剩余付款金额','原备注','付款计划'];
 const AH=['申请日期','供应商全称','付款主体','合同号','合同金额','已付金额','付款事由','备注','本次申请付款金额'];
 const OH=['流程编号','当前节点','未操作者','流程状态','申请人','收款单位','付款金额'];
-test('export keeps original sheets after the five result sheets and updates existing results',()=>{
+test('export keeps original sheets after the six result sheets and updates existing results',()=>{
  const names=['辅助说明','11月谈判付款','正常付款','付款进度整理','付款申请核对','隐藏原表'];
  const before=names.slice(),plan=C.outputSheetPlan(names,'11月谈判付款');
  assert.deepEqual(plan.map(s=>s.name),[...C.OUTPUT_SHEETS,'辅助说明','隐藏原表']);
- assert.equal(plan[0].sourceName,'11月谈判付款');assert.equal(plan[1].sourceName,'正常付款');assert.deepEqual(names,before);
- assert.deepEqual(C.outputSheetPlan(['谈判付款'],'谈判付款').map(s=>s.sourceName),['谈判付款',null,null,null,null]);
+ assert.equal(plan[0].sourceName,'11月谈判付款');assert.equal(plan[2].sourceName,'正常付款');assert.deepEqual(names,before);
+ assert.deepEqual(C.outputSheetPlan(['谈判付款'],'谈判付款').map(s=>s.sourceName),['谈判付款',null,null,null,null,null]);
  const conflict=C.outputSheetPlan(['谈判付款','谈判付款（原表）','新谈判付款'],'新谈判付款');
  assert.deepEqual(conflict.map(s=>s.name),[...C.OUTPUT_SHEETS,'谈判付款（原表2）','谈判付款（原表）']);
  assert.throws(()=>C.outputSheetPlan(names,'不存在'),/未找到/);
@@ -36,7 +36,7 @@ function fixture(owner='李奇'){
  const main={'月份':'2026-10-01','供应商名称':'测试供应商甲','付款主体':'迈德斯特','对公付款0A流程号':'MDST-DGFK20261001001','开票时间':'2026-10-01','开票金额':100,'摘要':'九月货款','申请付款金额':100,'应付款时间':'2026-10-31','单据号【财务应付单】':'AP000001','OA合同编号':'MDST-HT20260101','合同总金额':1000,'已付款金额':20,'是否结清':'否','剩余付款金额':80,'是否谈判付款':'是','是否提交付款申请单':''};
  const normal={...main,'供应商名称':'测试供应商乙','对公付款0A流程号':'MDST-DGFK20261001002','单据号【财务应付单】':'AP000002','OA合同编号':'MDST-HT20260102','是否谈判付款':'否','已付款金额':100,'是否结清':'是','剩余付款金额':0};
  const ledger=book('对账明细-'+owner,LH,[main,normal]);for(const person of C.PEOPLE.filter(name=>name!==owner))X.utils.book_append_sheet(ledger,X.utils.aoa_to_sheet([LH]),'对账明细-'+person);
- const n={'供应商':'测试供应商甲','付款主体':'迈德斯特','对公付款0A流程号':main['对公付款0A流程号'],'合同总金额':1000,'已付金额':0,'摘要':'九月货款','申请付款金额':100,'单据号【财务应付单】':'AP000001','创建人':'李奇','是否结清':'否','剩余付款金额':100,'原备注':'保留备注','付款计划':100};
+ const n={'供应商':'测试供应商甲','付款主体':'迈德斯特','对公付款0A流程号':main['对公付款0A流程号'],'合同总金额':1000,'已付金额':0,'摘要':'九月货款','申请付款金额':100,'单据号【财务应付单】':'AP000001','是否谈判分批':'是','是否结清':'否','剩余付款金额':100,'原备注':'保留备注','付款计划':100};
  const negotiated=book('10月谈判付款主表',NH,[n]);negotiated.Sheets[negotiated.SheetNames[0]].M2={t:'n',v:100,f:'G2'};
  const appRows=[main,normal].map(r=>({'申请日期':'2026-10-10','供应商全称':r['供应商名称'],'付款主体':r['付款主体'],'合同号':r['对公付款0A流程号'],'合同金额':r['合同总金额'],'已付金额':0,'付款事由':r['摘要'],'备注':r['单据号【财务应付单】'],'本次申请付款金额':r['申请付款金额']}));
  const oaRows=[main,normal].map(r=>({'流程编号':r['对公付款0A流程号'],'当前节点':'财务审核','未操作者':'测试人员','流程状态':'未归档','申请人':'李奇','收款单位':r['供应商名称'],'付款金额':r['申请付款金额']}));

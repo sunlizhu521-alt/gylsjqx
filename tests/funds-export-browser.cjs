@@ -23,14 +23,42 @@ const {REVIEW_HEADERS}=require('./funds-fixtures.cjs');
   for(const cell of matrixBorders)assert.equal(cell.bordered,!cell.ref.startsWith('D')&&!cell.ref.endsWith('3'),cell.ref+'：有内容的行列交叉区保留边框，整空行列无边框');
   const matrixBook=X.read(matrixBytes);assert.equal(matrixBook.Sheets.正常付款.B2.v,0);assert.equal(matrixBook.Sheets.正常付款.E2.v,false);assert.equal(matrixBook.Sheets.正常付款.C2.v,'');
   const output=await exportBytes(input,result),saved=X.read(output,{cellStyles:true,cellNF:true});
-  assert.deepEqual(saved.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理','总额校验核对','其他']);const s=saved.Sheets.谈判付款;
-  for(const sheet of saved.SheetNames.slice(0,4).map(name=>saved.Sheets[name])){assert.equal(sheet['!autofilter'].ref,sheet['!ref']);for(const row of sheet['!rows']||[])if(row){if(sheet===saved.Sheets.付款申请核对)assert(row.hpt>=30);else assert.equal(row.hpt,30);assert(!row.hidden);}assert(sheet['!cols'].every(c=>c.width>=12&&c.width<=80));}
+  assert.deepEqual(saved.SheetNames,['谈判付款','谈判付款付款表付款节奏','正常付款','付款申请核对','付款进度整理','总额校验核对','其他']);const s=saved.Sheets.谈判付款;
+  for(const sheet of ['谈判付款','正常付款','付款申请核对','付款进度整理'].map(name=>saved.Sheets[name])){assert.equal(sheet['!autofilter'].ref,sheet['!ref']);for(const row of sheet['!rows']||[])if(row){if(sheet===saved.Sheets.付款申请核对)assert(row.hpt>=30);else assert.equal(row.hpt,30);assert(!row.hidden);}assert(sheet['!cols'].every(c=>c.width>=12&&c.width<=80));}
   assert.equal(s.C2.v,40);assert.equal(s.D2.v,60);assert.equal(s.E2.v,60);assert.equal(s.D5.v,510);assert.equal(s.D5.f,'SUM(D2:D4)');assert.deepEqual(s['!merges'],source['!merges']);assert.equal(s['!rows'][1].hpt,30);assert.equal(s.E3.v,'合并备注');assert.equal(saved.Sheets.正常付款.A2.t,'s');assert.equal(saved.Sheets.正常付款.A2.v,'2026年10月');assert.equal(saved.Sheets.正常付款.A2.z,'@');assert.equal(saved.Sheets.正常付款.E2.v,10);
   assert.equal(saved.Sheets.正常付款['!autofilter'].ref,'A1:E2');assert.equal(saved.Sheets.正常付款.A1.s.fgColor.rgb,'315B9D');
-  for(const sheet of saved.SheetNames.slice(0,4).map(name=>saved.Sheets[name]))for(const address of Object.keys(sheet).filter(a=>/^[A-Z]+1$/.test(a)))assert.equal(sheet[address].s.fgColor.rgb,'315B9D','所有原有及新增表头统一底色');
+  for(const sheet of ['谈判付款','正常付款','付款申请核对','付款进度整理'].map(name=>saved.Sheets[name]))for(const address of Object.keys(sheet).filter(a=>/^[A-Z]+1$/.test(a)))assert.equal(sheet[address].s.fgColor.rgb,'315B9D','所有原有及新增表头统一底色');
   const review=saved.Sheets.付款申请核对;assert.deepEqual(X.utils.sheet_to_json(review,{header:1})[0],REVIEW_HEADERS);assert.equal(review.D2.v,12.34);assert.equal(review.D2.t,'n');assert.equal(review.D2.z,'#,##0.00');assert.equal(review.I2.v,2);assert.equal(review.G2.v,'资金台账.xlsx');assert.equal(review.J2.v,'李奇');assert.equal(review['!autofilter'].ref,'A1:J2');assert.deepEqual(review.A1.s,saved.Sheets.正常付款.A1.s);assert.deepEqual(review.A2.s,saved.Sheets.正常付款.B2.s);
-  const parts=await page.evaluate(async bytes=>{const z=await JSZip.loadAsync(new Uint8Array(bytes));return {files:Object.keys(z.files),nativeXml:await z.file('xl/worksheets/sheet1.xml').async('string'),xml:await z.file('xl/worksheets/funds-normal.xml').async('string'),reviewXml:await z.file('xl/worksheets/funds-review.xml').async('string'),app:await z.file('docProps/app.xml').async('string')};},[...output]);assert(parts.files.includes('xl/worksheets/sheet2.xml'));assert.doesNotMatch(parts.nativeXml,/<(?:\w+:)?filterColumn\b/);assert.match(parts.nativeXml,/defaultRowHeight="30"/);assert(!parts.files.some(p=>p.startsWith('xl/tables/')));assert.match(parts.xml,/state="frozen"/);assert.match(parts.reviewXml,/state="frozen"/);assert.match(parts.app,/付款申请核对/);assert.match(parts.app,/<(?:\w+:)?i4>6<\//);
-  const again=await exportBytes(output,{...result,reviewRows:[],negotiated:{...result.negotiated,sheetName:'谈判付款'}}),againBook=X.read(again);assert.deepEqual(againBook.SheetNames,['谈判付款','正常付款','付款申请核对','付款进度整理','总额校验核对','其他']);assert.deepEqual(X.utils.sheet_to_json(againBook.Sheets.付款申请核对,{header:1}),[REVIEW_HEADERS]);assert.equal(againBook.Sheets.付款申请核对['!autofilter'].ref,'A1:J1');
+  const parts=await page.evaluate(async bytes=>{const z=await JSZip.loadAsync(new Uint8Array(bytes));return {files:Object.keys(z.files),nativeXml:await z.file('xl/worksheets/sheet1.xml').async('string'),xml:await z.file('xl/worksheets/funds-normal.xml').async('string'),reviewXml:await z.file('xl/worksheets/funds-review.xml').async('string'),app:await z.file('docProps/app.xml').async('string')};},[...output]);assert(parts.files.includes('xl/worksheets/sheet2.xml'));assert.doesNotMatch(parts.nativeXml,/<(?:\w+:)?filterColumn\b/);assert.match(parts.nativeXml,/defaultRowHeight="30"/);assert(!parts.files.some(p=>p.startsWith('xl/tables/')));assert.match(parts.xml,/state="frozen"/);assert.match(parts.reviewXml,/state="frozen"/);assert.match(parts.app,/付款申请核对/);assert.match(parts.app,/<(?:\w+:)?i4>7<\//);
+  const again=await exportBytes(output,{...result,reviewRows:[],negotiated:{...result.negotiated,sheetName:'谈判付款'}}),againBook=X.read(again);assert.deepEqual(againBook.SheetNames,['谈判付款','谈判付款付款表付款节奏','正常付款','付款申请核对','付款进度整理','总额校验核对','其他']);assert.deepEqual(X.utils.sheet_to_json(againBook.Sheets.付款申请核对,{header:1}),[REVIEW_HEADERS]);assert.equal(againBook.Sheets.付款申请核对['!autofilter'].ref,'A1:J1');
+  const summaryName='谈判付款付款表付款节奏',summaryHeaders=['分类','创跟单员','供应商','付款主体','对公付款0A流程号','摘要','OA-申请付款金额','付款日期','申请纸质单日期'];
+  assert.deepEqual(X.utils.sheet_to_json(saved.Sheets[summaryName],{header:1}),[summaryHeaders],'旧手构结果缺少新字段时仍生成九列表头');
+  const summaryValues=[
+   ['谈判付款','李奇','测试供应商','迈德斯特','MDST-DGFK20261001001','第一笔\n保留摘要',12.34,'2026-11-02\n2026-12-01','2026-10-26\n2026-11-23'],
+   ['谈判付款','李奇','测试供应商','迈德斯特','MDST-DGFK20261001001','第一笔\n保留摘要',12.34,'2026-11-02\n2026-12-01','2026-10-26\n2026-11-23'],
+   ['正常付款','','零值供应商','','未提交OA','',0,'',''],
+   ['','','空白金额供应商','','','','','','']
+  ],summaryRows=summaryValues.map(row=>row.map((v,c)=>({t:typeof v==='number'?'n':'s',v,...(c===6&&typeof v==='number'?{z:'#,##0.00'}:{})})));
+  summaryRows[0][6].f='C99';
+  const summaryResult={...result,negotiatedSummaryHeaders:summaryHeaders,negotiatedSummaryRows:summaryRows},summaryBefore=JSON.stringify(summaryResult);
+  const summaryOutput=await exportBytes(input,summaryResult),summaryBook=X.read(summaryOutput,{cellStyles:true,cellNF:true}),summary=summaryBook.Sheets[summaryName];
+  assert.deepEqual(summaryBook.SheetNames,saved.SheetNames);assert.deepEqual(X.utils.sheet_to_json(summary,{header:1}),[summaryHeaders,...summaryValues]);
+  assert.equal(summary.G2.t,'n');assert.equal(summary.G2.z,'#,##0.00');assert.equal(summary.G2.f,undefined,'原表公式不搬到新表坐标');assert.equal(summary.G4.v,0);assert.equal(summary.G5.v,'');assert.equal(summary['!autofilter'].ref,'A1:I5');
+  assert.equal(summary.A1.s.fgColor.rgb,'315B9D');assert(summary['!rows'][1].hpt>30,'多日期分行显示时行高容纳全部内容');assert(summary['!cols'].every(c=>c.width>=12));assert.equal(JSON.stringify(summaryResult),summaryBefore);
+  const summaryFormat=await page.evaluate(async bytes=>{
+   const zip=await JSZip.loadAsync(Uint8Array.from(bytes)),parse=x=>new DOMParser().parseFromString(x,'application/xml'),all=(d,n)=>[...d.getElementsByTagNameNS('*',n)],doc=parse(await zip.file('xl/worksheets/funds-negotiatedsummary.xml').async('string')),styles=parse(await zip.file('xl/styles.xml').async('string')),xfs=all(styles,'cellXfs')[0],cell=all(doc,'c').find(c=>c.getAttribute('r')==='I2'),alignment=all(xfs.children[Number(cell.getAttribute('s'))],'alignment')[0];
+   return {frozen:all(doc,'pane')[0].getAttribute('state'),wrap:alignment.getAttribute('wrapText'),horizontal:alignment.getAttribute('horizontal'),formulas:all(doc,'f').length};
+  },[...summaryOutput]);assert.deepEqual(summaryFormat,{frozen:'frozen',wrap:'1',horizontal:'center',formulas:0});
+  const summaryAgain=await exportBytes(summaryOutput,{...summaryResult,negotiatedSummaryRows:[summaryRows[2]],negotiated:{...result.negotiated,sheetName:'谈判付款'}}),summaryAgainBook=X.read(summaryAgain,{cellNF:true});
+  assert.deepEqual(summaryAgainBook.SheetNames,saved.SheetNames);assert.deepEqual(X.utils.sheet_to_json(summaryAgainBook.Sheets[summaryName],{header:1}),[summaryHeaders,summaryValues[2]]);assert.equal(summaryAgainBook.Sheets[summaryName]['!autofilter'].ref,'A1:I2');
+  assert.equal(summaryAgainBook.Sheets.谈判付款.D5.f,'SUM(D2:D4)');assert.equal(summaryAgainBook.Sheets.其他.A1.v,'必须保留');
+  for(const date1904 of [false,true]){
+   const dateBook=X.read(input,{cellNF:true});dateBook.Workbook.WBProps.date1904=date1904;
+   const dateRows=[summaryRows[2].map(cell=>({...cell}))],serial=(Date.UTC(2026,10,2)-Date.UTC(1899,11,30))/86400000;
+   dateRows[0][7]={t:'n',v:serial,z:'yyyy-mm-dd'};dateRows[0][8]={t:'n',v:serial-7,z:'yyyy-mm-dd'};
+   const dated=X.read(await exportBytes(Buffer.from(X.write(dateBook,{type:'buffer',bookType:'xlsx'})),{...summaryResult,negotiatedSummaryRows:dateRows}),{cellNF:true}),dateSummary=dated.Sheets[summaryName];
+   for(const [address,offset,label]of [['H2',0,'2026-11-02'],['I2',7,'2026-10-26']]){assert.equal(dateSummary[address].t,'n','单日期保留原生日期');assert.equal(dateSummary[address].z,'yyyy-mm-dd');assert.equal(dateSummary[address].v,serial-offset-(date1904?1462:0));assert.equal(X.SSF.format('yyyy-mm-dd',dateSummary[address].v,{date1904}),label);}
+  }
   const submissionHeaders=['供应商','申请付款金额','已付金额','剩余付款金额','付款计划','提交付款申请单日期','提交时间汇总'];
   const withSummary=await exportBytes(output,{...result,negotiated:{sheetName:'谈判付款',headerRow:0,headers:submissionHeaders,updates:[{address:'G1',cell:{t:'s',v:'提交时间汇总'}},{address:'G2',cell:{t:'s',v:'2026-10-01-10.00'}}]}});
   // Simulate a reused workbook with its own unwrapped style and manually increased row height.
@@ -88,7 +116,7 @@ const {REVIEW_HEADERS}=require('./funds-fixtures.cjs');
   const blankBorders=await page.evaluate(async bytes=>{const zip=await JSZip.loadAsync(new Uint8Array(bytes)),parse=x=>new DOMParser().parseFromString(x,'application/xml'),all=(d,n)=>[...d.getElementsByTagNameNS('*',n)],doc=parse(await zip.file('xl/worksheets/sheet1.xml').async('string')),styles=parse(await zip.file('xl/styles.xml').async('string')),cells=new Map(all(doc,'c').map(c=>[c.getAttribute('r'),c])),xfs=all(styles,'cellXfs')[0],borders=all(styles,'borders')[0];return ['E5','F3','F4','F5','G4','G5'].map(ref=>{const c=cells.get(ref),border=c&&borders.children[Number(xfs.children[Number(c.getAttribute('s')||0)].getAttribute('borderId')||0)];return {ref,empty:c&&!all(c,'v').length&&!all(c,'t').length,bordered:!!border&&['left','right','top','bottom'].every(edge=>!!all(border,edge)[0]?.getAttribute('style'))};});},[...flowOutput]);assert(blankBorders.every(c=>c.empty&&c.bordered),JSON.stringify(blankBorders));
   const longHeader='完整显示且不得换行的自适应表头'.repeat(4),wideResult={...result,progressHeaders:[longHeader,'短标题'],progressRows:[],normalHeaders:[longHeader,'短标题'],normalRows:[[{t:'s',v:'短内容'},{t:'s',v:'短'}]],reviewHeaders:[longHeader,'短标题'],reviewRows:[],negotiated:{...result.negotiated,updates:[...result.negotiated.updates,{address:'A1',cell:{t:'s',v:longHeader}}]}};
   const wideOutput=await exportBytes(input,wideResult),wideBook=X.read(wideOutput,{cellStyles:true});
-  for(const sheet of wideBook.SheetNames.slice(0,4).map(name=>wideBook.Sheets[name])){assert(sheet['!cols'][0].width>80);assert(sheet['!cols'][0].width>sheet['!cols'][1].width);assert.equal(sheet.A1.v,longHeader);}
+  for(const sheet of ['谈判付款','正常付款','付款申请核对','付款进度整理'].map(name=>wideBook.Sheets[name])){assert(sheet['!cols'][0].width>80);assert(sheet['!cols'][0].width>sheet['!cols'][1].width);assert.equal(sheet.A1.v,longHeader);}
   const headerProblems=await page.evaluate(async bytes=>{
    const z=await JSZip.loadAsync(new Uint8Array(bytes)),parse=x=>new DOMParser().parseFromString(x,'application/xml'),all=(d,n)=>[...d.getElementsByTagNameNS('*',n)],styles=parse(await z.file('xl/styles.xml').async('string')),xfs=all(styles,'cellXfs')[0],problems=[];
    for(const path of ['xl/worksheets/sheet1.xml','xl/worksheets/funds-normal.xml','xl/worksheets/funds-review.xml'])for(const c of all(parse(await z.file(path).async('string')),'c').filter(c=>/^[A-Z]+1$/.test(c.getAttribute('r')))){const xf=xfs.children[Number(c.getAttribute('s')||0)];if(all(xf,'alignment')[0]?.getAttribute('wrapText')!=='0')problems.push(path+':'+c.getAttribute('r'));}
@@ -107,20 +135,20 @@ const {REVIEW_HEADERS}=require('./funds-fixtures.cjs');
   refs.A3={t:'s',v:'复用谈判付款!C2',f:'"复用谈判付款!C2"'};
   refs.A4={t:'n',v:20,f:"'[外部.xlsx]复用谈判付款'!C2"};refs.A5={t:'n',v:20,f:'[外部.xlsx]复用谈判付款!C2'};refs['!ref']='A1:D5';refs.A1.l={Target:"#'复用谈判付款'!C2"};
   X.utils.book_append_sheet(preserved,refs,'引用核对');
-  for(const name of ['正常付款','付款申请核对','付款进度整理'])X.utils.book_append_sheet(preserved,X.utils.aoa_to_sheet([['旧结果不可重复追加'],[999]]),name);
+  for(const name of ['谈判付款付款表付款节奏','正常付款','付款申请核对','付款进度整理'])X.utils.book_append_sheet(preserved,X.utils.aoa_to_sheet([['旧结果不可重复追加'],[999]]),name);
   preserved.Workbook={Sheets:preserved.SheetNames.map((_,i)=>({Hidden:i===0?1:0})),Names:[{Name:'辅助局部',Sheet:0,Ref:'$C$2'},{Name:'谈判局部',Sheet:2,Ref:'$C$2'},{Name:'跨表范围',Ref:"'复用谈判付款'!$C$2"}]};
   const preservedInput=Buffer.from(X.write(preserved,{type:'buffer',bookType:'xlsx'}));
   const preservedOutput=await exportBytes(preservedInput,moveResult),reopened=X.read(preservedOutput,{cellStyles:true,cellNF:true});
-  const preservedNames=['谈判付款','正常付款','付款申请核对','付款进度整理','总额校验核对','辅助说明','谈判付款（原表）','引用核对'];
+  const preservedNames=['谈判付款','谈判付款付款表付款节奏','正常付款','付款申请核对','付款进度整理','总额校验核对','辅助说明','谈判付款（原表）','引用核对'];
   assert.deepEqual(reopened.SheetNames,preservedNames);assert.equal(reopened.Sheets.谈判付款.D2.v,20);
   assert.equal(reopened.Sheets['谈判付款（原表）'].A2.v,99);assert.equal(reopened.Sheets.正常付款.C2.v,12.34);
-  assert.equal(reopened.Workbook.Sheets[5].Hidden,1);assert.equal(reopened.Sheets.辅助说明.A2.c[0].t,'原批注不能丢失');
+  assert.equal(reopened.Workbook.Sheets[6].Hidden,1);assert.equal(reopened.Sheets.辅助说明.A2.c[0].t,'原批注不能丢失');
   assert.equal(reopened.Sheets.辅助说明['!rows'][1].hpt,51);assert(reopened.Sheets.辅助说明['!rows'][1].hidden);assert(reopened.Sheets.辅助说明['!cols'][1].hidden);
   assert.deepEqual(reopened.Sheets.辅助说明['!merges'],aux['!merges']);assert.equal(reopened.Sheets.辅助说明.A3.f,'B1+0');
   assert.equal(reopened.Sheets.引用核对.A2.f,"'谈判付款'!D2+C2");assert.equal(reopened.Sheets.引用核对.B2.f,"'谈判付款（原表）'!A2");assert.equal(reopened.Sheets.引用核对.D2.f,"'正常付款'!C2");
   for(const address of ['A3','A4','A5'])assert.equal(reopened.Sheets.引用核对[address].f,refs[address].f);
   assert.equal(reopened.Sheets.引用核对.A1.l.Target,"#'谈判付款'!D2");
-  const names=reopened.Workbook.Names;assert.equal(names.find(n=>n.Name==='辅助局部').Sheet,5);assert.equal(names.find(n=>n.Name==='辅助局部').Ref,'$C$2');assert.equal(names.find(n=>n.Name==='谈判局部').Sheet,0);assert.equal(names.find(n=>n.Name==='谈判局部').Ref,'$D$2');assert.equal(names.find(n=>n.Name==='跨表范围').Ref,"'谈判付款'!$D$2");
+  const names=reopened.Workbook.Names;assert.equal(names.find(n=>n.Name==='辅助局部').Sheet,6);assert.equal(names.find(n=>n.Name==='辅助局部').Ref,'$C$2');assert.equal(names.find(n=>n.Name==='谈判局部').Sheet,0);assert.equal(names.find(n=>n.Name==='谈判局部').Ref,'$D$2');assert.equal(names.find(n=>n.Name==='跨表范围').Ref,"'谈判付款'!$D$2");
   const unchanged=await page.evaluate(async({before,after})=>{
     const a=await JSZip.loadAsync(new Uint8Array(before)),b=await JSZip.loadAsync(new Uint8Array(after));
     const paths=Object.keys(a.files).filter(p=>/^xl\/(?:worksheets\/(?:sheet[12]\.xml|_rels\/sheet1\.xml\.rels)|comments1\.xml|drawings\/vmlDrawing1\.vml)/.test(p)&&!a.files[p].dir);

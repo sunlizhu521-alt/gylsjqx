@@ -163,16 +163,20 @@ window.FundsExport = async function(sourceBytes, result) {
   };
   const date1904=['1','true'].includes(first(workbook,'workbookPr')?.getAttribute('date1904'));
   const textDateStyles=new Map();
-  const writeCell=(doc,address,cell,styleId,convertDates=false)=>{
-    // Store generated dates and schedule date labels as text, leaving monetary values numeric.
+  const writeCell=(doc,address,cell,styleId,convertDates=false,preserveDates=false)=>{
+    // Summary dates stay native; existing generated date fields keep their text format.
     if(typeof cell?.v==='number'&&cell.t!=='s'&&cell.z&&XLSX.SSF.is_date(cell.z)){
       if(!Number.isFinite(cell.v))throw Error('单元格 '+address+' 的日期不是有效数值');
-      const format=cell.z.replace(/"[^"]*"|\\.|[年月日时分秒]/g,part=>part.length===1?'"'+part+'"':part);
-      cell={t:'s',v:XLSX.SSF.format(format,cell.v,{date1904:convertDates?false:date1904}),z:'@'};
-      if(styleId!==undefined){
-        const key=String(styleId);
-        if(!textDateStyles.has(key)){const xf=xfs.children[Number(styleId)].cloneNode(true);xf.setAttribute('numFmtId','49');xf.setAttribute('applyNumberFormat','1');textDateStyles.set(key,append('cellXfs',xf));}
-        styleId=textDateStyles.get(key);
+      if(preserveDates){
+        if(convertDates&&date1904)cell={...cell,v:cell.v-1462};
+      }else{
+        const format=cell.z.replace(/"[^"]*"|\\.|[年月日时分秒]/g,part=>part.length===1?'"'+part+'"':part);
+        cell={t:'s',v:XLSX.SSF.format(format,cell.v,{date1904:convertDates?false:date1904}),z:'@'};
+        if(styleId!==undefined){
+          const key=String(styleId);
+          if(!textDateStyles.has(key)){const xf=xfs.children[Number(styleId)].cloneNode(true);xf.setAttribute('numFmtId','49');xf.setAttribute('applyNumberFormat','1');textDateStyles.set(key,append('cellXfs',xf));}
+          styleId=textDateStyles.get(key);
+        }
       }
     }
     const c=create(doc,'c',{r:address});if(styleId!==undefined)c.setAttribute('s',styleId);
@@ -220,7 +224,7 @@ window.FundsExport = async function(sourceBytes, result) {
     const xf=xfs.children[id].cloneNode(true);xf.setAttribute('numFmtId',formatId('yyyy"年"m"月"d"日"'));xf.setAttribute('applyNumberFormat','1');
     const next=append('cellXfs',xf);dateDisplayStyles.set(id,next);return next;
   };
-  const fitSheet=(doc,end,headerRow=0,review=false,progress=false)=>{
+  const fitSheet=(doc,end,headerRow=0,review=false,progress=false,multiline=false)=>{
     const scoped=c=>doc!==sheet||managedColumn(result.negotiated.columnOrder?.[c]??c);
     const batch=doc===sheet&&result.negotiated.batchLayout,detailColumn=batch?result.negotiated.headers.findIndex(h=>String(h).trim()==='谈判明细'):-1;
     const data=first(doc,'sheetData');let cols=first(doc,'cols');
@@ -304,7 +308,7 @@ window.FundsExport = async function(sourceBytes, result) {
         const detail=cells.get(XLSX.utils.encode_cell({r:Number(row.getAttribute('r'))-1,c:detailColumn}));
         if(detail){const xf=xfs.children[styleId(detail)],size=Number(first(fonts.children[Number(xf.getAttribute('fontId')||0)],'sz')?.getAttribute('val')||11),width=Math.max(1,widths[detailColumn]-3);const lines=cellText(detail).split(/\r?\n/).reduce((n,line)=>n+Math.max(1,Math.ceil([...line].reduce((w,ch)=>w+(/[\u0000-\u00ff]/.test(ch)?1:2),0)*size/11/width)),0);height=Math.max(height,lines*(size+5)+8);}
       }
-      if((review||progress)&&Number(row.getAttribute('r'))>headerRow+1)for(const c of elements(row,'c'))height=Math.max(height,reviewHeight(c));
+      if((review||progress||multiline)&&Number(row.getAttribute('r'))>headerRow+1)for(const c of elements(row,'c'))height=Math.max(height,reviewHeight(c));
       row.setAttribute('ht',Math.min(409.5,height));row.setAttribute('customHeight','1');row.removeAttribute('hidden');
     }
     }
@@ -585,19 +589,19 @@ window.FundsExport = async function(sourceBytes, result) {
   selected.removeAttribute('state');
   const outputEntries=new Map([['谈判付款',selected]]),outputPaths=new Set([sheetPath]);
   let nextSheetId=Math.max(...entries.map(e=>Number(e.getAttribute('sheetId'))),0)+1;
-  const generatedSheets=[['正常付款','Normal',result.normalHeaders,result.normalRows],['付款申请核对','Review',result.reviewHeaders,result.reviewRows],['付款进度整理','Progress',result.progressHeaders||FundsCore.PROGRESS_HEADERS,result.progressRows||[]],['总额校验核对','TotalValidation',result.totalValidation?.headers||FundsCore.TOTAL_VALIDATION_HEADERS,result.totalValidation?.rows||[]]];
+  const generatedSheets=[['谈判付款付款表付款节奏','NegotiatedSummary',result.negotiatedSummaryHeaders||FundsCore.NEGOTIATED_SUMMARY_HEADERS,result.negotiatedSummaryRows||[]],['正常付款','Normal',result.normalHeaders,result.normalRows],['付款申请核对','Review',result.reviewHeaders,result.reviewRows],['付款进度整理','Progress',result.progressHeaders||FundsCore.PROGRESS_HEADERS,result.progressRows||[]],['总额校验核对','TotalValidation',result.totalValidation?.headers||FundsCore.TOTAL_VALIDATION_HEADERS,result.totalValidation?.rows||[]]];
   for(const [name,key,headers,data] of generatedSheets){
     const generated=parseText(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="${S}"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews><cols/><sheetData/></worksheet>`);
     const generatedData=first(generated,'sheetData');
     const allRows=[headers.map(v=>({t:'s',v})),...data];
     for(const [r,values] of allRows.entries()){
       const row=create(generated,'row',{r:r+1});
-      for(let c=0;c<headers.length;c++){const original=values[c]||{t:'s',v:''},cell=key==='Review'&&r>0&&headers[c]==='核对说明'?{...original,v:FundsCore.formatReviewText(original.v)}:original;row.append(writeCell(generated,XLSX.utils.encode_cell({r,c}),cell,styleFor(cell.z||'',r===0,r>0&&(key==='Normal'&&appliedNormalRows.has(r+1)||key==='Progress'&&headers[c]==='是否已付款'&&cell.v==='已付款')),true));}
+      for(let c=0;c<headers.length;c++){const original=values[c]||{t:'s',v:''},cell=key==='Review'&&r>0&&headers[c]==='核对说明'?{...original,v:FundsCore.formatReviewText(original.v)}:key==='NegotiatedSummary'?{...original,f:undefined}:original;row.append(writeCell(generated,XLSX.utils.encode_cell({r,c}),cell,styleFor(cell.z||'',r===0,r>0&&(key==='Normal'&&appliedNormalRows.has(r+1)||key==='Progress'&&headers[c]==='是否已付款'&&cell.v==='已付款')),true,key==='NegotiatedSummary'));}
       generatedData.append(row);
     }
     const range=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:allRows.length-1,c:headers.length-1}});
     generated.documentElement.insertBefore(create(generated,'dimension',{ref:range}),generated.documentElement.firstChild);
-    fitSheet(generated,{r:allRows.length-1,c:headers.length-1},0,key==='Review'||key==='TotalValidation',key==='Progress');
+    fitSheet(generated,{r:allRows.length-1,c:headers.length-1},0,key==='Review'||key==='TotalValidation',key==='Progress',key==='NegotiatedSummary');
     if(key==='Normal'){
       for(const col of elements(generated,'col'))if(FundsCore.NORMAL_HIDDEN_HEADERS.includes(headers[Number(col.getAttribute('min'))-1]))col.setAttribute('hidden','1');
     }

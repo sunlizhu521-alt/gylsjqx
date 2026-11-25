@@ -64,8 +64,8 @@
     $('sourceVersion').textContent = '';
     for (const id of Object.keys(decisions)) delete decisions[id];
     for (const id of Object.keys(dateDrafts)) delete dateDrafts[id];
-    for (const id of ['results','negotiatedPreviewSection','normalPreviewSection','reviewPreviewSection','progressPreviewSection','totalValidationPreviewSection']) $(id).hidden = true;
-    for (const id of ['issueList','normalPreview','negotiatedPreview','reviewPreview','progressPreview','totalValidationPreview']) $(id).replaceChildren();
+    for (const id of ['results','negotiatedPreviewSection','negotiatedSummaryPreviewSection','normalPreviewSection','reviewPreviewSection','progressPreviewSection','totalValidationPreviewSection']) $(id).hidden = true;
+    for (const id of ['issueList','normalPreview','negotiatedPreview','negotiatedSummaryPreview','reviewPreview','progressPreview','totalValidationPreview']) $(id).replaceChildren();
     controls();
   }
   function valueText(cell, date1904=false) {
@@ -80,7 +80,7 @@
     const bands=id==='negotiatedPreview'?(result?.negotiated.headerBands||[]):[],lowerHead=bands.length?table.tHead.insertRow():null;
     if(lowerHead)table.classList.add('month-header-preview');
     const appliedRows = new Set(result?.highlights?.normalRows || []), appliedCells = new Set(result?.highlights?.negotiatedCells || []), paidCells = new Set(result?.highlights?.negotiatedPaidCells || []);
-    const singleLineHeaders=['流程编号','付款自然周','申请付款的日期',...(id==='progressPreview'?['对公付款OA号','申请日期','应付时间']:[]),...(id==='normalPreview'?['对公付款0A流程号','应付时间','预估时间','开票时间','OA合同编号']:[])];
+    const singleLineHeaders=['流程编号','付款自然周','申请付款的日期',...(id==='progressPreview'?['对公付款OA号','申请日期','应付时间']:[]),...(id==='normalPreview'?['对公付款0A流程号','应付时间','预估时间','开票时间','OA合同编号']:[]),...(id==='negotiatedSummaryPreview'?['对公付款0A流程号']:[])];
     const hiddenColumns=headers.map(title=>id==='normalPreview'&&FundsCore.NORMAL_HIDDEN_HEADERS.includes(title));
     const flowColumn=headers.map(title=>singleLineHeaders.includes(String(title).normalize('NFKC').replace(/\s+/g,'')));
     for (const [i,title] of headers.entries()) {
@@ -188,6 +188,8 @@
       $('stats').textContent = `谈判付款 ${result.stats.negotiatedRows} 条；正常付款 ${result.normalRows.length} 条；流程编号已填写 ${result.stats.oaMatched} 条；付款申请核对表 ${result.reviewRows.length} 条；付款进度 ${result.progressRows.length} 条；待处理 ${pending()} 项。`;
       $('classificationSummary').textContent = `资金台账 ${result.stats.ledgerRows} 条：${result.stats.negotiatedLedgerRows} 条“是否谈判付款”为“是”，${result.normalRows.length} 条“否或空白”纳入正常付款（含未提交OA），${result.stats.excludedNormalRows} 条 OA 字段异常暂未纳入，${result.stats.unclassifiedLedgerRows} 条分类缺失或异常待核对。`;
       showIssues();
+      const summaryHeaders=result.negotiatedSummaryHeaders||FundsCore.NEGOTIATED_SUMMARY_HEADERS,summaryRows=result.negotiatedSummaryRows||[];
+      preview('negotiatedSummaryPreview',summaryHeaders,summaryRows);
       preview('normalPreview',result.normalHeaders,result.normalRows);
       const order=result.negotiated.columnOrder,negotiatedHeaders=order.map(c=>result.negotiated.headers[c]);
       preview('negotiatedPreview',negotiatedHeaders,result.negotiated.rows.map(row=>order.map(c=>row[c])),Boolean(inputs.negotiated.book.Workbook?.WBProps?.date1904));
@@ -198,7 +200,7 @@
       $('totalValidationStats').textContent=`核对 ${totals.total} 条；已排除“不支付” ${totals.excludedNotPay} 条；一致 ${totals.consistent} 条；不一致 ${totals.inconsistent} 条；待核对 ${totals.unverified} 条。差异不自动修改原金额，也不单独阻止下载。`;
       $('totalValidationPreviewSection').hidden = false;
       $('progressPreviewSection').hidden = false;
-      $('negotiatedPreviewSection').hidden = false; $('normalPreviewSection').hidden = false; $('reviewPreviewSection').hidden = false;
+      $('negotiatedPreviewSection').hidden = false; $('negotiatedSummaryPreviewSection').hidden = false; $('normalPreviewSection').hidden = false; $('reviewPreviewSection').hidden = false;
       $('status').textContent = pending() ? `已完成整理，请处理下方 ${pending()} 项核对。` : '核对已完成，正在验证导出结果…';
       if (!pending()) {
         busy = true; controls();
@@ -212,6 +214,10 @@
         const saved = XLSX.read(bytes,{type:'array',cellNF:true});
         const expectedSheets=FundsCore.outputSheetPlan(inputs.negotiated.book.SheetNames,result.negotiated.sheetName).map(item=>item.name);
         if (saved.SheetNames.join('|') !== expectedSheets.join('|')) throw Error('导出工作表检查未通过，原工作表未完整保留');
+        const summary=saved.Sheets['谈判付款付款表付款节奏'],summaryRange=XLSX.utils.decode_range(summary['!ref']);
+        if(summaryRange.e.c!==summaryHeaders.length-1||summaryRange.e.r!==summaryRows.length||summaryHeaders.some((h,c)=>summary[XLSX.utils.encode_cell({r:0,c})]?.v!==h))throw Error('谈判付款付款表付款节奏表头或记录数量检查未通过');
+        const exportedSummaryRows=summaryRows.map((_,r)=>summaryHeaders.map((_,c)=>summary[XLSX.utils.encode_cell({r:r+1,c})]));
+        preview('negotiatedSummaryPreview',summaryHeaders,exportedSummaryRows,Boolean(saved.Workbook?.WBProps?.date1904));
         const progress=saved.Sheets['付款进度整理'],progressRange=XLSX.utils.decode_range(progress['!ref']);
         if(progressRange.e.c!==result.progressHeaders.length-1||result.progressHeaders.some((h,c)=>progress[XLSX.utils.encode_cell({r:0,c})]?.v!==h))throw Error('付款进度表头检查未通过');
         const progressRows=result.progressRows.map((_,r)=>result.progressHeaders.map((_,c)=>progress[XLSX.utils.encode_cell({r:r+1,c})]));
@@ -231,7 +237,7 @@
     } catch (e) {
       if (revision !== sourceRevision) return;
       result = null; $('results').hidden = true;
-      for (const id of ['normalPreviewSection','negotiatedPreviewSection','reviewPreviewSection','progressPreviewSection','totalValidationPreviewSection']) $(id).hidden = true;
+      for (const id of ['normalPreviewSection','negotiatedPreviewSection','negotiatedSummaryPreviewSection','reviewPreviewSection','progressPreviewSection','totalValidationPreviewSection']) $(id).hidden = true;
       $('status').textContent = (review?'核对失败：':'整理失败：') + e.message;
     } finally { busy = false; controls(); }
   }

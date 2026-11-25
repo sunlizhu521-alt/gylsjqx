@@ -6,10 +6,10 @@ const OA=['流程编号','收款单位','付款金额',...C.FLOW_FIELDS];
 const negCode='MDST-DGFK20261001001',normalCode='MDST-DGFK20261001002';
 function book(name,headers,rows){const b=X.utils.book_new();X.utils.book_append_sheet(b,X.utils.aoa_to_sheet([headers,...rows.map(row=>headers.map(h=>row[h]??''))]),name);return b;}
 function fixture(plans=[100],amounts=[100]){
- const base={'供应商名称':'谈判供应商','付款主体':'迈德斯特','对公付款0A流程号':negCode,'申请付款金额':100,'已付金额':0,'剩余付款金额':100,'是否结清':'否','是否提交付款申请单':'未提交','是否谈判付款':'是','应付款时间':'2026-10-31','开票时间':'2026-10-01','登记月份':'2026-10','谈判明细':'原文'};
+ const base={'供应商名称':'谈判供应商','付款主体':'迈德斯特','对公付款0A流程号':negCode,'申请付款金额':100,'已付金额':0,'剩余付款金额':100,'是否结清':'否','是否提交付款申请单':'未提交','是否谈判付款':'是','应付款时间':'2026-10-31','开票时间':'2026-10-01','登记月份':'2026-10','谈判明细':'2026年11月2日 - 100'};
  const normal={...base,'供应商名称':'正常供应商','对公付款0A流程号':normalCode,'申请付款金额':80,'剩余付款金额':80,'是否谈判付款':'否','是否提交付款申请单':'已提交'};
  const ledger=book('对账明细-李奇',LEDGER_HEADERS,[base,normal]);for(const p of C.PEOPLE.slice(1))X.utils.book_append_sheet(ledger,X.utils.aoa_to_sheet([LEDGER_HEADERS]),'对账明细-'+p);
- const dates=plans.map((_,i)=>'2026-11-'+String(i+2).padStart(2,'0')),negotiated=book('最新版谈判付款',NEG.concat(dates),[{...base,...Object.fromEntries(dates.map((d,i)=>[d,plans[i]]))}]);
+ const dates=plans.map((_,i)=>'2026-11-'+String(i+2).padStart(2,'0')),negotiated=book('最新版谈判付款',NEG.concat(dates,'是否谈判分批'),[{...base,'是否谈判分批':'是',...Object.fromEntries(dates.map((d,i)=>[d,plans[i]]))}]);
  const applications=book('申请汇总',APP,amounts.map((a,i)=>({'申请日期':'2026-10-'+(20+i),'供应商名称':'谈判供应商','付款主体':'迈德斯特','流程编码':negCode,'本次申请付款金额':a,'付款分类':'谈判付款'})).concat([{'申请日期':'2026-10-27','供应商名称':'正常供应商','付款主体':'迈德斯特','流程编码':normalCode,'本次申请付款金额':80,'付款分类':'正常付款'}]));
  const oa=book('Sheet0',OA,[base,normal].map(r=>({'流程编号':r['对公付款0A流程号'],'收款单位':r['供应商名称'],'付款金额':r['申请付款金额'],当前节点:'审批',未操作者:'人',流程状态:'处理中',申请人:'人'})));
  return {ledger:{book:ledger,name:'资金.xlsx'},negotiated:{book:negotiated,name:'谈判.xlsx'},applications:{book:applications,name:'申请.xlsx'},oa:{book:oa,name:'OA.xlsx'}};
@@ -76,7 +76,7 @@ test('分类隔离且原已提交状态不能触发红色，未申请不新增�
  const noApplications=fixture([100],[]);sheet(noApplications,'applications').E2={t:'n',v:79};assert.deepEqual(C.build(noApplications).highlights,{negotiatedCells:[],negotiatedPaidCells:[],normalRows:[]});
 });
 test('零、空、负、异常分批和无缓存公式不标红，不按申请日期选择批次',()=>{
- for(const value of [0,'',-1,'待定',{t:'e',v:23},{t:'n',f:'D2'},{t:'n',v:100.001}]){const i=fixture([value],[100]),r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,[]);assert.equal(reviews(r).length,1);assert.equal(r.stats.pending,0);assert.match(reviews(r)[0][5].v,/需要处理/);}
+ for(const value of [0,'',-1,'待定',{t:'e',v:23},{t:'n',f:'D2'},{t:'n',v:100.001}]){const i=fixture([value],[100]),r=C.build(i),invalidAmount=!!C.money(sheet(i,'negotiated').L2).invalid;assert.deepEqual(r.highlights.negotiatedCells,[]);assert.equal(reviews(r).length,1);assert.equal(r.stats.pending,invalidAmount?1:0);assert.equal(r.issues.filter(issue=>issue.kind==='summary-date').length,invalidAmount?1:0,'异常计划金额单独提示新汇总表日期待核实');assert.match(reviews(r)[0][5].v,/需要处理/);}
  const same=fixture([50,50],[50]);sheet(same,'applications').A2={t:'s',v:'2026-11-03'};assert.deepEqual(C.build(same).highlights.negotiatedCells,['L2']);
  for(const value of [0,-1,'',{t:'e',v:23}]){const i=fixture([100],[value]);sheet(i,'negotiated').H2={t:'s',v:'未提交'};const r=C.build(i);assert.deepEqual(r.highlights.negotiatedCells,[]);for(const row of reviews(r))assert.match(row[5].v,/需要处理/);}
 });

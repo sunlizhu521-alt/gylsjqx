@@ -16,6 +16,7 @@ function fixture(){
  }
  const negotiated=book('十一月谈判付款主表',[NH,['合成供应商1','迈德斯特',ID(1),100,0,100,'否',46332,'保留备注','1、11月2日－40\n2、11月9日－60',100,'一致',40,60]]);
  const ns=negotiated.Sheets[negotiated.SheetNames[0]];
+ X.utils.sheet_add_aoa(ns,[['是否谈判分批'],['是']],{origin:'O1'});
  ns.F2={t:'n',v:100,f:'D2-E2',z:'#,##0.00'};ns.K2={t:'n',v:100,f:'SUM(M2:N2)'};ns.H2.z=ns.M1.z=ns.N1.z=C.DATE_FORMAT;ns.I2.c=[{a:'人工',t:'保留原批注'}];
  const applications=book('付款申请汇总',[AH,
   ['2026-11-01','合成供应商1','浙江迈德斯特医疗器械科技有限公司',ID(1),40,'谈判付款'],

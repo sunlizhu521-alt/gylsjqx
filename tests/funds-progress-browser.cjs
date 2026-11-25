@@ -32,9 +32,19 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
   async function analyze(){await frame.locator('#analyze:not([disabled])').click();await frame.locator('#download:not([disabled])').waitFor();assert.equal(await frame.locator('#pendingCount').innerText(),'0');}
   async function snapshot(id){return frame.locator('#'+id).evaluate(el=>({headers:[...el.querySelectorAll('th')].map(e=>e.textContent),rows:[...el.querySelectorAll('tbody tr')].map(tr=>[...tr.cells].map(td=>({text:td.textContent,title:td.title,color:getComputedStyle(td).backgroundColor})))}));}
   async function download(version){const event=page.waitForEvent('download');await frame.locator('#download').click();const d=await event;assert.equal(d.suggestedFilename(),'付款节奏跟进-2026-11-15-V'+version+'.xlsx');return fs.readFile(await d.path());}
+  async function verifySummary(out,paperDates='2026-11-02\n2026-11-09'){
+   const summary=out.Sheets['谈判付款付款表付款节奏'],headers=['分类','创跟单员','供应商','付款主体','对公付款0A流程号','摘要','OA-申请付款金额','付款日期','申请纸质单日期'];
+   const source=input.negotiated.book.Sheets[C.negotiatedSheets(input.negotiated.book)[0]],sourceRows=X.utils.sheet_to_json(source,{header:1}).slice(1).filter(row=>row[0]);
+   const data=X.utils.sheet_to_json(summary,{header:1}),snap=await snapshot('negotiatedSummaryPreview');
+   assert.deepEqual(data[0],headers);assert.deepEqual(snap.headers,headers);assert.equal(data.length-1,sourceRows.length,'每条原谈判记录保留一行');assert.equal(snap.rows.length,sourceRows.length);
+   assert.deepEqual(data.slice(1).map(row=>row[0]),sourceRows.map(row=>row[14]==='是'?'谈判付款-谈判付款表':row[14]==='否'?'正常付款-谈判付款表':''));
+   for(let r=0;r<sourceRows.length;r++)for(let c=0;c<headers.length;c++)assert.equal(snap.rows[r][c].text,X.utils.format_cell(summary[X.utils.encode_cell({r:r+1,c})]));
+   assert.equal(summary.H2.v,'2026-11-02\n2026-11-09');assert.equal(summary.I2.v,paperDates);
+  }
   async function verify(bytes,states,colors){
    const out=X.read(bytes,{type:'buffer',cellNF:true,cellStyles:true}),core=C.build(input);
    assert.deepEqual(out.SheetNames,[...C.OUTPUT_SHEETS,'原工作表']);assert.equal(out.Sheets.原工作表.A2.v,'不得修改');assert.equal(out.Sheets.原工作表.A2.c[0].t,'保留人工批注');
+   await verifySummary(out);
    const progress=out.Sheets.付款进度整理,headers=X.utils.sheet_to_json(progress,{header:1})[0],data=X.utils.sheet_to_json(progress,{defval:''});
    assert.equal(headers.length,13);assert.deepEqual(headers,C.PROGRESS_HEADERS);assert.deepEqual(headers.slice(0,3),['申请日期','付款来源','跟单员']);
    assert.deepEqual(data.slice(0,4).map(r=>r.应付时间),expectedDates);assert.deepEqual(data.map(r=>r.是否已付款),states);assert.equal(data[0].付款来源,'谈判付款表-谈判付款');assert.equal(data[1].付款来源,'资金台账');assert.equal(progress['!autofilter'].ref,'A1:M'+(states.length+1));
@@ -60,9 +70,10 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
   }
   await analyze();const first=await download(1),initial=await verify(first,['已付款','未付款','已付款','未付款','待核对','待核对','待核对'],{M2:'FF0000',N2:''});
   const note=initial.Sheets.谈判付款.M2.c[0].t;assert.match(note,/共2批，第1批/);assert.match(note,/申请日期（付款节奏跟进）：2026年11月1日；2026年11月3日/);assert.match(note,/OA备注时间（付款节奏跟进）：.*2026年11月3日.*10:30/);assert.match(note,/付款时间（付款节奏跟进）：2026年11月5日/);
-  const before=await snapshot('progressPreview');await page.locator('.tool-tab[data-tool="payment"]').click();await page.locator('.tool-tab[data-tool="funds"]').click();assert.deepEqual(await snapshot('progressPreview'),before);
+  const before=await snapshot('progressPreview'),summaryBefore=await snapshot('negotiatedSummaryPreview');await page.locator('.tool-tab[data-tool="payment"]').click();await page.locator('.tool-tab[data-tool="funds"]').click();assert.deepEqual(await snapshot('progressPreview'),before);assert.deepEqual(await snapshot('negotiatedSummaryPreview'),summaryBefore);
   // Latest application data, not archived OA or a prior generated note, controls negotiated payment status.
   await upload('negotiated',first);set(input,'applications','应付时间',2,'2026-12-31');set(input,'applications','应付时间',4,'2027-01-08');expectedDates=['2026年11月6日','2026年11月9日','2026年11月6日',''];for(const row of [2,4])set(input,'applications','是否已付款',row,'');await upload('applications');await analyze();
+  assert.deepEqual(await frame.locator('#negotiatedSheet').evaluate(el=>[...el.options].map(option=>option.value).filter(Boolean)),['谈判付款'],'重新上传结果时，新汇总表不能成为谈判主表候选');
   await verify(await download(2),['待核对','未付款','待核对','未付款','待核对','待核对','待核对'],{M2:'FFFF00',N2:''});
   for(const row of [2,4])set(input,'applications','是否已付款',row,'否');await upload('applications');await analyze();
   await verify(await download(3),['未付款','未付款','未付款','未付款','待核对','待核对','待核对'],{M2:'FFFF00',N2:''});
@@ -88,6 +99,7 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
   assert.equal(progressRecords[0].付款来源,'谈判付款表-正常付款');assert.equal(progressRecords[0].是否已付款,'已付款');
   const finalPreview=await snapshot('progressPreview');assert.equal(finalPreview.rows[0][1].text,'谈判付款表-正常付款');
   assert.equal(normalSource.Sheets.谈判付款.O2.v,'否');assert.equal(progressRecords[0].应付时间,'2027年1月26日');assert.equal(progressRecords[1].应付时间,'');assert.equal(finalPreview.rows[0][7].text,'2027年1月26日');assert.equal(finalPreview.rows[1][7].text,'');
+  await verifySummary(normalSource);
   assert.match(JSON.stringify(X.utils.sheet_to_json(normalSource.Sheets.付款申请核对)),/应付时间为空或无法识别/);
   // Moving back across the cutoff must restore the legacy source, not the last generated date.
   set(input,'applications','申请日期',2,'2026-11-18');set(input,'applications','申请日期',3,'2026-11-18');await upload('applications');await analyze();
@@ -95,6 +107,11 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
   assert.equal(legacyRows[0].应付时间,'2026年11月6日');assert.equal(legacyRows[1].应付时间,'2026年11月9日');
   assert.equal(legacyPreview.rows[0][7].text,'2026年11月6日');assert.equal(legacyPreview.rows[1][7].text,'2026年11月9日');
   assert(!X.utils.sheet_to_json(legacy.Sheets.付款申请核对).some(r=>r.来源文件==='applications.xlsx'&&[2,3].includes(r.来源行号)&&/应付时间为空或无法识别/.test(r.核对说明)));
-  assert.deepEqual(errors,[]);console.log(JSON.stringify({base,progressColumns:13,sheets:C.OUTPUT_SHEETS,latestApplicationStatus:true,fourNotes:true,yellowRed:true,normalPreserved:true,errors}));
+  // Payment dates and paper dates retain their distinct sources across a month boundary.
+  Object.assign(input,fixture());sourceClasses();const crossMonth=input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]];crossMonth.M1.v-=7;crossMonth.N1.v-=7;
+  for(const role of ['ledger','applications','oa','negotiated'])await upload(role);await analyze();
+  const crossMonthBook=X.read(await download(12),{cellNF:true});await verifySummary(crossMonthBook,'2026-10-26\n2026-11-02');
+  assert.equal(X.utils.format_cell(crossMonthBook.Sheets.谈判付款.M1),'2026年10月26日');assert.equal(X.utils.format_cell(crossMonthBook.Sheets.谈判付款.N1),'2026年11月2日');
+  assert.deepEqual(errors,[]);console.log(JSON.stringify({base,progressColumns:13,negotiatedSummaryColumns:9,sheets:C.OUTPUT_SHEETS,latestApplicationStatus:true,fourNotes:true,yellowRed:true,normalPreserved:true,summaryPreview:true,summaryReupload:true,crossMonthDates:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

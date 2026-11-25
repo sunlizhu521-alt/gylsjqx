@@ -19,6 +19,7 @@ function sample(headerRow=0,withDates=true){
  const headers=['供应商名称','付款主体','对公付款0A流程号','OA-申请付款金额','已付金额','剩余付款金额','是否结清','应付款时间','备注','谈判明细','分批总金额','核对','人工公式','手工合并备注','保留文本','人工标识'];
  headers.push(...days.map((day,i)=>withDates?serial(day):'人工金额'+(i+17)));
  while(headers.length<34)headers.push('保留字段'+(headers.length+1));
+ headers[23]='是否谈判分批';
  headers.push(...['2026年9月支付','2026年10月支付','2026年11月支付','2026年12月支付','2027年1月支付','2027年2月支付','2027年3月支付','2027年4月支付']);
  const amounts=[100,0,25],plans=[[1,2,3,4,5,6,79],[0,0,0,0,0,0,0],[0,0,0,0,25,0,0]];
  const data=amounts.map((amount,i)=>{
@@ -26,6 +27,7 @@ function sample(headerRow=0,withDates=true){
   values.splice(0,16,'表头合成'+(i+1),'迈德斯特','未提交OA',amount,0,amount,amount?'否':'是',serial('2026-11-30'),'保留人工备注'+i,paymentDays.map((day,c)=>X.SSF.format(C.DATE_FORMAT,serial(day))+'－'+plans[i][c]).join('\n'),amount,'一致',amount*2,i===0?'手工合并备注':'','引用字符串D2','人工'+i);
   values.splice(16,7,...plans[i]);
   values.splice(34,8,plans[i][0]+plans[i][1],plans[i][2]+plans[i][3],plans[i][4]+plans[i][5],plans[i][6],0,0,0,0);
+  values[23]='是';
   return values;
  });
  const prefix=Array.from({length:headerRow},(_,i)=>['人工标题'+(i+1)]),sheet=X.utils.aoa_to_sheet([...prefix,headers,...data]),h=headerRow+1,first=h+1;

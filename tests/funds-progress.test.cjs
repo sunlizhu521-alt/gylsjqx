@@ -5,6 +5,7 @@ const review=r=>r.reviewRows.filter(row=>row[5].v.startsWith('付款进度核对
 const display=c=>c.t==='n'&&c.z?X.SSF.format(c.z,c.v):c.v;
 test('付款来源以申请分类为准，谈判表分批标记不覆盖分类',()=>{
  const i=fixture(),s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];
+ delete s.O1;delete s.O2;
  X.utils.sheet_add_aoa(s,[['是否谈判分批'],['是']],{origin:'R1'});s.R2.c=[{a:'人工',t:'保留分类说明'}];
  const yes=C.build(i);s.R2={...s.R2,v:'否',f:'"否"'};const before=JSON.stringify(i),no=C.build(i);
  assert.deepEqual(records(yes).map(r=>r.付款来源.v),['谈判付款表','资金台账','谈判付款表','资金台账']);
@@ -16,10 +17,10 @@ test('付款来源以申请分类为准，谈判表分批标记不覆盖分类',
 });
 test('谈判表分批标记异常不影响分类，旧申请日期来源不唯一时不猜测',()=>{
  for(const flag of ['', '待确认',0,{t:'e',v:23,w:'#REF!'},{t:'z',f:'A99',v:0},{t:'s',f:'A99'}]){
-  const i=fixture(),s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];X.utils.sheet_add_aoa(s,[['是否谈判分批'],[flag]],{origin:'P1'});
+  const i=fixture(),s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];delete s.O1;delete s.O2;X.utils.sheet_add_aoa(s,[['是否谈判分批'],[flag]],{origin:'P1'});
   const r=C.build(i);assert.equal(records(r)[0].付款来源.v,'谈判付款表');assert(!r.negotiated.managedColumns.includes(15));
  }
- const i=fixture(),s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];X.utils.sheet_add_aoa(s,[['是否谈判分批','是否谈判分批'],['是','否']],{origin:'P1'});
+ const i=fixture(),s=i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];delete s.O1;delete s.O2;X.utils.sheet_add_aoa(s,[['是否谈判分批','是否谈判分批'],['是','否']],{origin:'P1'});
  assert.equal(records(C.build(i))[0].付款来源.v,'谈判付款表');
  delete s.Q1;delete s.Q2;X.utils.sheet_add_aoa(s,[X.utils.sheet_to_json(s,{header:1})[1]],{origin:-1});
  const result=C.build(i);assert.equal(records(result)[0].付款来源.v,'谈判付款表');assert.equal(records(result)[0].应付时间.v,'');assert.match(review(result).find(row=>row[8].v===2)[5].v,/对应多笔记录/);
@@ -153,7 +154,7 @@ test('原三表金额、提交标红及公式与上一版一致，进度核对�
 });
 test('没有申请时仍输出固定13列表头与空进度表',()=>{
  const i=fixture();i.applications.book=book('付款申请汇总',[AH]);const r=C.build(i);assert.deepEqual(r.progressRows,[]);assert.deepEqual(r.progressHeaders,['申请日期','付款来源','跟单员','供应商名称','付款主体','对公付款OA号','申请付款金额','应付时间','当前节点','未操作者','流程状态','申请人','是否已付款']);
- assert.equal(C.OUTPUT_SHEETS.length,5);
+ assert.equal(C.OUTPUT_SHEETS.length,6);
 });
 
 test('申请分类不被台账谈判标记覆盖，保留旧文件无分类列的兼容',()=>{

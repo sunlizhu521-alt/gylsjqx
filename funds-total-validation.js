@@ -46,7 +46,7 @@ function parseDetailLines(raw,yearsForMonth,money,sourceAddress){
   if(note){raw=raw.slice(0,note.index).trim();result.issues.push(location+'括号说明“'+text(note[1])+'”不参与金额汇总');}
   const value=money(cell(raw.normalize('NFKC').replace(/\s*元$/,'')));
   if(value.cents===undefined){result.issues.push(location+'金额无效：“'+match[4]+'”');result.complete=false;continue;}
-  result.sum=(result.sum??0n)+value.cents;result.count++;result.payments.push({year,month:+match[2],cents:value.cents});
+  result.sum=(result.sum??0n)+value.cents;result.count++;result.payments.push({year,month:+match[2],day:match[3]===undefined?null:+match[3],cents:value.cents});
   const key=monthKey({year,month:+match[2]});result.months.set(key,(result.months.get(key)??0n)+value.cents);
  }
  return result;
@@ -145,5 +145,5 @@ function build(table,money){
  }
  return {headers:HEADERS.slice(),rows,stats};
 }
-return {HEADERS,selectColumns,paymentHeaderBands,isMonthBandLabel,build};
+return {HEADERS,selectColumns,paymentHeaderBands,isMonthBandLabel,parseDetailLines,headerDate,monthHeader,build};
 });

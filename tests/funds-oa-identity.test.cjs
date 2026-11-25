@@ -20,7 +20,7 @@ function fixture(kind,{oldAmount=70,candidate=true,targetOA=OLD,targetSupplier=S
  for(const person of C.PEOPLE.slice(1))X.utils.book_append_sheet(ledger,X.utils.aoa_to_sheet([HEADERS]),'对账明细-'+person);
  const oa=[flow(OLD,oldSupplier,oldAmount),flow(HEALTHY,CONTROL,30)];if(candidate)oa.push(flow(CANDIDATE,targetSupplier,100));
  const apps=[application(OLD,oldSupplier,oldAmount,kind),application(CANDIDATE,targetSupplier,100,kind),application(HEALTHY,CONTROL,30,'正常付款')];
- return {ledger:{book:ledger,name:'合成资金台账.xlsx'},negotiated:{book:book('合成谈判付款',HEADERS,kind==='谈判付款'?[target]:[]),name:'合成谈判.xlsx'},applications:{book:book('申请汇总',APP_HEADERS,apps),name:'合成申请.xlsx'},oa:{book:book('Sheet0',OA_HEADERS,oa),name:'合成OA.xlsx'}};
+ return {ledger:{book:ledger,name:'合成资金台账.xlsx'},negotiated:{book:book('合成谈判付款',[...HEADERS,'是否谈判分批'],kind==='谈判付款'?[{...target,'是否谈判分批':'是'}]:[]),name:'合成谈判.xlsx'},applications:{book:book('申请汇总',APP_HEADERS,apps),name:'合成申请.xlsx'},oa:{book:book('Sheet0',OA_HEADERS,oa),name:'合成OA.xlsx'}};
 }
 function output(result,kind,supplier=SUPPLIER){const headers=kind==='谈判付款'?result.negotiated.headers:result.normalHeaders,rows=kind==='谈判付款'?result.negotiated.rows:result.normalRows,row=rows.find(r=>r[headers.indexOf('供应商名称')]?.v===supplier);assert(row,'target record must remain in output');return Object.fromEntries(headers.map((h,i)=>[h,row[i]]));}
 function append(input,role,headers,row){const b=input[role].book;X.utils.sheet_add_aoa(b.Sheets[b.SheetNames[0]],[headers.map(h=>row[h]??'')],{origin:-1});}
