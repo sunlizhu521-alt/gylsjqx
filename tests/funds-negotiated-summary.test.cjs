@@ -12,16 +12,16 @@ const sheet=i=>i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];
 const summaryIssues=r=>r.issues.filter(i=>i.id.startsWith('summary-'));
 const text=c=>c.t==='n'&&X.SSF.is_date(c.z||'')?X.SSF.format('yyyy-mm-dd',c.v):c.v;
 
-test('新汇总固定九列，按谈判原行分类，保留不支付、已结清、重复、零和空白金额',()=>{
- const rows=[row(),row(),row(),row()];rows[1][6]='否';rows[2][5]=0;rows[2][7]='';rows[3][5]='';rows[3][7]='';
+test('新汇总固定十一列，按明细日期金额展开，保留不支付、已结清、重复、零和空白来源',()=>{
+ const rows=[row(),row(),row(),row()];rows[1][6]='否';rows[2][5]=999;rows[2][7]='2026年12月10日-0';rows[3][5]=999;rows[3][7]='';
  const input=sample(rows),before=JSON.stringify(input),result=C.build(input);
- assert.deepEqual(result.negotiatedSummaryHeaders,['分类','创跟单员','供应商','付款主体','对公付款0A流程号','摘要','OA-申请付款金额','付款日期','申请纸质单日期']);
- assert.equal(result.negotiatedSummaryRows.length,4);
- assert.deepEqual(result.negotiatedSummaryRows[0].slice(0,7).map(c=>c.v),['谈判付款-谈判付款表','李奇','汇总合成供应商','迈德斯特','不支付','十二月货款',100]);
- assert.equal(result.negotiatedSummaryRows[1][0].v,'正常付款-谈判付款表');
- assert.equal(result.negotiatedSummaryRows[2][6].v,0);assert.equal(result.negotiatedSummaryRows[2][6].t,'n');
- assert.equal(result.negotiatedSummaryRows[3][6].v,'');assert.equal(result.negotiatedSummaryRows[0][6].z,'#,##0.00');
- assert.deepEqual(result.negotiatedSummaryRows[0].slice(7).map(text),['2026-12-10\n2027-01-20','2026-11-30\n2027-01-04']);
+ assert.deepEqual(result.negotiatedSummaryHeaders,['分类','创跟单员','供应商','付款主体','对公付款0A流程号','摘要','OA-申请付款金额','付款日期','申请纸质单日期','是否申请纸质单','是否已付款']);
+ assert.equal(result.negotiatedSummaryRows.length,6);
+ assert.deepEqual(result.negotiatedSummaryRows[0].slice(0,7).map(c=>c.v),['谈判付款-谈判付款表','李奇','汇总合成供应商','迈德斯特','不支付','十二月货款',40]);
+ assert.equal(result.negotiatedSummaryRows[2][0].v,'正常付款-谈判付款表');
+ assert.equal(result.negotiatedSummaryRows[4][6].v,0);assert.equal(result.negotiatedSummaryRows[4][6].t,'n');
+ assert.equal(result.negotiatedSummaryRows[5][6].v,'');assert.equal(result.negotiatedSummaryRows[0][6].z,'#,##0.00');
+ assert.deepEqual(result.negotiatedSummaryRows.slice(0,2).map(r=>r.slice(6).map(text)),[[40,'2026-12-10','2026-11-30','待核对','待核对'],[60,'2027-01-20','2027-01-04','待核对','待核对']]);
  assert.equal(JSON.stringify(input),before);
  assert(!result.negotiated.managedColumns.includes(6),'只读分类列不能成为原表受管理列');
 });
@@ -50,13 +50,15 @@ test('分类空白、异常、公式错误和缺列不当正常付款；确认�
  assert.equal(summaryIssues(C.build(sample([]))).length,0);
 });
 
-test('单期使用真实日期，多期付款与申请日期分别按来源顺序保留，不将申请月当付款月',()=>{
+test('每个付款日期一行，金额与申请日期同行；同原行同日合计但不同原行不合并',()=>{
  const one=row();one[7]='2026年12月10日-100';one[9]=100;one[10]=0;
- const result=C.build(sample([one])),dates=result.negotiatedSummaryRows[0].slice(7);
+ const result=C.build(sample([one])),dates=result.negotiatedSummaryRows[0].slice(7,9);
  assert.deepEqual(dates.map(text),['2026-12-10','2026-11-30']);
  for(const c of dates){assert.equal(c.t,'n');assert.equal(c.z,'yyyy-mm-dd');assert.equal(c.f,undefined);}
  const multiple=row();multiple[7]='2027年1月20日-60\n2026年12月10日-20\n2026年12月10日-20';
- assert.equal(C.build(sample([multiple])).negotiatedSummaryRows[0][7].v,'2027-01-20\n2026-12-10\n2026-12-10');
+ const grouped=C.build(sample([multiple,multiple])).negotiatedSummaryRows;
+ assert.deepEqual(grouped.map(r=>[text(r[7]),r[6].v]),[['2027-01-20',60],['2026-12-10',40],['2027-01-20',60],['2026-12-10',40]]);
+ assert.equal(grouped.reduce((sum,r)=>sum+r[6].v,0),200);
 });
 
 test('缺日、无效日期、缺少年份及跨年冲突提示精确来源，不默认补日或年份',()=>{
@@ -65,8 +67,9 @@ test('缺日、无效日期、缺少年份及跨年冲突提示精确来源，�
   assert.equal(result.negotiatedSummaryRows[0][7].v,'');assert(summaryIssues(result).some(i=>i.id.startsWith('summary-dates:')&&i.message.includes('H2')));
  }
  const input=sample();X.utils.sheet_add_aoa(sheet(input),[['2027年12月付款'],[0]],{origin:'N1'});
- const result=C.build(input);assert.equal(result.negotiatedSummaryRows[0][7].t,'n');
- assert.equal(text(result.negotiatedSummaryRows[0][7]),'2027-01-20');assert(summaryIssues(result).some(i=>/缺少年份/.test(i.message)));
+ const result=C.build(input);assert.equal(result.negotiatedSummaryRows.length,2);assert.equal(result.negotiatedSummaryRows[0][7].v,'');
+ assert.equal(result.negotiatedSummaryRows[0][6].v,40,'异常日期对应的已知金额不丢失');
+ assert.equal(text(result.negotiatedSummaryRows[1][7]),'2027-01-20');assert(summaryIssues(result).some(i=>/缺少年份/.test(i.message)));
 });
 
 test('计划空白和零不取日期，异常金额及合并归属提示；使用原表头而非批次排序年份',()=>{
@@ -74,17 +77,18 @@ test('计划空白和零不取日期，异常金额及合并归属提示；使�
  assert.equal(C.build(input).negotiatedSummaryRows[0][8].v,'');
  s.J2={t:'e',v:15,w:'#VALUE!'};s.K2.v=60;s['!merges']=[{s:{r:1,c:10},e:{r:2,c:10}}];
  let result=C.build(input);assert.equal(result.negotiatedSummaryRows[0][8].v,'');assert(summaryIssues(result).some(i=>/J2/.test(i.message)&&/K2/.test(i.message)));
- const changed=sample(),name=changed.negotiated.book.SheetNames[0];sheet(changed).L1.v='2027年11月付款';
+ const changed=sample(),name=changed.negotiated.book.SheetNames[0];sheet(changed).L1.v='2027年11月付款';sheet(changed).H2.v='2026年12月10日-40\n2027年1月20日-60';
  result=C.build(changed,{['batch-year:'+name+'!J1']:['year:2027']});
- assert.equal(result.negotiatedSummaryRows[0][8].v,'2026-11-30\n2027-01-04');
+ assert.deepEqual(result.negotiatedSummaryRows.map(r=>text(r[8])),['2026-11-30','2027-01-04']);
  assert.equal(result.negotiated.batchYearAdjustments[0].year,2027);
 });
 
-test('公式只取缓存值，错误或缺缓存不当零；文本OA及前导零完整保留',()=>{
+test('金额只取谈判明细，不取整笔OA公式；明细缓存缺失不当零，文本OA前导零保留',()=>{
  const input=sample(),s=sheet(input);s.D2.v='000123';s.F2={t:'n',v:100,f:'SUM(J2:K2)'};s.H2.f='A1';
- let result=C.build(input),summary=result.negotiatedSummaryRows[0];assert.equal(summary[4].v,'000123');assert.equal(summary[4].t,'s');assert.equal(summary[6].v,100);
+ let result=C.build(input),summary=result.negotiatedSummaryRows[0];assert.equal(summary[4].v,'000123');assert.equal(summary[4].t,'s');assert.equal(summary[6].v,40);
  for(const c of summary)assert.equal(c.f,undefined);
- s.F2={t:'n',f:'SUM(J2:K2)'};result=C.build(input);assert.equal(result.negotiatedSummaryRows[0][6].v,'公式结果不可用');assert(summaryIssues(result).some(i=>i.id.includes('summary-value:')));
+ s.F2={t:'n',f:'SUM(J2:K2)'};result=C.build(input);assert.equal(result.negotiatedSummaryRows[0][6].v,40);
+ s.H2={t:'s',f:'A1'};result=C.build(input);assert.equal(result.negotiatedSummaryRows[0][6].v,'');assert(summaryIssues(result).some(i=>i.id.startsWith('summary-dates:')));
 });
 
 test('重上传只保留一个新结果表，不将新表误作谈判主源',()=>{
@@ -99,7 +103,7 @@ test('1904来源日期表头转为正确日历日期，核心结果仍统一1900
  X.utils.sheet_add_aoa(s,[one],{origin:'A2'});
  input.negotiated.book.Workbook={WBProps:{date1904:true}};
  for(const [address,stamp]of [['J1','2026-11-30'],['K1','2027-01-04']])s[address]={t:'n',v:C.parsePaymentDate(stamp).v-1462,z:'yyyy-mm-dd'};
- const result=C.build(input);assert.deepEqual(result.negotiatedSummaryRows[0].slice(7).map(text),['2026-12-10','2026-11-30']);
+ const result=C.build(input);assert.deepEqual(result.negotiatedSummaryRows[0].slice(7,9).map(text),['2026-12-10','2026-11-30']);
  assert.equal(result.negotiatedSummaryRows[0][8].v,C.parsePaymentDate('2026-11-30').v);
 });
 
@@ -113,6 +117,16 @@ test('双层表头分类与跟单员读取原合并表头，保留数据来源�
  input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]]=next;
  const before=JSON.stringify(input),result=C.build(input);assert.equal(result.negotiated.headerTopRow,0);
  assert.deepEqual(result.negotiatedSummaryRows[0].slice(0,2).map(c=>c.v),['谈判付款-谈判付款表','李奇']);
- assert.deepEqual(result.negotiatedSummaryRows[0].slice(7).map(text),['2026-12-10\n2027-01-20','2026-11-30\n2027-01-04']);
- assert.equal(JSON.stringify(input),before);assert.equal(result.negotiatedSummaryRows.length,1);
+ assert.deepEqual(result.negotiatedSummaryRows.map(r=>r.slice(6,9).map(text)),[[40,'2026-12-10','2026-11-30'],[60,'2027-01-20','2027-01-04']]);
+ assert.equal(JSON.stringify(input),before);assert.equal(result.negotiatedSummaryRows.length,2);
+});
+
+test('同日金额按整数分合计，部分金额无效不能以部分小计或原OA金额代替',()=>{
+ const input=sample(),s=sheet(input);s.H2.v='2026年12月10日-0.10\n2026年12月10日-0.20\n2027年1月20日--0.05';
+ let result=C.build(input);assert.deepEqual(result.negotiatedSummaryRows.map(r=>r[6].v),[0.3,-0.05]);
+ s.H2.v='2026年12月10日-40\n2026年12月10日-未知\n无法识别的原明细';result=C.build(input);
+ assert.equal(result.negotiatedSummaryRows.length,2);assert.equal(text(result.negotiatedSummaryRows[0][7]),'2026-12-10');assert.equal(result.negotiatedSummaryRows[0][6].v,'');
+ assert.equal(result.negotiatedSummaryRows[1][6].v,'');assert(summaryIssues(result).some(i=>/第2笔.*金额无效/.test(i.message)&&/第3笔.*无法完整解析/.test(i.message)));
+ s.H2.v='2026年12月10日-90071992547409.90\n2026年12月10日-0.02';result=C.build(input);
+ assert.equal(result.negotiatedSummaryRows[0][6].v,'');assert(summaryIssues(result).some(i=>/超出安全金额/.test(i.message)));
 });

@@ -33,19 +33,23 @@ function selectColumns(table){
  return {dateColumns,monthColumns};
 }
 function parseDetailLines(raw,yearsForMonth,money,sourceAddress){
- const result={sum:null,count:0,complete:true,months:new Map(),payments:[],issues:[]};
+ const result={sum:null,count:0,complete:true,months:new Map(),payments:[],entries:[],issues:[]};
  const lines=raw.replace(/\s+(?=\d+\s*[、.)）．]\s*(?:(?:\d{4}年)?\d{1,2}月|\d{4}[-/.]))/g,'\n').split(/[\r\n;；]+/).map(text).filter(Boolean);
  if(!lines.length){result.issues.push(sourceAddress+'谈判明细没有可解析的日期和金额');result.complete=false;}
  for(let i=0;i<lines.length;i++){
+  const entry={line:i+1};result.entries.push(entry);
   const line=lines[i].replace(/^\d+\s*[、.)）．]\s*(?=(?:\d{4}年)?\d{1,2}月|\d{4}[-/.])/,'');
   const match=/^(?:(\d{4})年)?(\d{1,2})月(?:(\d{1,2})日?)?\s*[－—–:：-]\s*(.+)$/.exec(line)||/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\s*[－—–:：-]\s*(.+)$/.exec(line),location=sourceAddress+'第'+(i+1)+'笔';
   if(!match){result.issues.push(location+'无法完整解析“'+lines[i]+'”，请填写日期－金额');result.complete=false;continue;}
   const years=yearsForMonth(+match[2]),year=match[1]?+match[1]:years.size===1?[...years][0]:null;
-  if(year===null||!day(year,+match[2],match[3]===undefined?1:+match[3])){result.issues.push(location+(year===null?'日期缺少年份且无唯一表头依据':'日期无效')+'：“'+lines[i]+'”');result.complete=false;continue;}
+  Object.assign(entry,{year,month:+match[2],day:match[3]===undefined?null:+match[3],validDate:year!==null&&!!day(year,+match[2],match[3]===undefined?1:+match[3])});
+  if(!entry.validDate){result.issues.push(location+(year===null?'日期缺少年份且无唯一表头依据':'日期无效')+'：“'+lines[i]+'”');result.complete=false;}
   let raw=text(match[4]);const note=/[（(]([\p{L}\s，,。！!、；;：:]+)[）)]$/u.exec(raw);
   if(note){raw=raw.slice(0,note.index).trim();result.issues.push(location+'括号说明“'+text(note[1])+'”不参与金额汇总');}
   const value=money(cell(raw.normalize('NFKC').replace(/\s*元$/,'')));
   if(value.cents===undefined){result.issues.push(location+'金额无效：“'+match[4]+'”');result.complete=false;continue;}
+  entry.cents=value.cents;
+  if(!entry.validDate)continue;
   result.sum=(result.sum??0n)+value.cents;result.count++;result.payments.push({year,month:+match[2],day:match[3]===undefined?null:+match[3],cents:value.cents});
   const key=monthKey({year,month:+match[2]});result.months.set(key,(result.months.get(key)??0n)+value.cents);
  }

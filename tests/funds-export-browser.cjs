@@ -31,26 +31,27 @@ const {REVIEW_HEADERS}=require('./funds-fixtures.cjs');
   const review=saved.Sheets.付款申请核对;assert.deepEqual(X.utils.sheet_to_json(review,{header:1})[0],REVIEW_HEADERS);assert.equal(review.D2.v,12.34);assert.equal(review.D2.t,'n');assert.equal(review.D2.z,'#,##0.00');assert.equal(review.I2.v,2);assert.equal(review.G2.v,'资金台账.xlsx');assert.equal(review.J2.v,'李奇');assert.equal(review['!autofilter'].ref,'A1:J2');assert.deepEqual(review.A1.s,saved.Sheets.正常付款.A1.s);assert.deepEqual(review.A2.s,saved.Sheets.正常付款.B2.s);
   const parts=await page.evaluate(async bytes=>{const z=await JSZip.loadAsync(new Uint8Array(bytes));return {files:Object.keys(z.files),nativeXml:await z.file('xl/worksheets/sheet1.xml').async('string'),xml:await z.file('xl/worksheets/funds-normal.xml').async('string'),reviewXml:await z.file('xl/worksheets/funds-review.xml').async('string'),app:await z.file('docProps/app.xml').async('string')};},[...output]);assert(parts.files.includes('xl/worksheets/sheet2.xml'));assert.doesNotMatch(parts.nativeXml,/<(?:\w+:)?filterColumn\b/);assert.match(parts.nativeXml,/defaultRowHeight="30"/);assert(!parts.files.some(p=>p.startsWith('xl/tables/')));assert.match(parts.xml,/state="frozen"/);assert.match(parts.reviewXml,/state="frozen"/);assert.match(parts.app,/付款申请核对/);assert.match(parts.app,/<(?:\w+:)?i4>7<\//);
   const again=await exportBytes(output,{...result,reviewRows:[],negotiated:{...result.negotiated,sheetName:'谈判付款'}}),againBook=X.read(again);assert.deepEqual(againBook.SheetNames,['谈判付款','谈判付款付款表付款节奏','正常付款','付款申请核对','付款进度整理','总额校验核对','其他']);assert.deepEqual(X.utils.sheet_to_json(againBook.Sheets.付款申请核对,{header:1}),[REVIEW_HEADERS]);assert.equal(againBook.Sheets.付款申请核对['!autofilter'].ref,'A1:J1');
-  const summaryName='谈判付款付款表付款节奏',summaryHeaders=['分类','创跟单员','供应商','付款主体','对公付款0A流程号','摘要','OA-申请付款金额','付款日期','申请纸质单日期'];
-  assert.deepEqual(X.utils.sheet_to_json(saved.Sheets[summaryName],{header:1}),[summaryHeaders],'旧手构结果缺少新字段时仍生成九列表头');
+  const summaryName='谈判付款付款表付款节奏',summaryHeaders=['分类','创跟单员','供应商','付款主体','对公付款0A流程号','摘要','OA-申请付款金额','付款日期','申请纸质单日期','是否申请纸质单','是否已付款'];
+  assert.deepEqual(X.utils.sheet_to_json(saved.Sheets[summaryName],{header:1}),[summaryHeaders],'旧手构结果缺少新字段时仍生成十一列表头');
   const summaryValues=[
-   ['谈判付款','李奇','测试供应商','迈德斯特','MDST-DGFK20261001001','第一笔\n保留摘要',12.34,'2026-11-02\n2026-12-01','2026-10-26\n2026-11-23'],
-   ['谈判付款','李奇','测试供应商','迈德斯特','MDST-DGFK20261001001','第一笔\n保留摘要',12.34,'2026-11-02\n2026-12-01','2026-10-26\n2026-11-23'],
-   ['正常付款','','零值供应商','','未提交OA','',0,'',''],
-   ['','','空白金额供应商','','','','','','']
-  ],summaryRows=summaryValues.map(row=>row.map((v,c)=>({t:typeof v==='number'?'n':'s',v,...(c===6&&typeof v==='number'?{z:'#,##0.00'}:{})})));
+   ['谈判付款-谈判付款表','李奇','测试供应商','迈德斯特','MDST-DGFK20261001001','第一笔\n保留摘要',40,46328,46321,'是','是'],
+   ['谈判付款-谈判付款表','李奇','测试供应商','迈德斯特','MDST-DGFK20261001001','第二笔',60,46335,'2026-11-02\n2026-11-03','待核对','待核对'],
+   ['正常付款-谈判付款表','','零值供应商','','未提交OA','',0,'','','待核对','待核对'],
+   ['','','空白金额供应商','','','','','','','','']
+  ],summaryRows=summaryValues.map(row=>row.map((v,c)=>({t:typeof v==='number'?'n':'s',v,...(typeof v==='number'?(c===6?{z:'#,##0.00'}:c===7||c===8?{z:'yyyy-mm-dd'}:{}):{})})));
   summaryRows[0][6].f='C99';
   const summaryResult={...result,negotiatedSummaryHeaders:summaryHeaders,negotiatedSummaryRows:summaryRows},summaryBefore=JSON.stringify(summaryResult);
   const summaryOutput=await exportBytes(input,summaryResult),summaryBook=X.read(summaryOutput,{cellStyles:true,cellNF:true}),summary=summaryBook.Sheets[summaryName];
-  assert.deepEqual(summaryBook.SheetNames,saved.SheetNames);assert.deepEqual(X.utils.sheet_to_json(summary,{header:1}),[summaryHeaders,...summaryValues]);
-  assert.equal(summary.G2.t,'n');assert.equal(summary.G2.z,'#,##0.00');assert.equal(summary.G2.f,undefined,'原表公式不搬到新表坐标');assert.equal(summary.G4.v,0);assert.equal(summary.G5.v,'');assert.equal(summary['!autofilter'].ref,'A1:I5');
-  assert.equal(summary.A1.s.fgColor.rgb,'315B9D');assert(summary['!rows'][1].hpt>30,'多日期分行显示时行高容纳全部内容');assert(summary['!cols'].every(c=>c.width>=12));assert.equal(JSON.stringify(summaryResult),summaryBefore);
+  assert.deepEqual(summaryBook.SheetNames,saved.SheetNames);assert.deepEqual([summaryHeaders,...summaryRows.map((_,r)=>summaryHeaders.map((_,c)=>summary[X.utils.encode_cell({r:r+1,c})]?.v??''))],[summaryHeaders,...summaryValues]);
+  assert.equal(summary.G2.t,'n');assert.equal(summary.G2.z,'#,##0.00');assert.equal(summary.G2.f,undefined,'原表公式不搬到新表坐标');assert.equal(summary.G4.v,0);assert.equal(summary.G5.v,'');assert.equal(summary['!autofilter'].ref,'A1:K5');
+  assert.deepEqual([summary.G2.v,summary.G3.v],[40,60]);assert.equal(summary.H2.t,'n');assert.equal(summary.H2.z,'yyyy-mm-dd');assert.equal(X.utils.format_cell(summary.H2),'2026-11-02');assert.equal(summary.J2.t,'s');assert.equal(summary.K2.v,'是');assert.equal(summary.K3.v,'待核对');
+  assert.equal(summary.A1.s.fgColor.rgb,'315B9D');assert(summary['!rows'][1].hpt>30,'摘要和申请日期换行时行高容纳全部内容');assert(summary['!cols'].every(c=>c.width>=12));assert.equal(JSON.stringify(summaryResult),summaryBefore);
   const summaryFormat=await page.evaluate(async bytes=>{
    const zip=await JSZip.loadAsync(Uint8Array.from(bytes)),parse=x=>new DOMParser().parseFromString(x,'application/xml'),all=(d,n)=>[...d.getElementsByTagNameNS('*',n)],doc=parse(await zip.file('xl/worksheets/funds-negotiatedsummary.xml').async('string')),styles=parse(await zip.file('xl/styles.xml').async('string')),xfs=all(styles,'cellXfs')[0],cell=all(doc,'c').find(c=>c.getAttribute('r')==='I2'),alignment=all(xfs.children[Number(cell.getAttribute('s'))],'alignment')[0];
    return {frozen:all(doc,'pane')[0].getAttribute('state'),wrap:alignment.getAttribute('wrapText'),horizontal:alignment.getAttribute('horizontal'),formulas:all(doc,'f').length};
   },[...summaryOutput]);assert.deepEqual(summaryFormat,{frozen:'frozen',wrap:'1',horizontal:'center',formulas:0});
   const summaryAgain=await exportBytes(summaryOutput,{...summaryResult,negotiatedSummaryRows:[summaryRows[2]],negotiated:{...result.negotiated,sheetName:'谈判付款'}}),summaryAgainBook=X.read(summaryAgain,{cellNF:true});
-  assert.deepEqual(summaryAgainBook.SheetNames,saved.SheetNames);assert.deepEqual(X.utils.sheet_to_json(summaryAgainBook.Sheets[summaryName],{header:1}),[summaryHeaders,summaryValues[2]]);assert.equal(summaryAgainBook.Sheets[summaryName]['!autofilter'].ref,'A1:I2');
+  assert.deepEqual(summaryAgainBook.SheetNames,saved.SheetNames);assert.deepEqual(X.utils.sheet_to_json(summaryAgainBook.Sheets[summaryName],{header:1}),[summaryHeaders,summaryValues[2]]);assert.equal(summaryAgainBook.Sheets[summaryName]['!autofilter'].ref,'A1:K2');
   assert.equal(summaryAgainBook.Sheets.谈判付款.D5.f,'SUM(D2:D4)');assert.equal(summaryAgainBook.Sheets.其他.A1.v,'必须保留');
   for(const date1904 of [false,true]){
    const dateBook=X.read(input,{cellNF:true});dateBook.Workbook.WBProps.date1904=date1904;
