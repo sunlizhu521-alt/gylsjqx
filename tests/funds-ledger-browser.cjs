@@ -3,7 +3,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const X=require('../vendor/xlsx.full.min.js'),Zip=require('../vendor/jszip.min.js');
 const PEOPLE=['李奇','徐英','邢芳芳','操思敏','孙立柱'];
 const HEADERS=['供应商名称','付款主体','对公付款0A流程号','申请付款金额','摘要','应付款时间','预估付款时间','是否提交付款申请单','是否结清','是否谈判付款','开票时间','所属月份','账期'];
-const OUTPUT_HEADERS=['采购跟单员','供应商','付款主体','对公付款OA流程号','申请付款金额','摘要','应付款时间','当前节点','未操作者','流程状态','是否已付款','付款月份','付款日期','申请付款月份','需要提交付款审单的日期','是否提交纸质付款审单'];
+const OUTPUT_HEADERS=['分类','创跟单员','供应商','付款主体','对公付款0A流程号','摘要','OA-申请付款金额','应付款时间','当前节点','未操作者','流程状态','是否已付款','付款月份','付款日期','申请付款月份','需要提交付款审单的日期','是否提交纸质付款审单'];
 const MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const VERSION_KEY='funds-ledger-export-versions',OTHER_VERSIONS='{"2026-11-08":37}';
 const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
@@ -26,7 +26,7 @@ function applications(codes){
  X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([['合同号','流程编码','供应商','金额','是否已签字'],...codes.map(code=>[flow(2),code,'无关供应商',999,'']),[flow(2),'','空流程不得回退',0,'签完字']]),'付款申请汇总');
  X.utils.book_append_sheet(book,X.utils.aoa_to_sheet([['流程编码'],[flow(2)]]),'忽略其他申请');return {book,bytes:write(book)};
 }
-const withPaper=(rows,codes)=>rows.map(row=>[...row.slice(0,15),row[3]?(codes.includes(row[3])?'已提交':'未提交'):'待核对']).sort((a,b)=>['已提交','未提交','待核对',''].indexOf(a[15])-['已提交','未提交','待核对',''].indexOf(b[15]));
+const withPaper=(rows,codes)=>rows.map(row=>[...row.slice(0,16),row[4]?(codes.includes(row[4])?'已提交':'未提交'):'待核对']).sort((a,b)=>['已提交','未提交','待核对',''].indexOf(a[16])-['已提交','未提交','待核对',''].indexOf(b[16]));
 function fixture(replacement=false){
  const book=X.utils.book_new(),rows=PEOPLE.map(()=>[]),entries=[];
  function add(person,supplier,changes={},expectedDate='2026-11-20',inferred=false){
@@ -78,7 +78,7 @@ function fixture(replacement=false){
   const info=mode==='full'?fullInfo:mode==='new'?{[flow(1)]:['最新节点','最新人员','未归档','未付款']}:{};
   return entries.toSorted((a,b)=>(a.date||'9999').localeCompare(b.date||'9999')||a.index-b.index).map(({person,row,date,inferred})=>{
    const submission=inferred||!date?'':expectedSubmission(date,today),parts=submission===''?null:X.SSF.parse_date_code(submission);
-   return [person,...row.slice(0,5).map(value),inferred?'未对账待定':date?serial(date):value(row[5]||row[6]),...(mode?(info[value(row[2])]||['','','','待核对']):['','','','']),inferred?'未对账待定':date?date.slice(0,4)+'年'+date.slice(5,7)+'月':'',inferred?'未对账待定':date?serial(date):value(row[5]||row[6]),parts?serial(parts.y+'-'+String(parts.m).padStart(2,'0')+'-01'):'',submission,''];
+   return ['正常付款-正常对账表',person,...row.slice(0,3).map(value),value(row[4]),value(row[3]),inferred?'未对账待定':date?serial(date):value(row[5]||row[6]),...(mode?(info[value(row[2])]||['','','','待核对']):['','','','']),inferred?'未对账待定':date?date.slice(0,4)+'年'+date.slice(5,7)+'月':'',inferred?'未对账待定':date?serial(date):value(row[5]||row[6]),parts?serial(parts.y+'-'+String(parts.m).padStart(2,'0')+'-01'):'',submission,''];
   });
  }
  return {book,bytes:write(book),oa,newOA,expected};
@@ -103,7 +103,7 @@ function fixture(replacement=false){
    await surface.locator('#'+reference).filter({hasText:name}).waitFor();assert.match(await surface.locator('#'+reference).innerText(),/2026.*11.*0?8/);
   }
   async function ready(surface=frame){await surface.locator('#download:not([disabled])').waitFor();}
-  async function preview(surface=frame){return surface.locator('#preview').evaluate(el=>({headers:[...el.querySelectorAll('th')].map(c=>c.textContent),rows:[...el.querySelectorAll('tbody tr')].filter(tr=>tr.cells.length===16).map(tr=>[...tr.cells].map(c=>c.textContent))}));}
+  async function preview(surface=frame){return surface.locator('#preview').evaluate(el=>({headers:[...el.querySelectorAll('th')].map(c=>c.textContent),rows:[...el.querySelectorAll('tbody tr')].filter(tr=>tr.cells.length===17).map(tr=>[...tr.cells].map(c=>c.textContent))}));}
   async function blocked(pattern){await frame.locator('#status').filter({hasText:pattern}).waitFor();assert(await frame.locator('#download').isDisabled());assert.equal((await preview()).rows.length,0);}
   async function download(label,surface=frame,owner=page,date='2026-11-08'){
    const event=owner.waitForEvent('download');await surface.locator('#download').click();const d=await event;
@@ -113,30 +113,31 @@ function fixture(replacement=false){
    const bytes=await fs.readFile(await d.path());await fs.writeFile(path.join(out,label+'.xlsx'),bytes);return bytes;
   }
   async function verify(bytes,expected,surface=frame){
-   expected=expected.map(row=>row.map((value,c)=>typeof value==='number'&&[6,12,13,14].includes(c)?X.SSF.format(c===13?'yyyy"年"mm"月"':'yyyy"年"mm"月"dd"日"',value):value));
+   expected=expected.map(row=>row.map((value,c)=>typeof value==='number'&&[7,13,14,15].includes(c)?X.SSF.format(c===14?'yyyy"年"mm"月"':'yyyy"年"mm"月"dd"日"',value):value));
    const book=X.read(bytes,{type:'buffer',cellNF:true,cellStyles:true}),name='正常付款',sheet=book.Sheets[name],snap=await preview(surface);
    assert.deepEqual(book.SheetNames,[name]);const range=X.utils.decode_range(sheet['!ref']);
    const matrix=Array.from({length:range.e.r+1},(_,r)=>Array.from({length:range.e.c+1},(_,c)=>sheet[X.utils.encode_cell({r,c})]?.v??''));
    assert.deepEqual(matrix,[OUTPUT_HEADERS,...expected]);assert.deepEqual(snap.headers,OUTPUT_HEADERS);assert.equal(snap.rows.length,expected.length);
    assert.equal(Number((await surface.locator('#record-count').innerText()).replace(/[^\d]/g,'')),expected.length);
-   assert.equal(sheet['!autofilter'].ref,'A1:P'+(expected.length+1));assert(!book.Workbook?.Sheets?.[0]?.Hidden);
+   assert.equal(sheet['!autofilter'].ref,'A1:Q'+(expected.length+1));assert(!book.Workbook?.Sheets?.[0]?.Hidden);
    const previewFills=await surface.locator('#preview').evaluate(el=>({
     headers:[...el.querySelectorAll('th')].map(cell=>getComputedStyle(cell).backgroundColor),
-    rows:[...el.querySelectorAll('tbody tr')].filter(row=>row.cells.length===16).map(row=>[...row.cells].map(cell=>getComputedStyle(cell).backgroundColor))
+    rows:[...el.querySelectorAll('tbody tr')].filter(row=>row.cells.length===17).map(row=>[...row.cells].map(cell=>getComputedStyle(cell).backgroundColor))
    }));
-   assert.deepEqual(previewFills.headers,Array(16).fill('rgb(49, 91, 157)'));
-   assert.deepEqual(previewFills.rows,expected.map(row=>Array(16).fill(row[10]==='已付款'?'rgb(255, 153, 153)':'rgb(255, 255, 255)')),'预览整行颜色须与是否已付款一致，包含空白格');
-   for(let r=0;r<expected.length;r++)for(let c=0;c<16;c++){
+   assert.deepEqual(previewFills.headers,Array(17).fill('rgb(49, 91, 157)'));
+   assert.deepEqual(previewFills.rows,expected.map(row=>Array(17).fill(row[11]==='已付款'?'rgb(255, 153, 153)':'rgb(255, 255, 255)')),'预览整行颜色须与是否已付款一致，包含空白格');
+   for(let r=0;r<expected.length;r++)for(let c=0;c<17;c++){
     const cell=sheet[X.utils.encode_cell({r:r+1,c})],v=expected[r][c];assert.equal(cell?.v??'',v);assert(!cell?.f);
-    if(v!=='')assert.equal(cell.t,typeof v==='number'?'n':'s');if(c===4&&v!=='')assert.match(cell.z,/0\.00/);
-    if(c===6){
+    if(v!=='')assert.equal(cell.t,typeof v==='number'?'n':'s');if(c===6&&v!=='')assert.match(cell.z,/0\.00/);
+    if(c===7){
      if(/^\d{4}年\d{2}月\d{2}日$/.test(v)){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月\d{2}日$/);}
      else{assert(['未对账待定','待定'].includes(v));assert.equal(cell.t,'s');assert.equal(snap.rows[r][c],v);}
     }
-    if(c===11&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(v,/^(?:\d{4}年\d{2}月|未对账待定)$/);}
-    if(c===12){assert.equal(v,expected[r][6]);assert.equal(cell.t,'s');assert.equal(snap.rows[r][c],snap.rows[r][6]);if(/^\d{4}年/.test(v))assert.equal(cell.z,'@');}
-    if(c===13&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月$/);}
-    if(c===14&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月\d{2}日$/);}
+    if(c===12&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(v,/^(?:\d{4}年\d{2}月|未对账待定)$/);}
+    if(c===0)assert.equal(v,'正常付款-正常对账表');
+    if(c===13){assert.equal(v,expected[r][7]);assert.equal(cell.t,'s');assert.equal(snap.rows[r][c],snap.rows[r][7]);if(/^\d{4}年/.test(v))assert.equal(cell.z,'@');}
+    if(c===14&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月$/);}
+    if(c===15&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月\d{2}日$/);}
     assert.equal(snap.rows[r][c],cell?X.utils.format_cell(cell):'');
    }
    const meta=await surface.locator('body').evaluate(async(_,data)=>{
@@ -150,7 +151,7 @@ function fixture(replacement=false){
     }
     const pane=all(doc,'pane')[0];if(pane?.getAttribute('state')!=='frozen'||pane?.getAttribute('ySplit')!=='1')problems.push('首行未冻结');
     if(all(doc,'f').length||all(doc,'filterColumn').length||all(doc,'conditionalFormatting').length)problems.push('存在公式、旧筛选条件或条件格式');
-    if(all(doc,'row').some(r=>r.getAttribute('hidden')==='1'||all(r,'c').length!==16))problems.push('隐藏行或缺少矩形单元格');
+    if(all(doc,'row').some(r=>r.getAttribute('hidden')==='1'||all(r,'c').length!==17))problems.push('隐藏行或缺少矩形单元格');
     for(const col of all(doc,'col')){if(col.getAttribute('hidden')==='1')problems.push('隐藏列');for(let c=+col.getAttribute('min');c<=+col.getAttribute('max');c++)widths[c-1]=+col.getAttribute('width');}
     for(const cell of all(doc,'c')){
      const xf=xfs[+(cell.getAttribute('s')||0)],font=fonts[+(xf.getAttribute('fontId')||0)],border=borders[+(xf.getAttribute('borderId')||0)];
@@ -159,27 +160,27 @@ function fixture(replacement=false){
      const blank=row>1&&(!contentRows.has(row)||!contentColumns.has(cell.getAttribute('r').match(/^[A-Z]+/)[0]));
      if(['left','right','top','bottom'].some(edge=>{const side=all(border,edge)[0];return blank?Boolean(side?.getAttribute('style')):side?.getAttribute('style')!==(row===1?'thin':'hair')||all(side,'color')[0]?.getAttribute('rgb')!=='FF404040';}))problems.push('表头/正文边框不符 '+cell.getAttribute('r'));
      if(all(fill,'patternFill')[0]?.getAttribute('patternType')!=='solid'||all(fill,'fgColor')[0]?.getAttribute('rgb')!==expectedFill||xf.getAttribute('applyFill')!=='1')problems.push('原生填充颜色不符 '+cell.getAttribute('r'));
-     if((row===1||/^[ALMNO]\d+$/.test(cell.getAttribute('r')))&&all(xf,'alignment')[0]?.getAttribute('wrapText')==='1')problems.push('表头或提交日期换行');
+     if((row===1||/^[BEGHMNOP]\d+$/.test(cell.getAttribute('r')))&&all(xf,'alignment')[0]?.getAttribute('wrapText')==='1')problems.push('表头或提交日期换行');
     }
     return {problems,names:[...names],sizes:[...sizes],widths};
-   },{bytes:[...bytes],paid:expected.map(row=>row[10]==='已付款')});
-   assert.deepEqual(meta.problems,[]);assert.equal(meta.names.length,1);assert.equal(meta.sizes.length,1);assert.equal(meta.widths.length,16);assert(meta.widths.every(w=>w>=12&&w<=255));return snap;
+   },{bytes:[...bytes],paid:expected.map(row=>row[11]==='已付款')});
+   assert.deepEqual(meta.problems,[]);assert.equal(meta.names.length,1);assert.equal(meta.sizes.length,1);assert.equal(meta.widths.length,17);assert(meta.widths.every(w=>w>=12&&w<=255));return snap;
   }
   await upload(input.bytes,'合成全月份台账.xlsx');await ready();
   const baseSnap=await verify(await download('monthly-base'),input.expected());
-  assert.equal(baseSnap.rows.find(r=>r[1]==='合成月末已归档')[14],'2026年11月23日');
-  assert.equal(baseSnap.rows.find(r=>r[1]==='合成已结清仍保留')[14],'2026年11月09日');
-  assert.equal(baseSnap.rows.find(r=>r[1]==='合成空应付用预估')[14],'2026年11月02日');
-  assert(baseSnap.rows.filter(r=>r[6]==='未对账待定').every(r=>r[14]===''));
-  assert(baseSnap.rows.some(r=>r[1]==='合成已结清仍保留'));assert.equal(baseSnap.rows.filter(r=>r[1]==='合成重复原明细').length,2);
-  assert.deepEqual(baseSnap.rows.filter(r=>r[6]==='未对账待定').map(r=>r[1]),['合成缺列五个月','合成已有预估列双空','合成缺列60天','保留无时间无所属月份']);
-  assert.deepEqual(baseSnap.rows.slice(6,11).map(r=>[r[1],r[6]]),[
+  assert.equal(baseSnap.rows.find(r=>r[2]==='合成月末已归档')[15],'2026年11月23日');
+  assert.equal(baseSnap.rows.find(r=>r[2]==='合成已结清仍保留')[15],'2026年11月09日');
+  assert.equal(baseSnap.rows.find(r=>r[2]==='合成空应付用预估')[15],'2026年11月02日');
+  assert(baseSnap.rows.filter(r=>r[7]==='未对账待定').every(r=>r[15]===''));
+  assert(baseSnap.rows.some(r=>r[2]==='合成已结清仍保留'));assert.equal(baseSnap.rows.filter(r=>r[2]==='合成重复原明细').length,2);
+  assert.deepEqual(baseSnap.rows.filter(r=>r[7]==='未对账待定').map(r=>r[2]),['合成缺列五个月','合成已有预估列双空','合成缺列60天','保留无时间无所属月份']);
+  assert.deepEqual(baseSnap.rows.slice(6,11).map(r=>[r[2],r[7]]),[
    ['合成OA未匹配','2026年11月04日'],['合成缺列五个月','未对账待定'],['合成已有预估列双空','未对账待定'],['合成缺列60天','未对账待定'],['合成缺列应付优先','2026年11月07日']
   ]);
-  assert.equal(baseSnap.rows.find(r=>r[1]==='合成十二月甲')[11],'2026年12月');assert(baseSnap.rows.filter(r=>r[6]==='未对账待定').every(r=>r[11]==='未对账待定'));
-  assert.equal(baseSnap.rows.find(r=>r[1]==='合成十二月甲')[13],'2026年11月');assert.equal(baseSnap.rows.find(r=>r[1]==='合成十二月甲')[14],'2026年11月23日');
-  assert(baseSnap.rows.some(r=>r[6]==='2026年10月31日'));assert.equal(baseSnap.rows.filter(r=>r[6]==='2026年12月01日').length,2);
-  assert.deepEqual(baseSnap.rows.slice(-3).map(r=>r[1]),['保留非法应付不换预估','保留非法预估不推算','保留无时间无所属月份']);assert(baseSnap.rows.slice(-3).every(r=>r[13]===''&&r[14]===''));
+  assert.equal(baseSnap.rows.find(r=>r[2]==='合成十二月甲')[12],'2026年12月');assert(baseSnap.rows.filter(r=>r[7]==='未对账待定').every(r=>r[12]==='未对账待定'));
+  assert.equal(baseSnap.rows.find(r=>r[2]==='合成十二月甲')[14],'2026年11月');assert.equal(baseSnap.rows.find(r=>r[2]==='合成十二月甲')[15],'2026年11月23日');
+  assert(baseSnap.rows.some(r=>r[7]==='2026年10月31日'));assert.equal(baseSnap.rows.filter(r=>r[7]==='2026年12月01日').length,2);
+  assert.deepEqual(baseSnap.rows.slice(-3).map(r=>r[2]),['保留非法应付不换预估','保留非法预估不推算','保留无时间无所属月份']);assert(baseSnap.rows.slice(-3).every(r=>r[14]===''&&r[15]===''));
   assert(!JSON.stringify(baseSnap).includes('排除'));assert(!JSON.stringify(baseSnap).includes('历史干扰记录'));assert(baseSnap.rows.length>60);
   await upload(input.oa.bytes,'合成原始OA.xlsx','oa');await ready();const fullSnap=await verify(await download('monthly-oa'),input.expected('full'));
   const warningPanel=frame.locator('#warning-panel');await warningPanel.waitFor({state:'visible'});if(!await warningPanel.evaluate(el=>el.open))await warningPanel.locator('summary').click();
@@ -227,7 +228,7 @@ function fixture(replacement=false){
   const badOAFormula=await replaceSourceCell(input.oa.bytes,'B2','<c r="B2" t="str"><f>IF(1=1,&quot;节点&quot;,&quot;&quot;)</f></c>');
   await upload(badOAFormula,'合成OA缺缓存.xlsx','oa');await blocked(/公式缺少.*缓存/);await frame.locator('#clear-oa').click();await ready();
   const emptyFormula=await replaceSourceCell(input.bytes,'E2','<c r="E2" t="str"><f>IF(1=1,&quot;&quot;,&quot;摘要&quot;)</f><v/></c>'),emptyExpected=input.expected().map(r=>[...r]);
-  emptyExpected.find(r=>r[1]==='合成已结清仍保留')[5]='';await upload(emptyFormula,'合成有效空缓存.xlsx');await ready();await verify(await download('valid-empty-formula'),emptyExpected);
+  emptyExpected.find(r=>r[2]==='合成已结清仍保留')[5]='';await upload(emptyFormula,'合成有效空缓存.xlsx');await ready();await verify(await download('valid-empty-formula'),emptyExpected);
   await upload(input.bytes,'合成竞态台账.xlsx');await upload(input.newOA.bytes,'合成替换OA.xlsx','oa');await ready();await verify(await download('replace-oa'),input.expected('new'));
   await frame.locator('body').evaluate(()=>{
    window.__qaOriginalRead=File.prototype.arrayBuffer;window.__qaGates={};
@@ -288,13 +289,13 @@ function fixture(replacement=false){
   await download('version-after-failures',standalone,standalone);
   await standalone.clock.setFixedTime(new Date('2026-11-08T15:59:59Z'));
   await verify(await download('version-before-beijing-midnight',standalone,standalone),replacement.expected(),standalone);
-  const sundayPreview=await preview(standalone);assert.equal(sundayPreview.rows[0][14],'2026年11月02日');
+  const sundayPreview=await preview(standalone);assert.equal(sundayPreview.rows[0][15],'2026年11月02日');
   await standalone.clock.setFixedTime(new Date('2026-11-08T16:00:00Z'));
   // Download must update the stale Sunday preview without another upload or another action.
   assert.deepEqual(await preview(standalone),sundayPreview);
   await verify(await download('version-after-beijing-midnight',standalone,standalone,'2026-11-09'),replacement.expected('','2026-11-09'),standalone);
-  const mondayPreview=await preview(standalone);assert.equal(mondayPreview.rows[0][14],'2026年11月09日');
-  assert.deepEqual(mondayPreview.rows.map(r=>r.filter((_,c)=>c!==13&&c!==14)),sundayPreview.rows.map(r=>r.filter((_,c)=>c!==13&&c!==14)));
+  const mondayPreview=await preview(standalone);assert.equal(mondayPreview.rows[0][15],'2026年11月09日');
+  assert.deepEqual(mondayPreview.rows.map(r=>r.filter((_,c)=>c!==14&&c!==15)),sundayPreview.rows.map(r=>r.filter((_,c)=>c!==14&&c!==15)));
   await download('version-new-day-second',standalone,standalone,'2026-11-09');
   const persisted=await standalone.evaluate(key=>JSON.parse(localStorage.getItem(key)),VERSION_KEY);
   assert.equal(persisted['2026-11-08'],4);assert.equal(persisted['2026-11-09'],2);
@@ -310,6 +311,6 @@ function fixture(replacement=false){
   await standalone.evaluate(()=>{Object.defineProperty(window,'localStorage',window.__qaStorageDescriptor);delete window.__qaStorageDescriptor;});
   assert.equal(await standalone.evaluate(()=>localStorage.getItem('funds-export-versions')),OTHER_VERSIONS,'内存回退也不能改动其他工具的版本号');
   await standalone.close();assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({base,out,columns:16,allMonthRows:input.expected().length,submissionDate:true,weeklyDownloadRefresh:true,paperSubmission:true,paperReplacementRemoval:true,allMonthSheet:true,applicationMonth:true,paymentMonth:true,undatedRetained:true,datePriority:true,negotiatedOnly:true,oaMatching:true,fullPreview:true,styles:true,followerBySource:true,lightRedPaidRows:true,toolSwitch:true,invalidRecovery:true,formulaCacheGuard:true,oaFirst:true,simultaneous:true,latestWins:true,mobile:true,downloadNames:true,versionRefresh:true,versionFailureGuard:true,beijingRollover:true,memoryFallback:true,errors}));
+  console.log(JSON.stringify({base,out,columns:17,allMonthRows:input.expected().length,submissionDate:true,weeklyDownloadRefresh:true,paperSubmission:true,paperReplacementRemoval:true,allMonthSheet:true,applicationMonth:true,paymentMonth:true,undatedRetained:true,datePriority:true,negotiatedOnly:true,oaMatching:true,fullPreview:true,styles:true,followerBySource:true,lightRedPaidRows:true,toolSwitch:true,invalidRecovery:true,formulaCacheGuard:true,oaFirst:true,simultaneous:true,latestWins:true,mobile:true,downloadNames:true,versionRefresh:true,versionFailureGuard:true,beijingRollover:true,memoryFallback:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

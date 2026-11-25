@@ -40,7 +40,7 @@
         contentRows.add(Number(match[2])); contentColumns.add(match[1]);
       }
       const paidColumn = result.sheets[index].headers.indexOf('是否已付款');
-      const noWrap = new Set(['采购跟单员','对公付款OA流程号','申请付款金额','应付款时间','付款月份','付款日期','申请付款月份','需要提交付款审单的日期']);
+      const noWrap = new Set(['分类','创跟单员','对公付款0A流程号','OA-申请付款金额','应付款时间','付款月份','付款日期','申请付款月份','需要提交付款审单的日期']);
       const wrapColumns = result.sheets[index].headers.map((name,c) => noWrap.has(name) ? -1 : c).filter(c => c >= 0);
       const path = `xl/worksheets/sheet${index + 1}.xml`;
       let xml = await zip.file(path).async('string');
