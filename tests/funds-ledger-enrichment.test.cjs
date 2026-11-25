@@ -49,6 +49,18 @@ test('无效源OA提示来源不用于匹配，真实十七列表可回读并保
 const applications=(rows,headers=['流程编码'],name='付款申请汇总')=>{const book=X.utils.book_new();X.utils.book_append_sheet(book,sheet(headers,rows),name);return {book,filename:'申请单.xlsx'};};
 const paper=(rows,source,options={})=>C.build(ledger(rows),'台账.xlsx',{...options,...(source?{applications:source}:{})});
 const submitted=result=>result.sheets[0].rows.map(row=>row[16].v);
+test('付款日期确认跟随源行，OA与申请汇总补充和排序不把确认移到另一条记录',()=>{
+ const input=ledger([ledgerRow({'应付款时间':'未对账待定','摘要':'确认日期'}),ledgerRow({'对公付款0A流程号':'OA002','应付款时间':'未对账待定','摘要':'继续待定'}),ledgerRow({'对公付款0A流程号':'OA003','摘要':'明确日期'})]);
+ const before=JSON.stringify(input),base=C.build(input,'台账.xlsx',{today:'2026-11-09'}),paymentDateDecisions=Object.fromEntries(base.paymentDateReviews.map(review=>[review.id,review.source.row===2?{mode:'date',date:'2026-12-08'}:{mode:'pending'}]));
+ const result=C.build(input,'台账.xlsx',{today:'2026-11-09',paymentDateDecisions,oa:oa([flow(),flow({'流程编号':'OA002','流程状态':'未归档'})]),applications:applications([{'流程编码':'OA002'}])});
+ const at=sourceRow=>result.sheets[0].rows[result.sheets[0].sources.findIndex(source=>source.row===sourceRow)];
+ assert.equal(result.pendingPaymentDates,0);assert.equal(result.sheets[0].sources[0].row,3);assert.equal(C.formatCell(at(2)[7]),'2026年12月08日');assert.equal(at(3)[7].v,'未对账待定');
+ assert.equal(at(2)[12].v,'已付款');assert.equal(at(3)[12].v,'未付款');assert.equal(at(3)[16].v,'已提交');assert.equal(at(2)[16].v,'未提交');assert.equal(at(2)[8].v,'未对账待定');assert.equal(at(2)[15].v,'');
+ assert.doesNotThrow(()=>C.workbook(result));
+ const removed=C.build(input,'台账.xlsx',{today:'2026-11-09',paymentDateDecisions});assert.equal(removed.pendingPaymentDates,0);
+ for(const sourceRow of [2,3]){const index=removed.sheets[0].sources.findIndex(source=>source.row===sourceRow);assert.deepEqual(removed.sheets[0].rows[index][7],at(sourceRow)[7]);assert.equal(removed.sheets[0].rows[index][12].v,'');assert.equal(removed.sheets[0].rows[index][16].v,'');}
+ assert.equal(JSON.stringify(input),before);
+});
 test('纸质提交状态中文名称降序，同状态保持日期及同日来源顺序，行数据和来源整体移动',()=>{
  const records=[
   ledgerRow({'对公付款0A流程号':'','应付款时间':'2026-11-01','摘要':'待核对'}),

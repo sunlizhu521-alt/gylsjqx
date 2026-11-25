@@ -157,7 +157,7 @@ function build(book,filename='资金台账.xlsx',options={}){
     submissionMonth.z='yyyy"年"mm"月"';
    }
    const day=hasDate?Date.UTC(parts.y,parts.m-1,monthOnly?1:parts.d):Infinity;
-   rows.push({row:[read('supplier'),read('entity'),oa,money(at('amount'),label('amount')),read('summary'),inferred?{t:'s',v:'未对账待定',z:'@'}:timeCell,...Array.from({length:4},blank),submissionMonth,submissionDate,blank()],source:{sheet:name,row:r+1},day,order:rows.length});
+   rows.push({row:[read('supplier'),read('entity'),oa,money(at('amount'),label('amount')),read('summary'),inferred?{t:'s',v:'未对账待定',z:'@'}:timeCell,...Array.from({length:4},blank),submissionMonth,submissionDate,blank()],source:{sheet:name,row:r+1},day,order:rows.length,suggestedPaymentDate:inferred&&hasDate?`${parts.y}-${String(parts.m).padStart(2,'0')}-${String(parts.d).padStart(2,'0')}`:''});
    count.included++;
   }
   counts.push(count);
@@ -188,12 +188,27 @@ function build(book,filename='资金台账.xlsx',options={}){
   }
  }
  rows.sort((a,b)=>b.row[12].v.localeCompare(a.row[12].v,'zh-CN-u-co-pinyin'));
+ const paymentDateReviews=[];
+ for(const record of rows){
+  record.paymentDate=copy(record.row[5]);
+  if(norm(record.paymentDate.v)!=='未对账待定')continue;
+  const source={filename,...record.source},id=JSON.stringify([filename,source.sheet,source.row]);
+  const decision=options.paymentDateDecisions?.[id],mode=decision?.mode||'',rawDate=typeof decision?.date==='string'?decision.date:'';
+  let resolved=false,error='';
+  if(mode==='pending')resolved=true;
+  else if(mode==='date'){
+   const parsed=/^\d{4}-\d{2}-\d{2}$/.test(rawDate)?date({t:'s',v:rawDate},false,'预估付款日期',[]):blank();
+   if(parsed.t==='n'){record.paymentDate={...parsed,z:'yyyy"年"mm"月"dd"日"'};resolved=true;}
+   else error='请填写完整且有效的预估付款日期';
+  }else if(decision)error='请选择确认预估付款日期或继续未对账待定';
+  paymentDateReviews.push({id,source,supplier:text(record.row[0]),oa:text(record.row[2]),amount:formatCell(record.row[3]),suggestedDate:record.suggestedPaymentDate,mode,date:rawDate,resolved,error});
+ }
  return {sheets:[{name:'正常付款',headers:[...HEADERS],rows:rows.map(record=>[
   {t:'s',v:'正常付款-正常对账表',z:'@'},
   {t:'s',v:selected.get(record.source.sheet),z:'@'},
-  ...record.row.slice(0,3),record.row[4],record.row[3],copy(record.row[5]),...record.row.slice(5,10),
+  ...record.row.slice(0,3),record.row[4],record.row[3],record.paymentDate,...record.row.slice(5,10),
   paymentMonth(record.row[5]),...record.row.slice(10)
- ]),sources:rows.map(record=>record.source)}],counts,warnings};
+ ]),sources:rows.map(record=>record.source)}],counts,warnings,paymentDateReviews,pendingPaymentDates:paymentDateReviews.filter(review=>!review.resolved).length};
 }
 function paymentMonth(cell){
  if(text(cell)==='未对账待定')return {t:'s',v:'未对账待定',z:'@'};
@@ -253,7 +268,12 @@ function parseApplications(book,filename='付款申请单汇总.xlsx'){
  return {sheetName,count:activeRows.size,warnings,codes};
 }
 function validateApplications(book,filename){const parsed=parseApplications(book,filename);return {sheetName:parsed.sheetName,count:parsed.count,warnings:parsed.warnings};}
+function assertExportable(result){
+ const pending=(result.paymentDateReviews||[]).filter(review=>!review.resolved);
+ if(pending.length||result.pendingPaymentDates)throw Error('还有 '+(pending.length||result.pendingPaymentDates)+' 条付款日期为“未对账待定”，请逐条确认预估付款日期或继续待定后再下载');
+}
 function workbook(result){
+ assertExportable(result);
  const book=X.utils.book_new();
  for(const source of result.sheets){
   const sheet=X.utils.aoa_to_sheet([source.headers,...source.rows.map(row=>row.map(copy))]);
@@ -271,5 +291,5 @@ function workbook(result){
 }
 function formatCell(cell){return !cell||cell.v==null?'':X.utils.format_cell(copy(cell));}
 function exportFilename(date,version=1){return `资金台账整理-${date}-V${version}.xlsx`;}
-return {HEADERS,build,workbook,formatCell,exportFilename,validateOA,validateApplications};
+return {HEADERS,build,workbook,formatCell,exportFilename,validateOA,validateApplications,assertExportable};
 });

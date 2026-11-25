@@ -102,7 +102,17 @@ function fixture(replacement=false){
    await surface.locator('#'+id+':not([disabled])').waitFor();await surface.locator('#'+id).setInputFiles({name,mimeType:MIME,buffer:bytes});
    await surface.locator('#'+reference).filter({hasText:name}).waitFor();assert.match(await surface.locator('#'+reference).innerText(),/2026.*11.*0?8/);
   }
-  async function ready(surface=frame){await surface.locator('#download:not([disabled])').waitFor();}
+  async function ready(surface=frame){
+   await surface.locator('#result').waitFor({state:'visible'});
+   const cards=surface.locator('.payment-date-review');
+   for(let i=0;i<await cards.count();i++){
+    const card=cards.nth(i);
+    if((await card.locator('.date-review-status').innerText()).includes('已确认'))continue;
+    await card.locator('[data-date-mode]').selectOption('pending');
+    await card.locator('[data-confirm-payment-date]').click();
+   }
+   await surface.locator('#download:not([disabled])').waitFor();
+  }
   async function preview(surface=frame){return surface.locator('#preview').evaluate(el=>({headers:[...el.querySelectorAll('th')].map(c=>c.textContent),rows:[...el.querySelectorAll('tbody tr')].filter(tr=>tr.cells.length===17).map(tr=>[...tr.cells].map(c=>c.textContent))}));}
   async function blocked(pattern){await frame.locator('#status').filter({hasText:pattern}).waitFor();assert(await frame.locator('#download').isDisabled());assert.equal((await preview()).rows.length,0);}
   async function download(label,surface=frame,owner=page,date='2026-11-08'){
@@ -135,7 +145,7 @@ function fixture(replacement=false){
     }
     if(c===13&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(v,/^(?:\d{4}年\d{2}月|未对账待定)$/);}
     if(c===0)assert.equal(v,'正常付款-正常对账表');
-    if(c===7){assert.equal(v,expected[r][8]);assert.equal(cell.t,'s');assert.equal(snap.rows[r][c],snap.rows[r][8]);if(/^\d{4}年/.test(v))assert.equal(cell.z,'@');}
+    if(c===7){assert.equal(cell.t,'s');assert.equal(snap.rows[r][c],v);if(/^\d{4}年/.test(v))assert.equal(cell.z,'@');}
     if(c===14&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月$/);}
     if(c===15&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月\d{2}日$/);}
     assert.equal(snap.rows[r][c],cell?X.utils.format_cell(cell):'');
@@ -166,7 +176,11 @@ function fixture(replacement=false){
    },{bytes:[...bytes],paid:expected.map(row=>row[12]==='已付款')});
    assert.deepEqual(meta.problems,[]);assert.equal(meta.names.length,1);assert.equal(meta.sizes.length,1);assert.equal(meta.widths.length,17);assert(meta.widths.every(w=>w>=12&&w<=255));return snap;
   }
-  await upload(input.bytes,'合成全月份台账.xlsx');await ready();
+  await upload(input.bytes,'合成全月份台账.xlsx');
+  await frame.locator('#result').waitFor({state:'visible'});
+  assert.equal(await frame.locator('.payment-date-review').count(),4);
+  assert(await frame.locator('#download').isDisabled(),'待定日期未确认前，仍可预览但不能下载');
+  await ready();
   const baseSnap=await verify(await download('monthly-base'),input.expected());
   assert.equal(baseSnap.rows.find(r=>r[2]==='合成月末已归档')[15],'2026年11月23日');
   assert.equal(baseSnap.rows.find(r=>r[2]==='合成已结清仍保留')[15],'2026年11月09日');
@@ -251,6 +265,61 @@ function fixture(replacement=false){
   await frame.locator('#clear-oa').click();await ready();await upload(replacement.bytes,'合成替换台账.xlsx');await ready();await verify(await download('replace-ledger'),replacement.expected());
   assert.equal(await page.evaluate(()=>localStorage.getItem('funds-export-versions')),OTHER_VERSIONS);
 
+  // Date review changes only the payment-date cell; source-derived dates and ordering stay intact.
+  const reviewPage=await browser.newPage({viewport:{width:1600,height:1000},timezoneId:'America/Los_Angeles'});
+  reviewPage.on('pageerror',e=>errors.push(e.message));await reviewPage.clock.setFixedTime(new Date('2026-11-08T02:00:00Z'));
+  await reviewPage.goto(base,{waitUntil:'networkidle'});await reviewPage.locator('button[data-tool="funds-ledger"]').click();
+  const reviewFrame=reviewPage.frameLocator('iframe[data-tool="funds-ledger"]'),reviewName='合成待定日期确认.xlsx';
+  await upload(input.bytes,reviewName,'ledger',reviewFrame);await reviewFrame.locator('#result').waitFor({state:'visible'});
+  const cards=reviewFrame.locator('.payment-date-review'),editedCard=cards.filter({hasText:'合成已有预估列双空'}),unknownCard=cards.filter({hasText:'保留无时间无所属月份'});
+  assert.equal(await cards.count(),4);assert(await reviewFrame.locator('#download').isDisabled());
+  assert.equal(await editedCard.locator('[data-payment-date]').inputValue(),'2026-11-06','推算日期仅作建议，不应自动确认');
+  assert.equal(await editedCard.locator('[data-date-mode]').inputValue(),'');
+  assert.equal(await unknownCard.locator('[data-payment-date]').inputValue(),'','缺少推算依据不填造日期');
+  assert.equal(await reviewPage.evaluate(key=>localStorage.getItem(key),VERSION_KEY),null,'未确认不能产生下载版本');
+  const directError=await reviewFrame.locator('body').evaluate(async(_,data)=>{
+   const book=XLSX.read(Uint8Array.from(data.bytes),{type:'array',cellNF:true}),result=FundsLedgerCore.build(book,data.name,{today:'2026-11-08'});
+   try{await FundsLedgerExport(result);return '';}catch(error){return error.message;}
+  },{bytes:[...input.bytes],name:reviewName});
+  assert.match(directError,/确认/,'直接调用导出也不能绕过逐行确认');
+  const untouched=await preview(reviewFrame);
+  await editedCard.locator('[data-date-mode]').selectOption('date');
+  await editedCard.locator('[data-payment-date]').fill('2026-12-18');
+  assert(await reviewFrame.locator('#download').isDisabled(),'选日期并编辑尚不表示确认');
+  await editedCard.locator('[data-confirm-payment-date]').click();
+  assert.match(await editedCard.locator('.date-review-status').innerText(),/已确认/);
+  assert(await reviewFrame.locator('#download').isDisabled(),'其他待定记录也要逐条确认');
+  await ready(reviewFrame);
+  const changed=input.expected().map(row=>row[2]==='合成已有预估列双空'?row.map((v,c)=>c===7?serial('2026-12-18'):v):row);
+  const confirmed=await verify(await download('review-confirmed-date',reviewFrame,reviewPage),changed,reviewFrame);
+  assert.deepEqual(confirmed.rows.map(row=>row.filter((_,c)=>c!==7)),untouched.rows.map(row=>row.filter((_,c)=>c!==7)),'确认日期不更新应付、付款月份及审单提交日期');
+  const versionBeforeEdit=await reviewPage.evaluate(key=>localStorage.getItem(key),VERSION_KEY);
+  await editedCard.locator('[data-payment-date]').fill('2026-12-19');
+  assert(await reviewFrame.locator('#download').isDisabled(),'修改已确认日期立即撤销确认');
+  assert(!(await editedCard.locator('.date-review-status').innerText()).includes('已确认'));
+  assert.equal((await preview(reviewFrame)).rows.find(row=>row[2]==='合成已有预估列双空')[7],'未对账待定');
+  assert.equal(await reviewPage.evaluate(key=>localStorage.getItem(key),VERSION_KEY),versionBeforeEdit);
+  await editedCard.locator('[data-confirm-payment-date]').click();
+  await reviewFrame.locator('#download:not([disabled])').waitFor();
+  await editedCard.locator('[data-date-mode]').selectOption('pending');
+  assert(await reviewFrame.locator('#download').isDisabled(),'改为继续待定也必须重新确认');
+  await editedCard.locator('[data-confirm-payment-date]').click();
+  await reviewFrame.locator('#download:not([disabled])').waitFor();
+  const pendingSnap=await verify(await download('review-confirmed-pending',reviewFrame,reviewPage),input.expected(),reviewFrame);
+  await reviewPage.locator('button[data-tool="funds"]').click();await reviewPage.locator('button[data-tool="funds-ledger"]').click();
+  assert.deepEqual(await preview(reviewFrame),pendingSnap);assert(await reviewFrame.locator('#download').isEnabled(),'切换工具保留本次确认');
+  await upload(input.oa.bytes,'合成日期确认OA.xlsx','oa',reviewFrame);await reviewFrame.locator('#result').waitFor({state:'visible'});
+  assert(await reviewFrame.locator('#download').isEnabled(),'替换OA不撤销同一台账的日期确认');
+  await upload(paper.bytes,'合成日期确认申请.xlsx','applications',reviewFrame);await reviewFrame.locator('#result').waitFor({state:'visible'});
+  assert(await reviewFrame.locator('#download').isEnabled(),'替换申请汇总不撤销同一台账的日期确认');
+  await verify(await download('review-preserved-supplements',reviewFrame,reviewPage),withPaper(input.expected('full'),paperCodes),reviewFrame);
+  await upload(input.bytes,reviewName,'ledger',reviewFrame);await reviewFrame.locator('#result').waitFor({state:'visible'});
+  assert(await reviewFrame.locator('#download').isDisabled(),'同名同内容重传台账也必须重新确认');
+  assert.equal(await cards.count(),4);
+  assert((await cards.locator('.date-review-status').allTextContents()).every(text=>!text.includes('已确认')));
+  await ready(reviewFrame);await verify(await download('review-reconfirmed-upload',reviewFrame,reviewPage),withPaper(input.expected('full'),paperCodes),reviewFrame);
+  await reviewPage.screenshot({path:path.join(out,'payment-date-review.png'),fullPage:true});await reviewPage.close();
+
   const mobile=await browser.newPage({viewport:{width:390,height:844},isMobile:true,deviceScaleFactor:1});mobile.on('pageerror',e=>errors.push(e.message));
   await mobile.clock.setFixedTime(new Date('2026-11-08T02:00:00Z'));await mobile.goto(base,{waitUntil:'networkidle'});await mobile.locator('button[data-tool="funds-ledger"]').click();
   const mobileFrame=mobile.frameLocator('iframe[data-tool="funds-ledger"]');await upload(replacement.bytes,'合成手机台账.xlsx','ledger',mobileFrame);await ready(mobileFrame);
@@ -311,6 +380,6 @@ function fixture(replacement=false){
   await standalone.evaluate(()=>{Object.defineProperty(window,'localStorage',window.__qaStorageDescriptor);delete window.__qaStorageDescriptor;});
   assert.equal(await standalone.evaluate(()=>localStorage.getItem('funds-export-versions')),OTHER_VERSIONS,'内存回退也不能改动其他工具的版本号');
   await standalone.close();assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({base,out,columns:17,allMonthRows:input.expected().length,submissionDate:true,weeklyDownloadRefresh:true,paperSubmission:true,paperReplacementRemoval:true,allMonthSheet:true,applicationMonth:true,paymentMonth:true,undatedRetained:true,datePriority:true,negotiatedOnly:true,oaMatching:true,fullPreview:true,styles:true,followerBySource:true,lightRedPaidRows:true,toolSwitch:true,invalidRecovery:true,formulaCacheGuard:true,oaFirst:true,simultaneous:true,latestWins:true,mobile:true,downloadNames:true,versionRefresh:true,versionFailureGuard:true,beijingRollover:true,memoryFallback:true,errors}));
+  console.log(JSON.stringify({base,out,columns:17,allMonthRows:input.expected().length,submissionDate:true,weeklyDownloadRefresh:true,paperSubmission:true,paperReplacementRemoval:true,allMonthSheet:true,applicationMonth:true,paymentMonth:true,undatedRetained:true,datePriority:true,negotiatedOnly:true,oaMatching:true,fullPreview:true,styles:true,followerBySource:true,lightRedPaidRows:true,toolSwitch:true,invalidRecovery:true,formulaCacheGuard:true,oaFirst:true,simultaneous:true,latestWins:true,mobile:true,downloadNames:true,versionRefresh:true,versionFailureGuard:true,beijingRollover:true,memoryFallback:true,paymentDateReview:true,dateReviewExportGuard:true,dateReviewReset:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -2,6 +2,7 @@
   'use strict';
   const $ = id => document.getElementById(id), C = window.FundsLedgerCore;
   let result = null, exporting = false;
+  let paymentDateDecisions = {}, paymentDateDrafts = {};
   const versionKey = 'funds-ledger-export-versions', memoryVersions = {};
   function savedVersions() {
     try {
@@ -52,7 +53,7 @@
     return XLSX.read(bytes, {type:'array', cellNF:true, cellFormula:true, cellDates:false, sheetStubs:true});
   }
 
-  function clear() {
+  function clear(keepReviews = false) {
     result = null;
     $('result').hidden = true;
     $('download').disabled = true;
@@ -60,8 +61,34 @@
     $('warnings').replaceChildren();
     $('record-count').textContent = '0';
     $('preview').replaceChildren();
+    $('payment-date-panel').hidden = true;
+    if (!keepReviews) $('payment-date-reviews').replaceChildren();
   }
-  function render() {
+  function renderDateReviews(rebuild = true) {
+    const reviews = result.paymentDateReviews;
+    $('payment-date-panel').hidden = !reviews.length;
+    $('pending-date-count').textContent = result.pendingPaymentDates;
+    if (rebuild) $('payment-date-reviews').innerHTML = reviews.map((review, index) => {
+      const draft = paymentDateDrafts[review.id] || {mode:review.mode, date:review.date || review.suggestedDate};
+      return '<div class="payment-date-review" data-review-id="' + esc(review.id) + '">' +
+        '<strong>' + esc(review.supplier || '供应商未填写') + ' · ' + esc(review.amount || '金额未填写') + '</strong>' +
+        '<small>' + esc(review.source.filename + ' / ' + review.source.sheet + ' 第 ' + review.source.row + ' 行；OA：' + (review.oa || '空白')) + '</small>' +
+        '<p>' + (review.suggestedDate ? '推算参考：' + esc(review.suggestedDate) + '（需确认，可修改）' : '无可用推算日期，请填写具体日期或确认继续待定。') + '</p>' +
+        '<div class="date-review-controls"><label for="date-mode-' + index + '">处理方式<select id="date-mode-' + index + '" data-date-mode>' +
+        [['','请选择处理方式'],['date','确认预估付款日期'],['pending','继续未对账待定']].map(([value,label]) => '<option value="' + value + '"' + (draft.mode === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select></label>' +
+        '<label for="payment-date-' + index + '">预估付款日期<input id="payment-date-' + index + '" type="date" min="1900-01-01" max="9999-12-31" data-payment-date value="' + esc(draft.date || '') + '"></label>' +
+        '<button type="button" data-confirm-payment-date>确认本条</button></div><p class="date-review-status" role="status"></p></div>';
+    }).join('');
+    const byId = new Map(reviews.map(review => [review.id, review]));
+    for (const card of $('payment-date-reviews').children) {
+      const review = byId.get(card.dataset.reviewId);
+      if (!review) continue;
+      card.querySelector('.date-review-status').textContent = review.resolved
+        ? review.mode === 'pending' ? '已确认继续未对账待定' : '已确认预估付款日期：' + review.date
+        : review.error || '待确认：请选择处理方式并点击“确认本条”，确认前不能导出。';
+    }
+  }
+  function render(rebuildReviews = true) {
     const sheet = result.sheets[0];
     const paidColumn = sheet.headers.indexOf('是否已付款');
     $('sheet-title').textContent = sheet.name;
@@ -71,8 +98,9 @@
     $('warning-count').textContent = result.warnings.length;
     $('warning-panel').hidden = !result.warnings.length;
     $('result').hidden = false;
-    $('download').disabled = false;
-    $('status').textContent = `整理完成：${sheet.name}，${sheet.rows.length} 条。` + (result.warnings.length ? `需要留意 ${result.warnings.length} 项，详见下方提示。` : '');
+    renderDateReviews(rebuildReviews);
+    $('download').disabled = !!result.pendingPaymentDates;
+    $('status').textContent = `整理完成：${sheet.name}，${sheet.rows.length} 条。` + (result.pendingPaymentDates ? `还有 ${result.pendingPaymentDates} 条付款日期需要逐条确认，完成后可下载。` : '') + (result.warnings.length ? `需要留意 ${result.warnings.length} 项，详见下方提示。` : '');
   }
   function controls() {
     for (const [role, source] of Object.entries(sources)) {
@@ -80,10 +108,15 @@
       const button = $('clear-' + role);
       if (button) { button.hidden = source.state === 'empty'; button.disabled = exporting; }
     }
-    $('download').disabled = exporting || !result;
+    for (const card of $('payment-date-reviews').children) {
+      card.querySelector('[data-date-mode]').disabled = exporting;
+      card.querySelector('[data-payment-date]').disabled = exporting || card.querySelector('[data-date-mode]').value !== 'date';
+      card.querySelector('[data-confirm-payment-date]').disabled = exporting;
+    }
+    $('download').disabled = exporting || !result || !!result.pendingPaymentDates;
   }
-  function refresh() {
-    clear();
+  function refresh(rebuildReviews = true) {
+    clear(!rebuildReviews);
     const reading = Object.values(sources).filter(source => source.state === 'reading');
     const failed = Object.values(sources).filter(source => source.state === 'error');
     if (reading.length) $('status').textContent = '正在读取：' + reading.map(source => source.label).join('、') + '…';
@@ -91,11 +124,11 @@
     else if (!sources.ledger.book) $('status').textContent = '请选择采购付款台账；OA流程表和付款申请单汇总可选。';
     else {
       try {
-        const options = {};
+        const options = {paymentDateDecisions};
         if (sources.oa.book) options.oa = {book:sources.oa.book, filename:sources.oa.filename};
         if (sources.applications.book) options.applications = {book:sources.applications.book, filename:sources.applications.filename};
         result = C.build(sources.ledger.book, sources.ledger.filename, options);
-        render();
+        render(rebuildReviews);
       } catch (error) { clear(); $('status').textContent = '整理失败：' + error.message; }
     }
     controls();
@@ -104,10 +137,31 @@
     $('status').textContent = '工具加载失败，请刷新页面后重试。';
     return;
   }
+  function dateDraft(card) {
+    return {mode:card.querySelector('[data-date-mode]').value, date:card.querySelector('[data-payment-date]').value};
+  }
+  function changeDate(event) {
+    if (exporting) return;
+    const card = event.target.closest('.payment-date-review');
+    if (!card) return;
+    paymentDateDrafts[card.dataset.reviewId] = dateDraft(card);
+    delete paymentDateDecisions[card.dataset.reviewId];
+    refresh(false);
+  }
+  $('payment-date-reviews').addEventListener('input', event => { if (event.target.matches('[data-payment-date]')) changeDate(event); });
+  $('payment-date-reviews').addEventListener('change', event => { if (event.target.matches('[data-date-mode]')) changeDate(event); });
+  $('payment-date-reviews').addEventListener('click', event => {
+    const button = event.target.closest('[data-confirm-payment-date]');
+    if (!button || exporting) return;
+    const card = button.closest('.payment-date-review'), id = card.dataset.reviewId;
+    paymentDateDecisions[id] = paymentDateDrafts[id] = dateDraft(card);
+    refresh();
+  });
   for (const [role, source] of Object.entries(sources)) {
     $(source.input).addEventListener('change', async () => {
       const file = $(source.input).files[0];
       if (!file || exporting) return;
+      if (role === 'ledger') { paymentDateDecisions = {}; paymentDateDrafts = {}; }
       const current = ++source.version;
       source.book = null;
       source.filename = file.name;
@@ -153,7 +207,7 @@
     if (!result || exporting) return;
     // A tab may stay open across Monday; refresh both preview and export before downloading.
     refresh();
-    if (!result) return;
+    if (!result || result.pendingPaymentDates) return;
     exporting = true;
     controls();
     let url;

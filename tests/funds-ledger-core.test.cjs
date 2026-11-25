@@ -5,8 +5,62 @@ const row=(o={})=>({'供应商名称':'供应商甲','付款主体':'国源','�
 function sheet(rows,headers=H,title=false){return X.utils.aoa_to_sheet([...(title?[['台账标题']]:[]),headers,...rows.map(r=>headers.map(h=>r[h]??''))]);}
 function book(rows=[]){const b=X.utils.book_new();PEOPLE.forEach((p,i)=>X.utils.book_append_sheet(b,sheet(i?[]:rows),'对账明细-'+p));return b;}
 const build=b=>C.build(b,'台账.xlsx',{today:'2026-11-09'});
+const confirmedBuild=b=>C.build(b,'台账.xlsx',{today:'2026-11-09',paymentDateDecisions:Object.fromEntries(build(b).paymentDateReviews.map(review=>[review.id,{mode:'pending'}]))});
 // Keep existing business-field assertions in their original order, excluding display-only columns.
 const rows=r=>r.sheets[0].rows.map(row=>[row[2],row[3],row[4],row[6],row[5],...row.slice(8,13),...row.slice(14)]);
+test('只审查付款日期未对账待定，推算日期仅作建议；未确认禁止workbook和直接导出',async()=>{
+ const Export=require('../funds-ledger-export.js'),b=book();
+ b.Sheets['对账明细-李奇']=sheet([
+  row({'应付款时间':'','预估付款时间':'','所属月份':'2026-08','账期':'60天','申请付款金额':0}),
+  row({'应付款时间':'未对账待定'}),row({'应付款时间':'待定'}),row({'应付款时间':'2026年11月'})
+ ],[...H,'所属月份','账期']);
+ const before=JSON.stringify(b),result=build(b),reviews=result.paymentDateReviews;
+ assert.equal(result.sheets[0].rows.length,4);assert.equal(result.pendingPaymentDates,2);assert.equal(reviews.length,2);
+ assert.deepEqual(reviews.map(review=>review.source.row).sort((a,b)=>a-b),[2,3]);
+ for(const review of reviews){assert.equal(review.id,JSON.stringify(['台账.xlsx','对账明细-李奇',review.source.row]));assert.deepEqual(review.source,{filename:'台账.xlsx',sheet:'对账明细-李奇',row:review.source.row});assert.equal(review.resolved,false);}
+ assert.equal(reviews.find(review=>review.source.row===2).suggestedDate,'2026-11-06');assert.equal(reviews.find(review=>review.source.row===3).suggestedDate,'');
+ assert.throws(()=>C.assertExportable(result),/确认/);assert.throws(()=>C.workbook(result),/确认/);await assert.rejects(Export(result),/确认/);
+ await assert.rejects(Export({...result,pendingPaymentDates:0}),/确认/);
+ assert.equal(JSON.stringify(b),before);
+});
+test('确认预估日期只更新H付款日期，原应付月份审单日期、排序金额与源文件不变',async()=>{
+ const Export=require('../funds-ledger-export.js'),b=book();
+ b.Sheets['对账明细-李奇']=sheet([row({'应付款时间':'','预估付款时间':'','所属月份':'2026-08','账期':'60天','申请付款金额':0}),row({'应付款时间':'2026-11-07'})],[...H,'所属月份','账期']);
+ const before=JSON.stringify(b),base=build(b),id=base.paymentDateReviews[0].id,decisions={[id]:{mode:'date',date:'2027-01-15'}},decisionsBefore=JSON.stringify(decisions);
+ const result=C.build(b,'台账.xlsx',{today:'2026-11-09',paymentDateDecisions:decisions}),index=result.sheets[0].sources.findIndex(source=>source.row===2);
+ assert.equal(result.pendingPaymentDates,0);assert.equal(result.paymentDateReviews[0].resolved,true);assert.equal(result.paymentDateReviews[0].mode,'date');
+ assert.deepEqual(result.sheets[0].headers,base.sheets[0].headers);assert.deepEqual(result.sheets[0].sources,base.sheets[0].sources);assert.deepEqual(result.counts,base.counts);assert.deepEqual(result.warnings,base.warnings);
+ assert.deepEqual(result.sheets[0].rows.map(row=>row.filter((_,column)=>column!==7)),base.sheets[0].rows.map(row=>row.filter((_,column)=>column!==7)));
+ assert.equal(C.formatCell(result.sheets[0].rows[index][7]),'2027年01月15日');assert.equal(result.sheets[0].rows[index][8].v,'未对账待定');assert.equal(result.sheets[0].rows[index][13].v,'未对账待定');
+ assert.equal(result.sheets[0].rows[index][14].v,'');assert.equal(result.sheets[0].rows[index][15].v,'');assert.equal(result.sheets[0].rows[index][6].v,0);
+ assert.doesNotThrow(()=>C.assertExportable(result));const unchanged=JSON.stringify(result),out=X.read(await Export(result),{type:'array',cellNF:true}).Sheets.正常付款;
+ assert.equal(out['H'+(index+2)].v,'2027年01月15日');assert.equal(out['H'+(index+2)].t,'s');assert.equal(out['H'+(index+2)].z,'@');assert.equal(out['I'+(index+2)].v,'未对账待定');assert.equal(out['!autofilter'].ref,'A1:Q3');
+ assert.equal(JSON.stringify(result),unchanged);assert.equal(JSON.stringify(b),before);assert.equal(JSON.stringify(decisions),decisionsBefore);
+});
+test('同供应商同OA重复明细仍逐行确认，部分确认不能导出，全部继续待定后保留原值',async()=>{
+ const Export=require('../funds-ledger-export.js'),b=book([row({'应付款时间':'未对账待定'}),row({'应付款时间':'未对账待定'})]),base=build(b),ids=base.paymentDateReviews.map(review=>review.id);
+ assert.equal(new Set(ids).size,2);
+ const partial=C.build(b,'台账.xlsx',{today:'2026-11-09',paymentDateDecisions:{[ids[0]]:{mode:'pending'}}});
+ assert.equal(partial.pendingPaymentDates,1);assert.equal(partial.paymentDateReviews.filter(review=>review.resolved).length,1);assert.throws(()=>C.workbook(partial),/确认/);await assert.rejects(Export(partial),/确认/);
+ const result=confirmedBuild(b);assert.equal(result.pendingPaymentDates,0);assert(result.paymentDateReviews.every(review=>review.resolved&&review.mode==='pending'));
+ assert.deepEqual(result.sheets,base.sheets);const out=X.read(await Export(result),{type:'array'}).Sheets.正常付款;assert.equal(out.H2.v,'未对账待定');assert.equal(out.H3.v,'未对账待定');assert.equal(out['!ref'],'A1:Q3');
+});
+test('确认日期必须是有效的完整日历日期，无效或缺失不改变预览值且继续阻止导出',async()=>{
+ const Export=require('../funds-ledger-export.js'),b=book([row({'应付款时间':'未对账待定'})]),base=build(b),id=base.paymentDateReviews[0].id;
+ for(const date of ['',null,undefined,0,'2026-11','2026-11-9','2026-02-30','2026-13-01','2026-11-20T00:00:00Z']){
+  const result=C.build(b,'台账.xlsx',{today:'2026-11-09',paymentDateDecisions:{[id]:{mode:'date',date}}});
+  assert.equal(result.pendingPaymentDates,1,String(date));assert.equal(result.paymentDateReviews[0].resolved,false);assert(result.paymentDateReviews[0].error);
+  assert.deepEqual(result.sheets,base.sheets);assert.throws(()=>C.workbook(result),/确认/);await assert.rejects(Export(result),/确认/);
+ }
+ const leap=C.build(b,'台账.xlsx',{today:'2026-11-09',paymentDateDecisions:{[id]:{mode:'date',date:'2028-02-29'}}});assert.equal(leap.pendingPaymentDates,0);assert.equal(C.formatCell(leap.sheets[0].rows[0][7]),'2028年02月29日');
+});
+test('确认按文件工作表行号隔离，新文件不复用旧决定，重算不丢确认且不改明确日期',()=>{
+ const b=book([row({'应付款时间':'未对账待定'})]),base=build(b),id=base.paymentDateReviews[0].id,paymentDateDecisions={[id]:{mode:'date',date:'2026-12-08'}};
+ const previous=C.build(b,'台账.xlsx',{today:'2026-11-08',paymentDateDecisions}),next=C.build(b,'台账.xlsx',{today:'2026-11-09',paymentDateDecisions});
+ assert.equal(previous.pendingPaymentDates,0);assert.equal(next.pendingPaymentDates,0);assert.deepEqual(next.sheets,previous.sheets);
+ const latest=C.build(b,'新版台账.xlsx',{today:'2026-11-09',paymentDateDecisions});assert.equal(latest.pendingPaymentDates,1);assert.notEqual(latest.paymentDateReviews[0].id,id);assert.equal(latest.sheets[0].rows[0][7].v,'未对账待定');assert.throws(()=>C.assertExportable(latest),/确认/);
+ const dated=C.build(book([row()]),'台账.xlsx',{today:'2026-11-09',paymentDateDecisions});assert.equal(dated.paymentDateReviews.length,0);assert.equal(dated.pendingPaymentDates,0);assert.equal(C.formatCell(dated.sheets[0].rows[0][7]),'2026年11月06日');
+});
 test('前七列按指定名称排序，分类统一填写，摘要与金额不串位且保留零和空白',async()=>{
  const Export=require('../funds-ledger-export.js'),source=book();
  source.Sheets['对账明细-李奇']=sheet([row({'分类':'原分类','创跟单员':'原人员','摘要':'原摘要甲','申请付款金额':0}),row({'分类':'','创跟单员':'','摘要':'原摘要乙','申请付款金额':''})],[...H,'分类','创跟单员']);
@@ -33,7 +87,7 @@ test('付款日期位于金额之后且仅保留一列，复制整理后的应�
   [{'应付款时间':'2026-02-30','预估付款时间':'2026-12-08'},'2026-02-30']
  ];
  for(const [values,expected]of cases){
-  const source=book([row(values)]),before=JSON.stringify(source),result=build(source),record=result.sheets[0].rows[0];
+  const source=book([row(values)]),before=JSON.stringify(source),result=confirmedBuild(source),record=result.sheets[0].rows[0];
   assert.deepEqual(result.sheets[0].headers.slice(6,9),['OA-申请付款金额','付款日期','应付款时间']);assert.equal(result.sheets[0].headers.length,17);assert.equal(result.sheets[0].headers.filter(header=>header==='付款日期').length,1);
   assert.deepEqual(record[7],record[8]);assert.notEqual(record[7],record[8]);assert.equal(C.formatCell(record[7]),expected);
   const unchanged=JSON.stringify(result),out=X.read(await Export(result),{type:'array',cellNF:true}).Sheets.正常付款;
@@ -72,7 +126,7 @@ test('付款月份兼容1900/1904日期、有效公式及月格式，实际下�
  const Export=require('../funds-ledger-export.js');
  for(const date1904 of [false,true]){
   const b=book([row({'应付款时间':{t:'n',v:date1904?44870:46332,f:'DATE(2026,11,6)',z:'yyyy-mm-dd'}}),row({'应付款时间':{t:'d',v:new Date('2026-12-08T00:00:00Z')}}),row({'应付款时间':'未对账待定'}),row({'应付款时间':{t:'n',v:date1904?44870:46332,z:'yyyy-mm'}})]);
-  b.Workbook={WBProps:{date1904}};const result=build(b),before=JSON.stringify(result),out=X.read(await Export(result),{type:'array',cellNF:true}),s=out.Sheets.正常付款;
+  b.Workbook={WBProps:{date1904}};const result=confirmedBuild(b),before=JSON.stringify(result),out=X.read(await Export(result),{type:'array',cellNF:true}),s=out.Sheets.正常付款;
   assert.equal(s.N1.v,'付款月份');assert.equal(s.H1.v,'付款日期');assert.equal(s.O1.v,'申请付款月份');assert.equal(s.P1.v,'需要提交付款审单的日期');assert.equal(s.Q1.v,'是否提交纸质付款审单');assert.equal(s['!autofilter'].ref,'A1:Q5');
   for(let i=0;i<result.sheets[0].rows.length;i++){const cell=s['N'+(i+2)];assert.equal(cell.v,result.sheets[0].rows[i][13].v);assert.equal(cell.t,'s');assert.equal(cell.z,'@');assert.equal(cell.f,undefined);}
   for(let i=0;i<result.sheets[0].rows.length;i++){assert.deepEqual(result.sheets[0].rows[i][7],result.sheets[0].rows[i][8]);assert.equal(s['H'+(i+2)].v,s['I'+(i+2)].v);}
@@ -141,7 +195,7 @@ test('应付与预估均空时按月末加账期加7归月，但仅显示未对�
  const headers=[...H.filter(h=>h!=='预估付款时间'),'所属月份','账期'],b=book();b.Sheets['对账明细-李奇']=sheet([row({'应付款时间':'','所属月份':'2026-10','账期':'60天'}),row({'应付款时间':'','所属月份':'2026-10','账期':'5个月账期'}),row({'应付款时间':'','所属月份':'2024-02','账期':0})],headers);
  const inferred=build(b);assert.equal(rows(inferred).length,3);assert(rows(inferred).every(r=>r[5].v==='未对账待定'));assert.deepEqual(inferred.sheets[0].sources.map(s=>s.row),[4,2,3]);
  const existing=book();existing.Sheets['对账明细-李奇']=sheet([row({'应付款时间':'','预估付款时间':'','所属月份':'2026-10','账期':'60天'})],[...H,'所属月份','账期']);const r=build(existing);assert.equal(rows(r).length,1);assert.equal(rows(r)[0][5].v,'未对账待定');assert.equal(r.counts[0].undated,0);assert.match(r.warnings.join('\n'),/台账.xlsx.*李奇 第2行.*未对账待定.*留空.*补充具体付款日期/);
- const out=C.workbook(r),read=X.read(X.write(out,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true});assert.equal(read.Sheets[out.SheetNames[0]].I2.t,'s');assert.equal(read.Sheets[out.SheetNames[0]].I2.v,'未对账待定');
+ const out=C.workbook(confirmedBuild(existing)),read=X.read(X.write(out,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true});assert.equal(read.Sheets[out.SheetNames[0]].I2.t,'s');assert.equal(read.Sheets[out.SheetNames[0]].I2.v,'未对账待定');
 });
 test('推算日期与真实日期一起升序，推算同日仍保留来源顺序，源数据不变',()=>{
  const b=book();b.Sheets['对账明细-李奇']=sheet([
@@ -203,7 +257,7 @@ test('审单日期跨月跨年，使用当前周边界；同一文件基准日�
  const b=book([row({'应付款时间':'2026-11-06'})]);for(const [today,expected]of [['2026-11-08','2026年11月02日'],['2026-11-09','2026年11月09日'],['2026-11-16','2026年11月16日']])assert.equal(C.formatCell(rows(C.build(b,'台账.xlsx',{today}))[0][11]),expected);
  for(const today of ['',null,'2026-11','2026-11-9','2026-02-30','2026-13-01','2026-00-01','0000-01-01'])assert.throws(()=>C.build(b,'台账.xlsx',{today}),/基准.*有效日期/);
 });
-test('缺日或内部推算不生成审单日期，明确预估可计算，提示来源但仍可导出',()=>{
+test('缺日或内部推算不生成审单日期，明确预估可计算，确认待定后可导出',()=>{
  const b=book();b.Sheets['对账明细-李奇']=sheet([
   row({'应付款时间':'2026年11月'}),
   row({'应付款时间':{t:'n',v:46332,z:'yyyy-mm'}}),
@@ -213,7 +267,7 @@ test('缺日或内部推算不生成审单日期，明确预估可计算，提�
  ],[...H,'所属月份','账期']);const result=build(b);
  assert.deepEqual(rows(result).map(r=>C.formatCell(r[11])),['','','','','2026年11月16日']);assert.equal(result.warnings.length,4);
  for(const sourceRow of [2,3,4,5])assert(result.warnings.some(w=>w.includes('台账.xlsx / 对账明细-李奇 第'+sourceRow+'行')&&w.includes('补充具体付款日期')));
- const out=C.workbook(result);assert.equal(out.Sheets[out.SheetNames[0]].P2.v,'');assert.equal(out.Sheets[out.SheetNames[0]].P6.t,'n');
+ const out=C.workbook(confirmedBuild(b));assert.equal(out.Sheets[out.SheetNames[0]].P2.v,'');assert.equal(out.Sheets[out.SheetNames[0]].P6.t,'n');
  const formatted=book();formatted.Sheets['对账明细-李奇']=sheet([row({'应付款时间':'','预估付款月份':'2026-11-25'})],H.map(h=>h==='预估付款时间'?'预估付款月份':h));assert.equal(rows(build(formatted))[0][11].v,'');
 });
 test('审单日期用有效公式及1904日期的日历日期，不带时分秒',()=>{
