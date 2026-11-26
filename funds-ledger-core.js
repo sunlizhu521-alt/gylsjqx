@@ -118,14 +118,17 @@ function build(book,filename='资金台账.xlsx',options={}){
  const rows=[],counts=[],warnings=[],date1904=book.Workbook?.WBProps?.date1904===true||book.Workbook?.WBProps?.date1904===1;
  for(const name of book.SheetNames.filter(name=>selected.has(name))){
   const sheet=book.Sheets[name],{header,map,lastRow}=table(sheet,name,filename),count={sheet:name,included:0,excluded:0,undated:0};
+  const negotiatedMerges=(sheet['!merges']||[]).filter(merge=>merge.s.c===map.negotiated&&merge.e.c===map.negotiated&&merge.s.r>header);
   const absent=['entity','summary'].filter(key=>map[key]===undefined);
   if(absent.length)warnings.push(filename+' / '+name+'：缺少 '+absent.map(key=>FIELDS[key][0]).join('、')+'，对应输出保留空白');
   for(let r=header+1;r<=lastRow;r++){
    const at=key=>map[key]===undefined?undefined:sheet[X.utils.encode_cell({r,c:map[key]})];
    const label=key=>filename+' / '+name+'!'+(map[key]===undefined?'第'+(r+1)+'行':X.utils.encode_cell({r,c:map[key]}))+'（'+FIELDS[key][0]+'）';
    if(Object.keys(map).every(key=>!at(key)?.f&&!text(at(key))))continue;
-   valid(at('negotiated'),label('negotiated'));
-   if(text(at('negotiated'))!=='否'){count.excluded++;continue;}
+   const negotiatedMerge=negotiatedMerges.find(merge=>merge.s.r<=r&&merge.e.r>=r);
+   const negotiatedCell=negotiatedMerge?sheet[X.utils.encode_cell(negotiatedMerge.s)]:at('negotiated');
+   valid(negotiatedCell,negotiatedMerge?filename+' / '+name+'!'+X.utils.encode_cell(negotiatedMerge.s)+'（是否谈判付款）':label('negotiated'));
+   if(!['否',''].includes(text(negotiatedCell))){count.excluded++;continue;}
    let timeCell,inferred=false;
    valid(at('due'),label('due'));
    if(text(at('due')))timeCell=date(at('due'),date1904,label('due'),warnings);

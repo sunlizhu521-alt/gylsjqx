@@ -167,7 +167,9 @@
       source.filename = file.name;
       source.state = 'reading';
       source.error = '';
-      $(source.reference).textContent = `${file.name}\n引用时间：${new Date().toLocaleString('zh-CN', {timeZone:'Asia/Shanghai', hour12:false})}`;
+      const modified = new Date(file.lastModified);
+      const modifiedText = Number.isNaN(modified.getTime()) ? '未知' : modified.toLocaleString('zh-CN', {timeZone:'Asia/Shanghai', hour12:false});
+      $(source.reference).textContent = `${file.name}\n文件修改时间：${modifiedText}\n文件大小：${file.size} 字节\n引用时间：${new Date().toLocaleString('zh-CN', {timeZone:'Asia/Shanghai', hour12:false})}`;
       refresh();
       try {
         if (!/\.xlsx?$/i.test(file.name)) throw Error('请选择 .xlsx 或 .xls 文件');

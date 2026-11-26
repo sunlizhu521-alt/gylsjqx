@@ -15,9 +15,9 @@ test('原始OA按编号精确匹配，金额/供应商/主体不参与，也不�
 test('归档/已归档才已付款，未归档未付款，其他状态待核对；办理人付款执行不能代替归档',()=>{
  for(const [state,expected]of [['归档','已付款'],['已归档','已付款'],['未归档','未付款'],['流程归档','待核对'],['','待核对'],['审批中','待核对']]){const r=build([ledgerRow()],oa([flow({'流程状态':state})]));assert.equal(extras(r)[0][3],expected);assert.equal(extras(r)[0][0],'出纳执行付款');}
 });
-test('相同供应商同金额不同OA分别读取流程信息，不混用另一笔节点或付款状态',()=>{
- const r=build([ledgerRow(),ledgerRow({'对公付款0A流程号':'OA002'})],oa([flow(),flow({'流程编号':'OA002','当前节点':'财务审核','未操作者':'人员乙','流程状态':'未归档'})]));
- assert.deepEqual(r.sheets[0].rows.map(row=>row[4].v),['OA001','OA002']);assert.deepEqual(extras(r),[['出纳执行付款','人员甲','归档','已付款'],['财务审核','人员乙','未归档','未付款']]);
+test('谈判否与空白的同供应商同金额不同OA逐行保留，分别读取流程信息不混用付款状态',()=>{
+ const r=build([ledgerRow(),ledgerRow({'对公付款0A流程号':'OA002','是否谈判付款':''})],oa([flow(),flow({'流程编号':'OA002','当前节点':'财务审核','未操作者':'人员乙','流程状态':'未归档'})]));
+ assert.deepEqual(r.sheets[0].rows.map(row=>row[4].v),['OA001','OA002']);assert.deepEqual(r.sheets[0].rows.map(row=>row[6].v),[100,100]);assert.deepEqual(r.sheets[0].sources.map(source=>source.row),[2,3]);assert.deepEqual(extras(r),[['出纳执行付款','人员甲','归档','已付款'],['财务审核','人员乙','未归档','未付款']]);
 });
 test('无OA上传四字段全空；上传后缺号、占位、多号及未匹配只待核对且不借号',()=>{
  assert.deepEqual(extras(build([ledgerRow()])),[['','','','']]);

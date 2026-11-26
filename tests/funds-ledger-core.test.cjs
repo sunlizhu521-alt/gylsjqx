@@ -181,10 +181,19 @@ test('有内容行列交叉处含空白格都画边框，全空行列不画，�
  assert.equal(s.G2.v,0);assert.equal(s.G2.t,'n');assert.equal(s.G2.z,result.sheets[0].rows[0][6].z);assert.equal(s.F2.v,' \n ');assert.equal(s.J2.v,false);assert.equal(s.J2.t,'b');assert.equal(s.K2.v,'');assert.equal(JSON.stringify(result),before);
 });
 function set(b,h,cell,r=2){b.Sheets['对账明细-李奇'][X.utils.encode_cell({r:r-1,c:H.indexOf(h)})]=cell;}
-test('全部月份单表17列，仅谈判否筛选，已结清仍保留且结清列无需存在或可含错误',()=>{
- const records=[row({'是否结清':'是'}),row({'是否结清':'否'}),row({'是否结清':{t:'e',v:23}}),row({'是否谈判付款':' 否 '}),row({'是否谈判付款':'是'}),row({'是否谈判付款':''}),row({'是否谈判付款':'正常付款'})],b=book();b.Sheets['对账明细-李奇']=sheet(records,[...H,'是否结清']);
- const before=JSON.stringify(b),r=build(b);assert.equal(r.sheets.length,1);assert.equal(r.sheets[0].name,'正常付款');assert.equal(rows(r).length,4);assert(r.sheets[0].rows.every(row=>row.length===17));assert.deepEqual(r.counts[0],{sheet:'对账明细-李奇',included:4,excluded:3,undated:0});assert.equal(JSON.stringify(b),before);assert.equal(rows(build(book([row()]))).length,1);
+test('全部月份单表17列，谈判否或空白含空格与公式空串均纳入，是及异常非空排除，已结清仍保留',()=>{
+ const records=[row({'是否结清':'是'}),row({'是否结清':'否'}),row({'是否结清':{t:'e',v:23}}),row({'是否谈判付款':' 否 '}),row({'是否谈判付款':'是'}),row({'是否谈判付款':''}),row({'是否谈判付款':'正常付款'}),row({'是否谈判付款':' \t\n　'}),row({'是否谈判付款':{t:'s',f:'IF(TRUE,"","是")',v:''}}),row({'是否谈判付款':''}),row({'是否谈判付款':0}),row({'是否谈判付款':false}),row({'是否谈判付款':'否待确认'})],b=book();b.Sheets['对账明细-李奇']=sheet(records,[...H,'是否结清']);delete b.Sheets['对账明细-李奇'].H11;
+ const before=JSON.stringify(b),r=build(b);assert.equal(r.sheets.length,1);assert.equal(r.sheets[0].name,'正常付款');assert.equal(rows(r).length,8);assert(r.sheets[0].rows.every(row=>row.length===17));assert.deepEqual(r.sheets[0].sources.map(source=>source.row),[2,3,4,5,7,9,10,11]);assert.deepEqual(r.counts[0],{sheet:'对账明细-李奇',included:8,excluded:5,undated:0});assert.equal(JSON.stringify(b),before);assert.equal(rows(build(book([row()]))).length,1);
  assert.deepEqual(C.HEADERS,['分类','创跟单员','供应商','付款主体','对公付款0A流程号','摘要','OA-申请付款金额','付款日期','应付款时间','当前节点','未操作者','流程状态','是否已付款','付款月份','申请付款月份','需要提交付款审单的日期','是否提交纸质付款审单']);assert(rows(r).every(row=>row.filter((_,c)=>c>=6&&c!==10&&c!==11).every(c=>c.v==='')));
+});
+test('谈判分类单列纵向合并继承是或否，合并空白仍纳入，整行空白不生成记录且源表不变',()=>{
+ for(const flag of ['是','否','']){
+  const b=book([row({'是否谈判付款':flag,'申请付款金额':10}),row({'是否谈判付款':'','对公付款0A流程号':'OA002','申请付款金额':20}),{},row({'是否谈判付款':'','对公付款0A流程号':'OA003','申请付款金额':30})]),s=b.Sheets['对账明细-李奇'];
+  s['!merges']=[X.utils.decode_range('H2:H4')];delete s.H3;delete s.H4;if(flag==='')delete s.H2;
+  const before=JSON.stringify(b),result=build(b),expected=flag==='是'?[5]:[2,3,5];
+  assert.deepEqual(result.sheets[0].sources.map(source=>source.row),expected,flag);assert.deepEqual(rows(result).map(record=>record[3].v),flag==='是'?[30]:[10,20,30]);assert.deepEqual(result.counts[0],{sheet:'对账明细-李奇',included:expected.length,excluded:flag==='是'?2:0,undated:0});
+  assert.equal(JSON.stringify(b),before);assert.equal(C.workbook(result).Sheets.正常付款['!autofilter'].ref,'A1:Q'+(expected.length+1));
+ }
 });
 test('应付款时间优先，空才用预估日期；不依OA分表，无OA与未提交OA均保留',()=>{
  const r=build(book([row(),row({'对公付款0A流程号':'','应付款时间':'','预估付款时间':'2026-11-02'}),row({'对公付款0A流程号':'未提交OA','应付款时间':'2026-11-03','预估付款时间':'2026-12-01'}),row({'应付款时间':'2026-12-01','预估付款时间':'2026-11-01'})]));
@@ -235,7 +244,8 @@ test('1904与typed Date正确归月和回读，金额0/空白/合法币种保留
 });
 test('有效公式缓存取值包括零和空字符串；必要错误阻断，不读结清/未选日期/排除款无关字段',()=>{
  const b=book([row()]);set(b,'申请付款金额',{t:'n',f:'1-1',v:0});set(b,'应付款时间',{t:'s',f:'""',v:''});set(b,'预估付款时间',{t:'n',f:'DATE(2026,11,6)',v:46332,z:'yyyy-mm-dd'});const before=JSON.stringify(b),r=build(b);assert.equal(rows(r)[0][3].v,0);assert(rows(r)[0].every(c=>c.f===undefined));assert.equal(JSON.stringify(b),before);
- for(const h of ['供应商名称','付款主体','对公付款0A流程号','申请付款金额','摘要','应付款时间','是否谈判付款'])for(const cell of [{t:'n',f:'A99'},{t:'e',v:23,w:'#REF!'}]){const n=book([row()]);set(n,h,cell);assert.throws(()=>build(n),/台账.xlsx.*李奇!/);}
+ for(const flag of ['否',''])for(const h of ['供应商名称','付款主体','对公付款0A流程号','申请付款金额','摘要','应付款时间','是否谈判付款'])for(const cell of [{t:'n',f:'A99'},{t:'e',v:23,w:'#REF!'}]){const n=book([row({'是否谈判付款':flag})]);set(n,h,cell);assert.throws(()=>build(n),/台账.xlsx.*李奇!/);}
+ for(const type of ['s','str']){const n=book([row({'是否谈判付款':{t:type,f:'IF(TRUE,"","否")'}})]);assert.throws(()=>build(n),/李奇!H2.*公式缺少有效缓存/);}
  const n=book([row({'预估付款时间':{t:'n',f:'A99'}}),row({'是否谈判付款':'是','应付款时间':{t:'n',f:'A99'}})]);assert.equal(rows(build(n)).length,1);const otherMonth=book([row({'应付款时间':'2026-12-01','申请付款金额':{t:'n',f:'A99'}})]);assert.throws(()=>build(otherMonth),/李奇!D2.*公式/);
 });
 test('五人唯一表、日期后缀、标题行及字段别名，历史表不读取，冲突表头不任取',()=>{
