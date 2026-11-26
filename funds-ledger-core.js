@@ -213,7 +213,7 @@ function build(book,filename='资金台账.xlsx',options={}){
 function paymentMonth(cell){
  if(text(cell)==='未对账待定')return {t:'s',v:'未对账待定',z:'@'};
  const parts=cell?.t==='n'?X.SSF.parse_date_code(cell.v):null;
- return parts&&parts.y>=1900&&parts.y<=9999?{t:'s',v:parts.y+'年'+String(parts.m).padStart(2,'0')+'月',z:'@'}:blank();
+ return parts&&parts.y>=1900&&parts.y<=9999?{t:'n',v:Math.floor(cell.v)-parts.d+1,z:'yyyy"年"mm"月"'}:blank();
 }
 function mondayStamp(parts){
  const stamp=Date.UTC(parts.y,parts.m-1,parts.d);

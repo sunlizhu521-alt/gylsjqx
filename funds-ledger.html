@@ -50,7 +50,8 @@
       <li>付款月份取整理表“应付款时间”所在月份，显示为“2026年12月”；应付款时间为“未对账待定”时原样显示。有效年月也可提取月份，其他无法识别的日期留空并保留核对提示。</li>
       <li>“付款日期”为“未对账待定”的记录，必须逐条确认预估付款日期或确认继续待定，全部确认后才能导出。推算日期仅供参考，可修改；无推算依据时可手填。确认只更新付款日期，应付款时间、月份及审单提交日期保持原口径。</li>
       <li>修改确认选项或日期后需重新确认；切换工具保留本次确认，重新上传采购付款台账后清除确认。替换OA或申请汇总保留同一台账的确认；原文件不修改。</li>
-      <li>申请付款月份取“需要提交付款审单的日期”所在月份，导出为年月文本；提交日期不明确时留空。</li>
+      <li>申请付款月份取“需要提交付款审单的日期”所在月份；提交日期不明确时留空。</li>
+      <li>付款日期、应付款时间、付款月份、申请付款月份及需要提交付款审单的日期均导出为Excel日期格式。具体日期显示“2026年11月26日”，月份显示“2026年11月”；“未对账待定”、无法识别的原文及空白保留。</li>
       <li>每条明细单独保留。公式采用文件保存的有效结果，导出为值；原文件不修改。</li>
       <li>下载命名为“资金台账整理-日期-V版本号.xlsx”；日期按北京时间，同一天在当前浏览器内依次递增，生成失败不递增。</li>
       <li>日期无法识别，或缺少有效月份、账期而无法推算时，列出来源提示，保留记录，申请付款月份和提交日期留空；必要公式结果异常时需修正源表后再下载。</li>
@@ -69,8 +70,8 @@
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-ledger-core.js?v=ledger-date-confirm-20261126"></script>
-<script src="funds-ledger-export.js?v=ledger-columns-20261126"></script>
+<script src="funds-ledger-core.js?v=ledger-native-dates-20261126"></script>
+<script src="funds-ledger-export.js?v=ledger-native-dates-20261126"></script>
 <script src="funds-ledger-tool.js?v=ledger-date-confirm-20261126"></script>
 </body>
 </html>

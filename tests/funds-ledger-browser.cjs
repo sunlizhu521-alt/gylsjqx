@@ -78,7 +78,7 @@ function fixture(replacement=false){
   const info=mode==='full'?fullInfo:mode==='new'?{[flow(1)]:['最新节点','最新人员','未归档','未付款']}:{};
   return entries.toSorted((a,b)=>(a.date||'9999').localeCompare(b.date||'9999')||a.index-b.index).map(({person,row,date,inferred})=>{
    const submission=inferred||!date?'':expectedSubmission(date,today),parts=submission===''?null:X.SSF.parse_date_code(submission),due=inferred?'未对账待定':date?serial(date):value(row[5]||row[6]);
-   return ['正常付款-正常对账表',person,...row.slice(0,3).map(value),value(row[4]),value(row[3]),due,due,...(mode?(info[value(row[2])]||['','','','待核对']):['','','','']),inferred?'未对账待定':date?date.slice(0,4)+'年'+date.slice(5,7)+'月':'',parts?serial(parts.y+'-'+String(parts.m).padStart(2,'0')+'-01'):'',submission,''];
+   return ['正常付款-正常对账表',person,...row.slice(0,3).map(value),value(row[4]),value(row[3]),due,due,...(mode?(info[value(row[2])]||['','','','待核对']):['','','','']),inferred?'未对账待定':date?serial(date.slice(0,7)+'-01'):'',parts?serial(parts.y+'-'+String(parts.m).padStart(2,'0')+'-01'):'',submission,''];
   });
  }
  return {book,bytes:write(book),oa,newOA,expected};
@@ -123,8 +123,7 @@ function fixture(replacement=false){
    const bytes=await fs.readFile(await d.path());await fs.writeFile(path.join(out,label+'.xlsx'),bytes);return bytes;
   }
   async function verify(bytes,expected,surface=frame){
-   expected=expected.map(row=>row.map((value,c)=>typeof value==='number'&&[7,8,14,15].includes(c)?X.SSF.format(c===14?'yyyy"年"mm"月"':'yyyy"年"mm"月"dd"日"',value):value));
-   const book=X.read(bytes,{type:'buffer',cellNF:true,cellStyles:true}),name='正常付款',sheet=book.Sheets[name],snap=await preview(surface);
+   const book=X.read(bytes,{type:'buffer',cellNF:true,cellStyles:true}),name='正常付款',sheet=book.Sheets[name],dateSheet=X.read(bytes,{type:'buffer',cellNF:true,cellDates:true}).Sheets[name],snap=await preview(surface);
    assert.deepEqual(book.SheetNames,[name]);const range=X.utils.decode_range(sheet['!ref']);
    const matrix=Array.from({length:range.e.r+1},(_,r)=>Array.from({length:range.e.c+1},(_,c)=>sheet[X.utils.encode_cell({r,c})]?.v??''));
    assert.deepEqual(matrix,[OUTPUT_HEADERS,...expected]);assert.deepEqual(snap.headers,OUTPUT_HEADERS);assert.equal(snap.rows.length,expected.length);
@@ -139,15 +138,21 @@ function fixture(replacement=false){
    for(let r=0;r<expected.length;r++)for(let c=0;c<17;c++){
     const cell=sheet[X.utils.encode_cell({r:r+1,c})],v=expected[r][c];assert.equal(cell?.v??'',v);assert(!cell?.f);
     if(v!=='')assert.equal(cell.t,typeof v==='number'?'n':'s');if(c===6&&v!=='')assert.match(cell.z,/0\.00/);
-    if(c===8){
-     if(/^\d{4}年\d{2}月\d{2}日$/.test(v)){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月\d{2}日$/);}
-     else{assert(['未对账待定','待定'].includes(v));assert.equal(cell.t,'s');assert.equal(snap.rows[r][c],v);}
-    }
-    if(c===13&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(v,/^(?:\d{4}年\d{2}月|未对账待定)$/);}
     if(c===0)assert.equal(v,'正常付款-正常对账表');
-    if(c===7){assert.equal(cell.t,'s');assert.equal(snap.rows[r][c],v);if(/^\d{4}年/.test(v))assert.equal(cell.z,'@');}
-    if(c===14&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月$/);}
-    if(c===15&&v!==''){assert.equal(cell.z,'@');assert.equal(cell.t,'s');assert.match(snap.rows[r][c],/^\d{4}年\d{2}月\d{2}日$/);}
+    if([7,8,13,14,15].includes(c)){
+     const dateCell=dateSheet[X.utils.encode_cell({r:r+1,c})];
+     if(typeof v==='number'){
+      const month=[13,14].includes(c),format=month?'yyyy"年"mm"月"':'yyyy"年"mm"月"dd"日"',parts=X.SSF.parse_date_code(v);
+      assert.equal(cell.t,'n');assert.equal(cell.z,format);assert(X.SSF.is_date(cell.z));
+      assert.equal(dateCell.t,'d');assert(dateCell.v instanceof Date);
+      assert.equal(dateCell.v.toISOString().slice(0,10),parts.y+'-'+String(parts.m).padStart(2,'0')+'-'+String(parts.d).padStart(2,'0'));
+      assert.equal(snap.rows[r][c],X.SSF.format(format,v));
+     }else{
+      if(v!=='')assert.equal(cell.t,'s');
+      assert.equal(snap.rows[r][c],v,'待定、无效或空白日期保留原文');
+      assert.notEqual(dateCell?.t,'d');
+     }
+    }
     assert.equal(snap.rows[r][c],cell?X.utils.format_cell(cell):'');
    }
    const meta=await surface.locator('body').evaluate(async(_,data)=>{
@@ -380,6 +385,6 @@ function fixture(replacement=false){
   await standalone.evaluate(()=>{Object.defineProperty(window,'localStorage',window.__qaStorageDescriptor);delete window.__qaStorageDescriptor;});
   assert.equal(await standalone.evaluate(()=>localStorage.getItem('funds-export-versions')),OTHER_VERSIONS,'内存回退也不能改动其他工具的版本号');
   await standalone.close();assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({base,out,columns:17,allMonthRows:input.expected().length,submissionDate:true,weeklyDownloadRefresh:true,paperSubmission:true,paperReplacementRemoval:true,allMonthSheet:true,applicationMonth:true,paymentMonth:true,undatedRetained:true,datePriority:true,negotiatedOnly:true,oaMatching:true,fullPreview:true,styles:true,followerBySource:true,lightRedPaidRows:true,toolSwitch:true,invalidRecovery:true,formulaCacheGuard:true,oaFirst:true,simultaneous:true,latestWins:true,mobile:true,downloadNames:true,versionRefresh:true,versionFailureGuard:true,beijingRollover:true,memoryFallback:true,paymentDateReview:true,dateReviewExportGuard:true,dateReviewReset:true,errors}));
+  console.log(JSON.stringify({base,out,columns:17,allMonthRows:input.expected().length,submissionDate:true,weeklyDownloadRefresh:true,paperSubmission:true,paperReplacementRemoval:true,allMonthSheet:true,applicationMonth:true,paymentMonth:true,undatedRetained:true,datePriority:true,negotiatedOnly:true,oaMatching:true,fullPreview:true,styles:true,followerBySource:true,lightRedPaidRows:true,toolSwitch:true,invalidRecovery:true,formulaCacheGuard:true,oaFirst:true,simultaneous:true,latestWins:true,mobile:true,downloadNames:true,versionRefresh:true,versionFailureGuard:true,beijingRollover:true,memoryFallback:true,paymentDateReview:true,dateReviewExportGuard:true,dateReviewReset:true,nativeExcelDates:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

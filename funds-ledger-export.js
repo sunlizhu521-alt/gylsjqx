@@ -6,19 +6,6 @@
   const width = text => [...String(text)].reduce((n, c) => n + (c.codePointAt(0) > 255 ? 2 : 1), 0);
   return async function(result) {
     const book = Core.workbook(result);
-    const dateHeaders = new Set(['应付款时间','付款日期','申请付款月份','需要提交付款审单的日期']);
-    for (const [index,name] of book.SheetNames.entries()) {
-      const sheet = book.Sheets[name], source = result.sheets[index];
-      source.headers.forEach((header,c) => {
-        if (!dateHeaders.has(header)) return;
-        for (let r=1;r<=source.rows.length;r++) {
-          const address = X.utils.encode_cell({r,c}), cell = sheet[address];
-          if (cell?.t !== 'n' || !cell.z || !X.SSF.is_date(cell.z)) continue;
-          sheet[address] = {...cell,t:'s',v:X.SSF.format(cell.z,cell.v),z:'@'};
-          delete sheet[address].f; delete sheet[address].w;
-        }
-      });
-    }
     const zip = await Zip.loadAsync(X.write(book, {type:'array', bookType:'xlsx'}));
     let styles = await zip.file('xl/styles.xml').async('string');
     const original = styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*(?:\/>|>[\s\S]*?<\/xf>)/g);

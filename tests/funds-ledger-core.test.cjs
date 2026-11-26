@@ -33,8 +33,8 @@ test('确认预估日期只更新H付款日期，原应付月份审单日期、�
  assert.deepEqual(result.sheets[0].rows.map(row=>row.filter((_,column)=>column!==7)),base.sheets[0].rows.map(row=>row.filter((_,column)=>column!==7)));
  assert.equal(C.formatCell(result.sheets[0].rows[index][7]),'2027年01月15日');assert.equal(result.sheets[0].rows[index][8].v,'未对账待定');assert.equal(result.sheets[0].rows[index][13].v,'未对账待定');
  assert.equal(result.sheets[0].rows[index][14].v,'');assert.equal(result.sheets[0].rows[index][15].v,'');assert.equal(result.sheets[0].rows[index][6].v,0);
- assert.doesNotThrow(()=>C.assertExportable(result));const unchanged=JSON.stringify(result),out=X.read(await Export(result),{type:'array',cellNF:true}).Sheets.正常付款;
- assert.equal(out['H'+(index+2)].v,'2027年01月15日');assert.equal(out['H'+(index+2)].t,'s');assert.equal(out['H'+(index+2)].z,'@');assert.equal(out['I'+(index+2)].v,'未对账待定');assert.equal(out['!autofilter'].ref,'A1:Q3');
+ assert.doesNotThrow(()=>C.assertExportable(result));const unchanged=JSON.stringify(result),bytes=await Export(result),out=X.read(bytes,{type:'array',cellNF:true}).Sheets.正常付款,dates=X.read(bytes,{type:'array',cellDates:true}).Sheets.正常付款;
+ assert.equal(out['H'+(index+2)].v,result.sheets[0].rows[index][7].v);assert.equal(out['H'+(index+2)].w,'2027年01月15日');assert.equal(out['H'+(index+2)].t,'n');assert.equal(out['H'+(index+2)].z,'yyyy"年"mm"月"dd"日"');assert.equal(dates['H'+(index+2)].t,'d');assert.equal(dates['H'+(index+2)].v.toISOString(),'2027-01-15T00:00:00.000Z');assert.equal(out['I'+(index+2)].v,'未对账待定');assert.equal(out['!autofilter'].ref,'A1:Q3');
  assert.equal(JSON.stringify(result),unchanged);assert.equal(JSON.stringify(b),before);assert.equal(JSON.stringify(decisions),decisionsBefore);
 });
 test('同供应商同OA重复明细仍逐行确认，部分确认不能导出，全部继续待定后保留原值',async()=>{
@@ -43,7 +43,7 @@ test('同供应商同OA重复明细仍逐行确认，部分确认不能导出，
  const partial=C.build(b,'台账.xlsx',{today:'2026-11-09',paymentDateDecisions:{[ids[0]]:{mode:'pending'}}});
  assert.equal(partial.pendingPaymentDates,1);assert.equal(partial.paymentDateReviews.filter(review=>review.resolved).length,1);assert.throws(()=>C.workbook(partial),/确认/);await assert.rejects(Export(partial),/确认/);
  const result=confirmedBuild(b);assert.equal(result.pendingPaymentDates,0);assert(result.paymentDateReviews.every(review=>review.resolved&&review.mode==='pending'));
- assert.deepEqual(result.sheets,base.sheets);const out=X.read(await Export(result),{type:'array'}).Sheets.正常付款;assert.equal(out.H2.v,'未对账待定');assert.equal(out.H3.v,'未对账待定');assert.equal(out['!ref'],'A1:Q3');
+ assert.deepEqual(result.sheets,base.sheets);const out=X.read(await Export(result),{type:'array',cellDates:true}).Sheets.正常付款;assert.equal(out.H2.v,'未对账待定');assert.equal(out.H3.v,'未对账待定');assert.equal(out.H2.t,'s');assert.equal(out.H3.t,'s');assert.equal(out['!ref'],'A1:Q3');
 });
 test('确认日期必须是有效的完整日历日期，无效或缺失不改变预览值且继续阻止导出',async()=>{
  const Export=require('../funds-ledger-export.js'),b=book([row({'应付款时间':'未对账待定'})]),base=build(b),id=base.paymentDateReviews[0].id;
@@ -77,21 +77,22 @@ test('前七列按指定名称排序，分类统一填写，摘要与金额不�
 test('付款日期位于金额之后且仅保留一列，复制整理后的应付款时间，保留具体日期、年月和待定原文',async()=>{
  const Export=require('../funds-ledger-export.js');
  const cases=[
-  [{'应付款时间':'2026-12-08','预估付款时间':'2026-11-01'},'2026年12月08日'],
-  [{'应付款时间':'','预估付款时间':'2026-12-08'},'2026年12月08日'],
-  [{'应付款时间':'2026年12月'},'2026年12月'],
-  [{'应付款时间':'','预估付款时间':'2026-12'},'2026年12月'],
+  [{'应付款时间':'2026-12-08','预估付款时间':'2026-11-01'},'2026年12月08日','2026-12-08'],
+  [{'应付款时间':'','预估付款时间':'2026-12-08'},'2026年12月08日','2026-12-08'],
+  [{'应付款时间':'2026年12月'},'2026年12月','2026-12-01'],
+  [{'应付款时间':'','预估付款时间':'2026-12'},'2026年12月','2026-12-01'],
   [{'应付款时间':'','预估付款时间':''},'未对账待定'],
   [{'应付款时间':'未对账待定'},'未对账待定'],
   [{'应付款时间':'待定'},'待定'],
   [{'应付款时间':'2026-02-30','预估付款时间':'2026-12-08'},'2026-02-30']
  ];
- for(const [values,expected]of cases){
+ for(const [values,expected,iso]of cases){
   const source=book([row(values)]),before=JSON.stringify(source),result=confirmedBuild(source),record=result.sheets[0].rows[0];
   assert.deepEqual(result.sheets[0].headers.slice(6,9),['OA-申请付款金额','付款日期','应付款时间']);assert.equal(result.sheets[0].headers.length,17);assert.equal(result.sheets[0].headers.filter(header=>header==='付款日期').length,1);
   assert.deepEqual(record[7],record[8]);assert.notEqual(record[7],record[8]);assert.equal(C.formatCell(record[7]),expected);
-  const unchanged=JSON.stringify(result),out=X.read(await Export(result),{type:'array',cellNF:true}).Sheets.正常付款;
-  assert.equal(out.H1.v,'付款日期');assert.equal(out.H2.v,expected);assert.equal(out.H2.t,'s');assert.equal(out.H2.f,undefined);
+  const unchanged=JSON.stringify(result),bytes=await Export(result),out=X.read(bytes,{type:'array',cellNF:true}).Sheets.正常付款,dates=X.read(bytes,{type:'array',cellDates:true}).Sheets.正常付款;
+  assert.equal(out.H1.v,'付款日期');assert.equal(out.H2.v,record[7].v);assert.equal(out.H2.w,expected);assert.equal(out.H2.t,iso?'n':'s');assert.equal(out.H2.f,undefined);
+  if(iso){assert.equal(out.H2.z,record[7].z);assert.equal(dates.H2.t,'d');assert.equal(dates.H2.v.toISOString(),iso+'T00:00:00.000Z');assert.equal(dates.I2.v.toISOString(),iso+'T00:00:00.000Z');}else{assert.equal(dates.H2.t,'s');assert.equal(dates.H2.v,expected);}
   assert.equal(out.I2.v,out.H2.v);assert.equal(out['!autofilter'].ref,'A1:Q2');
   assert.equal(JSON.stringify(source),before);assert.equal(JSON.stringify(result),unchanged);
  }
@@ -103,12 +104,12 @@ test('付款月份按整理后的应付时间归月，具体日期和年月均�
   for(const today of ['2026-11-20','2027-02-01']){
    const result=C.build(b,'台账.xlsx',{today}),record=result.sheets[0].rows[0];
    assert.deepEqual(result.sheets[0].headers.slice(13),['付款月份','申请付款月份','需要提交付款审单的日期','是否提交纸质付款审单']);
-   assert.equal(record[13].v,expected);assert.equal(record[13].t,'s');assert.equal(record[13].z,'@');assert.equal(record[6].v,0);
+   assert.equal(C.formatCell(record[13]),expected);assert.equal(record[13].t,'n');assert.equal(record[13].z,'yyyy"年"mm"月"');assert.equal(X.SSF.parse_date_code(record[13].v).d,1);assert.equal(record[6].v,0);
   }
   assert.equal(JSON.stringify(b),before);
  }
  const record=C.build(book([row({'应付款时间':'2026-12-08'})]),'台账.xlsx',{today:'2026-11-20'}).sheets[0].rows[0];
- assert.equal(record[13].v,'2026年12月');assert.equal(C.formatCell(record[14]),'2026年11月');assert.equal(C.formatCell(record[15]),'2026年11月30日');
+ assert.equal(C.formatCell(record[13]),'2026年12月');assert.equal(C.formatCell(record[14]),'2026年11月');assert.equal(C.formatCell(record[15]),'2026年11月30日');
 });
 test('未对账待定保持文字，不用内部排序推算月份；其他无效日期不编造付款月份',()=>{
  for(const values of [
@@ -120,37 +121,47 @@ test('未对账待定保持文字，不用内部排序推算月份；其他无�
   assert.equal(record[8].v,'未对账待定');assert.equal(record[13].v,'未对账待定');assert.equal(record[14].v,'');assert.equal(record[15].v,'');
  }
  for(const due of ['待定','/','2026-02-30']){const result=build(book([row({'应付款时间':due})]));assert.equal(result.sheets[0].rows[0][13].v,'');assert(result.warnings.some(w=>w.includes('日期无法识别')));}
- const fallback=build(book([row({'应付款时间':'','预估付款时间':'2026-12-08'})]));assert.equal(fallback.sheets[0].rows[0][13].v,'2026年12月');
+ const fallback=build(book([row({'应付款时间':'','预估付款时间':'2026-12-08'})]));assert.equal(C.formatCell(fallback.sheets[0].rows[0][13]),'2026年12月');
 });
-test('付款月份兼容1900/1904日期、有效公式及月格式，实际下载为文本且列位一致',async()=>{
+test('付款月份兼容1900/1904日期、有效公式及月格式，实际下载为原生月首日期且列位一致',async()=>{
  const Export=require('../funds-ledger-export.js');
  for(const date1904 of [false,true]){
   const b=book([row({'应付款时间':{t:'n',v:date1904?44870:46332,f:'DATE(2026,11,6)',z:'yyyy-mm-dd'}}),row({'应付款时间':{t:'d',v:new Date('2026-12-08T00:00:00Z')}}),row({'应付款时间':'未对账待定'}),row({'应付款时间':{t:'n',v:date1904?44870:46332,z:'yyyy-mm'}})]);
-  b.Workbook={WBProps:{date1904}};const result=confirmedBuild(b),before=JSON.stringify(result),out=X.read(await Export(result),{type:'array',cellNF:true}),s=out.Sheets.正常付款;
+  b.Workbook={WBProps:{date1904}};const sourceBefore=JSON.stringify(b),result=confirmedBuild(b),before=JSON.stringify(result),bytes=await Export(result),out=X.read(bytes,{type:'array',cellNF:true}),s=out.Sheets.正常付款,dates=X.read(bytes,{type:'array',cellDates:true}).Sheets.正常付款;
   assert.equal(s.N1.v,'付款月份');assert.equal(s.H1.v,'付款日期');assert.equal(s.O1.v,'申请付款月份');assert.equal(s.P1.v,'需要提交付款审单的日期');assert.equal(s.Q1.v,'是否提交纸质付款审单');assert.equal(s['!autofilter'].ref,'A1:Q5');
-  for(let i=0;i<result.sheets[0].rows.length;i++){const cell=s['N'+(i+2)];assert.equal(cell.v,result.sheets[0].rows[i][13].v);assert.equal(cell.t,'s');assert.equal(cell.z,'@');assert.equal(cell.f,undefined);}
+  for(let i=0;i<result.sheets[0].rows.length;i++){
+   const cell=s['N'+(i+2)],expected=result.sheets[0].rows[i][13];assert.equal(cell.v,expected.v);assert.equal(cell.t,expected.t);assert.equal(cell.z,expected.z);assert.equal(cell.f,undefined);
+   if(i<3){assert.equal(cell.t,'n');assert.equal(cell.z,'yyyy"年"mm"月"');assert.equal(X.SSF.parse_date_code(cell.v).d,1);assert.equal(dates['N'+(i+2)].t,'d');assert.equal(dates['N'+(i+2)].v.toISOString(),(i<2?'2026-11-01':'2026-12-01')+'T00:00:00.000Z');}else{assert.equal(cell.t,'s');assert.equal(dates['N'+(i+2)].v,'未对账待定');}
+  }
   for(let i=0;i<result.sheets[0].rows.length;i++){assert.deepEqual(result.sheets[0].rows[i][7],result.sheets[0].rows[i][8]);assert.equal(s['H'+(i+2)].v,s['I'+(i+2)].v);}
-  assert.deepEqual(result.sheets[0].rows.map(r=>r[13].v),['2026年11月','2026年11月','2026年12月','未对账待定']);assert.equal(JSON.stringify(result),before);
+  const monthRow=result.sheets[0].sources.findIndex(source=>source.row===5)+2;
+  for(const column of ['H','I']){assert.equal(s[column+monthRow].v,46332);assert.equal(s[column+monthRow].w,'2026年11月');assert.equal(s[column+monthRow].z,'yyyy"年"mm"月"');assert.equal(dates[column+monthRow].v.toISOString(),'2026-11-06T00:00:00.000Z');}
+  assert.deepEqual(result.sheets[0].rows.map(r=>C.formatCell(r[13])),['2026年11月','2026年11月','2026年12月','未对账待定']);assert.equal(JSON.stringify(result),before);assert.equal(JSON.stringify(b),sourceBefore);
  }
 });
-for(const date1904 of [false,true])test(`实际导出日期为文本，${date1904?'1904':'1900'}来源、金额零值及内部日期不变`,async()=>{
+for(const date1904 of [false,true])test(`实际导出五个日期列为原生日期，${date1904?'1904':'1900'}来源、年月精度及零空金额不变`,async()=>{
  const Export=require('../funds-ledger-export.js');
  const b=book([row({'应付款时间':{t:'n',v:date1904?44870:46332,z:'yyyy-mm-dd',f:'DATE(2026,11,6)'},'申请付款金额':0}),row({'应付款时间':'2026年12月'}),row({'应付款时间':'待定','申请付款金额':''})]);
  b.Workbook={WBProps:{date1904}};
- const result=build(b),before=JSON.stringify(result),bytes=await Export(result),out=X.read(bytes,{type:'array',cellNF:true}),s=out.Sheets.正常付款;
+ const sourceBefore=JSON.stringify(b),result=build(b),before=JSON.stringify(result),bytes=await Export(result),out=X.read(bytes,{type:'array',cellNF:true}),s=out.Sheets.正常付款,dates=X.read(bytes,{type:'array',cellDates:true,cellNF:true}).Sheets.正常付款;
  assert.deepEqual(out.SheetNames,['正常付款']);
- assert.deepEqual([s.I2.v,s.H2.v,s.O2.v,s.P2.v],['2026年11月06日','2026年11月06日','2026年11月','2026年11月09日']);
- for(const address of ['I2','H2','O2','P2','I3','H3']){assert.equal(s[address].t,'s');assert.equal(s[address].z,'@');assert.equal(s[address].f,undefined);}
- assert.equal(s.I3.v,'2026年12月');assert.equal(s.O3.v,'');assert.equal(s.P3.v,'');assert.equal(s.I4.v,'待定');assert.equal(s.G4.v,'');
+ assert.deepEqual([s.H2.w,s.I2.w,s.N2.w,s.O2.w,s.P2.w],['2026年11月06日','2026年11月06日','2026年11月','2026年11月','2026年11月09日']);
+ assert.deepEqual([s.H2.v,s.I2.v,s.N2.v,s.O2.v,s.P2.v],[46332,46332,46327,46327,46335]);
+ for(const [address,iso]of [['H2','2026-11-06'],['I2','2026-11-06'],['N2','2026-11-01'],['O2','2026-11-01'],['P2','2026-11-09'],['H3','2026-12-01'],['I3','2026-12-01'],['N3','2026-12-01']]){
+  assert.equal(s[address].t,'n');assert.equal(s[address].z,/^[NO]|3$/.test(address)?'yyyy"年"mm"月"':'yyyy"年"mm"月"dd"日"');assert.equal(s[address].f,undefined);
+  assert.equal(dates[address].t,'d');assert.equal(dates[address].v.toISOString(),iso+'T00:00:00.000Z');assert.equal(dates[address].z,s[address].z);
+ }
+ assert.equal(s.I3.w,'2026年12月');assert.equal(s.O3.v,'');assert.equal(s.P3.v,'');assert.equal(s.I4.v,'待定');assert.equal(s.G4.v,'');
+ for(const address of ['O3','P3','H4','I4','N4','O4','P4']){assert.equal(s[address].t,'s');assert.equal(dates[address].t,'s');assert.equal(dates[address].v,s[address].v);}
  assert.equal(s.G2.t,'n');assert.equal(s.G2.v,0);assert.equal(s.G3.t,'n');assert.equal(s.G3.v,100);
- assert.equal([s.I2,s.H2,s.O2,s.P2,s.G2].filter(c=>c.t==='n').reduce((sum,c)=>sum+c.v,0),0);
- assert.equal(JSON.stringify(result),before);assert.equal(result.sheets[0].rows[0][8].t,'n');assert.equal(C.workbook(result).Sheets.正常付款.I2.t,'n');
+ assert.equal([s.G2,s.G3,s.G4].filter(c=>c.t==='n').reduce((sum,c)=>sum+c.v,0),100);
+ assert.equal(JSON.stringify(result),before);assert.equal(JSON.stringify(b),sourceBefore);assert.equal(result.sheets[0].rows[0][8].t,'n');assert.equal(C.workbook(result).Sheets.正常付款.I2.t,'n');
  const zip=await require('../vendor/jszip.min.js').loadAsync(bytes),styles=await zip.file('xl/styles.xml').async('string'),xml=await zip.file('xl/worksheets/sheet1.xml').async('string');
  const xfs=styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].match(/<xf\b[^>]*(?:\/>|>[\s\S]*?<\/xf>)/g),borders=styles.match(/<borders\b[^>]*>([\s\S]*?)<\/borders>/)[1].match(/<border>[\s\S]*?<\/border>/g);
  for(const c of xml.match(/<c\b[^>]+>/g)){
   const address=c.match(/\br="([A-Z]+\d+)"/)[1],row=Number(address.match(/\d+$/)[0]),style=xfs[Number(c.match(/\bs="(\d+)"/)[1])],border=borders[Number(style.match(/\bborderId="(\d+)"/)[1])];
   for(const side of ['left','right','top','bottom'])assert.match(border,new RegExp(`<${side} style="${row===1?'thin':'hair'}"><color rgb="FF404040"/></${side}>`),address);
-  if(/^H\d+$/.test(address))assert.match(style,/wrapText="0"/,'付款日期不换行');
+  if(/^[HINOP]\d+$/.test(address))assert.match(style,/wrapText="0"/,'日期列不换行');
  }
 });
 test('有内容行列交叉处含空白格都画边框，全空行列不画，零和false有效且红色不变',async()=>{

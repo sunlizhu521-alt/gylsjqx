@@ -43,8 +43,14 @@ test('数值OA按显示格式保留前导零匹配，新OA重算不遗留旧状�
  const l=ledger([ledgerRow({'对公付款0A流程号':{t:'n',v:123,z:'000000'}})]),source=oa([flow({'流程编号':{t:'n',v:123,z:'000000'}})]);const r=C.build(l,'台账.xlsx',{oa:source});assert.equal(r.sheets[0].rows[0][4].v,'000123');assert.equal(extras(r)[0][3],'已付款');
  const changed=oa([flow({'流程编号':'000123','流程状态':'未归档'})]);assert.equal(extras(C.build(l,'台账.xlsx',{oa:changed}))[0][3],'未付款');assert.deepEqual(extras(C.build(l,'台账.xlsx',{})),[['','','','']]);
 });
-test('无效源OA提示来源不用于匹配，真实十七列表可回读并保留原生金额和日期',()=>{
- const source=oa([flow(),flow({'流程编号':'未匹配'})]),info=C.validateOA(source.book,source.filename);assert.equal(info.count,2);assert.match(info.warnings.join('\n'),/原始OA.xlsx.*第3行/);const r=build([ledgerRow()],source),out=C.workbook(r),roundtrip=X.read(X.write(out,{type:'buffer',bookType:'xlsx'}),{type:'buffer'}),s=roundtrip.Sheets['正常付款'];assert.deepEqual(roundtrip.SheetNames,['正常付款']);assert.equal(s['!ref'],'A1:Q2');assert.equal(s.G2.t,'n');assert.equal(s.I2.t,'n');assert.equal(s.M2.v,'已付款');
+test('无效源OA提示来源不用于匹配，实际十七列导出保留原生金额、五列日期及已付款整行色',async()=>{
+ const Export=require('../funds-ledger-export.js'),source=oa([flow(),flow({'流程编号':'未匹配'})]),info=C.validateOA(source.book,source.filename);assert.equal(info.count,2);assert.match(info.warnings.join('\n'),/原始OA.xlsx.*第3行/);
+ const r=C.build(ledger([ledgerRow()]),'台账.xlsx',{today:'2026-11-09',oa:source}),bytes=await Export(r),roundtrip=X.read(bytes,{type:'array',cellNF:true,cellStyles:true}),s=roundtrip.Sheets.正常付款,dates=X.read(bytes,{type:'array',cellDates:true}).Sheets.正常付款;
+ assert.deepEqual(roundtrip.SheetNames,['正常付款']);assert.equal(s['!ref'],'A1:Q2');assert.equal(s['!autofilter'].ref,'A1:Q2');assert.equal(s.G2.t,'n');assert.equal(s.G2.v,100);assert.equal(s.M2.v,'已付款');
+ for(const [column,index,iso]of [['H',7,'2026-11-06'],['I',8,'2026-11-06'],['N',13,'2026-11-01'],['O',14,'2026-11-01'],['P',15,'2026-11-09']]){
+  const cell=s[column+'2'];assert.equal(cell.t,'n');assert.equal(cell.v,r.sheets[0].rows[0][index].v);assert.equal(cell.w,C.formatCell(r.sheets[0].rows[0][index]));assert.equal(cell.z,r.sheets[0].rows[0][index].z);assert.equal(dates[column+'2'].t,'d');assert.equal(dates[column+'2'].v.toISOString(),iso+'T00:00:00.000Z');
+ }
+ for(let column=0;column<17;column++)assert.equal(s[X.utils.encode_cell({r:1,c:column})].s.fgColor.rgb,'FF9999');
 });
 const applications=(rows,headers=['流程编码'],name='付款申请汇总')=>{const book=X.utils.book_new();X.utils.book_append_sheet(book,sheet(headers,rows),name);return {book,filename:'申请单.xlsx'};};
 const paper=(rows,source,options={})=>C.build(ledger(rows),'台账.xlsx',{...options,...(source?{applications:source}:{})});
