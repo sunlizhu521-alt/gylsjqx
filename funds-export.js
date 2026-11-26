@@ -53,7 +53,7 @@ window.FundsExport = async function(sourceBytes, result) {
   for(const name of elements(workbook,'definedName')) {
     const local=name.getAttribute('localSheetId');
     const sourceName=local===null?null:entries[Number(local)]?.getAttribute('name');
-    if(sourceName&&FundsCore.OUTPUT_SHEETS.slice(1).includes(sourceName))name.remove();
+    if(sourceName&&(FundsCore.OUTPUT_SHEETS.slice(1).includes(sourceName)||!plan.some(item=>item.sourceName===sourceName)))name.remove();
     else {if(local!==null)name.setAttribute('localSheetId',plan.findIndex(item=>item.sourceName===sourceName));name.textContent=renameSelf(name.textContent);}
   }
   for(const formula of [...elements(sheet,'f'),...elements(sheet,'formula'),...elements(sheet,'formula1'),...elements(sheet,'formula2')]) {
@@ -589,7 +589,7 @@ window.FundsExport = async function(sourceBytes, result) {
   selected.removeAttribute('state');
   const outputEntries=new Map([['谈判付款',selected]]),outputPaths=new Set([sheetPath]);
   let nextSheetId=Math.max(...entries.map(e=>Number(e.getAttribute('sheetId'))),0)+1;
-  const generatedSheets=[['谈判付款付款表付款节奏','NegotiatedSummary',result.negotiatedSummaryHeaders||FundsCore.NEGOTIATED_SUMMARY_HEADERS,result.negotiatedSummaryRows||[]],['正常付款','Normal',result.normalHeaders,result.normalRows],['付款申请核对','Review',result.reviewHeaders,result.reviewRows],['付款进度整理','Progress',result.progressHeaders||FundsCore.PROGRESS_HEADERS,result.progressRows||[]],['总额校验核对','TotalValidation',result.totalValidation?.headers||FundsCore.TOTAL_VALIDATION_HEADERS,result.totalValidation?.rows||[]]];
+  const generatedSheets=[['谈判付款付款表付款节奏','NegotiatedSummary',result.negotiatedSummaryHeaders||FundsCore.NEGOTIATED_SUMMARY_HEADERS,result.negotiatedSummaryRows||[]],['正常付款','Normal',result.normalHeaders,result.normalRows],['付款申请核对','Review',result.reviewHeaders,result.reviewRows],['付款进度整理','Progress',result.progressHeaders||FundsCore.PROGRESS_HEADERS,result.progressRows||[]]];
   for(const [name,key,headers,data] of generatedSheets){
     const generated=parseText(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="${S}"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews><cols/><sheetData/></worksheet>`);
     const generatedData=first(generated,'sheetData');
@@ -601,7 +601,7 @@ window.FundsExport = async function(sourceBytes, result) {
     }
     const range=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:allRows.length-1,c:headers.length-1}});
     generated.documentElement.insertBefore(create(generated,'dimension',{ref:range}),generated.documentElement.firstChild);
-    fitSheet(generated,{r:allRows.length-1,c:headers.length-1},0,key==='Review'||key==='TotalValidation',key==='Progress',key==='NegotiatedSummary');
+    fitSheet(generated,{r:allRows.length-1,c:headers.length-1},0,key==='Review',key==='Progress',key==='NegotiatedSummary');
     if(key==='Normal'){
       for(const col of elements(generated,'col'))if(FundsCore.NORMAL_HIDDEN_HEADERS.includes(headers[Number(col.getAttribute('min'))-1]))col.setAttribute('hidden','1');
     }
@@ -622,6 +622,8 @@ window.FundsExport = async function(sourceBytes, result) {
     outputEntries.set(name,entry);outputPaths.add(generatedPath);save(generatedPath,generated);
   }
   sheets.replaceChildren(...plan.map(item=>outputEntries.get(item.name)||sourceEntries.get(item.sourceName)));
+  const retainedSheetRelations=new Set(elements(sheets,'sheet').map(entry=>entry.getAttributeNS(R,'id')));
+  for(const relationship of elements(rels,'Relationship'))if(relationship.getAttribute('Type')===R+'/worksheet'&&!retainedSheetRelations.has(relationship.getAttribute('Id')))relationship.remove();
   // Only adjust references into renamed/reordered sheets; other original XML stays byte-identical.
   for(const path of Object.keys(zip.files)){
     if(!/^xl\/.*\.xml$/.test(path)||outputPaths.has(path)||relocatedParts.has(path)||path==='xl/workbook.xml'||path===stylePath)continue;

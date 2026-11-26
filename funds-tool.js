@@ -223,10 +223,7 @@
         const progressRows=result.progressRows.map((_,r)=>result.progressHeaders.map((_,c)=>progress[XLSX.utils.encode_cell({r:r+1,c})]));
         if(progressRange.e.r!==result.progressRows.length)throw Error('付款进度记录数量检查未通过');
         preview('progressPreview',result.progressHeaders,progressRows,Boolean(saved.Workbook?.WBProps?.date1904));
-        const totalSheet=saved.Sheets['总额校验核对'],totalRange=XLSX.utils.decode_range(totalSheet['!ref']);
-        if(totalRange.e.c!==result.totalValidation.headers.length-1||totalRange.e.r!==result.totalValidation.rows.length||result.totalValidation.headers.some((h,c)=>totalSheet[XLSX.utils.encode_cell({r:0,c})]?.v!==h))throw Error('总额校验核对表检查未通过');
-        const totalRows=result.totalValidation.rows.map((_,r)=>result.totalValidation.headers.map((_,c)=>totalSheet[XLSX.utils.encode_cell({r:r+1,c})]));
-        preview('totalValidationPreview',result.totalValidation.headers,totalRows);
+        if(saved.Sheets['总额校验核对'])throw Error('下载文件不应包含总额校验核对工作表');
         const sheet = saved.Sheets['谈判付款'];
         const exportedHeaderRow=result.negotiated.headerRow;
         const rows = result.negotiated.rows.map((_,index)=>result.negotiated.headers.map((_,col)=>sheet[XLSX.utils.encode_cell({r:index+exportedHeaderRow+1,c:col})]));

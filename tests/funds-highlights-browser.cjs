@@ -133,7 +133,7 @@ function fixture({ removeFirstApplication = false } = {}) {
     }
     async function checkExport(bytes, highlighted) {
       const book = X.read(bytes, { type: 'buffer', cellNF: true, cellStyles: true });
-      assert.deepEqual(book.SheetNames, ['谈判付款', '正常付款', '付款申请核对', '付款进度整理', '总额校验核对']);
+      assert.deepEqual(book.SheetNames, ['谈判付款', '谈判付款付款表付款节奏', '正常付款', '付款申请核对', '付款进度整理']);
       const n = book.Sheets.谈判付款, normal = book.Sheets.正常付款;
       assert.equal(n.U2.c?.[0]?.t,batchNote);assert.equal(n.U3.c[0].t,uncertainBatchNote);assert.equal(n.V2.c,undefined);
       const actualDate=normal[X.utils.encode_cell({r:1,c:C.NORMAL_HEADERS.indexOf('申请日期')})];assert.equal(actualDate.t,'s');assert.equal(actualDate.z,'@');assert.equal(X.SSF.format(actualDate.z,actualDate.v),'2026年10月27日');
@@ -178,11 +178,11 @@ function fixture({ removeFirstApplication = false } = {}) {
       assert.deepEqual(metadata.正常付款.rules, [], '正常付款不能用固定行号条件格式，以免排序后颜色错位');
       assert.deepEqual(metadata.谈判付款.rules, [], '谈判付款底色也可手动修改，不添加覆盖底色的条件格式');
       assert.deepEqual(metadata.付款申请核对.cells, []);
-      assert.deepEqual(metadata.总额校验核对.cells, []);assert.deepEqual(metadata.总额校验核对.yellowCells, []);
-      const total=await frame.locator('body').evaluate(()=>window.__totalValidation),totalSheet=book.Sheets.总额校验核对;
-      assert.deepEqual(X.utils.sheet_to_json(totalSheet,{header:1})[0],C.TOTAL_VALIDATION_HEADERS);assert.equal(X.utils.decode_range(totalSheet['!ref']).e.r,total.rows.length);
-      for(let r=0;r<total.rows.length;r++)for(let c=0;c<total.headers.length;c++)assert.equal(totalSheet[X.utils.encode_cell({r:r+1,c})]?.v??'',total.rows[r][c].v??'');
-      assert.equal(totalSheet['!autofilter'].ref,totalSheet['!ref']);
+      assert(!metadata.总额校验核对);assert(!book.Sheets.总额校验核对);
+      const total=await frame.locator('body').evaluate(()=>window.__totalValidation);
+      assert.deepEqual(await frame.locator('#totalValidationPreview th').allTextContents(),C.TOTAL_VALIDATION_HEADERS);
+      const totalPreview=await frame.locator('#totalValidationPreview tbody tr').evaluateAll(rows=>rows.map(row=>[...row.cells].map(cell=>cell.textContent)));
+      assert.deepEqual(totalPreview,total.rows.map(row=>row.map(cell=>X.utils.format_cell(cell))));
       for (const sheet of Object.values(metadata)) for (const rule of sheet.rules) { assert.equal(rule.type, 'expression'); assert.match(rule.color, /^(?:FF)?FF0000$/i); assert.equal(rule.background, 'FFFF0000', 'WPS conditional-format background must be explicitly red'); assert.equal(rule.backgroundIndex, null); }
       assert.equal(X.utils.sheet_to_json(book.Sheets.付款申请核对).filter(row=>!row.核对说明.includes('付款进度核对：')).length, 0, '同额批次按日期确定后不再产生核对记录');
     }

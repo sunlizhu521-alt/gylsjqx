@@ -8,12 +8,12 @@ const NORMAL_HIDDEN_HEADERS=['OA合同编号','合同总金额','是否对账'];
 const REVIEW_HEADERS=['付款类别','供应商名称','付款主体','申请付款金额','是否提交付款申请单','核对说明','来源文件','来源工作表','来源行号','跟单员'];
 const PROGRESS_HEADERS=['申请日期','付款来源','跟单员','供应商名称','付款主体','对公付款OA号','申请付款金额','应付时间','当前节点','未操作者','流程状态','申请人','是否已付款'];
 const NEGOTIATED_SUMMARY_HEADERS=['分类','创跟单员','供应商','付款主体','对公付款0A流程号','摘要','OA-申请付款金额','付款日期','申请纸质单日期','是否申请纸质单','是否已付款'];
-const OUTPUT_SHEETS=['谈判付款','谈判付款付款表付款节奏','正常付款','付款申请核对','付款进度整理','总额校验核对'];
+const OUTPUT_SHEETS=['谈判付款','谈判付款付款表付款节奏','正常付款','付款申请核对','付款进度整理'];
 const TOTAL_VALIDATION_HEADERS=FundsTotalValidation.HEADERS;
 function outputSheetPlan(names,selected){
  if(!names.includes(selected))throw Error('未找到选中的谈判付款工作表');
  const used=new Set([...names,...OUTPUT_SHEETS].map(name=>name.toLowerCase()));
- const retained=names.filter(name=>name!==selected&&!OUTPUT_SHEETS.slice(1).includes(name)).map(sourceName=>{
+ const retained=names.filter(name=>name!==selected&&name!=='总额校验核对'&&!OUTPUT_SHEETS.slice(1).includes(name)).map(sourceName=>{
   let name=sourceName;
   if(name==='谈判付款'){
    name='谈判付款（原表）';let suffix=2;
@@ -400,6 +400,7 @@ function build(inputs,decisions={}){
  }
  const blank=c=>!c?.f&&c?.t!=='e'&&!norm(c?.v);
  const usable=c=>c?.t!=='e'&&norm(c?.v)!=='';
+ const explicitNonpayment=c=>c?.t!=='e'&&!(c?.f&&c.t==='z')&&norm(c?.v)==='不支付';
  const isReapplication=r=>usable(r.values['核对说明'])&&norm(value(r,'核对说明')).includes('重新申请');
  const compatible=(a,b,key)=>{
   const x=a.values[key],y=b.values[key];
@@ -667,6 +668,7 @@ function build(inputs,decisions={}){
  }
  for(const target of targets){
   if(target.normal&&target.missingOA)continue;
+  if(!target.normal&&explicitNonpayment(target.sourceOA))continue;
   const info=classification(target.record);
   const originalIds=[...new Set([target.sourceOA,target.values['对公付款0A流程号']].flatMap(c=>c?.t==='e'?[]:codes(c?.v)))];
   const originalFlows=flow.records.filter(r=>originalIds.includes(flowId(r))&&r.values['流程编号']?.t!=='e');
@@ -1142,9 +1144,10 @@ function build(inputs,decisions={}){
  // Summary-only fields stay outside the managed source columns.
  const summaryColumns=names=>negotiated.headers.flatMap((h,c)=>names.includes(norm(h))?[c]:[]);
  const classificationColumns=summaryColumns(['是否谈判分批']),ownerColumns=summaryColumns(['创跟单员','跟单员','采购跟单员']);
- if(negotiated.records.length&&classificationColumns.length!==1)issue('summary-classification-header:'+selected,'missing-header',(classificationColumns.length?'存在多个':'缺少')+'“是否谈判分批”列，新汇总表分类留空；请核实来源分类后重新上传，或确认保留空白。',headerRecord(negotiated),[{value:'keep',label:'新汇总表分类留空，保留全部记录'}]);
- if(negotiated.records.length&&ownerColumns.length>1)issue('summary-owner-header:'+selected,'duplicate-header','跟单员存在多个别名列，新汇总表“创跟单员”留空，请核实唯一来源。',headerRecord(negotiated));
  const summaryInvalid=c=>c?.t==='e'||c?.f&&(c.t==='z'||c.v==null||c.v==='');
+ const summaryTargets=negotiatedObjects.filter(target=>!explicitNonpayment(target.sourceOA));
+ if(summaryTargets.length&&classificationColumns.length!==1)issue('summary-classification-header:'+selected,'missing-header',(classificationColumns.length?'存在多个':'缺少')+'“是否谈判分批”列，新汇总表分类留空；请核实来源分类后重新上传，或确认保留空白。',headerRecord(negotiated),[{value:'keep',label:'新汇总表分类留空，保留全部记录'}]);
+ if(summaryTargets.length&&ownerColumns.length>1)issue('summary-owner-header:'+selected,'duplicate-header','跟单员存在多个别名列，新汇总表“创跟单员”留空，请核实唯一来源。',headerRecord(negotiated));
  const summaryYears=new Map();
  for(let c=0;c<negotiated.headers.length;c++){
   const header=negotiated.sheet[X.utils.encode_cell({r:negotiated.headerRow,c})],parts=FundsTotalValidation.monthHeader(header)||FundsTotalValidation.headerDate(header,negotiated.date1904);
@@ -1201,7 +1204,7 @@ function build(inputs,decisions={}){
   const paid=linked.filter(r=>!isReapplication(r)).map(r=>applicationEvent(r,'是否已付款').state);
   return ['是',paid.length&&paid.every(s=>s==='no')?'否':paid.includes('done')&&!paid.some(s=>s==='no'||s==='invalid')?'是':'待核对'];
  }
- const negotiatedSummaryRows=negotiatedObjects.flatMap(target=>{
+ const negotiatedSummaryRows=summaryTargets.flatMap(target=>{
   const read=c=>negotiated.sheet[X.utils.encode_cell({r:target.record.r,c})];
   const flag=classificationColumns.length===1?read(classificationColumns[0]):null,kind=summaryInvalid(flag)?'':norm(flag?.v);
   if(classificationColumns.length===1&&!['是','否'].includes(kind))issue('summary-classification:'+target.record.id,'classification','“是否谈判分批”为空或异常，新汇总表分类留空；请核实本行，不能自动判为正常付款。',target.record,[{value:'keep',label:'新汇总表分类留空，保留本条记录'}]);

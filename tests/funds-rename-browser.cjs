@@ -2,7 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=r
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const X=require('../vendor/xlsx.full.min.js'),{fixtures}=require('./funds-fixtures.cjs');
 const MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',TITLE='付款节奏跟进';
-const SHEETS=['谈判付款','谈判付款付款表付款节奏','正常付款','付款申请核对','付款进度整理','总额校验核对','辅助说明','谈判付款-反馈'];
+const SHEETS=['谈判付款','谈判付款付款表付款节奏','正常付款','付款申请核对','付款进度整理','辅助说明','谈判付款-反馈'];
 const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
 (async()=>{
  const base=process.env.BASE_URL||process.env.QA_URL||'http://127.0.0.1:8899/',out=process.env.OUT_DIR||process.env.QA_OUT||'/private/tmp/funds-rename-browser';
@@ -62,7 +62,7 @@ const write=book=>Buffer.from(X.write(book,{type:'buffer',bookType:'xlsx'}));
    const preview=await frame.locator('#normalPreview tbody tr').evaluateAll(rows=>rows.map(r=>[...r.cells].map(c=>c.textContent)));
    const visible=preview.find(r=>r[supplier]==='正常供应商3');for(const h of ['已付金额','剩余金额','是否结清'])assert.equal(visible[headers.indexOf(h)],X.utils.format_cell(get(h)));
    for(const name of SHEETS.slice(0,5))assert(book.Sheets[name]['!autofilter']);
-   assert.deepEqual(X.utils.sheet_to_json(book.Sheets.总额校验核对,{header:1})[0],require('../funds-core.js').TOTAL_VALIDATION_HEADERS);assert.equal(X.utils.sheet_to_json(book.Sheets.总额校验核对).length,2);
+   assert(!book.Sheets.总额校验核对);
    const liqiRow=Array.from({length:range.e.r},(_,i)=>i+1).find(r=>sheet[X.utils.encode_cell({r,c:supplier})]?.v==='正常供应商1'),liqi=h=>sheet[X.utils.encode_cell({r:liqiRow,c:headers.indexOf(h)})];
    assert.deepEqual([liqi('已付金额').v,liqi('剩余金额').v,liqi('是否结清').v],[40,999,'是']);assert.equal(liqi('剩余金额').f,undefined);assert.equal(await decision('settlement:对账明细-李奇!2').count(),0,'李奇源付款情况不再要求重算');
   }

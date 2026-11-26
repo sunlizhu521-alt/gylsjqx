@@ -2,7 +2,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const X=require('../vendor/xlsx.full.min.js'),C=require('../funds-core.js');
 const {fixture}=require('./funds-progress-fixtures.cjs');
 const HEADERS=['创跟单员','供应商','付款主体','对公付款0A流程号','摘要','OA-申请付款金额','是否谈判分批','谈判明细','是否结清','2026年11月30日','2027年1月4日','2026年12月付款','2027年1月付款'];
-const row=()=>['李奇','汇总合成供应商','迈德斯特','不支付','十二月货款',100,'是','12月10日-40\n2027年1月20日-60','是',40,60,40,60];
+const row=()=>['李奇','汇总合成供应商','迈德斯特','未提交OA','十二月货款',100,'是','12月10日-40\n2027年1月20日-60','是',40,60,40,60];
 function sample(rows=[row()],headers=HEADERS){
  const input=fixture(),name=input.negotiated.book.SheetNames[0];
  input.negotiated.book.Sheets[name]=X.utils.aoa_to_sheet([headers,...rows]);
@@ -12,12 +12,47 @@ const sheet=i=>i.negotiated.book.Sheets[i.negotiated.book.SheetNames[0]];
 const summaryIssues=r=>r.issues.filter(i=>i.id.startsWith('summary-'));
 const text=c=>c.t==='n'&&X.SSF.is_date(c.z||'')?X.SSF.format('yyyy-mm-dd',c.v):c.v;
 
-test('新汇总固定十一列，按明细日期金额展开，保留不支付、已结清、重复、零和空白来源',()=>{
+test('新汇总仅排除原OA明确不支付的全部分期，原谈判记录保留；两种OA表头均适用',()=>{
+ for(const header of ['对公付款0A流程号','对公付款OA流程号']){
+  const rows=[row(),row(),row()];rows[0][3]=' 不 支 付 ';rows[0][6]='异常分类';rows[0][7]='不解析的明细';rows[2][3]='不支付';
+  const headers=HEADERS.slice();headers[3]=header;const input=sample(rows,headers),before=JSON.stringify(input),result=C.build(input);
+  assert.equal(result.negotiatedSummaryRows.length,2);assert.deepEqual(result.negotiatedSummaryRows.map(r=>r[6].v),[40,60]);
+  assert.equal(result.negotiated.rows.length,3);assert.equal(result.stats.negotiatedRows,3);assert.equal(summaryIssues(result).length,0);
+  assert.equal(JSON.stringify(input),before);
+ }
+});
+
+test('不从摘要、显示文字、异常公式或近似文字排除；有效不支付公式结果可排除',()=>{
+ for(const oa of ['',0,'暂不支付','不支付（待核对）',{t:'e',v:'不支付',w:'#VALUE!'},{t:'z',f:'A99',v:'不支付'},{t:'n',v:123,w:'不支付'}]){
+  const input=sample();sheet(input).D2=typeof oa==='object'?oa:{t:typeof oa==='number'?'n':'s',v:oa};sheet(input).E2.v='不支付说明';
+  assert.equal(C.build(input).negotiatedSummaryRows.length,2,JSON.stringify(oa));
+ }
+ const input=sample();sheet(input).D2={t:'s',f:'"不支付"',v:'不支付'};
+ assert.deepEqual(C.build(input).negotiatedSummaryRows,[]);
+});
+
+test('全不支付时仍提供11列表头，不因已排除记录的分类缺列或坏明细产生汇总提示',()=>{
+ const data=row();data[3]='不支付';data[7]='日期金额异常';const input=sample([data]);sheet(input).G1.v='原手工列';
+ const result=C.build(input);assert.deepEqual(result.negotiatedSummaryRows,[]);assert.equal(result.negotiatedSummaryHeaders.length,11);
+ assert.equal(summaryIssues(result).length,0);assert.equal(result.negotiated.rows.length,1);
+});
+
+test('不支付标记即使唯一匹配OA也不被补号覆盖，重复处理仍排除且原表保留',()=>{
+ const input=fixture(),s=sheet(input);s.C2={t:'s',v:'不支付'};
+ const before=JSON.stringify(input),first=C.build(input);
+ assert.deepEqual(first.negotiatedSummaryRows,[]);assert.equal(first.negotiated.rows[0][2].v,'不支付');
+ assert(!first.negotiated.updates.some(u=>u.address==='C2'));assert.equal(JSON.stringify(input),before);
+ for(const {address,cell}of first.negotiated.updates)s[address]={...cell};
+ s['!ref']=X.utils.encode_range({s:{r:0,c:0},e:{r:1,c:first.negotiated.headers.length-1}});
+ const second=C.build(input);assert.deepEqual(second.negotiatedSummaryRows,[]);assert.equal(second.negotiated.rows[0][2].v,'不支付');
+});
+
+test('新汇总固定十一列，按明细日期金额展开，保留已结清、重复、零和空白来源',()=>{
  const rows=[row(),row(),row(),row()];rows[1][6]='否';rows[2][5]=999;rows[2][7]='2026年12月10日-0';rows[3][5]=999;rows[3][7]='';
  const input=sample(rows),before=JSON.stringify(input),result=C.build(input);
  assert.deepEqual(result.negotiatedSummaryHeaders,['分类','创跟单员','供应商','付款主体','对公付款0A流程号','摘要','OA-申请付款金额','付款日期','申请纸质单日期','是否申请纸质单','是否已付款']);
  assert.equal(result.negotiatedSummaryRows.length,6);
- assert.deepEqual(result.negotiatedSummaryRows[0].slice(0,7).map(c=>c.v),['谈判付款-谈判付款表','李奇','汇总合成供应商','迈德斯特','不支付','十二月货款',40]);
+ assert.deepEqual(result.negotiatedSummaryRows[0].slice(0,7).map(c=>c.v),['谈判付款-谈判付款表','李奇','汇总合成供应商','迈德斯特','未提交OA','十二月货款',40]);
  assert.equal(result.negotiatedSummaryRows[2][0].v,'正常付款-谈判付款表');
  assert.equal(result.negotiatedSummaryRows[4][6].v,0);assert.equal(result.negotiatedSummaryRows[4][6].t,'n');
  assert.equal(result.negotiatedSummaryRows[5][6].v,'');assert.equal(result.negotiatedSummaryRows[0][6].z,'#,##0.00');

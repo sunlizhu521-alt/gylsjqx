@@ -94,5 +94,5 @@ test('年份冲突必须核对，确认仅改变排序年月，原表头与五�
 });
 test('付款来源列紧跟申请日期，旧文件缺新列待核对，工具历史付款行不补判',()=>{
  const i=fixture(),s=source(i);s.M2.c=[{a:'人工',t:P[3]+'2026年11月3日'}];const r=C.build(i);
- assert.equal(r.progressHeaders.length,13);assert.deepEqual(r.progressHeaders.slice(0,2),['申请日期','付款来源']);assert.deepEqual(r.progressRows.map(row=>row[1].v),['谈判付款表','资金台账','谈判付款表','资金台账']);assert.equal(states(r)[0],'待核对');assert.equal(r.totalValidation.headers.length,C.TOTAL_VALIDATION_HEADERS.length);assert.equal(C.OUTPUT_SHEETS.at(-1),'总额校验核对');
+ assert.equal(r.progressHeaders.length,13);assert.deepEqual(r.progressHeaders.slice(0,2),['申请日期','付款来源']);assert.deepEqual(r.progressRows.map(row=>row[1].v),['谈判付款表','资金台账','谈判付款表','资金台账']);assert.equal(states(r)[0],'待核对');assert.equal(r.totalValidation.headers.length,C.TOTAL_VALIDATION_HEADERS.length);assert.equal(C.OUTPUT_SHEETS.includes('总额校验核对'),false);
 });

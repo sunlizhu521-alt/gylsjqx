@@ -56,7 +56,7 @@
       <div><dt>对公付款</dt><dd>每次整理都重新导出</dd></div>
     </dl>
   </aside>
-  <p>核对资金台账、付款申请和 OA 审批进度，导出“谈判付款”“谈判付款付款表付款节奏”“正常付款”“付款申请核对”“付款进度整理”“总额校验核对”六张结果表，并保留谈判付款文件中的其他原工作表；同名结果表更新。文件仅在当前浏览器处理，原文件不修改。</p>
+  <p>核对资金台账、付款申请和 OA 审批进度，导出“谈判付款”“谈判付款付款表付款节奏”“正常付款”“付款申请核对”“付款进度整理”五张结果表，并保留谈判付款文件中的其他原工作表；同名结果表更新，旧“总额校验核对”工作表移除。文件仅在当前浏览器处理，原文件不修改。</p>
   <section>
     <h2>上传四份文件</h2>
     <div class="uploads">
@@ -82,18 +82,18 @@
     <details class="help-details"><summary>查看核对与下载说明</summary><ul><li>核对说明含“重新申请”的申请不再生成申请相关核对提示。其余重复申请每组只列一次；OA 编号补齐、更正、缺失及冲突均保留来源供核对。</li><li>未申请本身无需核对。重复、超额、归属不清及申请日期问题写入核对表，不阻止下载；其他待处理项需先确认。</li><li>当天在当前浏览器再次下载时，文件版本自动递增。</li></ul></details>
   </section>
   <section id="negotiatedPreviewSection" hidden><h2>谈判付款预览</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>预览最多 100 行，下载包含全部记录。</li><li>保留上传表原有表头、合并及金额列，不重新生成“2026年X月付款”，不插入表头行。已有双层表头仍按第二行日期读取，筛选位置不变。</li><li>日期付款计划列有一笔非零金额为单笔，两笔及以上为分批；未提交 OA 也按金额格计批次。</li><li>匹配付款申请后标黄，申请汇总确认已付且批次唯一时标红。同额多批按明确批号或原批注申请日期定位。申请沿用旧 OA 号而旧批次已被其他申请占用、或金额不同，按供应商、付款主体、金额查找新批次；唯一定位后匹配并提示编号差异，多个候选不猜配。已记录批注或红黄标记的金额格不覆盖给另一申请。</li><li>批注包含批次、申请日期、OA 备注时间和付款时间。有具体时间就显示时间；只有“是”时显示已备注或已付款、时间未填。原人工批注保留，底色下载后可手动修改。</li></ul></details><div class="preview" id="negotiatedPreview"></div></section>
-  <section id="negotiatedSummaryPreviewSection" hidden><h2>谈判付款付款表付款节奏</h2><p>按谈判明细的付款日期展开，同一原记录同一天的金额合计一行，不合并不同原记录。OA-申请付款金额显示该付款日期对应的明细金额合计。申请纸质单日期取唯一对应的原付款计划金额格表头日期；同日对应多项计划时保留各申请日期。日期统一显示为 YYYY-MM-DD，缺日、金额异常或归属不清时提示核对。“是否申请纸质单”和“是否已付款”按本次申请汇总唯一对应批次自动判断，无可靠对应或状态冲突时显示待核对；重新申请不作为已付款依据。预览前 100 行，下载包含全部记录。</p><div class="preview" id="negotiatedSummaryPreview"></div></section>
+  <section id="negotiatedSummaryPreviewSection" hidden><h2>谈判付款付款表付款节奏</h2><p>原表 OA 流程号明确为“不支付”的记录不进入本表。其余按谈判明细的付款日期展开，同一原记录同一天的金额合计一行，不合并不同原记录。OA-申请付款金额显示该付款日期对应的明细金额合计。申请纸质单日期取唯一对应的原付款计划金额格表头日期；同日对应多项计划时保留各申请日期。日期统一显示为 YYYY-MM-DD，缺日、金额异常或归属不清时提示核对。“是否申请纸质单”和“是否已付款”按本次申请汇总唯一对应批次自动判断，无可靠对应或状态冲突时显示待核对；重新申请不作为已付款依据。预览前 100 行，下载包含全部记录。</p><div class="preview" id="negotiatedSummaryPreview"></div></section>
   <section id="normalPreviewSection" hidden><h2>正常付款预览</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>台账每笔付款分别保留；同供应商、同金额但 OA 号不同的记录不合并，各自读取对应流程信息和申请状态。</li><li>本次已匹配付款申请的记录整行标红，排序时底色跟随记录，下载后可手动改色。</li><li>跟单员取资金台账来源工作表，放在登记月份后。</li><li>单据号、OA 合同编号、合同总金额、是否对账默认隐藏，可在导出文件中取消隐藏；行高为 30 磅。</li></ul></details><div class="preview" id="normalPreview"></div></section>
   <section id="reviewPreviewSection" hidden><h2>付款申请核对</h2><details class="help-details"><summary>查看预览与导出说明</summary><ul><li>显示重复申请、OA 编号、台账金额差异和实付同步等需复核事项，保留来源文件、工作表、行号和跟单员。</li><li>谈判金额按同一供应商汇总，与资金台账“是否谈判付款=是”的各期申请付款金额合计核对；含已付、已结清的分期，正常付款不计入。分期同额或 OA 号更新不会漏计。总额一致不提示，不一致时每个供应商只列一条，显示双方总额、差额（谈判减台账）和全部来源行。此类核对行的“申请付款金额”显示供应商谈判总额。</li><li>金额以资金台账为核对基准，各期金额、已付、余额和付款计划保留。金额为空、错误、公式结果缺失或分类范围不明确时仍提示核对，不当作零。未提交申请或“重新申请”不屏蔽检查；原 OA 栏为“不支付”的记录跳过，同供应商还含应支付款但台账无法区分范围时提示核实。</li><li>核对说明分条显示，自动换行并调整行高；申请提交进度不等于实际付款，实付金额以资金台账的唯一匹配结果更新。</li></ul></details><div class="preview" id="reviewPreview"></div></section>
   <section id="progressPreviewSection" hidden><h2>付款进度整理</h2><details class="help-details"><summary>查看付款进度说明</summary><p>每笔申请保留一行，包括重复申请。付款来源按申请汇总“付款分类”显示，不根据谈判表“是否谈判分批”或台账分类改写。应付时间按申请日期区分：2026年11月19日（含）起，直接取申请汇总同一行；此前谈判表来源取谈判付款表，资金台账来源取台账。新申请应付时间空白或异常时保留并提示，不从其他表补填；申请日期无法识别时先提示补充申请日期。谈判表来源的申请以本次申请汇总“是否已付款”为准：日期或“是”为已付款，“否”为未付款，空白或异常为待核对；不由旧批注或 OA 状态补判。资金台账来源沿用现有流程判断。“重新申请”优先显示。仅已付款状态格标红，悬停可查看依据。预览前 100 行，下载包含全部记录。</p></details><div class="preview" id="progressPreview"></div></section>
-  <section id="totalValidationPreviewSection" hidden><h2>总额校验核对</h2><p id="totalValidationStats"></p><details class="help-details"><summary>查看总额校验说明</summary><p>谈判付款原表“对公付款0A流程号”标记为“不支付”的记录不参与总额校验，仍保留在谈判付款表。其余记录逐行对比谈判明细、OA申请金额、分批总金额、日期付款计划合计和月度支付合计。谈判明细还按年月合计，与对应年月支付列逐月比较；总额相等但月份金额不同也提示不一致。“需要处理”列显示具体月份、来源单元格、双方金额和差额（谈判明细减月度支付）。缺少年份且表头无法唯一确定、对应月列缺失或空白时提示待核对。付款计划及月度列按表头识别，插列或移动列后仍跟随字段；不改原金额。日期计划笔数与有金额月份数分别显示。</p></details><div class="preview" id="totalValidationPreview"></div></section>
+  <section id="totalValidationPreviewSection" hidden><h2>总额校验核对</h2><p>校验结果仅在本页面显示，下载文件不生成此工作表。</p><p id="totalValidationStats"></p><details class="help-details"><summary>查看总额校验说明</summary><p>谈判付款原表“对公付款0A流程号”标记为“不支付”的记录不参与总额校验，仍保留在谈判付款表。其余记录逐行对比谈判明细、OA申请金额、分批总金额、日期付款计划合计和月度支付合计。谈判明细还按年月合计，与对应年月支付列逐月比较；总额相等但月份金额不同也提示不一致。“需要处理”列显示具体月份、来源单元格、双方金额和差额（谈判明细减月度支付）。缺少年份且表头无法唯一确定、对应月列缺失或空白时提示待核对。付款计划及月度列按表头识别，插列或移动列后仍跟随字段；不改原金额。日期计划笔数与有金额月份数分别显示。</p></details><div class="preview" id="totalValidationPreview"></div></section>
 </main>
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
-<script src="funds-total-validation.js?v=negotiated-installments-20261126"></script>
-<script src="funds-core.js?v=negotiated-installments-20261126"></script>
+<script src="funds-total-validation.js?v=negotiated-summary-filter-20261126"></script>
+<script src="funds-core.js?v=negotiated-summary-filter-20261126"></script>
 <script src="funds-cleanup.js?v=trim-blank-format-20261117"></script>
-<script src="funds-export.js?v=negotiated-installments-20261126"></script>
-<script src="funds-tool.js?v=negotiated-installments-20261126"></script>
+<script src="funds-export.js?v=negotiated-summary-filter-20261126"></script>
+<script src="funds-tool.js?v=negotiated-summary-filter-20261126"></script>
 </body>
 </html>

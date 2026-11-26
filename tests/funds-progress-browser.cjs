@@ -24,6 +24,7 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
   append(input,'applications',['2026-11-06','缺编号合成供应商','迈德斯特','',18,'正常付款']);
   append(input,'applications',['2026-11-07','多流程合成供应商','迈德斯特',ID(1)+' / '+ID(2),20,'正常付款']);
   const untouched=X.utils.aoa_to_sheet([['原内容'],['不得修改']]);untouched.A2.c=[{a:'原作者',t:'保留人工批注'}];X.utils.book_append_sheet(input.negotiated.book,untouched,'原工作表');
+  X.utils.book_append_sheet(input.negotiated.book,X.utils.aoa_to_sheet([['旧校验结果'],['本次下载应移除']]),'总额校验核对');
   async function upload(role,bytes=write(input[role].book)){
    if(role==='negotiated')input[role].book=X.read(bytes,{type:'buffer',cellNF:true,cellStyles:true});
    await frame.locator('#'+role+'File:not([disabled])').waitFor();await frame.locator('#'+role+'File').setInputFiles({name:input[role].name,mimeType:MIME,buffer:bytes});
@@ -70,8 +71,9 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
    }
    const normal=out.Sheets.正常付款,normalRows=X.utils.sheet_to_json(normal);assert.deepEqual(normalRows.map(r=>r.供应商名称),['合成供应商2','合成供应商3']);assert.equal(normalRows[0].本次申请付款金额,200);assert.equal(normalRows[0].应付时间,'2026年11月9日');
    for(let c=0;c<C.NORMAL_HEADERS.length;c++)assert.equal(fill(normal[X.utils.encode_cell({r:1,c})]),'FF0000','正常付款原整行红色保留');
-   const total=out.Sheets.总额校验核对,totalSnap=await snapshot('totalValidationPreview');assert.deepEqual(totalSnap.headers,core.totalValidation.headers);assert.equal(X.utils.decode_range(total['!ref']).e.r,core.totalValidation.rows.length);
-   for(let r=0;r<core.totalValidation.rows.length;r++)for(let c=0;c<core.totalValidation.headers.length;c++)assert.equal(totalSnap.rows[r][c].text,X.utils.format_cell(total[X.utils.encode_cell({r:r+1,c})]));
+   assert(!out.Sheets.总额校验核对,'下载不含总额校验核对，也不保留源文件中同名旧表');
+   const totalSnap=await snapshot('totalValidationPreview');assert.deepEqual(totalSnap.headers,core.totalValidation.headers);assert.equal(totalSnap.rows.length,core.totalValidation.rows.length);
+   for(let r=0;r<core.totalValidation.rows.length;r++)for(let c=0;c<core.totalValidation.headers.length;c++)assert.equal(totalSnap.rows[r][c].text,X.utils.format_cell(core.totalValidation.rows[r][c]));
    return out;
   }
   await analyze();const first=await download(1),initial=await verify(first,['已付款','未付款','已付款','未付款','待核对','待核对','待核对'],{M2:'FF0000',N2:''});
@@ -118,6 +120,22 @@ const fill=c=>(c?.s?.fgColor?.rgb||'').replace(/^FF(?=.{6}$)/,'');
   for(const role of ['ledger','applications','oa','negotiated'])await upload(role);await analyze();
   const crossMonthBook=X.read(await download(12),{cellNF:true});await verifySummary(crossMonthBook,['2026-10-26','2026-11-02'],[['是','待核对'],['待核对','待核对']]);
   assert.equal(X.utils.format_cell(crossMonthBook.Sheets.谈判付款.M1),'2026年10月26日');assert.equal(X.utils.format_cell(crossMonthBook.Sheets.谈判付款.N1),'2026年11月2日');
-  assert.deepEqual(errors,[]);console.log(JSON.stringify({base,progressColumns:13,negotiatedSummaryColumns:11,sheets:C.OUTPUT_SHEETS,latestApplicationStatus:true,fourNotes:true,yellowRed:true,normalPreserved:true,summaryPreview:true,summaryReupload:true,summaryInstallments:true,summaryAutoStatus:true,crossMonthDates:true,errors}));
+  // Excluding a payment from the summary must retain its source row, even when its summary-only fields need review.
+  X.utils.sheet_add_aoa(input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]],[['不支付合成供应商','迈德斯特','不支付',25,0,25,'否',46332,'保留不支付备注','未提供计划日期',25,'',25,'','待确认']],{origin:'A3'});
+  input.negotiated.book.Sheets[input.negotiated.book.SheetNames[0]].I3.c=[{a:'人工',t:'不支付原批注必须保留'}];
+  async function verifyExcluded(bytes,count){
+   const out=X.read(bytes,{cellNF:true,cellStyles:true}),summary=out.Sheets['谈判付款付款表付款节奏'],raw=out.Sheets.谈判付款,data=X.utils.sheet_to_json(summary,{header:1}),snap=await snapshot('negotiatedSummaryPreview');
+   assert.deepEqual(out.SheetNames,C.OUTPUT_SHEETS);assert.deepEqual(data[0],C.NEGOTIATED_SUMMARY_HEADERS);assert.equal(data[0].length,11);assert.equal(data.length-1,count);assert.equal(snap.rows.length,count);assert.deepEqual(snap.headers,C.NEGOTIATED_SUMMARY_HEADERS);assert.equal(summary['!autofilter'].ref,'A1:K'+(count+1));
+   assert.equal(raw.A3.v,'不支付合成供应商');assert.equal(raw.C3.v,'不支付');assert.equal(raw.I3.v,'保留不支付备注');assert.equal(raw.I3.c[0].t,'不支付原批注必须保留');assert.equal(raw.J3.v,'未提供计划日期');assert.equal(raw.O3.v,'待确认');
+   assert(!JSON.stringify(data).includes('不支付合成供应商'));assert(!JSON.stringify(snap).includes('不支付合成供应商'));
+   if(count){assert.deepEqual(data.slice(1).map(row=>row[2]),['合成供应商1','合成供应商1']);assert.deepEqual(data.slice(1).map(row=>row[6]),[40,60]);}
+   else{assert.equal(summary['!ref'],'A1:K1');assert.equal(raw.C2.v,'不支付');assert.equal(raw.A2.v,'合成供应商1');assert.equal(raw.J2.v,'1、11月2日－40\n2、11月9日－60');}
+   return out;
+  }
+  await upload('negotiated');await analyze();await verifyExcluded(await download(13),2);
+  set(input,'negotiated','对公付款0A流程号',2,'不支付');await upload('negotiated');await analyze();const excluded=await download(14);await verifyExcluded(excluded,0);
+  await upload('negotiated',excluded);await analyze();await verifyExcluded(await download(15),0);
+  assert.deepEqual(await frame.locator('#negotiatedSheet').evaluate(el=>[...el.options].map(option=>option.value).filter(Boolean)),['谈判付款']);
+  assert.deepEqual(errors,[]);console.log(JSON.stringify({base,progressColumns:13,negotiatedSummaryColumns:11,sheets:C.OUTPUT_SHEETS,latestApplicationStatus:true,fourNotes:true,yellowRed:true,normalPreserved:true,summaryPreview:true,summaryReupload:true,summaryInstallments:true,summaryAutoStatus:true,crossMonthDates:true,notPayExcluded:true,emptySummary:true,excludedReupload:true,totalPreviewPreserved:true,totalSheetRemoved:true,errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
