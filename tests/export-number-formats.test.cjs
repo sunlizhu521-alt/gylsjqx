@@ -62,7 +62,7 @@ test('季度预算导出的明细、汇总和合计保留两位金额，不出�
   const amounts = [1378,0,-60,0.25,-0.12];
   const cents = amounts.reduce((sum,v) => sum + Math.round(v*100), 0);
   const totals = {totalCents:cents,paidCents:0,remainingCents:cents};
-  const result = {records:amounts.map(amount => ({monthKey:'2026-11',supplier:'供应商',amount})),summary:{classified:[{monthKey:'2026-11',category:'正常付款',...totals}],monthly:[{monthKey:'2026-11',...totals}],totals}};
+  const result = {records:amounts.map(amount => ({monthKey:'2026-11',supplier:'供应商',amount,cents:Math.round(amount*100)})),summary:{classified:[{monthKey:'2026-11',category:'正常付款',...totals}],monthly:[{monthKey:'2026-11',...totals}],totals}};
   const output = X.read(await BudgetExport(result), {type:'array',cellNF:true});
   amounts.forEach((v,i) => check(output.Sheets.付款汇总明细['F'+(i+2)], v));
   for (const name of output.SheetNames) for (const cell of Object.values(output.Sheets[name])) if (cell?.t === 'n') assert(!/\.\s*$/.test(cell.w));

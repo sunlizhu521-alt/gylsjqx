@@ -19,14 +19,15 @@ async function read(data) {
 test('1904日期系统合并导出为年月文本，内部月份保持原数值', async () => {
   const Core = require('../quarter-budget-core.js');
   const source = {filename:'1904.xlsx',fingerprint:'1904',book:{SheetNames:['付款汇总明细'],Workbook:{WBProps:{date1904:true}},Sheets:{付款汇总明细:X.utils.aoa_to_sheet([Core.HEADERS,[44865,'合成供应商','主体','FP001','货款',100,'未支付','原备注','人工分类','跟单员','否']])}}};
-  const built = Core.build({existing:source},{mode:'existing'});
+  const empty = role => ({filename:role+'.xlsx',fingerprint:role,book:{SheetNames:['明细'],Sheets:{明细:X.utils.aoa_to_sheet([Core.HEADERS])}}});
+  const built = Core.build({negotiated:empty('negotiated'),ledger:empty('ledger'),budget:source},{budgetStartMonth:'2026-11'});
   assert.equal(built.records[0].month,44865);
   const {book} = await read(built);
   assert.equal(book.Sheets.付款汇总明细.A2.v,'2026年11月');
   assert.equal(book.Sheets.付款汇总明细.A2.t,'s');
   assert.equal(book.Sheets.付款汇总明细.A2.z,'@');
   assert.equal(book.Sheets.付款汇总明细.A2.w,'2026年11月');
-  assert.equal(book.Sheets.付款汇总明细.H2.v,'原备注');
+  assert.match(book.Sheets.付款汇总明细.H2.v,/原备注/);assert.match(book.Sheets.付款汇总明细.H2.v,/1904.xlsx/);
   assert.equal(source.book.Sheets.付款汇总明细.A2.v,44865);
 });
 const xml = (zip, index) => zip.file(`xl/worksheets/sheet${index}.xml`).async('string');
@@ -48,8 +49,8 @@ test('固定11列，两张表；日期为文本，金额精度、空值和文本
   const data = result([
     record({amount:123.456,cents:12346,summary:'=1+1',notes:'=HYPERLINK("https://example.invalid","text")'}),
     record({id:'r2',month:'月份待定',monthKey:'',amount:0,cents:0,oa:'=SUM(1,2)'}),
-    record({id:'r3',month:null,monthKey:'',amount:null,cents:null,summary:''}),
-    record({id:'r4',month:'2027年11月/12月',monthKey:'',amount:'待核对',cents:null})
+    record({id:'r3',month:null,monthKey:'',amount:null,cents:null,summary:'',excluded:'是',notes:'缺少金额，人工确认剔除'}),
+    record({id:'r4',month:'2027年11月/12月',monthKey:'',amount:'待核对',cents:null,excluded:'是',notes:'异常金额，人工确认剔除'})
   ]);
   const before = JSON.stringify(data), {book} = await read(data), sheet = book.Sheets.付款汇总明细;
   assert.deepEqual(book.SheetNames,['付款汇总明细','付款预算汇总']);
@@ -113,7 +114,7 @@ test('普通明细筛选可取消，全部可见，两页冻结表头、居中�
 });
 
 test('有内容的行包含空白备注也画边框，全空行和分隔行不画，零及false有效',async()=>{
-  const empty={month:null,monthKey:'',supplier:' ',subject:'',oa:'',summary:null,amount:null,cents:null,status:'',notes:' \n ',category:'',owner:'',excluded:'',related:false};
+  const empty={month:null,monthKey:'',supplier:' ',subject:'',oa:'',summary:null,amount:null,cents:0,status:'',notes:' \n ',category:'',owner:'',excluded:'',related:false};
   const {zip,book}=await read(result([record({supplier:false,notes:' \n ',summary:null,amount:0,cents:0,related:true}),record(empty),record({...empty,amount:0,cents:0}),record({...empty,supplier:false})],{classified:[],monthly:[],totals:{totalCents:0,paidCents:0,remainingCents:0}}));
   const styles=stylesFrom(await zip.file('xl/styles.xml').async('string')),detail=await xml(zip,1),summary=await xml(zip,2);
   for(const address of ['E2','H2','B2','F2']){assert.match(styleAt(detail,styles,address).border,/style="hair"/);assert.equal(styleAt(detail,styles,address).color,'FFFFC7CE');}
@@ -146,6 +147,46 @@ test('异常数字和缺失输入阻止导出，不把未知金额写成零', as
   await assert.rejects(Export({}),/缺少季度预算整理结果/);
   await assert.rejects(Export(result([record({amount:Infinity})])),/无效数字/);
   await assert.rejects(Export(result([],{totals:{totalCents:NaN,paidCents:0,remainingCents:0}})),/汇总金额无效/);
+});
+
+test('下载端再次拦截未完成核对及空金额，已确认剔除仍保留原空值',async()=>{
+  await assert.rejects(Export({...result(),canExport:false}),/未完成.*核对/);
+  await assert.rejects(Export({...result(),issues:[{blocking:true,resolved:false}]}),/未完成.*核对/);
+  await assert.rejects(Export(result([record({amount:null,cents:null})])),/空白金额/);
+  const {book}=await read(result([record({amount:null,cents:null,excluded:'是',notes:'缺少金额，已确认本次剔除'})],{classified:[],monthly:[],totals:{totalCents:0,paidCents:0,remainingCents:0}}));
+  assert.equal(book.Sheets.付款汇总明细.F2.v,'');assert.equal(book.Sheets.付款汇总明细.K2.v,'是');
+});
+
+test('已校验的文本金额导出为数值，原记录内容不被改写',async()=>{
+  const data=result([record({amount:'￥1,378.00',cents:137800})],{classified:[],monthly:[],totals:{totalCents:137800,paidCents:0,remainingCents:137800}});
+  const {book}=await read(data);assert.equal(book.Sheets.付款汇总明细.F2.t,'n');assert.equal(book.Sheets.付款汇总明细.F2.v,1378);assert.equal(data.records[0].amount,'￥1,378.00');
+});
+
+test('手工预算对比独立第三表，合计差额与来源准确，格式范围不含多余空白',async()=>{
+  const data=result();
+  data.comparison={monthKey:'2026-11',rows:[
+    {monthKey:'2026-11',supplier:'供应商甲',subject:'迈德斯特',category:'正常付款-预估付款',systemCents:1489200,manualCents:1489200,differenceCents:0,status:'一致',systemSources:[{file:'预估.xlsx',sheet:'邢芳芳',row:3}],manualSources:[{file:'手工.xlsx',sheet:'Sheet1',row:52}]},
+    {monthKey:'2026-11',supplier:'供应商乙',subject:'国源',category:'正常付款-正常对账表',systemCents:100,manualCents:300,differenceCents:-200,status:'金额差异',systemSources:[{file:'台账.xlsx',sheet:'对账明细-李奇',row:2},{file:'台账.xlsx',sheet:'对账明细-李奇',row:3}],manualSources:[{file:'手工.xlsx',sheet:'Sheet1',row:10}]},
+    {monthKey:'2026-11',supplier:'=1+1',subject:'国源',category:'正常付款-预估付款',systemCents:50,manualCents:0,differenceCents:50,status:'仅系统有',systemSources:[],manualSources:[]}
+  ],totals:{systemCents:1489350,manualCents:1489500,differenceCents:-150}};
+  const before=JSON.stringify(data),{book,zip}=await read(data),s=book.Sheets.下月预算对比;
+  assert.deepEqual(book.SheetNames,['付款汇总明细','付款预算汇总','下月预算对比']);
+  assert.deepEqual([s.E5.v,s.F5.v,s.G5.v],[14893.5,14895,-1.5]);
+  assert.deepEqual([s.E3.v,s.F3.v,s.G3.v],[1,3,-2]);assert.equal(s.G2.v,0);assert.equal(s.G2.t,'n');assert.equal(s.G2.z,'#,##0.00');
+  assert.equal(s.A2.v,'2026年11月');assert.equal(s.B4.v,'=1+1');assert.equal(s.B4.f,undefined);
+  assert.equal(s.I3.v,'台账.xlsx / 对账明细-李奇 / 第2、3行');assert.equal(s.J2.v,'手工.xlsx / Sheet1 / 第52行');
+  assert.equal(s['!ref'],'A1:J5');assert.equal(s['!autofilter'].ref,'A1:J4');assert.equal(s.K1,undefined);
+  const content=await xml(zip,3),styles=stylesFrom(await zip.file('xl/styles.xml').async('string'));
+  assert.match(content,/topLeftCell="A2"/);assert.doesNotMatch(content,/<filterColumn|hidden="1"/);
+  assert.equal(styleAt(content,styles,'G2').color,'FFFFFFFF');assert.equal(styleAt(content,styles,'G3').color,'FFFFC7CE');
+  for(const [address,value]of Object.entries(s))if(!address.startsWith('!'))assert.equal(value.f,undefined);
+  assert.equal(JSON.stringify(data),before);
+});
+
+test('手工对比为空也提供表头和零合计，未知金额不能被导出为零',async()=>{
+  const data=result();data.comparison={monthKey:'2026-12',rows:[],totals:{systemCents:0,manualCents:0,differenceCents:0}};
+  const {book}=await read(data),s=book.Sheets.下月预算对比;assert.equal(s['!ref'],'A1:J2');assert.equal(s['!autofilter'],undefined);assert.equal(s.G2.v,0);
+  data.comparison.totals.manualCents=null;await assert.rejects(Export(data),/汇总金额无效/);
 });
 
 test('月份只作展示，不参与数值求和；缺年份数值保留文本，零金额仍为数值', async () => {

@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const database = 'gylsjqx-quarter-budget-files';
-  const roles = new Set(['negotiated', 'ledger', 'budget', 'evidence', 'existing']);
+  const roles = new Set(['negotiated', 'ledger', 'budget', 'manualBudget']);
   let queue = Promise.resolve();
 
   function transaction(mode, action) {
@@ -47,7 +47,12 @@
         if (entry?.kind === 'file' && roles.has(entry.role)) files[entry.role] = entry.value;
         else if (entry?.kind === 'settings') settings = entry.value;
       }
-      return {files, settings};
+      const migrated = Boolean(settings && settings.schema !== 2) || (entries || []).some(entry => entry?.kind === 'file' && ['evidence','existing'].includes(entry.role));
+      if (migrated) {
+        await run('readwrite', store => { store.delete('evidence'); store.delete('existing'); store.delete('@settings'); });
+        settings = null;
+      }
+      return {files, settings, migrated};
     },
     saveFile(role, file, settings) {
       checkRole(role);

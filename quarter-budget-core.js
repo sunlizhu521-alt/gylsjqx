@@ -4,8 +4,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function(Import) {
   'use strict';
   const HEADERS = ['预估付款月份','供应商名称','付款主体','对公付款0A流程号','摘要','申请付款金额','是否已支付','备注','分类','跟单员','是否剔除'];
-  const PRIORITY = {negotiated:0, ledger:1, budget:2};
-  const CATEGORY = {negotiated:'谈判付款',ledger:'正常付款',budget:'预估付款'};
+  const ROLES = ['negotiated','ledger','budget','manualBudget'];
   const text = v => String(v ?? '').trim();
   const norm = v => text(v).normalize('NFKC').replace(/\s+/g, '');
   const entity = v => ({'浙江迈德斯特医疗器械科技有限公司':'迈德斯特','杭州国源养老科技有限公司':'国源'}[norm(v)] || norm(v));
@@ -20,6 +19,23 @@
   const monthLabel = record => /^\d{4}-\d{2}$/.test(record.monthKey || '') ? `${record.monthKey.slice(0,4)}年${Number(record.monthKey.slice(5))}月` : '月份待核对';
   const toRow = r => [r.month ?? null,r.supplier,r.subject,r.oa,r.summary,r.amount ?? null,r.status,r.notes,r.category,r.owner,r.excluded];
   const message = w => typeof w === 'string' ? w : w?.message || String(w);
+  function resolveBudgetStartMonth(inputs={}, options={}) {
+    const selected=text(options.budgetStartMonth);
+    if(selected){
+      if(!/^(?:19\d{2}|[2-9]\d{3})-(?:0[1-9]|1[0-2])$/.test(selected))throw Error('请选择有效的预算起月');
+      return selected;
+    }
+    const manual=inputs.manualBudget?.book&&Import.inferManualMonth(inputs.manualBudget);
+    if(manual)return manual;
+    const now=options.now===undefined?new Date():new Date(options.now);
+    if(!Number.isFinite(now.getTime()))throw Error('预算起月的参考日期无效');
+    const beijing=new Date(now.getTime()+8*3600000),next=new Date(Date.UTC(beijing.getUTCFullYear(),beijing.getUTCMonth()+1,1));
+    return next.toISOString().slice(0,7);
+  }
+  function safeCents(value) {
+    if(value>BigInt(Number.MAX_SAFE_INTEGER)||value<BigInt(Number.MIN_SAFE_INTEGER))throw Error('汇总金额超过可安全统计范围');
+    return Number(value);
+  }
   function sameParty(a,b) {
     if (usable(a.supplier) && usable(b.supplier) && norm(a.supplier) !== norm(b.supplier)) return false;
     if (usable(a.subject) && usable(b.subject) && entity(a.subject) !== entity(b.subject)) return false;
@@ -39,51 +55,90 @@
   function summarize(records) {
     const groups=new Map(), months=new Map();
     function add(map,key,r) {
-      if (!map.has(key)) map.set(key,{monthKey:r.monthKey || '',category:r.category,total:0n,paid:0n});
-      if (r.cents===null || r.cents===undefined) return;
+      if (!map.has(key)) map.set(key,{monthKey:r.monthKey || '',category:r.category,total:0n,paid:0n,incomplete:false});
+      if (r.cents===null || r.cents===undefined) { map.get(key).incomplete=true; return; }
       if (!Number.isSafeInteger(r.cents)) throw Error(sourceLabel(r.source)+'：金额超过可安全统计范围');
       const t=map.get(key);t.total+=BigInt(r.cents);if(r.status==='已支付')t.paid+=BigInt(r.cents);
     }
     for (const r of records.filter(r=>r.excluded!=='是')) { add(groups,JSON.stringify([r.monthKey || '',r.category]),r);add(months,r.monthKey || '',r); }
     function finish(t,category=true) {
-      if ([t.total,t.paid,t.total-t.paid].some(v=>v>BigInt(Number.MAX_SAFE_INTEGER)||v< -BigInt(Number.MAX_SAFE_INTEGER))) throw Error('汇总金额超过可安全统计范围');
-      return {monthKey:t.monthKey,...(category?{category:t.category}:{}),totalCents:Number(t.total),paidCents:Number(t.paid),remainingCents:Number(t.total-t.paid)};
+      const total=safeCents(t.total),paid=safeCents(t.paid),remaining=safeCents(t.total-t.paid);
+      return {monthKey:t.monthKey,...(category?{category:t.category}:{}),totalCents:t.incomplete?null:total,paidCents:t.incomplete?null:paid,remainingCents:t.incomplete?null:remaining};
     }
-    const order=['谈判付款','正常付款','预估付款','暂停付款'];
+    const order=['谈判付款-谈判付款表','正常付款-谈判付款表','正常付款-正常对账表','正常付款-预估付款','暂停付款'];
     const byMonth=(a,b)=>(a.monthKey || '9999-99').localeCompare(b.monthKey || '9999-99');
     const classified=[...groups.values()].map(t=>finish(t)).sort((a,b)=>byMonth(a,b)||(order.includes(a.category)?order.indexOf(a.category):99)-(order.includes(b.category)?order.indexOf(b.category):99)||a.category.localeCompare(b.category,'zh-CN'));
     const monthly=[...months.values()].map(t=>finish(t,false)).sort(byMonth);
-    const all={total:0n,paid:0n};for(const t of months.values()){all.total+=t.total;all.paid+=t.paid;}
+    const all={total:0n,paid:0n,incomplete:false};for(const t of months.values()){all.total+=t.total;all.paid+=t.paid;all.incomplete ||= t.incomplete;}
     const totals=finish(all,false);delete totals.monthKey;
     return {classified,monthly,totals};
   }
-  function build(inputs, options={}) {
-    const mode=options.mode || 'new', decisions=options.decisions || {}, matches=options.matches || {};
-    if(!['new','existing'].includes(mode))throw Error('请选择新建整理或继续已有明细');
-    for(const role of mode==='existing'?['existing']:['negotiated','ledger','budget'])if(!inputs[role]?.book)throw Error('请先上传'+({negotiated:'谈判付款',ledger:'资金台账整理',budget:'预估预算',existing:'已有付款汇总明细'}[role]));
-    const parsed={},warnings=[],issues=[],errors=[];
-    for(const role of ['negotiated','ledger','budget','evidence','existing'])if(inputs[role]?.book){
-      parsed[role]=Import.parse(inputs[role],role,options);
-      warnings.push(...(parsed[role].warnings || []).map(message));
-      errors.push(...(parsed[role].errors || []).map(message));
+  function compareBudget(records, manualRecords, monthKey) {
+    const groups=new Map(),warnings=[];
+    for(const [side,rows] of [['system',records.filter(r=>r.excluded!=='是')],['manual',manualRecords]])for(const r of rows){
+      if(r.monthKey!==monthKey){
+        if(side==='manual')warnings.push(sourceLabel(r.source)+'：'+(r.monthKey?'付款月份为'+monthLabel(r):'付款月份未确定')+'，未计入'+monthLabel({monthKey})+'对比');
+        continue;
+      }
+      const key=JSON.stringify([norm(r.supplier),entity(r.subject),norm(r.category)]);
+      if(!groups.has(key))groups.set(key,{monthKey,supplier:r.supplier,subject:entity(r.subject),category:r.category,system:0n,manual:0n,systemIncomplete:false,manualIncomplete:false,systemSources:[],manualSources:[]});
+      const group=groups.get(key);group[side+'Sources'].push({...r.source});
+      if(r.cents==null)group[side+'Incomplete']=true;
+      else if(!Number.isSafeInteger(r.cents))throw Error(sourceLabel(r.source)+'：金额超过可安全统计范围');
+      else group[side]+=BigInt(r.cents);
     }
-    let records=(mode==='existing'?parsed.existing.records:['negotiated','ledger','budget'].flatMap(role=>parsed[role].records.map(r=>({...r,category:CATEGORY[role]})))).map((r,index)=>({...r,source:{...r.source},notes:r.notes || '',status:r.status || '待核对',excluded:r.excluded==='是'?'是':'否',index,related:false}));
+    const totals={system:0n,manual:0n,systemIncomplete:false,manualIncomplete:false};
+    const rows=[...groups.values()].map(group=>{
+      totals.system+=group.system;totals.manual+=group.manual;totals.systemIncomplete ||= group.systemIncomplete;totals.manualIncomplete ||= group.manualIncomplete;
+      const systemCents=group.systemIncomplete?null:safeCents(group.system),manualCents=group.manualIncomplete?null:safeCents(group.manual);
+      const differenceCents=systemCents==null||manualCents==null?null:safeCents(group.system-group.manual);
+      const status=differenceCents==null?'金额待核对':!group.systemSources.length?'仅手工有':!group.manualSources.length?'仅系统有':differenceCents?'金额差异':'一致';
+      return {monthKey,supplier:group.supplier,subject:group.subject,category:group.category,systemCents,manualCents,differenceCents,status,systemSources:group.systemSources,manualSources:group.manualSources};
+    });
+    rows.sort((a,b)=>(a.status==='一致')-(b.status==='一致')||a.supplier.localeCompare(b.supplier,'zh-CN')||a.subject.localeCompare(b.subject,'zh-CN')||a.category.localeCompare(b.category,'zh-CN'));
+    return {monthKey,rows,totals:{systemCents:totals.systemIncomplete?null:safeCents(totals.system),manualCents:totals.manualIncomplete?null:safeCents(totals.manual),differenceCents:totals.systemIncomplete||totals.manualIncomplete?null:safeCents(totals.system-totals.manual)},warnings};
+  }
+  function build(inputs, options={}) {
+    const decisions=options.decisions || {}, matches=options.matches || {};
+    if(options.mode&&options.mode!=='new'||inputs.existing||inputs.evidence)throw Error('已取消已有明细和独立付款依据，请使用四个来源槽位重新整理');
+    for(const role of ['negotiated','ledger','budget'])if(!inputs[role]?.book)throw Error('请先上传'+({negotiated:'付款节奏',ledger:'资金台账',budget:'预估预算'}[role]));
+    const budgetStartMonth=resolveBudgetStartMonth(inputs,options),parsed={},warnings=[],issues=[],errors=[],importErrors=[];
+    for(const role of ROLES)if(inputs[role]?.book){
+      parsed[role]=Import.parse(inputs[role],role,{...options,budgetStartMonth});
+      warnings.push(...(parsed[role].warnings || []).map(message));
+      importErrors.push(...(parsed[role].errors || []));
+    }
+    let records=[...['negotiated','ledger','budget'].flatMap(role=>parsed[role].records),...(parsed.manualBudget?.records || []).filter(r=>r.isForecast)].map((r,index)=>({...r,source:{...r.source},notes:r.notes || '',status:r.status || '待核对',excluded:r.excluded==='是'?'是':'否',index,related:false}));
+    for(const r of records)append(r,'来源：'+sourceLabel(r.source));
     const deleted=[];
-    if(mode==='new'){
+    {
       const groups=new Map();
-      for(const r of records){const oa=oaKey(r.oa);if(!oa||r.cents==null)continue;const key=oa+'|'+r.cents;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r);}
+      for(const r of records){
+        const oa=oaKey(r.oa);if(!oa||r.cents==null||!usable(r.supplier)||!usable(r.subject)||!r.monthKey)continue;
+        const key=JSON.stringify([oa,norm(r.supplier),entity(r.subject),r.monthKey,r.cents]);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r);
+      }
       const remove=new Set();
       for(const group of groups.values()){
-        const ranks=group.map(r=>PRIORITY[r.source.role]);
-        if(new Set(ranks).size<2)continue;
-        const best=Math.min(...ranks),kept=group.filter(r=>PRIORITY[r.source.role]===best);
-        for(const r of group)if(PRIORITY[r.source.role]!==best){remove.add(r.id);deleted.push({record:r,kept,reason:'跨表OA号和金额完全一致，按谈判付款、资金台账、预估预算的优先级保留。'});}
+        const buckets=ROLES.map(role=>group.filter(r=>r.source.role===role));
+        if(buckets.filter(rows=>rows.length).length<2)continue;
+        const kept=[];
+        for(const bucket of buckets){
+          const used=new Set(),previous=kept.slice();
+          for(const r of bucket){
+            const available=previous.filter(k=>!used.has(k.id)&&(!norm(r.summary)||!norm(k.summary)||norm(r.summary)===norm(k.summary)));
+            const match=available.find(k=>norm(k.summary)===norm(r.summary))||available[0];
+            if(!match)kept.push(r);
+            else {used.add(match.id);remove.add(r.id);deleted.push({record:r,kept:[match],reason:'跨来源OA、供应商、主体、付款年月和金额一致且摘要无冲突，逐笔保留分期次数；优先付款节奏、资金台账、预估预算、手工预估。'});}
+          }
+        }
       }
       records=records.filter(r=>!remove.has(r.id));
       const parents=new Map(records.map(r=>[r.id,r.id]));
       function find(id){let p=parents.get(id);if(p!==id){p=find(p);parents.set(id,p);}return p;}
       for(let i=0;i<records.length;i++)for(let j=i+1;j<records.length;j++){
         const a=records[i],b=records[j];if(a.source.role===b.source.role)continue;
+        if(a.monthKey&&b.monthKey&&a.monthKey!==b.monthKey)continue;
+        if(!sameParty(a,b))continue;
         const sameOA=oaKey(a.oa)&&oaKey(a.oa)===oaKey(b.oa);
         const sameSupplier=norm(a.supplier)&&norm(a.supplier)===norm(b.supplier)&&usable(a.subject)&&entity(a.subject)===entity(b.subject);
         const sameAmount=a.cents!=null&&a.cents===b.cents;
@@ -94,8 +149,10 @@
       records=[...related.values()].flatMap(group=>{
         if(group.length>1){
           const label=group.map(r=>sourceLabel(r.source)).join('；');
-          issues.push({id:'duplicate:'+group[0].id,type:'duplicate',message:'疑似重复，默认保留。请核对业务、金额和分期后确认是否剔除。'+label,recordIds:group.map(r=>r.id)});
-          for(const r of group){r.related=true;append(r,'疑似重复待核对：'+label);}
+          const blocking=group.some(r=>!oaKey(r.oa)),kept=group.filter(r=>decisions[r.id]?.excluded==='否');
+          const resolved=!blocking||group.every(r=>['是','否'].includes(decisions[r.id]?.excluded))&&(kept.length<=1||kept.every(r=>text(decisions[r.id]?.reason)));
+          issues.push({id:'duplicate:'+group[0].id,type:'duplicate',message:(blocking?'无有效OA的疑似重复，需逐笔确认保留或剔除；保留多笔时填写理由后才能下载。':'疑似重复，请核对业务、金额和分期后确认是否剔除。')+label,recordIds:group.map(r=>r.id),blocking,resolved});
+          for(const r of group){r.related=true;append(r,'疑似重复（'+group.length+'条），请在关联核对区确认来源。');}
         }
         return group;
       });
@@ -107,10 +164,26 @@
         else if(text(decisions[r.id].reason))append(r,'人工确认保留：'+text(decisions[r.id].reason));
       }
       if(!r.monthKey)warnings.push(sourceLabel(r.source)+'：付款年月未确定，计入“月份待核对”');
-      if(r.cents==null)warnings.push(sourceLabel(r.source)+'：金额为空或无法识别，保留明细，未计入金额汇总');
+      if(r.cents==null){
+        const resolved=r.excluded==='是'&&!!text(decisions[r.id]?.reason);
+        issues.push({id:'amount:'+r.id,type:'amount',message:sourceLabel(r.source)+'：金额为空或无法识别，不能按零统计。请补正来源，或明确剔除并填写原因。',recordIds:[r.id],blocking:true,resolved});
+      }
     }
-    // A dedicated schedule replaces the older schedule as evidence, not as row data.
-    const evidenceSources=[parsed.evidence || parsed.negotiated,parsed.ledger].filter(Boolean);
+    for(const error of importErrors){
+      const related=records.filter(r=>r.source.role===error.source?.role&&r.source.file===error.source?.file&&r.source.sheet===error.source?.sheet&&r.source.row===error.source?.row);
+      const amountError=['AMOUNT_FORMULA_ERROR','INVALID_AMOUNT','MISSING_AMOUNT'].includes(error.code);
+      if(amountError&&related.length){
+        for(const r of related){
+          let item=issues.find(i=>i.id==='amount:'+r.id);
+          if(!item){item={id:'amount:'+r.id,type:'amount',message:sourceLabel(r.source)+'：来源金额不可用，请补正或明确剔除并填写原因。',recordIds:[r.id],blocking:true,resolved:r.excluded==='是'&&!!text(decisions[r.id]?.reason)};issues.push(item);}
+          const detail=(error.cell?'来源单元格 '+error.cell+'：':'')+message(error);
+          if(!item.message.includes(detail))item.message+='\n'+detail;
+        }
+        continue;
+      }
+      errors.push((error.source?sourceLabel(error.source)+(error.cell?' / '+error.cell:'')+'：':'')+message(error));
+    }
+    const evidenceSources=[parsed.negotiated,parsed.ledger];
     let evidence=[...new Map(evidenceSources.flatMap(p=>p.evidence || []).filter(e=>e.id&&Number.isSafeInteger(e.cents)).map(e=>[e.id,e])).values()];
     const conflictingProofs=new Set();
     // A ledger's aggregate state does not create another installment payment beside its schedule cell.
@@ -193,10 +266,16 @@
         }
       }
     }
-    let summary;
+    let summary,comparison=null;
     try{summary=summarize(records);}catch(e){errors.push(e.message);summary={classified:[],monthly:[],totals:{totalCents:null,paidCents:null,remainingCents:null}};}
-    issues.push(...errors.map((message,i)=>({id:'error:'+i,type:'error',message,recordIds:[]})));
-    return {records,deleted,issues,warnings:[...new Set([...warnings,...errors])],summary,sources:Object.fromEntries(Object.entries(parsed).map(([role,p])=>[role,{filename:inputs[role].filename,sheets:p.sheets}])),canExport:errors.length===0};
+    if(parsed.manualBudget){
+      try{
+        comparison=compareBudget(records,parsed.manualBudget.records,budgetStartMonth);warnings.push(...comparison.warnings);
+        if(comparison.rows.some(r=>r.systemCents==null||r.manualCents==null))errors.push('下月对比含金额不可用的记录，请补正来源；手工对比基准不能按空金额或部分小计通过核对。');
+      }catch(e){errors.push(e.message);}
+    }
+    issues.push(...errors.map((message,i)=>({id:'error:'+i,type:'error',message,recordIds:[],blocking:true,resolved:false})));
+    return {records,deleted,issues,warnings:[...new Set([...warnings,...errors])],summary,budgetStartMonth,comparison,sources:Object.fromEntries(Object.entries(parsed).map(([role,p])=>[role,{filename:inputs[role].filename,sheets:p.sheets}])),canExport:errors.length===0&&!issues.some(i=>i.blocking&&!i.resolved)};
   }
-  return {HEADERS,build,summarize,toRow,monthLabel,formatMoney,oaKey};
+  return {HEADERS,build,summarize,toRow,monthLabel,formatMoney,oaKey,resolveBudgetStartMonth};
 });

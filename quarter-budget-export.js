@@ -6,6 +6,7 @@
   const DETAIL_HEADERS = ['预估付款月份','供应商名称','付款主体','对公付款0A流程号','摘要','申请付款金额','是否已支付','备注','分类','跟单员','是否剔除'];
   const CLASSIFIED_HEADERS = ['付款月份','分类','申请总金额','已付款金额','剩余付款金额','备注'];
   const MONTHLY_HEADERS = ['付款月份','申请总金额','已付款金额','剩余付款金额','备注'];
+  const COMPARISON_HEADERS = ['付款月份','供应商名称','付款主体','分类','系统预算金额','手工预算金额','差异金额','核对结果','系统来源','手工来源'];
   const AMOUNT_FORMAT = '#,##0.00';
   const width = text => [...String(text)].reduce((n, c) => n + (c.codePointAt(0) > 255 ? 2 : 1), 0);
 
@@ -34,6 +35,16 @@
     return value.t === 'n' && value.z ? X.SSF.format(value.z, value.v) : String(value.v ?? '');
   }
 
+  function sourceList(sources) {
+    const groups = new Map();
+    for (const source of sources || []) {
+      const key = [source.file || '来源',source.sheet || '工作表'].join(' / ');
+      if (!groups.has(key)) groups.set(key,new Set());
+      groups.get(key).add(String(source.row || '?') + (source.part > 1 ? '（第' + source.part + '期）' : ''));
+    }
+    return [...groups].map(([key,rows]) => key + ' / 第' + [...rows].join('、') + '行').join('\n');
+  }
+
   function rowHeight(row, columns, sheetName, index) {
     const lines = Math.max(1, ...row.map((value, c) => formatCell(value).split(/\r\n|\r|\n/).reduce((n, line) => n + Math.max(1, Math.ceil(width(line) / (columns[c].wch - 2))), 0)));
     const height = Math.max(26, lines * 16 + 10);
@@ -45,8 +56,10 @@
     if (!Array.isArray(result?.records) || !Array.isArray(result.summary?.classified) || !Array.isArray(result.summary?.monthly) || !result.summary?.totals) {
       throw new Error('缺少季度预算整理结果，请先整理数据。');
     }
+    if (result.canExport === false || result.issues?.some(issue => issue.blocking && !issue.resolved)) throw new Error('仍有未完成的预算核对，请先处理后下载。');
+    if (result.records.some(record => record.excluded !== '是' && !Number.isSafeInteger(record.cents))) throw new Error('存在未剔除的无效或空白金额，请补充金额或明确剔除后下载。');
     const detailRows = [DETAIL_HEADERS.map(v => cell(v)), ...result.records.map(r => [
-      r.monthKey ? month(r.monthKey) : {...cell(r.month == null ? '' : String(r.month)),z:'@'}, cell(r.supplier), cell(r.subject), cell(r.oa), cell(r.summary), cell(r.amount, AMOUNT_FORMAT),
+      r.monthKey ? month(r.monthKey) : {...cell(r.month == null ? '' : String(r.month)),z:'@'}, cell(r.supplier), cell(r.subject), cell(r.oa), cell(r.summary), cell(typeof r.amount === 'string' && Number.isSafeInteger(r.cents) ? r.cents / 100 : r.amount, AMOUNT_FORMAT),
       cell(r.status), cell(r.notes), cell(r.category), cell(r.owner), cell(r.excluded)
     ])];
     const total = result.summary.totals;
@@ -65,12 +78,23 @@
       {name:'付款汇总明细', rows:detailRows, widths:[18,34,20,29,56,18,15,76,17,15,13], headers:new Set([0]), totals:new Set()},
       {name:'付款预算汇总', rows:summaryRows, widths:[19,20,20,20,20,58], headers:summaryHeaders, totals:totalRows}
     ];
+    if (result.comparison) {
+      const comparison = result.comparison;
+      if (!Array.isArray(comparison.rows) || !comparison.totals) throw new Error('缺少下月预算对比结果，请重新整理。');
+      const rows = [COMPARISON_HEADERS.map(value => cell(value)), ...comparison.rows.map(row => [
+        month(row.monthKey),cell(row.supplier),cell(row.subject),cell(row.category),money(row.systemCents),money(row.manualCents),money(row.differenceCents),cell(row.status),cell(sourceList(row.systemSources)),cell(sourceList(row.manualSources))
+      ])];
+      const totals = new Set([rows.length]);
+      rows.push([month(comparison.monthKey),cell('合计'),cell(''),cell(''),money(comparison.totals.systemCents),money(comparison.totals.manualCents),money(comparison.totals.differenceCents),cell('系统预算减手工预算'),cell(''),cell('')]);
+      sheets.push({name:'下月预算对比',rows,widths:[18,34,20,30,20,20,20,25,76,76],headers:new Set([0]),totals,filterEnd:rows.length-2});
+    }
     const book = X.utils.book_new();
     for (const info of sheets) {
       const sheet = X.utils.aoa_to_sheet(info.rows);
       sheet['!cols'] = info.widths.map(wch => ({wch}));
       sheet['!rows'] = info.rows.map((row, index) => ({hpt:row.length ? rowHeight(row, sheet['!cols'], info.name, index) : 12}));
       if (info.name === '付款汇总明细') sheet['!autofilter'] = {ref:sheet['!ref']};
+      else if (info.filterEnd > 0) sheet['!autofilter'] = {ref:X.utils.encode_range({s:{r:0,c:0},e:{r:info.filterEnd,c:info.widths.length-1}})};
       info.sheet = sheet;
       X.utils.book_append_sheet(book, sheet, info.name);
     }
@@ -100,7 +124,8 @@
         if (!address) return tag;
         const row = Number(address[2]) - 1, col = X.utils.decode_col(address[1]);
         const old = Number(attrs.match(/\bs="(\d+)"/)?.[1] || 0), record = index === 0 ? result.records[row - 1] : null;
-        const red = record && (record.related === true || record.excluded === '是' || (record.status === '已支付' && (col === 5 || col === 6)));
+        const comparison = info.name === '下月预算对比' ? result.comparison.rows[row-1] : null;
+        const red = record && (record.related === true || record.excluded === '是' || (record.status === '已支付' && (col === 5 || col === 6))) || comparison && comparison.status !== '一致';
         const blank = !contentRows.has(row) || !contentColumns.has(col);
         const style = info.headers.has(row) ? count * 3 : old + (red ? count : info.totals.has(row) ? count * 2 : 0) + (blank ? count * 3 + 1 : 0);
         return '<c' + attrs.replace(/\s+s="\d+"/, '') + ` s="${style}"${end}>`;

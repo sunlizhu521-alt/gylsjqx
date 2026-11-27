@@ -1,10 +1,10 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id), C = window.QuarterBudgetCore, I = window.QuarterBudgetImport, Cache = window.QuarterBudgetCache;
-  const roles = ['negotiated','ledger','budget','evidence','existing'];
-  const labels = {negotiated:'谈判付款',ledger:'资金台账整理',budget:'预估预算',evidence:'付款状态依据',existing:'已有付款汇总明细'};
+  const roles = ['negotiated','ledger','budget','manualBudget'];
+  const labels = {negotiated:'付款节奏',ledger:'资金台账',budget:'预估预算',manualBudget:'手工下月预算'};
   const sources = Object.fromEntries(roles.map(role => [role,{book:null,filename:'',fingerprint:'',importedAt:'',state:'empty',error:'',version:0,sheets:[]} ]));
-  let result = null, decisions = {}, matches = {}, exporting = false, restoring = true;
+  let result = null, decisions = {}, matches = {}, exporting = false, restoring = true, monthEdited = false;
   const versionKey = 'quarter-budget-export-versions', memoryVersions = {};
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const message = value => typeof value === 'string' ? value : value?.message || String(value ?? '');
@@ -14,8 +14,18 @@
     const s = record?.source || {};
     return [s.file, s.sheet, s.row != null ? '第' + s.row + '行' : '', s.part != null && s.part !== '' ? '分期' + s.part : ''].filter(Boolean).join(' / ');
   };
+  function currentInputs() {
+    return Object.fromEntries(roles.filter(role => sources[role].book).map(role => [role,{book:sources[role].book,filename:sources[role].filename,fingerprint:sources[role].fingerprint}]));
+  }
+  function syncBudgetMonth() {
+    if (!monthEdited) {
+      const next = C.resolveBudgetStartMonth(currentInputs());
+      if ($('budgetStartMonth').value && $('budgetStartMonth').value !== next) clearChoices();
+      $('budgetStartMonth').value = next;
+    }
+  }
   function settings() {
-    return {mode:$('mode').value,decisions:structuredClone(decisions),matches:{...matches},fingerprints:Object.fromEntries(roles.filter(role => sources[role].book).map(role => [role,sources[role].fingerprint]))};
+    return {schema:2,budgetStartMonth:$('budgetStartMonth').value,monthEdited,decisions:structuredClone(decisions),matches:{...matches},fingerprints:Object.fromEntries(roles.filter(role => sources[role].book).map(role => [role,sources[role].fingerprint]))};
   }
   async function cacheWork(operation) {
     try { await operation(); $('cache-status').textContent = '文件与核对选择已保存在本机浏览器；不上传服务器。'; return true; }
@@ -27,18 +37,18 @@
     $('result').hidden = true;
     $('download').disabled = true;
     $('warning-panel').hidden = true;
-    for (const id of ['preview','warnings','review-list','deleted-list','classified-summary','monthly-summary']) $(id).replaceChildren();
+    for (const id of ['preview','warnings','review-list','deleted-list','classified-summary','monthly-summary','comparison-totals','comparison-preview']) $(id).replaceChildren();
     $('record-count').textContent = $('visible-count').textContent = '0';
+    $('comparison-panel').hidden = true;
   }
   function controls() {
     for (const role of roles) {
       $(role + 'File').disabled = restoring || exporting;
       $('clear-' + role).hidden = sources[role].state === 'empty';
       $('clear-' + role).disabled = restoring || exporting;
-      $('required-' + role).textContent = ($('mode').value === 'new' ? ['negotiated','ledger','budget'].includes(role) : role === 'existing') ? '必需' : '可选';
+      $('required-' + role).textContent = role !== 'manualBudget' ? '必需' : '可选';
     }
-    $('mode').disabled = $('clear-cache').disabled = restoring || exporting;
-    $('mode-help').textContent = $('mode').value === 'new' ? '新建整理需上传前三项文件。' : '已有付款汇总明细必需，其他文件可用于补充核对。';
+    $('budgetStartMonth').disabled = $('clear-cache').disabled = restoring || exporting;
     $('download').disabled = restoring || exporting || !result || result.canExport === false;
     for (const el of $('result').querySelectorAll('[data-action]')) el.disabled = restoring || exporting;
   }
@@ -79,8 +89,9 @@
     const fingerprint = [...new Uint8Array(digest)].map(v => v.toString(16).padStart(2,'0')).join('');
     if (entry.fingerprint && entry.fingerprint !== fingerprint) throw new Error('缓存文件校验失败，请重新上传');
     const book = await readBook(entry.bytes);
-    const parsed = I.parse({book,filename:entry.filename,fingerprint},role,{mode:$('mode').value});
-    if (parsed.errors?.length) throw new Error(parsed.errors.map(error => {
+    const parsed = I.parse({book,filename:entry.filename,fingerprint},role,{budgetStartMonth:$('budgetStartMonth').value});
+    const fatal = (parsed.errors || []).filter(error => !['AMOUNT_FORMULA_ERROR','INVALID_AMOUNT','MISSING_AMOUNT'].includes(error.code));
+    if (fatal.length) throw new Error(fatal.map(error => {
       const at = [error?.source?.file,error?.source?.sheet,error?.cell || (error?.source?.row ? '第' + error.source.row + '行' : '')].filter(Boolean).join(' / ');
       return (at ? at + '：' : '') + message(error);
     }).join('\n'));
@@ -93,7 +104,7 @@
   }
   function decisionControl(record) {
     const value = decisions[record.id]?.excluded || '';
-    return '<select aria-label="' + esc(record.supplier + '：保留或剔除') + '" data-action="decision" data-record-id="' + esc(record.id) + '"><option value=""' + (!value ? ' selected' : '') + '>按当前规则（' + (record.excluded === '是' ? '剔除' : '保留') + '）</option><option value="否"' + (value === '否' ? ' selected' : '') + '>保留</option><option value="是"' + (value === '是' ? ' selected' : '') + '>剔除</option></select><input type="text" maxlength="2000" aria-label="' + esc(record.supplier + '：核对说明') + '" data-action="reason" data-record-id="' + esc(record.id) + '" placeholder="核对说明（可选）" value="' + esc(decisions[record.id]?.reason || '') + '">';
+    return '<select aria-label="' + esc(record.supplier + '：保留或剔除') + '" data-action="decision" data-record-id="' + esc(record.id) + '"><option value=""' + (!value ? ' selected' : '') + '>按当前规则（' + (record.excluded === '是' ? '剔除' : '保留') + '）</option><option value="否"' + (value === '否' ? ' selected' : '') + '>保留</option><option value="是"' + (value === '是' ? ' selected' : '') + '>剔除</option></select><input type="text" maxlength="2000" aria-label="' + esc(record.supplier + '：核对说明') + '" data-action="reason" data-record-id="' + esc(record.id) + '" placeholder="剔除缺失金额或保留重复时必填原因" value="' + esc(decisions[record.id]?.reason || '') + '">';
   }
   function renderPreview() {
     if (!result) return;
@@ -131,12 +142,23 @@
     const total = ['合计',...(classified ? [''] : []),money(totals.totalCents),money(totals.paidCents),money(totals.remainingCents),''];
     return '<table class="summary-table"><thead><tr>' + headers.map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + rows.map(r => '<tr>' + cells(r).map(v => '<td>' + esc(v) + '</td>').join('') + '</tr>').join('') + '<tr class="total">' + total.map(v => '<td>' + esc(v) + '</td>').join('') + '</tr></tbody></table>';
   }
+  function renderComparison() {
+    const comparison = result.comparison;
+    $('comparison-panel').hidden = !comparison;
+    if (!comparison) return;
+    $('comparison-month').textContent = '（' + month(comparison.monthKey) + '）';
+    const amount = value => value == null ? '待核对' : money(value);
+    const table = (headers,rows) => '<table><thead><tr>' + headers.map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + rows.map(row => '<tr>' + row.map(value => '<td>' + esc(value) + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
+    const total = comparison.totals;
+    $('comparison-totals').innerHTML = table(['付款月份','系统预算金额','手工预算金额','差异金额'],[[month(comparison.monthKey),amount(total.systemCents),amount(total.manualCents),amount(total.differenceCents)]]);
+    $('comparison-preview').innerHTML = table(['付款月份','供应商','付款主体','分类','系统预算金额','手工预算金额','差异金额','核对结果','系统来源','手工来源'],comparison.rows.map(row => [month(row.monthKey),row.supplier,row.subject,row.category,amount(row.systemCents),amount(row.manualCents),amount(row.differenceCents),row.status,(row.systemSources || []).map(source => sourceText({source})).join('\n'),(row.manualSources || []).map(source => sourceText({source})).join('\n')]));
+  }
   function render() {
     $('record-count').textContent = result.records.length;
     updateFilter('filter-month',result.records.map(r => r.monthKey || '@undated').sort(),key => key === '@undated' ? '月份待核对' : month(key));
     updateFilter('filter-category',result.records.map(r => r.category || '@empty'),v => v === '@empty' ? '分类未填' : v);
     updateFilter('filter-status',result.records.map(r => r.status || '@empty'),v => v === '@empty' ? '状态未填' : v);
-    const warnings = [...new Set((result.warnings || []).map(message))];
+    const warnings = [...new Set([...(result.warnings || []),...(result.comparison?.warnings || [])].map(message))];
     $('warnings').innerHTML = warnings.map(w => '<li>' + esc(w) + '</li>').join('');
     $('warning-count').textContent = warnings.length; $('warning-panel').hidden = !warnings.length;
     renderReview();
@@ -146,24 +168,27 @@
     const summary = result.summary || {classified:[],monthly:[],totals:{}};
     $('classified-summary').innerHTML = summaryTable(summary.classified || [],true,summary.totals || {});
     $('monthly-summary').innerHTML = summaryTable(summary.monthly || [],false,summary.totals || {});
+    renderComparison();
     $('result').hidden = false;
     renderPreview();
-    $('status').textContent = result.canExport === false ? '已列出核对结果，请先处理提示的问题。' : '整理完成：' + result.records.length + ' 条明细；自动删除 ' + deleted.length + ' 条跨表重复记录。';
+    $('status').textContent = result.canExport === false ? '已列出核对结果，请处理未确认的重复或金额问题后下载。' : '整理完成：' + result.records.length + ' 条明细；自动删除 ' + deleted.length + ' 条跨表重复记录。';
   }
   function refresh() {
     clearResult();
     const reading = roles.filter(role => sources[role].state === 'reading');
     const failed = roles.filter(role => sources[role].state === 'error');
-    const required = $('mode').value === 'new' ? ['negotiated','ledger','budget'] : ['existing'];
+    syncBudgetMonth();
+    const required = ['negotiated','ledger','budget'];
     const missing = required.filter(role => !sources[role].book);
     if (restoring) $('status').textContent = '正在恢复本机文件…';
     else if (reading.length) $('status').textContent = '正在读取：' + reading.map(role => labels[role]).join('、') + '…';
     else if (failed.length) $('status').textContent = failed.map(role => labels[role] + '读取失败：' + sources[role].error).join('\n');
+    else if (!/^\d{4}-(0[1-9]|1[0-2])$/.test($('budgetStartMonth').value)) $('status').textContent = '请选择有效的预算起月。';
     else if (missing.length) $('status').textContent = '请上传：' + missing.map(role => labels[role]).join('、') + '。';
     else {
       try {
-        const inputs = Object.fromEntries(roles.filter(role => sources[role].book).map(role => [role,{book:sources[role].book,filename:sources[role].filename,fingerprint:sources[role].fingerprint}]));
-        result = C.build(inputs,{mode:$('mode').value,decisions,matches});
+        const inputs = currentInputs();
+        result = C.build(inputs,{budgetStartMonth:$('budgetStartMonth').value,decisions,matches});
         const ids = new Set(result.records.map(r => r.id));
         for (const selections of [decisions,matches]) for (const id of Object.keys(selections)) if (!ids.has(id)) delete selections[id];
         render();
@@ -213,7 +238,7 @@
       void cacheWork(() => Cache.removeFile(role,settings()));
     });
   }
-  $('mode').addEventListener('change',() => { clearChoices(); refresh(); void cacheWork(() => Cache.saveState(settings())); });
+  $('budgetStartMonth').addEventListener('change',() => { monthEdited = true; clearChoices(); refresh(); void cacheWork(() => Cache.saveState(settings())); });
   $('clear-cache').addEventListener('click',async () => {
     if (exporting || restoring) return;
     for (const role of roles) {
@@ -221,7 +246,7 @@
       Object.assign(s,{book:null,filename:'',fingerprint:'',importedAt:'',state:'empty',error:'',sheets:[]});
       $(role + 'File').value = ''; reference(role);
     }
-    clearChoices(); refresh();
+    monthEdited = false; clearChoices(); refresh();
     if (await cacheWork(() => Cache.clear())) $('cache-status').textContent = '已清空本工具的本机文件和核对选择。';
   });
   $('result').addEventListener('change',event => {
@@ -268,7 +293,9 @@
   async function restore() {
     try {
       const saved = await Cache.load();
-      if (['new','existing'].includes(saved.settings?.mode)) $('mode').value = saved.settings.mode;
+      if (saved.settings?.schema === 2 && /^\d{4}-(0[1-9]|1[0-2])$/.test(saved.settings.budgetStartMonth || '')) {
+        $('budgetStartMonth').value = saved.settings.budgetStartMonth; monthEdited = saved.settings.monthEdited === true;
+      }
       let invalid = false;
       await Promise.all(roles.map(async role => {
         const entry = saved.files?.[role];
@@ -278,8 +305,9 @@
         catch (error) { invalid = true; Object.assign(s,{book:null,state:'error',error:message(error)}); }
         reference(role);
       }));
+      syncBudgetMonth();
       const fingerprints = saved.settings?.fingerprints || {};
-      const unchanged = roles.every(role => (sources[role].fingerprint || '') === (fingerprints[role] || ''));
+      const unchanged = saved.settings?.schema === 2 && saved.settings.budgetStartMonth === $('budgetStartMonth').value && roles.every(role => (sources[role].fingerprint || '') === (fingerprints[role] || ''));
       if (!invalid && unchanged) {
         const storedDecisions = saved.settings?.decisions, storedMatches = saved.settings?.matches;
         if (storedDecisions && typeof storedDecisions === 'object' && !Array.isArray(storedDecisions)) decisions = Object.fromEntries(Object.entries(storedDecisions).filter(([,v]) => v && ['是','否'].includes(v.excluded) && typeof v.reason === 'string'));
@@ -288,10 +316,10 @@
       if (invalid) {
         clearChoices();
         for (const role of roles.filter(role => sources[role].state === 'error')) await Cache.removeFile(role,settings());
-      } else if (!unchanged) await Cache.saveState(settings());
-      $('cache-status').textContent = roles.some(role => sources[role].book) ? '已恢复本机文件和仍有效的核对选择，未上传服务器。' : '文件与核对选择仅缓存在当前浏览器，不上传服务器。';
+      } else if (!unchanged) { syncBudgetMonth(); await Cache.saveState(settings()); }
+      $('cache-status').textContent = roles.some(role => sources[role].book) ? saved.migrated ? '已恢复原有三个来源；旧付款依据、已有明细和旧核对选择已清除，请重新核对。' : '已恢复本机文件和仍有效的核对选择，未上传服务器。' : '文件与核对选择仅缓存在当前浏览器，不上传服务器。';
     } catch (error) { $('cache-status').textContent = '未能读取本机缓存：' + message(error) + '。可以重新上传，本次整理仍可使用。'; }
     finally { restoring = false; refresh(); window.QuarterBudgetToolReady = true; }
   }
-  controls(); void restore();
+  syncBudgetMonth(); controls(); void restore();
 })();

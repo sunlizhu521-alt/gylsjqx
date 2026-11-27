@@ -6,14 +6,19 @@
   'use strict';
 
   const aliases = {
-    month: ['预估付款月份', '申请付款月份', '预计付款月份'],
+    month: ['预估付款月份', '申请付款月份', '预计付款月份'], paymentDate: ['付款时间', '付款日期'],
+    due: ['应付时间', '应付款时间'], estimate: ['预估付款时间', '预估付款月份', '预估时间'],
     supplier: ['供应商名称', '供应商', '供应商全称'],
     subject: ['付款主体'], oa: ['对公付款OA流程号', '对公付款OA号', 'OA流程号'],
     summary: ['摘要'], amount: ['申请付款金额', '本次申请付款金额', 'OA-申请付款金额', '申请金额'],
-    status: ['是否已支付', '是否已付款', '是否已付', '付款状态'],
+    status: ['是否已支付', '是否已付款', '是否已付', '付款状态', '已支付未支付'],
     category: ['分类'], owner: ['跟单员', '采购跟单员', '创跟单员'], excluded: ['是否剔除'],
-    detail: ['谈判明细'], paid: ['已付金额'], settled: ['是否结清']
+    detail: ['谈判明细'], paid: ['已付金额', '已付款金额'], settled: ['是否结清'],
+    negotiated: ['是否谈判付款'], batching: ['是否谈判分批']
   };
+  const people = ['李奇', '徐英', '邢芳芳', '操思敏', '孙立柱'];
+  const summarySheet = '谈判付款付款表付款节奏';
+  const forecastCategory = '正常付款-预估付款';
   const noteHeaders = /备注|账期|付款条件|应付款?时间|当前节点|未操作者|流程状态|需要提交付款审单的日期|是否提交纸质付款审单/;
   const norm = value => String(value == null ? '' : value).replace(/\s/g, '').replace(/0A/gi, 'OA');
   const nonempty = value => value !== undefined && value !== null && value !== '';
@@ -38,10 +43,11 @@
     if (cell.v instanceof Date) return Number.isNaN(cell.v.getTime()) ? 'Invalid Date' : cell.v.toISOString();
     return cell.v == null ? null : cell.v;
   }
+  const unavailable = cell => cell && (cell.t === 'e' || cell.f && (cell.t === 'z' || !nonempty(cell.v)));
   function status(value) {
     const v = norm(value);
-    if (/^(已支付|已付款|已付|付清|已结清)$/.test(v)) return '已支付';
-    if (/^(未支付|未付款|未付|不支付)$/.test(v)) return '未支付';
+    if (/^(是|已支付|已付款|已付|付清|已结清)$/.test(v)) return '已支付';
+    if (/^(否|未支付|未付款|未付|不支付)$/.test(v)) return '未支付';
     return '待核对';
   }
   function decimal(value) {
@@ -90,7 +96,8 @@
   function keyFor(value, options, date1904) {
     const d = dated(value, date1904);
     const month = d ? d.month : monthNumber(value);
-    const year = d ? d.year : Number.isInteger(options.budgetYear) ? options.budgetYear : null;
+    const start = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(options.budgetStartMonth || '');
+    const year = d ? d.year : start && month ? Number(start[1]) + (month < Number(start[2]) ? 1 : 0) : Number.isInteger(options.budgetYear) ? options.budgetYear : null;
     return year && month ? `${year}-${String(month).padStart(2, '0')}` : '';
   }
   function isRed(cell) {
@@ -134,28 +141,49 @@
     return { rows, orderedRows, fields: {}, headerRow: null };
   }
 
+  function inferManualMonth(source) {
+    if (!source?.book?.Sheets) return '';
+    const book = source.book, date1904 = !!book.Workbook?.WBProps?.date1904;
+    const candidates = (book.SheetNames || Object.keys(book.Sheets)).filter(name => book.Sheets[name] && !/原始表|备份|旧表|backup/i.test(name)).map(name => ({name, ...inspect(book.Sheets[name])})).filter(t => t.headerRow && (t.fields.paymentDate != null || t.fields.month != null));
+    const selected = candidates.find(t => t.name === 'Sheet1') || (candidates.length === 1 ? candidates[0] : null);
+    if (!selected) return '';
+    const months = new Set();
+    for (const row of selected.orderedRows.filter(row => row > selected.headerRow)) {
+      const supplier = raw(book.Sheets[selected.name][address(row, selected.fields.supplier)]);
+      if (!nonempty(supplier) || /^(合计|总计|小计|备注|说明)[:：]?$/.test(norm(supplier))) continue;
+      const cell = book.Sheets[selected.name][address(row, selected.fields.paymentDate ?? selected.fields.month)], d = unavailable(cell) ? null : dated(raw(cell), date1904);
+      if (d) months.add(`${d.year}-${String(d.month).padStart(2, '0')}`);
+    }
+    return months.size === 1 ? [...months][0] : '';
+  }
+
   function parse(source, role, options) {
     options = options || {};
     if (!source || !source.book || !source.book.Sheets) throw new TypeError('缺少已读取的 Excel 工作簿');
-    if (!['negotiated', 'ledger', 'budget', 'existing', 'evidence'].includes(role)) throw new TypeError('未知导入角色');
+    if (!['negotiated', 'ledger', 'budget', 'manualBudget'].includes(role)) throw new TypeError('未知导入角色');
     const result = { records: [], warnings: [], errors: [], sheets: [], evidence: [] };
     const book = source.book, date1904 = !!(book.Workbook && book.Workbook.WBProps && book.Workbook.WBProps.date1904);
-    const evidenceIds = new Set(), summaryEvidenceIds = new Set();
+    const evidenceIds = new Set();
     const location = (sheet, row, part) => ({ role, file: source.filename || '', sheet, row, part: part || 1 });
     function issue(level, code, message, sheet, row, cell) {
-      result[level].push({ code, message, source: location(sheet, row), cell: cell || '' });
+      const entry = { code, message, source: location(sheet, row), cell: cell || '' };
+      if (sheet && row) entry.recordId = `${role}:${sourceId(source)}:${encodeURIComponent(sheet)}:${row}:1`;
+      result[level].push(entry);
     }
     function readAmount(cell, sheet, row, coordinate) {
       const amount = raw(cell);
       if (cell && (cell.t === 'e' || cell.f && !nonempty(cell.v))) {
         issue('errors', 'AMOUNT_FORMULA_ERROR', '金额公式无有效缓存或包含错误，不能按零计算', sheet, row, coordinate);
-        return { amount, cents: null };
+        return { amount, cents: null, invalidAmount: true };
       }
-      if (!nonempty(amount)) return { amount: null, cents: null };
+      if (!nonempty(amount)) {
+        issue('errors', 'MISSING_AMOUNT', '申请付款金额为空，补充金额或明确剔除本条后再汇总', sheet, row, coordinate);
+        return { amount: null, cents: null, invalidAmount: true };
+      }
       const d = decimal(amount);
       if (!d) issue('errors', 'INVALID_AMOUNT', '金额无效或超出安全整数分范围，保留原值', sheet, row, coordinate);
       else if (d.precision) issue('warnings', 'AMOUNT_PRECISION', '原金额超过两位小数，原值保留，统计按分四舍五入', sheet, row, coordinate);
-      return { amount, cents: d ? d.cents : null };
+      return { amount, cents: d ? d.cents : null, invalidAmount: !d };
     }
     function addEvidence(record, sheet, row, cell, cents, state, monthKey, part, kind) {
       if (cents == null || !['已支付', '未支付'].includes(state)) return null;
@@ -170,20 +198,22 @@
     const names = options.sheetName ? [options.sheetName] : (book.SheetNames || Object.keys(book.Sheets));
     const inspected = new Map(names.filter(name => book.Sheets[name]).map(name => [name, inspect(book.Sheets[name])]));
     let selected = new Set(names);
-    if (!options.sheetName && role !== 'evidence') {
+    if (!options.sheetName) {
       const candidates = names.filter(name => !/原始表|备份|旧表|backup/i.test(name) && inspected.get(name) && inspected.get(name).headerRow);
       let preferred = [];
       if (role === 'negotiated') {
-        preferred = candidates.filter(name => name === '谈判付款');
+        preferred = names.includes(summarySheet) ? [summarySheet] : [];
+        if (!preferred.length) preferred = candidates.filter(name => name === '谈判付款');
         if (!preferred.length) preferred = candidates.filter(name => /谈判.*付款|付款.*谈判/.test(name));
         if (!preferred.length) preferred = candidates.filter(name => { const f = inspected.get(name).fields; return f.detail != null || f.month != null && f.amount != null; });
       } else if (role === 'ledger') {
-        preferred = candidates.filter(name => name === '正常付款');
+        preferred = candidates.filter(name => people.some(person => name === '对账明细-' + person));
+        if (!preferred.length) preferred = candidates.filter(name => name === '正常付款');
         if (!preferred.length) preferred = candidates.filter(name => /正常付款/.test(name));
         if (!preferred.length) preferred = candidates.filter(name => inspected.get(name).fields.detail == null);
-      } else if (role === 'existing') {
-        preferred = candidates.filter(name => name === '付款汇总明细');
-        if (!preferred.length) preferred = candidates.filter(name => inspected.get(name).fields.month != null && inspected.get(name).fields.detail == null);
+      } else if (role === 'manualBudget') {
+        const eligible = candidates.filter(name => { const f = inspected.get(name).fields; return (f.paymentDate != null || f.month != null) && f.detail == null; });
+        preferred = eligible.includes('Sheet1') ? ['Sheet1'] : eligible;
       } else {
         const budgetCandidates = candidates.filter(name => { const f = inspected.get(name).fields; return f.month != null && f.detail == null; });
         preferred = budgetCandidates.filter(name => /^(预估预算.*|未预估付款明细|预估付款明细|预算明细)$/.test(name));
@@ -192,8 +222,10 @@
           preferred = standardized.length ? standardized : budgetCandidates;
         }
       }
-      const rawBudgetSheets = role === 'budget' && preferred.every(name => inspected.get(name).fields.category == null && !/预算.*明细|预估预算/.test(name));
-      if (preferred.length > 1 && !rawBudgetSheets) {
+      const personalBudget = name => people.slice(0, 4).some(person => name === person || name.endsWith('-' + person));
+      const rawBudgetSheets = role === 'budget' && preferred.every(name => personalBudget(name) || inspected.get(name).fields.category == null && !/预算.*明细|预估预算/.test(name));
+      const rawLedgerSheets = role === 'ledger' && preferred.every(name => people.some(person => name === '对账明细-' + person));
+      if (preferred.length > 1 && !rawBudgetSheets && !rawLedgerSheets) {
         issue('errors', 'AMBIGUOUS_SHEETS', `存在多个可用工作表：${preferred.join('、')}；请明确选择工作表`, '', 0);
         selected = new Set();
       } else selected = new Set(preferred);
@@ -209,11 +241,22 @@
       const { rows, orderedRows, headerRow, fields, headerCells } = inspected.get(sheetName);
       if (!headerRow) { result.sheets.push({ name: sheetName, skipped: true, reason: '未找到付款明细表头', recordCount: 0 }); continue; }
       const initialCount = result.records.length;
-      const getCell = (row, field) => fields[field] == null ? null : sheet[address(row, fields[field])];
+      const isRawLedger = role === 'ledger' && people.some(person => sheetName === '对账明细-' + person);
+      const getCell = (row, field) => {
+        if (fields[field] == null) return null;
+        if (field === 'negotiated') {
+          const merge = (sheet['!merges'] || []).find(m => row - 1 >= m.s.r && row - 1 <= m.e.r && fields[field] >= m.s.c && fields[field] <= m.e.c);
+          if (merge) return sheet[address(merge.s.r + 1, merge.s.c)];
+        }
+        return sheet[address(row, fields[field])];
+      };
       const get = (row, field) => raw(getCell(row, field));
       const noteColumns = [...headerCells].filter(([, entry]) => noteHeaders.test(text(raw(entry.cell))));
-      const details = fields.detail != null && (role === 'negotiated' || role === 'evidence');
-      const scheduleColumns = details ? [...headerCells].filter(([col, entry]) => col > fields.detail && (dated(raw(entry.cell), date1904) || monthNumber(raw(entry.cell)))).map(([col]) => col).sort((a, b) => a - b) : [];
+      const details = fields.detail != null && role === 'negotiated';
+      const lowerDateHeader = details && !nonempty(get(headerRow + 1, 'supplier')) && ![...headerCells].some(([col, entry]) => col > fields.detail && dated(raw(entry.cell), date1904)) && [...(rows.get(headerRow + 1) || [])].some(([col, entry]) => col > fields.detail && dated(raw(entry.cell), date1904));
+      const scheduleHeaderRow = lowerDateHeader ? headerRow + 1 : headerRow;
+      const scheduleHeaders = rows.get(scheduleHeaderRow) || headerCells;
+      const scheduleColumns = details ? [...scheduleHeaders].filter(([col, entry]) => col > fields.detail && (dated(raw(entry.cell), date1904) || monthNumber(raw(entry.cell)))).map(([col]) => col).sort((a, b) => a - b) : [];
       const mergeByRow = new Map();
       for (const merge of sheet['!merges'] || []) {
         if (details && fields.detail >= merge.s.c && fields.detail <= merge.e.c && merge.e.r > merge.s.r) {
@@ -225,30 +268,57 @@
       }
       function base(row, part) {
         const originalNotes = noteColumns.filter(([col]) => nonempty(raw(sheet[address(row, col)]))).map(([col, entry]) => `${norm(raw(entry.cell)) === '备注' ? '' : text(raw(entry.cell)) + '：'}${text(raw(sheet[address(row, col)]))}`);
-        const rec = { id: `${sourceId(source)}:${encodeURIComponent(sheetName)}:${row}:${part || 1}`, source: location(sheetName, row, part),
-          month: get(row, 'month'), monthKey: keyFor(get(row, 'month'), options, date1904), monthDate1904: date1904, supplier: text(get(row, 'supplier')),
+        let monthField = fields.paymentDate != null && (role === 'negotiated' || role === 'manualBudget') ? 'paymentDate' : 'month';
+        if (role === 'ledger' && (isRawLedger || fields.due != null)) {
+          const due = getCell(row, 'due');
+          const blankDue = !due || !due.f && due.t !== 'e' && !norm(raw(due));
+          monthField = blankDue ? 'estimate' : 'due';
+        }
+        const monthCell = getCell(row, monthField), monthValue = get(row, monthField);
+        const originalCategory = text(get(row, 'category'));
+        const forecastNote = noteColumns.some(([col, entry]) => /备注/.test(text(raw(entry.cell))) && text(raw(sheet[address(row, col)])).split(/[，,。；;：:\r\n]/).some(fragment => /^此款为预估(?:付款|金额)?$/.test(norm(fragment))));
+        const isForecast = role === 'manualBudget' && (['预估付款', forecastCategory].includes(norm(originalCategory)) || forecastNote);
+        let category = originalCategory || ({ negotiated: norm(get(row, 'batching')) === '否' ? '正常付款-谈判付款表' : '谈判付款-谈判付款表', ledger: '正常付款-正常对账表', budget: forecastCategory }[role] || '');
+        if (role !== 'manualBudget') category = ({'谈判付款':'谈判付款-谈判付款表','正常付款':role === 'negotiated' ? '正常付款-谈判付款表' : '正常付款-正常对账表','预估付款':forecastCategory})[norm(category)] || category;
+        if (isForecast) {
+          category = forecastCategory;
+          if (originalCategory && originalCategory !== category) originalNotes.push('原分类：' + originalCategory);
+        }
+        const person = people.find(person => sheetName === person || sheetName.endsWith('-' + person));
+        const rec = { id: `${role}:${sourceId(source)}:${encodeURIComponent(sheetName)}:${row}:${part || 1}`, source: location(sheetName, row, part),
+          month: monthValue, monthKey: unavailable(monthCell) ? '' : keyFor(monthValue, options, date1904), monthDate1904: date1904, supplier: text(get(row, 'supplier')),
           subject: text(get(row, 'subject')), oa: text(get(row, 'oa')), summary: text(get(row, 'summary')),
-          amount: null, cents: null, status: status(get(row, 'status')), notes: originalNotes.join('\n'),
-          category: text(get(row, 'category')) || ({ negotiated: '谈判付款', ledger: '正常付款', budget: '预估付款' }[role] || ''),
-          owner: text(get(row, 'owner')) || (role === 'budget' && fields.category == null ? sheetName : ''),
-          excluded: norm(get(row, 'excluded')) === '是' ? '是' : '否', evidenceIds: [] };
+          amount: null, cents: null, status: unavailable(getCell(row, 'status')) ? '待核对' : status(get(row, 'status')), notes: originalNotes.join('\n'),
+          category, owner: text(get(row, 'owner')) || ((role === 'budget' || isRawLedger) ? person || sheetName : ''),
+          excluded: norm(get(row, 'excluded')) === '是' ? '是' : '否', evidenceIds: [], isForecast };
         if (!rec.oa) {
           const oas = [...new Set((rec.notes.match(/MDST[-－]DGFK\d{11,}/gi) || []))];
           if (oas.length === 1) rec.oa = oas[0];
           else if (oas.length > 1) issue('warnings', 'MULTIPLE_OA', '备注含多个流程号，不能唯一提取', sheetName, row);
         }
         if (/原流程|历史流程/.test(rec.notes) && /未提交|未提交流程/.test(rec.notes)) rec.notes += '\n流程说明：原流程，本期未提交。';
-        if (!rec.monthKey && nonempty(rec.month)) issue('warnings', 'UNKNOWN_MONTH_YEAR', '付款月份没有可唯一确定的年份，保留原值', sheetName, row);
+        if (!rec.monthKey && (nonempty(rec.month) || unavailable(monthCell))) issue('warnings', 'UNKNOWN_MONTH_YEAR', '付款日期或月份无法确定，保留原值且不从其他日期替代', sheetName, row, fields[monthField] == null ? '' : address(row, fields[monthField]));
         return rec;
       }
       for (const row of orderedRows.filter(r => r > headerRow)) {
         const supplier = get(row, 'supplier');
         if (!nonempty(supplier) || /^(合计|总计|小计|备注|说明)[:：]?$/.test(norm(supplier))) continue;
-        if (!details && !['amount', 'summary', 'month', 'oa', 'subject'].some(field => nonempty(get(row, field)) || getCell(row, field) && getCell(row, field).f)) continue;
+        if (role === 'negotiated') {
+          const oa = getCell(row, 'oa');
+          if (oa?.t !== 'e' && !(oa?.f && oa.t === 'z') && norm(raw(oa)) === '不支付') continue;
+        }
+        if (isRawLedger || role === 'ledger' && fields.negotiated != null) {
+          const cell = getCell(row, 'negotiated'), flag = norm(raw(cell));
+          if (fields.negotiated == null || cell?.t === 'e' || cell?.f && (cell.t === 'z' || !nonempty(cell.v)) || !['是', '否', ''].includes(flag)) {
+            issue('errors', 'INVALID_NEGOTIATED_CLASSIFICATION', '是否谈判付款缺失或异常，不能自动归入正常付款', sheetName, row, fields.negotiated == null ? '' : address(row, fields.negotiated));
+            continue;
+          }
+          if (flag === '是') continue;
+        }
+        if (!details && !['amount', 'summary', 'month', 'paymentDate', 'due', 'estimate', 'oa', 'subject', 'category'].some(field => nonempty(get(row, field)) || getCell(row, field) && getCell(row, field).f)) continue;
         if (!details) {
           const rec = base(row), cell = getCell(row, 'amount'), coord = fields.amount == null ? '' : address(row, fields.amount);
           Object.assign(rec, readAmount(cell, sheetName, row, coord));
-          if (rec.cents == null && !nonempty(rec.amount)) issue('warnings', 'MISSING_AMOUNT', '申请付款金额为空，保留空值', sheetName, row, coord);
           if (fields.status == null) {
             const bareNotes = noteColumns.map(([col]) => text(raw(sheet[address(row, col)])).trim());
             if (bareNotes.some(n => /^(已付|已付款|已支付)[。！!]?$/u.test(n) || /^(本笔|本期)(款项)?已(支付|付款|付清)[。！!]?$/u.test(n) || /^(?:\d{4}[年/.-]\d{1,2}[月/.-]\d{1,2}[日号]?\s*[，,、和及]?\s*)+已(?:支付|付款|付)[。！!]?$/u.test(n))) rec.status = '已支付';
@@ -259,10 +329,9 @@
             rec.notes += `${rec.notes ? '\n' : ''}原付款状态：${get(row, 'status')}；已付组成及剩余金额待核对。`;
             issue('warnings', 'PARTIAL_PAYMENT', '部分支付不能视为全额已付', sheetName, row);
           }
-          const ev = role === 'existing' ? null : addEvidence(rec, sheetName, row, coord, rec.cents, rec.status, rec.monthKey, 1, 'ledger');
+          const ev = role === 'manualBudget' ? null : addEvidence(rec, sheetName, row, coord, rec.cents, rec.status, rec.monthKey, 1, 'ledger');
           if (ev) rec.evidenceIds.push(ev);
-          if (ev && fields.month == null && fields.summary == null) summaryEvidenceIds.add(ev);
-          if (role !== 'evidence') result.records.push(rec);
+          result.records.push(rec);
           continue;
         }
         const recBase = base(row), merge = mergeByRow.get(row);
@@ -278,15 +347,15 @@
           const cell = sheet[address(row, col)];
           if (!cell || !nonempty(cell.v) && !cell.f && cell.t !== 'e') continue;
           const value = readAmount(cell, sheetName, row, address(row, col));
-          const d = dated(raw(sheet[address(headerRow, col)]), date1904);
-          const mo = d ? d.month : monthNumber(raw(sheet[address(headerRow, col)]));
+          const d = dated(raw(sheet[address(scheduleHeaderRow, col)]), date1904);
+          const mo = d ? d.month : monthNumber(raw(sheet[address(scheduleHeaderRow, col)]));
           schedule.push({ ...value, cell, col, coordinate: address(row, col), month: mo, monthKey: d ? `${d.year}-${String(d.month).padStart(2, '0')}` : '', used: false });
         }
         if (!parts.length) {
-          const rec = { ...recBase, month: null, monthKey: '', amount: null, cents: null, status: '待核对', evidenceIds: [] };
+          const rec = { ...recBase, month: null, monthKey: '', amount: null, cents: null, invalidAmount: true, status: '待核对', evidenceIds: [] };
           rec.notes += `${rec.notes ? '\n' : ''}${ambiguousMerge ? '合并明细不能唯一分配' : nonempty(originalDetail) ? '谈判明细无法识别月份及金额' : '谈判明细为空'}${nonempty(originalDetail) ? `；原文：${originalDetail}` : ''}`;
           if (!ambiguousMerge) issue('warnings', 'MISSING_INSTALLMENTS', '缺少可解析的谈判分期，保留源行并待核对', sheetName, row);
-          if (role !== 'evidence') result.records.push(rec);
+          result.records.push(rec);
         }
         const yearsByPaymentMonth = new Map();
         function rememberYear(month, key) {
@@ -310,13 +379,14 @@
             const sameAmount = schedule.filter(s => !s.used && s.cents === rec.cents);
             if (sameAmount.length === 1) matched = sameAmount[0];
           }
-          rec.monthKey = keyFor(rec.month, options, date1904);
+          rec.monthKey = keyFor(rec.month, {}, date1904);
           rec.notes += `${rec.notes ? '\n' : ''}谈判明细：${originalDetail}`;
           const knownYears = yearsByPaymentMonth.get(part.monthNumber);
           if (!rec.monthKey && knownYears && knownYears.size === 1) {
             const year = [...knownYears][0];
             rec.monthKey = `${year}-${String(part.monthNumber).padStart(2, '0')}`;
           }
+          if (!rec.monthKey && (!knownYears || knownYears.size === 0)) rec.monthKey = keyFor(rec.month, options, date1904);
           rec.status = '待核对';
           if (matched && !matched.used) {
             matched.used = true;
@@ -339,7 +409,7 @@
             const [year, month] = rec.monthKey.split('-').map(Number);
             rec.month = Math.round((Date.UTC(year, month - 1, 1) - Date.UTC(date1904 ? 1904 : 1899, date1904 ? 0 : 11, date1904 ? 1 : 30)) / 86400000);
           }
-          if (role !== 'evidence') result.records.push(rec);
+          result.records.push(rec);
         }
         for (const item of schedule.filter(s => !s.used)) {
           addEvidence(recBase, sheetName, row, item.coordinate, item.cents, isRed(item.cell) ? '已支付' : '未支付', item.monthKey, schedule.indexOf(item) + 1, 'schedule');
@@ -348,16 +418,8 @@
       }
       result.sheets.push({ name: sheetName, headerRow, recordCount: result.records.length - initialCount, skipped: false });
     }
-    if (role === 'evidence') {
-      const detailed = result.evidence.filter(e => !summaryEvidenceIds.has(e.id));
-      result.evidence = result.evidence.filter(e => {
-        const duplicate = summaryEvidenceIds.has(e.id) && norm(e.oa) && detailed.some(d => norm(d.oa) === norm(e.oa) && norm(d.supplier) === norm(e.supplier) && norm(d.subject) === norm(e.subject) && d.cents === e.cents && d.status === e.status);
-        if (duplicate) issue('warnings', 'DUPLICATE_SUMMARY_EVIDENCE', '该汇总付款证据已有逐期或本笔明细支持，不重复分配到其他期次', e.source.sheet, e.source.row, e.source.cell);
-        return !duplicate;
-      });
-    }
     if (!result.sheets.some(s => !s.skipped)) issue('errors', 'NO_PAYMENT_SHEET', '没有找到可导入的付款明细工作表', '', 0);
     return result;
   }
-  return { parse };
+  return { parse, inferManualMonth };
 });
