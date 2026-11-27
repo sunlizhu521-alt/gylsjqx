@@ -92,6 +92,20 @@ const docXml = async data => (await Zip.loadAsync(data)).file('word/document.xml
       const download = await event, target = path.join(out,label+'.'+kind);
       await download.saveAs(target); return fs.readFile(target);
     }
+    async function printedContract(data) {
+      return page.evaluate(xml => {
+        const ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+        const doc = new DOMParser().parseFromString(xml,'application/xml');
+        const cell = doc.getElementsByTagNameNS(ns,'tbl')[1].getElementsByTagNameNS(ns,'tr')[1].getElementsByTagNameNS(ns,'tc')[3];
+        return [...cell.getElementsByTagNameNS(ns,'t')].map(node => node.textContent).join('');
+      },await docXml(data));
+    }
+    async function noOACandidate() {
+      assert.equal(await rows().first().locator('.payment-oa-amount').innerText(),'未找到对应OA');
+      assert.equal(await rows().first().locator('.payment-oa-amount .payment-budget-candidate').count(),0);
+      assert.equal(await rows().first().locator('.payment-oa-unoperated').innerText(),'—');
+      assert.equal(await rows().first().locator('[data-budget-confirm]').count(),1);
+    }
     async function assertNoOACache() {
       assert.equal(await page.evaluate(async () => !!(await PaymentCache.get('oa'))),false);
       assert(await page.evaluate(() => window.__oaCacheWrites.every(key => ['detail','template','directory','budget'].includes(key))),'OA uploads must not use a different persistent cache key');
@@ -115,16 +129,41 @@ const docXml = async data => (await Zip.loadAsync(data)).file('word/document.xml
     assert.doesNotMatch(await docXml(matchedDoc),/OA付款金额|未操作者|合成办理甲|合成OA流程/);
     await assertNoOACache();
 
+    // Numeric OA cells must retain leading zeros supplied by the Excel number format.
+    const paddedBook = X.read(detailBytes([first,second]),{type:'buffer'});
+    const paddedAddress = X.utils.encode_cell({r:1,c:C.required.indexOf('合同编号')});
+    paddedBook.Sheets.付款明细[paddedAddress] = {t:'n',v:123,z:'00000000'};
+    await upload('detail',Buffer.from(X.write(paddedBook,{type:'buffer',bookType:'xlsx'})),'数字格式补零付款明细.xlsx');
+    await upload('oa',oaBytes([oaRow({...first,合同编号:'00000123'}),oaRow(second)]),'补零编号OA.xlsx');
+    await table(true);
+    assert.equal(await rows().first().locator('.payment-budget-result').innerText(),'核对通过');
+    assert.match(await rows().first().locator('td').nth(1).innerText(),/OA号：00000123/);
+    assert.match(await rows().first().locator('.payment-oa-amount').innerText(),/流程编码：00000123/);
+    assert.equal(await page.locator('[data-budget-confirm]').count(),0);
+    await generate();
+    assert.equal(await printedContract(await save('docx','numeric-oa-leading-zeros')),'00000123');
+    await upload('detail',detailBytes([first,second]),'合成付款明细.xlsx');
+    await upload('oa',oaBytes([oaRow(first),oaRow(second,'200.00','合成办理乙')]),'合成OA流程.xlsx');
+
     // Existing budget checks and the new OA checks share one row and confirmation.
     await upload('budget',budgetBytes([budgetRow(first),budgetRow(second)]),'合成月份预算.xlsx');
     await table(true); await generate();
-    await upload('oa',oaBytes([oaRow({...first,合同编号:'MDST-DGFK20261127999'}),oaRow(second)]),'同额不同OA.xlsx');
+    const suggestedOA = 'MDST-DGFK20261127999';
+    await upload('oa',oaBytes([oaRow({...first,合同编号:suggestedOA},'100.00','建议办理人'),oaRow(second)]),'唯一建议OA.xlsx');
     assert.equal(await rows().first().locator('[data-budget-confirm]').count(),1);
-    assert.match(await rows().first().innerText(),/未找到|未匹配/);
-    assert.doesNotMatch(await rows().first().locator('.payment-oa-unoperated').innerText(),/合成办理甲/);
-    await blockedGeneration();
+    assert.equal(await rows().first().locator('.payment-budget-result').innerText(),'待核对');
+    assert.match(await rows().first().locator('.payment-oa-amount').innerText(),new RegExp(suggestedOA));
+    assert.match(await rows().first().locator('.payment-oa-amount').innerText(),new RegExp(first.供应商全称));
+    assert.equal(await rows().first().locator('.payment-oa-unoperated').innerText(),'建议办理人');
+    await blockedGeneration(); await confirmAll(); await generate();
+    const suggestedDoc = await save('docx','confirmed-suggested-oa');
+    assert.equal(await printedContract(suggestedDoc),first.合同编号,'confirmation does not replace the original OA in the print form');
+    assert.equal(await docXml(suggestedDoc),await docXml(initialDoc));
+    assert.deepEqual(await previews(),initialImages);
+
+    // An original OA does not let another amount or supplier enter the candidate list.
     await upload('oa',oaBytes([oaRow(first,'99.00'),oaRow(second)]),'合成OA流程.xlsx');
-    assert.equal(await rows().first().locator('.payment-oa-amount .payment-budget-amount').innerText(),'￥99.00');
+    await noOACandidate();
     assert.equal(await page.locator('[data-budget-confirm]').count(),1);
     await blockedGeneration(); await confirmAll(); await generate();
     assert.match(await page.locator('#paymentStatus').innerText(),/已生成/);
@@ -134,9 +173,40 @@ const docXml = async data => (await Zip.loadAsync(data)).file('word/document.xml
     await upload('budget',budgetBytes([budgetRow(first,'90.00'),budgetRow(second)]),'合成月份预算.xlsx');
     assert.equal(await rows().first().locator('[data-budget-confirm]').count(),1,'a budget and OA mismatch share one confirmation per application');
     assert.equal(await page.locator('[data-budget-confirm]:checked').count(),0);
-    assert.match(await rows().first().innerText(),/90\.00/); assert.match(await rows().first().innerText(),/99\.00/);
+    assert.match(await rows().first().innerText(),/90\.00/); await noOACandidate();
     await blockedGeneration(); await confirmAll(); await generate();
     await upload('budget',budgetBytes([budgetRow(first),budgetRow(second)]),'合成月份预算.xlsx');
+    await upload('oa',oaBytes([oaRow({...first,供应商全称:'合成其他收款单位'}),oaRow(second)]),'同号同额其他供应商.xlsx');
+    await noOACandidate(); await blockedGeneration();
+
+    // Missing original OA still has a supplier/amount suggestion, which remains review-only.
+    await upload('detail',detailBytes([{...first,合同编号:'/'},second]),'原OA空白付款明细.xlsx');
+    await upload('oa',oaBytes([oaRow(first,'100.00','缺号建议办理人'),oaRow(second)]),'原号缺失建议.xlsx');
+    await table(true);
+    assert.equal(await rows().first().locator('[data-budget-confirm]').count(),1);
+    assert.match(await rows().first().locator('.payment-oa-amount').innerText(),new RegExp(first.合同编号));
+    assert.equal(await rows().first().locator('.payment-oa-unoperated').innerText(),'缺号建议办理人');
+    await blockedGeneration(); await confirmAll(); await generate();
+    const missingOADoc = await save('docx','confirmed-missing-original-oa');
+    assert.equal(await printedContract(missingOADoc),'/','suggested OA is never filled into the print form');
+    await upload('detail',detailBytes([first,second]),'合成付款明细.xlsx');
+
+    // Matching the original OA must not hide other same-supplier/same-amount processes.
+    await upload('oa',oaBytes([
+      oaRow({...first,合同编号:suggestedOA},'100.00','候选办理甲'),
+      oaRow(first,'100.00','候选办理乙'),oaRow(second),
+    ]),'同供应商同额多个OA.xlsx');
+    await table(true);
+    const candidates = rows().first().locator('.payment-oa-amount .payment-budget-candidate');
+    assert.equal(await candidates.count(),2);
+    assert.deepEqual(await candidates.locator('.payment-budget-amount').allTextContents(),['￥100.00','￥100.00']);
+    assert.match(await candidates.nth(0).innerText(),new RegExp(suggestedOA));
+    assert.match(await candidates.nth(1).innerText(),new RegExp(first.合同编号));
+    assert.equal(await rows().first().locator('.payment-oa-unoperated').innerText(),'记录 1：候选办理甲\n记录 2：候选办理乙');
+    assert.equal(await rows().first().locator('.payment-budget-result').innerText(),'待核对');
+    assert.equal(await rows().first().locator('[data-budget-confirm]').count(),1);
+    await blockedGeneration(); await confirmAll(); await generate();
+    assert.equal(await printedContract(await save('docx','confirmed-multiple-oa')),first.合同编号);
 
     // Repeated consistent OA entries are read once; conflicting duplicates need review.
     await upload('oa',oaBytes([oaRow(first),oaRow(first),oaRow(second,'200.00','')]),'重复一致OA.xlsx');
@@ -146,17 +216,25 @@ const docXml = async data => (await Zip.loadAsync(data)).file('word/document.xml
     const emptyPending = (await rows().nth(1).locator('.payment-oa-unoperated').innerText()).trim();
     assert(/^$|^(?:[—/-]|（?空白）?)$/.test(emptyPending),'a blank pending operator must stay blank or be explicitly displayed as blank');
     await generate(); assert.match(await page.locator('#paymentStatus').innerText(),/已生成/);
-    await upload('oa',oaBytes([oaRow(first),oaRow(first,'101.00','合成冲突办理人'),oaRow(second)]),'重复冲突OA.xlsx');
-    assert.equal(await page.locator('[data-budget-confirm]').count(),1);
-    assert.match(await rows().first().innerText(),/冲突|不一致/);
-    await blockedGeneration(); await confirmAll(); await generate();
+    for (const [label, conflict] of [
+      ['金额',oaRow(first,'101.00')],
+      ['供应商',oaRow({...first,供应商全称:'合成其他收款单位'})],
+      ['未操作者',oaRow(first,'100.00','合成冲突办理人')],
+    ]) {
+      await upload('oa',oaBytes([oaRow(first),conflict,oaRow(second)]),`同流程${label}冲突OA.xlsx`);
+      assert.equal(await page.locator('[data-budget-confirm]').count(),1);
+      assert.match(await rows().first().innerText(),/冲突|不一致/,'conflicts anywhere in the same process must be reviewed');
+      await blockedGeneration(); await confirmAll(); await generate();
+    }
 
     // Even an identical filename is a new upload and resets all confirmations/results.
-    await upload('oa',oaBytes([oaRow(first,'98.00'),oaRow(second)]),'合成OA流程.xlsx');
+    await upload('oa',oaBytes([oaRow({...first,合同编号:suggestedOA},'100.00','旧版办理人'),oaRow(second)]),'合成OA流程.xlsx');
     await confirmAll(); await generate();
-    await upload('oa',oaBytes([oaRow(first,'97.00'),oaRow(second)]),'合成OA流程.xlsx');
+    await upload('oa',oaBytes([oaRow({...first,合同编号:'MDST-DGFK20261127998'},'100.00','新版办理人'),oaRow(second)]),'合成OA流程.xlsx');
     await blocked(); assert.equal(await page.locator('[data-budget-confirm]:checked').count(),0);
-    assert.equal(await rows().first().locator('.payment-oa-amount .payment-budget-amount').innerText(),'￥97.00');
+    assert.match(await rows().first().locator('.payment-oa-amount').innerText(),/MDST-DGFK20261127998/);
+    assert.doesNotMatch(await rows().first().locator('.payment-oa-amount').innerText(),new RegExp(suggestedOA));
+    assert.equal(await rows().first().locator('.payment-oa-unoperated').innerText(),'新版办理人');
     await confirmAll();
     await upload('detail',detailBytes([first,second]),'合成付款明细.xlsx');
     assert.equal(await page.locator('[data-budget-confirm]:checked').count(),0);
@@ -203,6 +281,8 @@ const docXml = async data => (await Zip.loadAsync(data)).file('word/document.xml
 
     await upload('oa',oaBytes([oaRow(first),oaRow(second)]),'有效OA.xlsx'); await generate();
     await upload('oa',Buffer.from([0,1,2,3]),'损坏OA.xlsx'); await blockedGeneration();
+    await upload('oa',oaBytes([oaRow(first).slice(0,3),oaRow(second).slice(0,3)],oaHeaders.slice(0,3)),'缺少收款单位OA.xlsx');
+    await blockedGeneration(); assert.match(await page.locator('#paymentBudgetChecks').innerText(),/收款单位/);
     const badBook = X.read(oaBytes([oaRow(first),oaRow(second)]),{type:'buffer'});
     badBook.Sheets.流程导出.B2 = {t:'e',v:7,f:'1/0'};
     await upload('oa',Buffer.from(X.write(badBook,{type:'buffer',bookType:'xlsx'})),'公式错误OA.xlsx');
@@ -231,7 +311,7 @@ const docXml = async data => (await Zip.loadAsync(data)).file('word/document.xml
     assert.deepEqual(await page.evaluate(async () => Object.fromEntries(await Promise.all(['detail','budget'].map(async key => [key,(await PaymentCache.get(key)).name])))),cache);
     await table(false); await generate(); assert.match(await page.locator('#paymentStatus').innerText(),/已生成/);
 
-    await upload('oa',oaBytes([oaRow(first,'99.00'),oaRow(second)]),'移动端OA.xlsx');
+    await upload('oa',oaBytes([oaRow({...first,合同编号:suggestedOA}),oaRow(second)]),'移动端OA.xlsx');
     await page.setViewportSize({width:390,height:844});
     const uploads = page.locator('.payment-upload-grid');
     const tops = await uploads.locator('.payment-upload').evaluateAll(slots => slots.map(slot => slot.getBoundingClientRect().top));
@@ -249,6 +329,6 @@ const docXml = async data => (await Zip.loadAsync(data)).file('word/document.xml
     await page.locator('#paymentBudgetChecks').scrollIntoViewIfNeeded();
     await page.screenshot({path:path.join(out,'oa-review.png'),fullPage:false});
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({status:'PASS',base,out,optionalOA:true,oaOnly:true,combinedReview:true,exactOA:true,amountDifference:true,duplicateConsistency:true,duplicateConflict:true,blankOperator:true,sameNameReplacement:true,detailReset:true,sheetSelection:true,latestOA:true,removeDuringRead:true,invalidRecovery:true,memoryOnly:true,toolSwitch:true,refreshAndNewPage:true,otherCachesPreserved:true,unchangedPrint:true,mobile:true,errors}));
+    console.log(JSON.stringify({status:'PASS',base,out,optionalOA:true,oaOnly:true,combinedReview:true,supplierAmountMatch:true,suggestedOA:true,missingOASuggestion:true,multipleCandidates:true,noUnrelatedCandidates:true,originalOAPreserved:true,duplicateConsistency:true,duplicateConflict:true,blankOperator:true,sameNameReplacement:true,detailReset:true,sheetSelection:true,latestOA:true,removeDuringRead:true,invalidRecovery:true,memoryOnly:true,toolSwitch:true,refreshAndNewPage:true,otherCachesPreserved:true,unchangedPrint:true,mobile:true,errors}));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

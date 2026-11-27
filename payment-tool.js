@@ -136,7 +136,7 @@
       if (!/\.(xlsx|xls)$/i.test(file.name) || file.size > 30 * 1024 * 1024) throw new Error('请选择 30 MB 以内的 Excel 文件');
       const bytes = await file.arrayBuffer();
       if (load !== state.loads.detail) return;
-      state.workbook = XLSX.read(bytes, { type: 'array', cellDates: false, cellFormula: true });
+      state.workbook = XLSX.read(bytes, { type: 'array', cellDates: false, cellFormula: true, cellNF: true });
       state.sheet = state.workbook.SheetNames[0];
       if (!state.sheet) throw new Error('文件中没有工作表');
       state.pending.detail = false; state.times.detail = savedTime || now();
@@ -252,7 +252,7 @@
       <button id="paymentClearOA" class="secondary-button">移除对公付款OA</button>
       ${state.oa?.sheetName && !state.oa.errors.length ? `<p>已读取 ${state.oa.rows.length} 条OA记录。本文件不缓存，刷新或重新打开页面需再次上传。</p>` : ''}
       ${state.oa?.warnings?.length ? `<details><summary>查看 ${state.oa.warnings.length} 条来源提醒</summary><ul>${state.oa.warnings.map(message => `<li>${esc(message)}</li>`).join('')}</ul></details>` : ''}
-      <details><summary>查看OA核对规则</summary><p class="payment-hint">付款明细“合同编号”作为付款OA号，精确匹配流程编码（兼容流程编号），逐笔核对付款金额并显示未操作者。同号重复行的金额、未操作者一致时读取一次；不一致、金额差异或未匹配时逐笔确认，不修改来源数据。未上传OA文件时提示未核对，仍允许生成。OA核对信息不写入Word/PDF。</p></details></section>`;
+      <details><summary>查看OA核对规则</summary><p class="payment-hint">按付款明细“供应商全称＋本次申请付款金额”精确匹配OA的“收款单位＋付款金额”，金额按分比较。唯一对应的流程编码（兼容流程编号）再与原填“合同编号”核对，并显示未操作者。原编号不同、缺失或异常时提示建议编号；同名同金额对应多个流程时列出全部候选。相同流程的重复记录只有供应商、金额及未操作者都一致才通过。差异须逐笔确认，原填写编号不自动替换。未上传OA文件时提示未核对，仍允许生成。OA核对信息不写入Word/PDF。</p></details></section>`;
     host.querySelector('#paymentOASheet')?.addEventListener('change', e => {
       invalidate(); state.budgetConfirmed.clear();
       state.oa = C.parsePaymentOA(state.oaWorkbook, state.oaName, XLSX, e.target.value);
@@ -290,7 +290,7 @@
         const check = row._budgetCheck, oa = row._oaCheck, passed = check?.status !== 'review' && oa?.status !== 'review';
         const oaGroups = new Map();
         for (const candidate of oa?.candidates || []) {
-          const key = JSON.stringify([candidate.amountText, candidate.unoperated]);
+          const key = JSON.stringify([C.text(candidate.oa).normalize('NFKC').replace(/\s/g, '').toUpperCase(), candidate.supplier, candidate.amountText, candidate.unoperated]);
           if (!oaGroups.has(key)) oaGroups.set(key, candidate);
         }
         const oaValues = [...oaGroups.values()];
@@ -299,7 +299,7 @@
           <td><strong>${esc(row['供应商全称'] || '（供应商空白）')}</strong><br>付款主体：${esc(row['付款主体'] || '（空白）')}<br>OA号：${esc(row['合同编号'] || '（空白）')}<small class="payment-budget-source">申请来源：${esc(source({filename:state.fileName, sheet:state.sheet, row:row._row}))}</small></td>
           <td class="payment-budget-amount">￥${esc(C.money(row._cents))}</td>
           <td>${check?.candidates.length ? check.candidates.map((candidate, index) => `<div class="payment-budget-candidate">${check.candidates.length > 1 ? `<strong>候选 ${index + 1}</strong><br>` : ''}供应商：${esc(candidate.supplier || '（空白）')}<br>付款主体：${esc(candidate.subject || '（空白）')}<br>OA号：${esc(candidate.oa || '（空白）')}<br>预算金额：<span class="payment-budget-amount">￥${esc(C.money(candidate.amount))}</span><small class="payment-budget-source">预算来源：${esc(source(candidate.source))}</small></div>`).join('') : check ? '未找到对应预算' : '未进行预算核对'}</td>
-          ${state.oaName ? `<td class="payment-oa-amount">${oaValues.length ? oaValues.map((candidate, index) => `<div class="payment-budget-candidate">${oaValues.length > 1 ? `记录 ${index + 1}：` : ''}<span class="payment-budget-amount">￥${esc(candidate.amountText)}</span><small class="payment-budget-source">流程编码：${esc(candidate.oa)}</small></div>`).join('') : '未找到对应OA'}</td><td class="payment-oa-unoperated">${oaValues.length ? oaValues.map((candidate, index) => `${oaValues.length > 1 ? `记录 ${index + 1}：` : ''}${esc(candidate.unoperated || '（空白）')}`).join('<br>') : '—'}</td>` : ''}
+          ${state.oaName ? `<td class="payment-oa-amount">${oaValues.length ? oaValues.map((candidate, index) => `<div class="payment-budget-candidate">${oaValues.length > 1 ? `记录 ${index + 1}：` : ''}<span class="payment-budget-amount">￥${esc(candidate.amountText)}</span><small class="payment-budget-source">流程编码：${esc(candidate.oa)}<br>收款单位：${esc(candidate.supplier || '（空白）')}</small></div>`).join('') : '未找到对应OA'}</td><td class="payment-oa-unoperated">${oaValues.length ? oaValues.map((candidate, index) => `${oaValues.length > 1 ? `记录 ${index + 1}：` : ''}${esc(candidate.unoperated || '（空白）')}`).join('<br>') : '—'}</td>` : ''}
           <td>${[check ? `${state.oaName ? '预算：' : ''}${check.reason}` : '', oa ? `OA：${oa.reason}` : ''].filter(Boolean).map(esc).join('<br>')}</td>
           <td>${passed ? '无需确认' : `<label><input type="checkbox" data-budget-confirm ${state.budgetConfirmed.has(String(row._row)) ? 'checked' : ''} />已核实，确认继续生成</label>`}</td>
           </tr>`;
@@ -422,6 +422,10 @@
           value = d ? `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}` : value;
         }
         if (['开户银行及账号', '合同编号'].includes(h) && typeof value === 'number' && Math.abs(value) >= 1e15) errors.push(`第 ${record._row} 行 ${h}：长编号保存为数字可能已丢失精度，请改为文本并核对`);
+        if (h === '合同编号' && Number.isSafeInteger(value) && Math.abs(value) < 1e15) {
+          const displayed = XLSX.utils.format_cell({ ...cell });
+          if (/^\d+$/.test(displayed)) value = displayed;
+        }
         record[h] = value;
       });
       records.push(record);
