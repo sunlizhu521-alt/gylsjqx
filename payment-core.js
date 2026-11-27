@@ -230,6 +230,86 @@
     result.status = 'matched'; result.reason = result.method === 'oa' ? 'OA号、供应商、付款主体及金额一致' : '一方缺OA号，供应商、付款主体唯一且金额一致';
     return result;
   }
+  function parsePaymentOA(book, filename, X, selectedSheet = '') {
+    const result = { sheetNames: [], sheetName: '', rows: [], errors: [], warnings: [] }, tables = new Map();
+    const aliases = new Map([['流程编码', 'code'], ['流程编号', 'legacy'], ['付款金额', 'amount'], ['未操作者', 'unoperated']]);
+    for (const name of book?.SheetNames || []) {
+      const sheet = book.Sheets?.[name], byRow = new Map(); let lastRow = 0;
+      for (const address of Object.keys(sheet || {})) {
+        if (!/^[A-Z]+\d+$/.test(address)) continue;
+        const cell = sheet[address]; if (!cell?.f && !text(cell?.v).trim()) continue;
+        const position = X.utils.decode_cell(address); lastRow = Math.max(lastRow, position.r);
+        if (position.r >= 100) continue;
+        const key = aliases.get(budgetHeader(cell?.v));
+        if (key) { if (!byRow.has(position.r)) byRow.set(position.r, {}); (byRow.get(position.r)[key] ||= []).push(position.c); }
+      }
+      const headers = [...byRow].sort((a, b) => a[0] - b[0]).map(([row, map]) => [row, { oa: map.code || map.legacy, amount: map.amount, unoperated: map.unoperated }]);
+      const complete = headers.find(([, map]) => map.oa && map.amount && map.unoperated);
+      const best = complete || headers.sort((a, b) => Object.values(b[1]).filter(Boolean).length - Object.values(a[1]).filter(Boolean).length)[0];
+      tables.set(name, { sheet, header: best?.[0], map: best?.[1] || {}, lastRow });
+      if (complete) result.sheetNames.push(name);
+    }
+    result.sheetName = selectedSheet || (result.sheetNames.length === 1 ? result.sheetNames[0] : '');
+    if (!result.sheetName) {
+      result.errors.push(result.sheetNames.length > 1 ? '请选择对公付款OA工作表' : `${filename}：未找到OA表头，必须包含流程编码或流程编号、付款金额、未操作者`);
+      return result;
+    }
+    const table = tables.get(result.sheetName), location = `${filename} / ${result.sheetName}`;
+    if (!table) { result.errors.push(`${location}：工作表不存在，请重新选择`); return result; }
+    const labels = { oa: '流程编码或流程编号', amount: '付款金额', unoperated: '未操作者' }, keys = Object.keys(labels);
+    const missing = keys.filter(key => !table.map[key]);
+    if (missing.length) { result.errors.push(`${location}：缺少OA表头 ${missing.map(key => labels[key]).join('、')}`); return result; }
+    for (const key of keys) if (table.map[key].length !== 1) result.errors.push(`${location} 第 ${table.header + 1} 行：OA字段“${labels[key]}”对应多个列，请保留唯一列`);
+    if (table.lastRow > 100000) result.errors.push(`${location}：OA数据超过100000行，请检查源表范围`);
+    if (result.errors.length) return result;
+    for (let r = table.header + 1; r <= table.lastRow; r++) {
+      const cells = Object.fromEntries(keys.map(key => [key, table.sheet[X.utils.encode_cell({ r, c: table.map[key][0] })]]));
+      if (keys.every(key => !cells[key]?.f && !text(cells[key]?.v).trim())) continue;
+      const values = {}, previousErrors = result.errors.length;
+      let missingOA = false;
+      for (const key of keys) {
+        const cell = cells[key], label = `${location}!${X.utils.encode_cell({ r, c: table.map[key][0] })}（${labels[key]}）`;
+        if (cell?.t === 'e' || cell?.f && (cell.v == null || cell.t === 'z' || cell.t === 'n' && typeof cell.v !== 'number')) result.errors.push(`${label}：公式错误或缺少有效计算结果，请在Excel/WPS重新计算并保存`);
+        if (typeof cell?.v === 'number' && !Number.isFinite(cell.v)) result.errors.push(`${label}：数值异常`);
+        values[key] = text(cell?.v).trim();
+        if (key === 'oa' && typeof cell?.v === 'number') {
+          if (!Number.isSafeInteger(cell.v) || Math.abs(cell.v) >= 1e15) result.errors.push(`${label}：OA编号保存为数字可能丢失精度，请改为文本并核实`);
+          else { const displayed = X.utils.format_cell({ ...cell }); values.oa = /^\d+$/.test(displayed) ? displayed : String(cell.v); }
+        }
+        if (key === 'oa' && !budgetOA(values.oa).key) {
+          missingOA = true;
+          if (result.errors.length === previousErrors) result.warnings.push(`${location} 第 ${r + 1} 行：流程号为空，未参与OA核对`);
+          break;
+        }
+      }
+      if (missingOA) continue;
+      let amount;
+      try { amount = cents(cells.amount?.v); }
+      catch (error) { result.errors.push(`${location}!${X.utils.encode_cell({ r, c: table.map.amount[0] })}（付款金额）：${error.message}`); continue; }
+      result.rows.push({ oa: values.oa, amount, amountText: money(amount), unoperated: values.unoperated, source: { filename, sheet: result.sheetName, row: r + 1 } });
+    }
+    if (result.errors.length) result.rows = [];
+    else if (!result.rows.length) result.errors.push(`${location}：没有OA明细`);
+    return result;
+  }
+  function matchPaymentOA(record, parsed) {
+    const result = { status: 'review', reason: '', candidates: [], unoperated: '' };
+    if (!parsed || parsed.errors?.length) { result.reason = '对公付款OA文件尚未有效读取，请检查OA文件'; return result; }
+    const rawOA = record['合同编号'], oa = budgetOA(rawOA);
+    if (typeof rawOA === 'number' && (!Number.isSafeInteger(rawOA) || Math.abs(rawOA) >= 1e15)) { result.reason = '付款明细OA编号保存为数字可能丢失精度，请改为文本并核实'; return result; }
+    if (!oa.key) { result.reason = '付款明细缺少付款OA号，请核实合同编号列'; return result; }
+    if (oa.invalid) { result.reason = '付款明细OA号包含多个编号或格式异常，请核对单笔付款OA号'; return result; }
+    result.candidates = (parsed.rows || []).filter(row => { const code = budgetOA(row.oa); return !code.invalid && code.key === oa.key; });
+    if (!result.candidates.length) { result.reason = `对公付款OA表未找到流程编号“${oa.key}”，请核实编号或重新导出OA文件`; return result; }
+    const first = result.candidates[0];
+    if (result.candidates.some(row => row.amount !== first.amount || row.unoperated !== first.unoperated)) { result.reason = `同一OA号“${oa.key}”的付款金额或未操作者不一致，请核实对应流程记录`; return result; }
+    let amount;
+    try { amount = cents(record['本次申请付款金额']); }
+    catch (error) { result.reason = `付款明细申请金额异常：${error.message}`; return result; }
+    if (amount !== first.amount) { result.reason = `本次申请付款金额 ${money(amount)} 与OA付款金额 ${first.amountText} 不一致，请核实分批申请或金额差异`; return result; }
+    result.status = 'matched'; result.unoperated = first.unoperated; result.reason = '付款OA号及付款金额一致';
+    return result;
+  }
   function date(v) {
     if (v === '' || v == null) return '';
     let s = text(v).trim().replace(/[年月/.]/g, '-').replace(/日$/, '');
@@ -292,7 +372,7 @@
     else if (!groups.size && !errors.length) errors.push('本次申请付款金额均为 0，没有需要生成的付款明细');
     return { errors, groups: [...groups.values()] };
   }
-  const api = { fields, required, infoFields, cents, money, upper, text, date, weekFriday, analyze, downloadName, printDownloadName, subjectName, bankSummary, buildDirectory, resolveBank, parseBudget, matchBudget };
+  const api = { fields, required, infoFields, cents, money, upper, text, date, weekFriday, analyze, downloadName, printDownloadName, subjectName, bankSummary, buildDirectory, resolveBank, parseBudget, matchBudget, parsePaymentOA, matchPaymentOA };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PaymentCore = api;
 })(typeof window === 'undefined' ? globalThis : window);

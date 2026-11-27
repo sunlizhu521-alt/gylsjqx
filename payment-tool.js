@@ -2,12 +2,13 @@
   'use strict';
   const C = PaymentCore, D = PaymentDocument;
   const state = { revision: 0, workbook: null, sheet: '', fileName: '', template: null, templateName: '内置付款申请模板', analysis: null, outputs: null, error: '', busy: false,
-    times: { detail: '', template: '', directory: '', budget: '' }, loads: { detail: 0, template: 0, directory: 0, budget: 0 }, pending: {}, templateInitialized: false, restoring: false, cacheMessage: '',
+    times: { detail: '', template: '', directory: '', budget: '', oa: '' }, loads: { detail: 0, template: 0, directory: 0, budget: 0, oa: 0 }, pending: {}, templateInitialized: false, restoring: false, cacheMessage: '',
     budgetWorkbook: null, budgetFile: null, budgetName: '', budgetSheet: '', budget: null, budgetFailure: '', budgetConfirmed: new Set(),
+    oaWorkbook: null, oaName: '', oaSheet: '', oa: null, oaFailure: '',
     directoryWorkbook: null, directoryName: '', directorySheet: '', directoryHeaders: [], directoryRows: [], directoryErrors: [], directoryMap: { supplier: '', bank: '', unit: '' }, directoryFailure: '', bankPolicy: 'directory' };
   const now = () => new Date().toLocaleString('zh-CN', { hour12: false });
   const reference = kind => state.pending[kind] ? '正在读取…' : state.times[kind] || '未引用';
-  function beginLoad(kind) { invalidate(); if (kind === 'detail' || kind === 'budget') state.budgetConfirmed.clear(); state.pending[kind] = true; state.times[kind] = ''; return ++state.loads[kind]; }
+  function beginLoad(kind) { invalidate(); if (['detail', 'budget', 'oa'].includes(kind)) state.budgetConfirmed.clear(); state.pending[kind] = true; state.times[kind] = ''; return ++state.loads[kind]; }
   const esc = s => C.text(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let root;
   function invalidate() {
@@ -49,14 +50,15 @@
   }
   async function clearCachedFiles() {
     invalidate(); state.budgetConfirmed.clear();
-    for (const kind of ['detail', 'template', 'directory', 'budget']) { state.loads[kind]++; state.pending[kind] = false; }
+    for (const kind of ['detail', 'template', 'directory', 'budget', 'oa']) { state.loads[kind]++; state.pending[kind] = false; }
     state.restoring = true; render();
     try { await PaymentCache.clear(); }
     catch (_) { state.restoring = false; state.cacheMessage = '缓存清除失败，请重试或在浏览器设置中清除此网站的数据。'; render(); return; }
-    for (const kind of ['detail', 'template', 'directory', 'budget']) { state.loads[kind]++; state.pending[kind] = false; state.times[kind] = ''; }
+    for (const kind of ['detail', 'template', 'directory', 'budget', 'oa']) { state.loads[kind]++; state.pending[kind] = false; state.times[kind] = ''; }
     invalidate(); state.workbook = null; state.analysis = null; state.fileName = ''; state.sheet = '';
     state.directoryWorkbook = null; state.directoryName = ''; state.directoryFailure = ''; state.directoryRows = []; state.directoryHeaders = []; state.directoryErrors = [];
     state.budgetWorkbook = null; state.budgetFile = null; state.budgetName = ''; state.budgetSheet = ''; state.budget = null; state.budgetFailure = ''; state.budgetConfirmed.clear();
+    state.oaWorkbook = null; state.oaName = ''; state.oaSheet = ''; state.oa = null; state.oaFailure = '';
     state.cacheMessage = '已清除上传文件缓存。';
     await uploadTemplate(null);
     state.restoring = false; render();
@@ -81,10 +83,12 @@
         <label class="payment-upload">付款申请模板（Word，可选）<input id="paymentTemplate" type="file" accept=".docx" /><span>${esc(state.templateName)}</span><small data-reference="template">引用时间：${esc(reference('template'))}</small></label>
         <label class="payment-upload">供应商名录（Excel，可选）<input id="paymentDirectory" type="file" accept=".xlsx,.xls" /><span>${esc(state.directoryName || '按供应商全称获取银行信息')}</span><small data-reference="directory">引用时间：${esc(reference('directory'))}</small></label>
         <label class="payment-upload">月份预算表（Excel，可选）<input id="paymentBudget" type="file" accept=".xlsx,.xls" /><span>${esc(state.budgetName || '选择本次核对的月份预算文件')}</span><small data-reference="budget">引用时间：${esc(reference('budget'))}</small></label>
+        <label class="payment-upload">对公付款OA（Excel，可选，不缓存）<input id="paymentOA" type="file" accept=".xlsx,.xls" /><span>${esc(state.oaName || '每次打开页面需重新上传')}</span><small data-reference="oa">引用时间：${esc(reference('oa'))}</small></label>
       </div>
-      <div class="payment-toolbar"><span id="paymentCacheMessage">${esc(state.cacheMessage || (state.restoring ? '正在恢复本机缓存…' : '已启用本机文件缓存，下次打开自动恢复。文件不会上传服务器。'))}</span><button id="paymentClearCache" class="secondary-button">清除上传文件缓存</button></div>
+      <div class="payment-toolbar"><span id="paymentCacheMessage">${esc(state.cacheMessage || (state.restoring ? '正在恢复本机缓存…' : '除对公付款OA外，其他上传文件在本机缓存，下次打开自动恢复。OA文件仅本次页面会话可用，刷新后需重新上传。文件不会上传服务器。'))}</span><button id="paymentClearCache" class="secondary-button">清除上传文件缓存</button></div>
       <div id="paymentDirectorySettings"></div>
       <div id="paymentBudgetSettings"></div>
+      <div id="paymentOASettings"></div>
       <div class="payment-toolbar"><label>工作表 <select id="paymentSheet" ${state.workbook ? '' : 'disabled'}>${(state.workbook?.SheetNames || []).map(n => `<option ${n === state.sheet ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label><button id="paymentResetTemplate" class="secondary-button">恢复内置付款申请模板</button></div>
       <p class="payment-fixed">付款类型：<strong>采购货款</strong>　付款方式：<strong>对公转账</strong>（固定）</p>
       <p class="payment-hint">引用供应商名录时，“开户银行及账号”显示银行名称和卡号；未引用名录时整理原明细的单位和账号。账号空格保留，原始明细不改。</p>
@@ -101,6 +105,7 @@
     root.querySelector('#paymentTemplate').addEventListener('change', e => uploadTemplate(e.target.files[0]));
     root.querySelector('#paymentDirectory').addEventListener('change', e => uploadDirectory(e.target.files[0]));
     root.querySelector('#paymentBudget').addEventListener('change', e => uploadBudget(e.target.files[0]));
+    root.querySelector('#paymentOA').addEventListener('change', e => uploadOA(e.target.files[0]));
     root.querySelector('#paymentResetTemplate').addEventListener('click', () => uploadTemplate(null));
     root.querySelector('#paymentSheet').addEventListener('change', e => { invalidate(); state.budgetConfirmed.clear(); state.sheet = e.target.value; analyzeSheet(); renderGroups(); });
     root.querySelector('#paymentGenerate').addEventListener('click', generate);
@@ -116,6 +121,7 @@
     };
     renderDirectorySettings();
     renderBudgetSettings();
+    renderOASettings();
     renderGroups();
     if (state.outputs) showOutputs();
     else if (state.error) status(state.error, true);
@@ -217,27 +223,85 @@
     if (!state.budget) return ['月份预算表尚未成功读取'];
     return state.budget.errors;
   }
+  async function uploadOA(file) {
+    if (!file) return;
+    const load = beginLoad('oa');
+    state.oaName = file.name; state.oaWorkbook = null; state.oa = null; state.oaSheet = ''; state.oaFailure = '';
+    refreshPayments(); render();
+    try {
+      if (!/\.(xlsx|xls)$/i.test(file.name) || file.size > 30 * 1024 * 1024) throw new Error('请选择 30 MB 以内的对公付款OA Excel 文件');
+      const bytes = await file.arrayBuffer();
+      if (load !== state.loads.oa) return;
+      const book = XLSX.read(bytes, { type: 'array', cellFormula: true, cellNF: true });
+      const oa = C.parsePaymentOA(book, file.name, XLSX);
+      if (!oa.sheetNames.length) throw new Error(oa.errors.join('；'));
+      state.oaWorkbook = book; state.oa = oa; state.oaSheet = oa.sheetName;
+      state.pending.oa = false; state.times.oa = now();
+      refreshPayments(); render();
+    } catch (e) {
+      if (load !== state.loads.oa) return;
+      state.pending.oa = false; state.oaWorkbook = null; state.oa = null; state.oaFailure = e.message;
+      refreshPayments(); render(); status(e.message, true);
+    }
+  }
+  function renderOASettings() {
+    const host = root.querySelector('#paymentOASettings');
+    if (!state.oaName) { host.replaceChildren(); return; }
+    host.innerHTML = `<section class="payment-group"><h3>对公付款OA</h3><p>${esc(state.oaName)}</p>
+      ${state.oa ? `<label>OA工作表 <select id="paymentOASheet"><option value="">请选择OA工作表</option>${state.oa.sheetNames.map(name => `<option value="${esc(name)}" ${name === state.oaSheet ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>` : ''}
+      <button id="paymentClearOA" class="secondary-button">移除对公付款OA</button>
+      ${state.oa?.sheetName && !state.oa.errors.length ? `<p>已读取 ${state.oa.rows.length} 条OA记录。本文件不缓存，刷新或重新打开页面需再次上传。</p>` : ''}
+      ${state.oa?.warnings?.length ? `<details><summary>查看 ${state.oa.warnings.length} 条来源提醒</summary><ul>${state.oa.warnings.map(message => `<li>${esc(message)}</li>`).join('')}</ul></details>` : ''}
+      <details><summary>查看OA核对规则</summary><p class="payment-hint">付款明细“合同编号”作为付款OA号，精确匹配流程编码（兼容流程编号），逐笔核对付款金额并显示未操作者。同号重复行的金额、未操作者一致时读取一次；不一致、金额差异或未匹配时逐笔确认，不修改来源数据。未上传OA文件时提示未核对，仍允许生成。OA核对信息不写入Word/PDF。</p></details></section>`;
+    host.querySelector('#paymentOASheet')?.addEventListener('change', e => {
+      invalidate(); state.budgetConfirmed.clear();
+      state.oa = C.parsePaymentOA(state.oaWorkbook, state.oaName, XLSX, e.target.value);
+      state.oaSheet = state.oa.sheetName;
+      refreshPayments(); render();
+    });
+    host.querySelector('#paymentClearOA').addEventListener('click', () => {
+      invalidate(); state.budgetConfirmed.clear(); state.loads.oa++; state.pending.oa = false; state.times.oa = '';
+      state.oaWorkbook = null; state.oa = null; state.oaName = ''; state.oaSheet = ''; state.oaFailure = '';
+      refreshPayments(); render();
+    });
+  }
+  function oaProblems() {
+    if (!state.oaName) return [];
+    if (state.oaFailure) return [state.oaFailure];
+    if (!state.oa) return ['对公付款OA尚未成功读取'];
+    return state.oa.errors;
+  }
   function renderBudgetChecks() {
     const host = root.querySelector('#paymentBudgetChecks');
-    if (!state.budgetName) { host.innerHTML = '<p class="payment-hint">未进行预算核对（未上传月份预算表）。</p>'; return; }
-    if (state.pending.budget) { host.textContent = '正在读取月份预算表…'; return; }
-    const errors = budgetProblems();
-    if (errors.length) { host.innerHTML = `<div class="payment-error">${errors.map(esc).join('<br>')}<br>请修正或移除月份预算表后重新生成。</div>`; return; }
-    const rows = (state.analysis?.groups || []).flatMap(group => group.rows).filter(row => row._budgetCheck);
-    if (!rows.length) { host.innerHTML = '<p class="payment-hint">上传有效付款明细后逐笔核对预算。</p>'; return; }
-    const matched = rows.filter(row => row._budgetCheck.status === 'matched').length;
+    const notices = `${state.budgetName ? '' : '<p class="payment-hint">未进行预算核对（未上传月份预算表）。</p>'}${state.oaName ? '' : '<p class="payment-hint">未进行OA核对（未上传对公付款OA文件），可继续生成。</p>'}`;
+    if (!state.budgetName && !state.oaName) { host.innerHTML = notices; return; }
+    if (state.pending.budget || state.pending.oa) { host.innerHTML = notices + '<p>正在读取核对文件…</p>'; return; }
+    const errors = [...budgetProblems(), ...oaProblems()];
+    if (errors.length) { host.innerHTML = `${notices}<div class="payment-error">${errors.map(esc).join('<br>')}<br>请修正或移除对应核对文件后重新生成。</div>`; return; }
+    const rows = (state.analysis?.groups || []).flatMap(group => group.rows).filter(row => row._budgetCheck || row._oaCheck);
+    if (!rows.length) { host.innerHTML = notices + '<p class="payment-hint">上传有效付款明细后逐笔核对预算及OA。</p>'; return; }
+    const matched = rows.filter(row => row._budgetCheck?.status !== 'review' && row._oaCheck?.status !== 'review').length;
     const source = value => `${value.filename} / ${value.sheet} 第 ${value.row} 行`;
-    host.innerHTML = `<section class="payment-group"><h3>月份预算核对 <small>预算内 ${matched} 笔，待核对 ${rows.length - matched} 笔</small></h3>
-      <div class="payment-budget-table-scroll" tabindex="0" role="region" aria-label="月份预算核对表，可横向滚动"><table class="payment-budget-table" aria-label="月份预算核对">
-      <thead><tr>${['核对结果', '付款申请', '申请金额', '预算信息', '核对说明', '确认'].map(title => `<th scope="col">${title}</th>`).join('')}</tr></thead><tbody>
+    const title = state.budgetName ? '月份预算核对' : '付款OA核对';
+    host.innerHTML = `${notices}<section class="payment-group"><h3>${title} <small>${state.oaName ? '核对通过' : '预算内'} ${matched} 笔，待核对 ${rows.length - matched} 笔</small></h3>
+      <div class="payment-budget-table-scroll" tabindex="0" role="region" aria-label="${title}表，可横向滚动"><table class="payment-budget-table ${state.oaName ? 'has-oa' : ''}" aria-label="${title}">
+      <thead><tr>${['核对结果', '付款申请', '申请金额', '预算信息', ...(state.oaName ? ['OA付款金额', '未操作者'] : []), '核对说明', '确认'].map(title => `<th scope="col">${title}</th>`).join('')}</tr></thead><tbody>
       ${rows.map(row => {
-        const check = row._budgetCheck, passed = check.status === 'matched';
+        const check = row._budgetCheck, oa = row._oaCheck, passed = check?.status !== 'review' && oa?.status !== 'review';
+        const oaGroups = new Map();
+        for (const candidate of oa?.candidates || []) {
+          const key = JSON.stringify([candidate.amountText, candidate.unoperated]);
+          if (!oaGroups.has(key)) oaGroups.set(key, { ...candidate, sources: [] });
+          oaGroups.get(key).sources.push(candidate.source);
+        }
+        const oaValues = [...oaGroups.values()];
         return `<tr class="payment-budget-check" data-budget-row="${row._row}">
-          <td><span class="payment-budget-result ${passed ? 'is-matched' : 'is-review'}">${passed ? '预算内' : '待核对'}</span></td>
+          <td><span class="payment-budget-result ${passed ? 'is-matched' : 'is-review'}">${passed ? (state.oaName ? '核对通过' : '预算内') : '待核对'}</span></td>
           <td><strong>${esc(row['供应商全称'] || '（供应商空白）')}</strong><br>付款主体：${esc(row['付款主体'] || '（空白）')}<br>OA号：${esc(row['合同编号'] || '（空白）')}<small class="payment-budget-source">申请来源：${esc(source({filename:state.fileName, sheet:state.sheet, row:row._row}))}</small></td>
           <td class="payment-budget-amount">￥${esc(C.money(row._cents))}</td>
-          <td>${check.candidates.length ? check.candidates.map((candidate, index) => `<div class="payment-budget-candidate">${check.candidates.length > 1 ? `<strong>候选 ${index + 1}</strong><br>` : ''}供应商：${esc(candidate.supplier || '（空白）')}<br>付款主体：${esc(candidate.subject || '（空白）')}<br>OA号：${esc(candidate.oa || '（空白）')}<br>预算金额：<span class="payment-budget-amount">￥${esc(C.money(candidate.amount))}</span><small class="payment-budget-source">预算来源：${esc(source(candidate.source))}</small></div>`).join('') : '未找到对应预算'}</td>
-          <td>${esc(check.reason)}</td>
+          <td>${check?.candidates.length ? check.candidates.map((candidate, index) => `<div class="payment-budget-candidate">${check.candidates.length > 1 ? `<strong>候选 ${index + 1}</strong><br>` : ''}供应商：${esc(candidate.supplier || '（空白）')}<br>付款主体：${esc(candidate.subject || '（空白）')}<br>OA号：${esc(candidate.oa || '（空白）')}<br>预算金额：<span class="payment-budget-amount">￥${esc(C.money(candidate.amount))}</span><small class="payment-budget-source">预算来源：${esc(source(candidate.source))}</small></div>`).join('') : check ? '未找到对应预算' : '未进行预算核对'}</td>
+          ${state.oaName ? `<td class="payment-oa-amount">${oaValues.length ? oaValues.map((candidate, index) => `<div class="payment-budget-candidate">${oaValues.length > 1 ? `记录 ${index + 1}：` : ''}<span class="payment-budget-amount">￥${esc(candidate.amountText)}</span><small class="payment-budget-source">流程编码：${esc(candidate.oa)}<br>OA来源：${candidate.sources.map(value => esc(source(value))).join('<br>')}</small></div>`).join('') : '未找到对应OA'}</td><td class="payment-oa-unoperated">${oaValues.length ? oaValues.map((candidate, index) => `${oaValues.length > 1 ? `记录 ${index + 1}：` : ''}${esc(candidate.unoperated || '（空白）')}`).join('<br>') : '—'}</td>` : ''}
+          <td>${[check ? `${state.oaName ? '预算：' : ''}${check.reason}` : '', oa ? `OA：${oa.reason}` : ''].filter(Boolean).map(esc).join('<br>')}</td>
           <td>${passed ? '无需确认' : `<label><input type="checkbox" data-budget-confirm ${state.budgetConfirmed.has(String(row._row)) ? 'checked' : ''} />已核实，确认继续生成</label>`}</td>
           </tr>`;
       }).join('')}</tbody></table></div></section>`;
@@ -380,6 +444,9 @@
     if (!state.analysis.errors.length && state.budgetName && !budgetProblems().length) {
       for (const group of state.analysis.groups) for (const row of group.rows) row._budgetCheck = C.matchBudget(row, state.budget);
     }
+    if (!state.analysis.errors.length && state.oaName && !oaProblems().length) {
+      for (const group of state.analysis.groups) for (const row of group.rows) row._oaCheck = C.matchPaymentOA(row, state.oa);
+    }
     state.error = '';
   }
   function renderGroups() {
@@ -412,10 +479,10 @@
       const a = state.analysis;
       if (Object.values(state.pending).some(Boolean)) throw new Error('文件正在读取，请稍候再生成');
       if (!a || a.errors.length || !a.groups.length) throw new Error('请先上传并修正付款明细');
-      const budgetErrors = budgetProblems();
+      const budgetErrors = [...budgetProblems(), ...oaProblems()];
       if (budgetErrors.length) throw new Error(budgetErrors.join('；'));
-      const unconfirmed = a.groups.flatMap(group => group.rows).filter(row => row._budgetCheck?.status === 'review' && !state.budgetConfirmed.has(String(row._row)));
-      if (unconfirmed.length) throw new Error(`请逐条确认预算核对：付款明细第 ${unconfirmed.map(row => row._row).join('、')} 行。`);
+      const unconfirmed = a.groups.flatMap(group => group.rows).filter(row => (row._budgetCheck?.status === 'review' || row._oaCheck?.status === 'review') && !state.budgetConfirmed.has(String(row._row)));
+      if (unconfirmed.length) throw new Error(`请逐条确认预算/OA核对：付款明细第 ${unconfirmed.map(row => row._row).join('、')} 行。`);
       if (!state.template) throw new Error('请先选择有效模板');
       for (const g of a.groups) {
         for (const f of C.infoFields) if (!g.info[f].trim()) throw new Error(`${g.subject}：请填写${f}，源数据冲突时需指定统一值`);

@@ -2,7 +2,7 @@
 .payment-tool { width:100%; min-width:0; }
 .payment-intro,.payment-hint { color:var(--muted); line-height:1.6; }
 .payment-upload-grid,.payment-info-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
-.payment-upload-grid { grid-template-columns:repeat(4,minmax(220px,1fr)); overflow-x:auto; }
+.payment-upload-grid { grid-template-columns:repeat(5,minmax(220px,1fr)); overflow-x:auto; }
 .payment-upload small { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
 .payment-info-grid select { width:100%; min-width:0; padding:8px; }
 #paymentBankPolicy { max-width:100%; margin:8px 12px 8px 0; }
@@ -33,6 +33,15 @@
 .payment-budget-table th:nth-child(4) { width:24%; }
 .payment-budget-table th:nth-child(5) { width:20%; }
 .payment-budget-table th:nth-child(6) { width:15%; }
+.payment-budget-table.has-oa { min-width:1480px; }
+.payment-budget-table.has-oa th:nth-child(1) { width:6%; }
+.payment-budget-table.has-oa th:nth-child(2) { width:17%; }
+.payment-budget-table.has-oa th:nth-child(3) { width:9%; }
+.payment-budget-table.has-oa th:nth-child(4) { width:18%; }
+.payment-budget-table.has-oa th:nth-child(5) { width:17%; }
+.payment-budget-table.has-oa th:nth-child(6) { width:9%; }
+.payment-budget-table.has-oa th:nth-child(7) { width:14%; }
+.payment-budget-table.has-oa th:nth-child(8) { width:10%; }
 .payment-budget-result,.payment-budget-amount { white-space:nowrap; }
 .payment-budget-result { font-weight:600; }
 .payment-budget-result.is-matched { color:#167044; }
@@ -40,7 +49,7 @@
 .payment-budget-source { display:block; margin-top:6px; }
 .payment-budget-candidate + .payment-budget-candidate { border-top:1px solid var(--line-strong); margin-top:10px; padding-top:10px; }
 .payment-budget-check label { cursor:pointer; }
-#paymentBudgetSheet { max-width:100%; margin:8px 12px 8px 0; padding:8px; }
+#paymentBudgetSheet,#paymentOASheet { max-width:100%; margin:8px 12px 8px 0; padding:8px; }
 .payment-detail-scroll { max-height:360px; overflow:auto; margin-top:12px; }
 .payment-detail-scroll table { border-collapse:collapse; min-width:1100px; width:100%; font-size:12px; }
 .payment-detail-scroll td,.payment-detail-scroll th { border:1px solid var(--line-strong); padding:8px; white-space:pre-wrap; vertical-align:top; }
