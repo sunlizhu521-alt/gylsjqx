@@ -160,3 +160,75 @@ test('页面分组与预算对比共用年月、供应商、主体及分类归�
  assert.equal(C.comparisonKey(record),C.comparisonKey(group));
  for(const changed of [{monthKey:'2027-01'},{supplier:'另一供应商'},{subject:'国源'},{category:'谈判付款-谈判付款表'}])assert.notEqual(C.comparisonKey(record),C.comparisonKey({...group,...changed}));
 });
+
+test('同金额两来源一行确认合并，只计选择来源一次且保留原记录与备注',()=>{
+ const i=inputs([],[],[row({oa:'',notes:'原预估备注'})],[row({oa:'',category:'正常付款-预估付款',notes:'手工原备注'})]),result=build(i),before=JSON.stringify(result);
+ const groups=C.duplicateReviewGroups(result);assert.equal(groups.length,1);assert.equal(groups[0].records.length,2);assert.equal(groups[0].canMerge,true);assert.equal(groups[0].cents,10000);
+ const keep=groups[0].records[1],decisions=C.applyDuplicateReviewDecision(result,{},groups[0].id,'keep:'+keep.id),next=build(i,{decisions});
+ assert.deepEqual(C.applyDuplicateReviewDecision(result,decisions,groups[0].id,'keep:'+keep.id),decisions);
+ assert.equal(next.canExport,true);assert.equal(next.summary.totals.totalCents,10000);assert.equal(next.records.filter(r=>r.excluded!=='是')[0].id,keep.id);assert.equal(next.records.length,2);
+ assert.match(decisions[groups[0].records[0].id].reason,/manualBudget.xlsx.*Sheet1.*第2行/);assert.match(next.records[1].notes,/手工原备注/);assert.match(next.records[0].notes,/原预估备注/);assert.equal(JSON.stringify(result),before);
+});
+test('同金额三来源跨分类也一行，可任选一个来源保留',()=>{
+ const i=inputs([],[row({oa:'',category:'正常付款-正常对账表'})],[row({oa:'',category:'正常付款-预估付款'})],[row({oa:'',category:'正常付款-预估付款'})]),result=build(i),group=C.duplicateReviewGroups(result)[0];
+ assert.equal(C.duplicateReviewGroups(result).length,1);assert.equal(group.records.length,3);assert.equal(group.canMerge,true);
+ for(const kept of group.records){
+  const decisions=C.applyDuplicateReviewDecision(result,{},group.id,'keep:'+kept.id),next=build(i,{decisions});
+  assert.equal(next.canExport,true);assert.equal(next.summary.totals.totalCents,10000);assert.equal(next.records.filter(r=>r.excluded!=='是')[0].id,kept.id);
+ }
+});
+test('不合并全部保留，已有原因保留且重复选择不累积确认文本；重置不影响其他组',()=>{
+ const i=inputs([],[],[row({oa:''})],[row({oa:'',category:'正常付款-预估付款'})]),result=build(i),group=C.duplicateReviewGroups(result)[0];
+ const old={other:{excluded:'否',reason:'其他组原选择'},[group.records[0].id]:{excluded:'否',reason:' 已经人工写下的原因 '}};
+ const oldSnapshot=JSON.stringify(old),next=C.applyDuplicateReviewDecision(result,old,group.id,'separate');
+ assert.equal(JSON.stringify(old),oldSnapshot);assert.notEqual(next,old);assert.notEqual(next.other,old.other);assert.deepEqual(next.other,old.other);
+ assert.equal(next[group.records[0].id].reason,' 已经人工写下的原因 \n人工确认不同款项，分别保留');assert(group.records.every(r=>next[r.id].excluded==='否'));
+ assert.deepEqual(C.applyDuplicateReviewDecision(result,next,group.id,'separate'),next);assert.equal(build(i,{decisions:next}).summary.totals.totalCents,20000);assert.equal(build(i,{decisions:next}).canExport,true);
+ const reset=C.applyDuplicateReviewDecision(result,next,group.id,'');assert.deepEqual(reset,{other:old.other});assert.equal(build(i,{decisions:reset}).canExport,false);
+});
+test('一个大型关联问题按金额拆行，单桶确认不会自动确认其他金额',()=>{
+ const i=inputs([],[row({oa:'',amount:403})],[row({oa:'',amount:403}),row({oa:'',amount:1134})]),result=build(i),groups=C.duplicateReviewGroups(result);
+ assert.equal(result.issues.filter(i=>i.type==='duplicate').length,1);assert.equal(groups.length,2);
+ const small=groups.find(g=>g.cents===40300),single=groups.find(g=>g.cents===113400);assert.equal(small.records.length,2);assert.equal(small.canMerge,true);assert.equal(single.records.length,1);assert.equal(single.canMerge,false);assert.match(single.restriction,/仅一条/);
+ let decisions=C.applyDuplicateReviewDecision(result,{},small.id,'keep:'+small.records[0].id);assert(!decisions[single.records[0].id]);assert.equal(build(i,{decisions}).canExport,false);
+ decisions=C.applyDuplicateReviewDecision(result,decisions,single.id,'separate');assert.equal(build(i,{decisions}).canExport,true);assert.equal(build(i,{decisions}).summary.totals.totalCents,153700);
+ assert.deepEqual(C.duplicateReviewGroups(build(i,{decisions})).map(g=>g.id),groups.map(g=>g.id));
+ const reset=C.applyDuplicateReviewDecision(result,decisions,small.id,'');assert.equal(reset[single.records[0].id].excluded,'否');assert.equal(build(i,{decisions:reset}).canExport,false);
+});
+test('快捷分组归一供应商主体但不混入不同供应商主体月份或金额，分类不拆组',()=>{
+ const base=build(inputs([],[],[row({oa:''})])).records[0];
+ const records=[{...base,id:'a',supplier:' 合成 供应商 ',subject:'浙江迈德斯特医疗器械科技有限公司',source:{...base.source,role:'ledger'}},{...base,id:'b',subject:'迈德斯特',category:'另一分类'},
+  {...base,id:'c',supplier:'另一供应商'},{...base,id:'d',subject:'国源'},{...base,id:'e',monthKey:'2027-01'},{...base,id:'f',cents:20000}];
+ const result={records,issues:[{id:'mixed',type:'duplicate',recordIds:records.map(r=>r.id)}]},groups=C.duplicateReviewGroups(result);
+ assert.equal(groups.length,5);assert.deepEqual(groups[0].records.map(r=>r.id),['a','b']);assert.equal(groups[0].canMerge,true);assert(groups.slice(1).every(g=>!g.canMerge));
+});
+test('零金额允许快捷合并且仍按0显示',()=>{
+ const i=inputs([],[],[row({oa:'',amount:0})],[row({oa:'',amount:0,category:'正常付款-预估付款'})]),result=build(i),group=C.duplicateReviewGroups(result)[0];
+ assert.equal(group.cents,0);assert.equal(group.canMerge,true);const decisions=C.applyDuplicateReviewDecision(result,{},group.id,'keep:'+group.records[0].id);assert.equal(build(i,{decisions}).canExport,true);assert.equal(build(i,{decisions}).summary.totals.totalCents,0);
+});
+test('空金额只能逐笔核对，不合并选择不会绕过金额门禁',()=>{
+ const i=inputs([],[row({oa:'',amount:null})],[row({oa:'',amount:null})]),result=build(i),group=C.duplicateReviewGroups(result)[0];
+ assert.equal(group.cents,null);assert.equal(group.canMerge,false);assert.match(group.restriction,/金额未确定/);assert.throws(()=>C.applyDuplicateReviewDecision(result,{},group.id,'keep:'+group.records[0].id),/金额未确定/);
+ const decisions=C.applyDuplicateReviewDecision(result,{},group.id,'separate');assert.equal(build(i,{decisions}).canExport,false);
+});
+test('不同有效OA与同来源多笔均禁止快捷合并，确认不合并不改金额',()=>{
+ for(const [i,pattern,count] of [[inputs([],[row({oa:'OA001'})],[row({oa:'OA002'})]),/不同OA/,2],[inputs([],[row({oa:''})],[row({oa:''}),row({oa:''})]),/同一来源/,3]]){
+  const result=build(i),group=C.duplicateReviewGroups(result)[0];assert.equal(group.canMerge,false);assert.match(group.restriction,pattern);assert.throws(()=>C.applyDuplicateReviewDecision(result,{},group.id,'keep:'+group.records[0].id),pattern);
+  const decisions=C.applyDuplicateReviewDecision(result,{},group.id,'separate'),next=build(i,{decisions});assert.equal(next.summary.totals.totalCents,count*10000);assert.equal(next.canExport,true);
+ }
+});
+test('未知身份、月份及来源类型不能快捷合并',()=>{
+ const base=build(inputs([],[],[row({oa:''})])).records[0];
+ for(const override of [{supplier:' '},{supplier:'待核对'},{supplier:'多家供应商'},{supplier:'多个供应商'},{subject:'/'},{monthKey:''},{monthKey:'2026-13'},{source:{...base.source,role:'unknown'}}]){
+  const a={...base,id:'a',...override},b={...base,id:'b',...override,source:{...base.source,role:'manualBudget'}};
+  const result={records:[a,b],issues:[{id:'missing',type:'duplicate',recordIds:['a','b']}]},group=C.duplicateReviewGroups(result)[0];assert.equal(group.canMerge,false,JSON.stringify(override));assert.throws(()=>C.applyDuplicateReviewDecision(result,{},group.id,'keep:a'));
+ }
+});
+test('快捷选择校验组与记录归属，错误输入不修改旧决策与原结果',()=>{
+ const i=inputs([],[row({oa:'',amount:403})],[row({oa:'',amount:403}),row({oa:'',amount:1134})]),result=build(i),groups=C.duplicateReviewGroups(result),old={other:{excluded:'是',reason:'原原因'}};
+ const beforeResult=JSON.stringify(result),beforeOld=JSON.stringify(old);
+ assert.throws(()=>C.applyDuplicateReviewDecision(result,old,'stale','separate'),/分组已变化/);
+ assert.throws(()=>C.applyDuplicateReviewDecision(result,old,groups[0].id,'keep:'+groups[1].records[0].id),/不属于/);
+ for(const choice of ['merge',null,{}])assert.throws(()=>C.applyDuplicateReviewDecision(result,old,groups[0].id,choice),/请选择/);
+ assert.equal(JSON.stringify(result),beforeResult);assert.equal(JSON.stringify(old),beforeOld);assert.deepEqual(C.duplicateReviewGroups(null),[]);
+});

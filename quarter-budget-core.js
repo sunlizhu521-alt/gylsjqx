@@ -37,6 +37,50 @@
     if(value>BigInt(Number.MAX_SAFE_INTEGER)||value<BigInt(Number.MIN_SAFE_INTEGER))throw Error('汇总金额超过可安全统计范围');
     return Number(value);
   }
+  function duplicateReviewGroups(result) {
+    const records=new Map((result?.records || []).map(r=>[r.id,r])),groups=[];
+    const known=value=>!!norm(value)&&!['待核对','待确认','未知','未匹配','无法区分','未提交OA','不支付','多家供应商','多个供应商','/','-','无'].includes(norm(value));
+    for(const issue of result?.issues || []){
+      if(issue.type!=='duplicate')continue;
+      const buckets=new Map();
+      for(const id of new Set(issue.recordIds || [])){
+        const r=records.get(id);if(!r)continue;
+        const key=JSON.stringify([norm(r.supplier),entity(r.subject),r.monthKey || '',r.cents ?? null]);
+        if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push(r);
+      }
+      for(const items of buckets.values()){
+        const first=items[0],cents=Number.isSafeInteger(first.cents)?first.cents:null;
+        let restriction='';
+        if(items.length<2)restriction='本金额仅一条记录，请确认不合并或逐笔核对';
+        else if(cents===null)restriction='金额未确定，请逐笔核对';
+        else if(!known(first.supplier)||!known(first.subject)||!/^(?:19\d{2}|[2-9]\d{3})-(?:0[1-9]|1[0-2])$/.test(first.monthKey || ''))restriction='供应商、主体或付款月份未明确，请逐笔核对';
+        else if(new Set(items.map(r=>oaKey(r.oa)).filter(Boolean)).size>1)restriction='存在不同OA流程号，请逐笔核对';
+        else if(items.some(r=>!ROLES.includes(r.source?.role)))restriction='来源类型未明确，请逐笔核对';
+        else if(new Set(items.map(r=>r.source.role)).size!==items.length)restriction='同一来源含多笔记录或分期，请逐笔核对';
+        groups.push({id:JSON.stringify([issue.id,first.id]),records:items,cents,canMerge:!restriction,restriction});
+      }
+    }
+    return groups;
+  }
+  function applyDuplicateReviewDecision(result, decisions={}, groupId, choice) {
+    const group=duplicateReviewGroups(result).find(g=>g.id===groupId);
+    if(!group)throw Error('疑似重复分组已变化，请重新核对');
+    let kept=null;
+    if(typeof choice==='string'&&choice.startsWith('keep:')){
+      kept=group.records.find(r=>r.id===choice.slice(5));
+      if(!kept)throw Error('保留记录不属于当前分组');
+      if(!group.canMerge)throw Error(group.restriction);
+    }else if(choice!==''&&choice!=='separate')throw Error('请选择不合并或要保留的来源');
+    const next=Object.fromEntries(Object.entries(decisions).map(([id,value])=>[id,{...value}]));
+    const note=kept?'人工确认同笔款项，仅保留：'+sourceLabel(kept.source):'人工确认不同款项，分别保留';
+    for(const r of group.records){
+      if(choice===''){delete next[r.id];continue;}
+      const previous=typeof decisions[r.id]?.reason==='string'?decisions[r.id].reason:'';
+      const reason=previous.split(/\r?\n/).includes(note)?previous:[previous,note].filter(Boolean).join('\n');
+      next[r.id]={...next[r.id],excluded:kept&&r.id!==kept.id?'是':'否',reason};
+    }
+    return next;
+  }
   function sameParty(a,b) {
     if (usable(a.supplier) && usable(b.supplier) && norm(a.supplier) !== norm(b.supplier)) return false;
     if (usable(a.subject) && usable(b.subject) && entity(a.subject) !== entity(b.subject)) return false;
@@ -278,5 +322,5 @@
     issues.push(...errors.map((message,i)=>({id:'error:'+i,type:'error',message,recordIds:[],blocking:true,resolved:false})));
     return {records,deleted,issues,warnings:[...new Set([...warnings,...errors])],summary,budgetStartMonth,comparison,sources:Object.fromEntries(Object.entries(parsed).map(([role,p])=>[role,{filename:inputs[role].filename,sheets:p.sheets}])),canExport:errors.length===0&&!issues.some(i=>i.blocking&&!i.resolved)};
   }
-  return {HEADERS,build,summarize,toRow,monthLabel,formatMoney,oaKey,resolveBudgetStartMonth,comparisonKey};
+  return {HEADERS,build,summarize,toRow,monthLabel,formatMoney,oaKey,resolveBudgetStartMonth,comparisonKey,duplicateReviewGroups,applyDuplicateReviewDecision};
 });
