@@ -8,6 +8,7 @@
   const text = v => String(v ?? '').trim();
   const norm = v => text(v).normalize('NFKC').replace(/\s+/g, '');
   const entity = v => ({'浙江迈德斯特医疗器械科技有限公司':'迈德斯特','杭州国源养老科技有限公司':'国源'}[norm(v)] || norm(v));
+  const comparisonKey = r => JSON.stringify([r.monthKey || '',norm(r.supplier),entity(r.subject),norm(r.category)]);
   const usable = v => v && !['待核对','未提交OA','不支付'].includes(norm(v));
   function oaKey(value) {
     const key = text(value).normalize('NFKC').toUpperCase();
@@ -80,7 +81,7 @@
         if(side==='manual')warnings.push(sourceLabel(r.source)+'：'+(r.monthKey?'付款月份为'+monthLabel(r):'付款月份未确定')+'，未计入'+monthLabel({monthKey})+'对比');
         continue;
       }
-      const key=JSON.stringify([norm(r.supplier),entity(r.subject),norm(r.category)]);
+      const key=comparisonKey(r);
       if(!groups.has(key))groups.set(key,{monthKey,supplier:r.supplier,subject:entity(r.subject),category:r.category,system:0n,manual:0n,systemIncomplete:false,manualIncomplete:false,systemSources:[],manualSources:[]});
       const group=groups.get(key);group[side+'Sources'].push({...r.source});
       if(r.cents==null)group[side+'Incomplete']=true;
@@ -277,5 +278,5 @@
     issues.push(...errors.map((message,i)=>({id:'error:'+i,type:'error',message,recordIds:[],blocking:true,resolved:false})));
     return {records,deleted,issues,warnings:[...new Set([...warnings,...errors])],summary,budgetStartMonth,comparison,sources:Object.fromEntries(Object.entries(parsed).map(([role,p])=>[role,{filename:inputs[role].filename,sheets:p.sheets}])),canExport:errors.length===0&&!issues.some(i=>i.blocking&&!i.resolved)};
   }
-  return {HEADERS,build,summarize,toRow,monthLabel,formatMoney,oaKey,resolveBudgetStartMonth};
+  return {HEADERS,build,summarize,toRow,monthLabel,formatMoney,oaKey,resolveBudgetStartMonth,comparisonKey};
 });

@@ -154,3 +154,9 @@ test('汇总及对比不会静默超出安全整数分，空结果为明确零',
  assert.throws(()=>C.summarize([{monthKey:'2026-12',category:'测试',cents:Number.MAX_SAFE_INTEGER,status:'未支付'},{monthKey:'2026-12',category:'测试',cents:1,status:'未支付'}]),/范围/);
  const result=build(inputs([],[],[],[]));assert.deepEqual(result.comparison.totals,{systemCents:0,manualCents:0,differenceCents:0});assert.equal(result.canExport,true);
 });
+test('页面分组与预算对比共用年月、供应商、主体及分类归一化口径',()=>{
+ const record={monthKey:'2026-12',supplier:' 合成 供应商 ',subject:'浙江迈德斯特医疗器械科技有限公司',category:'正常付款-预估付款'};
+ const group={...record,supplier:'合成供应商',subject:'迈德斯特'};
+ assert.equal(C.comparisonKey(record),C.comparisonKey(group));
+ for(const changed of [{monthKey:'2027-01'},{supplier:'另一供应商'},{subject:'国源'},{category:'谈判付款-谈判付款表'}])assert.notEqual(C.comparisonKey(record),C.comparisonKey({...group,...changed}));
+});

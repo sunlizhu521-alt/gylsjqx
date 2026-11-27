@@ -37,7 +37,7 @@
     $('result').hidden = true;
     $('download').disabled = true;
     $('warning-panel').hidden = true;
-    for (const id of ['preview','warnings','review-list','deleted-list','classified-summary','monthly-summary','comparison-totals','comparison-preview']) $(id).replaceChildren();
+    for (const id of ['preview','warnings','review-list','deleted-list','classified-summary','monthly-summary','comparison-totals']) $(id).replaceChildren();
     $('record-count').textContent = $('visible-count').textContent = '0';
     $('comparison-panel').hidden = true;
   }
@@ -109,13 +109,30 @@
   function renderPreview() {
     if (!result) return;
     const rows = result.records.filter(r => (!$('filter-month').value || (r.monthKey || '@undated') === $('filter-month').value) && (!$('filter-category').value || (r.category || '@empty') === $('filter-category').value) && (!$('filter-status').value || (r.status || '@empty') === $('filter-status').value) && (!$('filter-excluded').value || r.excluded === $('filter-excluded').value));
-    $('visible-count').textContent = rows.length;
-    $('preview').innerHTML = '<table><thead><tr>' + C.HEADERS.map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '<th scope="col">核对处理</th></tr></thead><tbody>' + rows.map(record => {
+    const comparison = result.comparison;
+    const extraHeaders = comparison ? ['系统预算金额','手工预算金额','差异金额','核对结果','系统来源','手工来源'] : [];
+    const detailRow = record => {
       const values = C.toRow(record).slice();
       values[0] = C.monthLabel(record); values[5] = money(record.cents);
       const style = record.excluded === '是' ? 'excluded' : record.related ? 'related' : record.status === '已支付' ? 'paid' : '';
-      return '<tr class="' + style + '" data-record-id="' + esc(record.id) + '">' + values.map((v,i) => '<td' + (i === 5 ? ' class="detail-money"' : '') + '>' + esc(v?.v !== undefined ? v.v : v) + '</td>').join('') + '<td class="row-action">' + decisionControl(record) + '<p class="row-source">' + esc(sourceText(record)) + '</p></td></tr>';
-    }).join('') + '</tbody></table>' + (!rows.length ? '<p class="empty">当前筛选没有记录。</p>' : '');
+      return '<tr class="' + style + '" data-record-id="' + esc(record.id) + '">' + values.map((v,i) => '<td' + (i === 5 ? ' class="detail-money"' : '') + '>' + esc(v?.v !== undefined ? v.v : v) + '</td>').join('') + '<td class="row-action">' + decisionControl(record) + '<p class="row-source">' + esc(sourceText(record)) + '</p></td>' + extraHeaders.map(() => '<td></td>').join('') + '</tr>';
+    };
+    const content = [], included = new Set(), groups = new Map();
+    for (const record of rows) {
+      const key = C.comparisonKey(record);
+      if (!groups.has(key)) groups.set(key,[]);
+      groups.get(key).push(record);
+    }
+    for (const group of comparison?.rows || []) {
+      const key = C.comparisonKey(group), details = groups.get(key) || [];
+      if (!details.length && (($('filter-month').value && $('filter-month').value !== group.monthKey) || ($('filter-category').value && $('filter-category').value !== (group.category || '@empty')) || $('filter-status').value || $('filter-excluded').value)) continue;
+      const values = [C.monthLabel(group),group.supplier,group.subject,'','分组对比（显示' + details.length + '条明细）','','','',group.category,'','','',...[group.systemCents,group.manualCents,group.differenceCents].map(v => v == null ? '金额待核对' : money(v)),group.status,...[group.systemSources,group.manualSources].map(list => (list || []).map(source => sourceText({source})).join('\n'))];
+      content.push('<tr class="comparison-row' + (group.status !== '一致' ? ' comparison-difference' : '') + '" data-comparison-key="' + esc(key) + '">' + values.map((v,i) => '<td' + (i >= 12 && i <= 14 ? ' class="detail-money"' : '') + '>' + esc(v) + '</td>').join('') + '</tr>');
+      for (const record of details) { included.add(record.id); content.push(detailRow(record)); }
+    }
+    for (const record of rows) if (!included.has(record.id)) content.push(detailRow(record));
+    $('visible-count').textContent = rows.length;
+    $('preview').innerHTML = '<table' + (comparison ? ' class="combined-table"' : '') + ' aria-label="' + (comparison ? '付款明细与下月预算对比' : '付款明细') + '"><thead><tr>' + [...C.HEADERS,'核对处理',...extraHeaders].map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + content.join('') + '</tbody></table>' + (!content.length ? '<p class="empty">当前筛选没有记录。</p>' : '');
     controls();
   }
   function renderReview() {
@@ -150,18 +167,18 @@
   function renderComparison() {
     const comparison = result.comparison;
     $('comparison-panel').hidden = !comparison;
+    $('detail-title').textContent = comparison ? '付款明细与下月预算对比' : '付款明细';
     if (!comparison) return;
     $('comparison-month').textContent = '（' + month(comparison.monthKey) + '）';
     const amount = value => value == null ? '待核对' : money(value);
-    const table = (headers,rows) => '<table><thead><tr>' + headers.map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + rows.map(row => '<tr>' + row.map(value => '<td>' + esc(value) + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
     const total = comparison.totals;
-    $('comparison-totals').innerHTML = table(['付款月份','系统预算金额','手工预算金额','差异金额'],[[month(comparison.monthKey),amount(total.systemCents),amount(total.manualCents),amount(total.differenceCents)]]);
-    $('comparison-preview').innerHTML = table(['付款月份','供应商','付款主体','分类','系统预算金额','手工预算金额','差异金额','核对结果','系统来源','手工来源'],comparison.rows.map(row => [month(row.monthKey),row.supplier,row.subject,row.category,amount(row.systemCents),amount(row.manualCents),amount(row.differenceCents),row.status,(row.systemSources || []).map(source => sourceText({source})).join('\n'),(row.manualSources || []).map(source => sourceText({source})).join('\n')]));
+    $('comparison-totals').innerHTML = [['系统预算金额',total.systemCents],['手工预算金额',total.manualCents],['差异金额',total.differenceCents]].map(([label,value]) => '<span>' + esc(label) + '<strong>' + esc(amount(value)) + '</strong></span>').join('');
   }
   function render() {
     $('record-count').textContent = result.records.length;
-    updateFilter('filter-month',result.records.map(r => r.monthKey || '@undated').sort(),key => key === '@undated' ? '月份待核对' : month(key));
-    updateFilter('filter-category',result.records.map(r => r.category || '@empty'),v => v === '@empty' ? '分类未填' : v);
+    const filterRows = [...result.records,...(result.comparison?.rows || [])];
+    updateFilter('filter-month',filterRows.map(r => r.monthKey || '@undated').sort(),key => key === '@undated' ? '月份待核对' : month(key));
+    updateFilter('filter-category',filterRows.map(r => r.category || '@empty'),v => v === '@empty' ? '分类未填' : v);
     updateFilter('filter-status',result.records.map(r => r.status || '@empty'),v => v === '@empty' ? '状态未填' : v);
     const warnings = [...new Set([...(result.warnings || []),...(result.comparison?.warnings || [])].map(message))];
     $('warnings').innerHTML = warnings.map(w => '<li>' + esc(w) + '</li>').join('');
@@ -259,15 +276,15 @@
     if (!action || !id || !result || exporting) return;
     const record = result.records.find(r => r.id === id);
     if (!record) return;
-    const reviewScroll = el.closest('.review-scroll');
-    const reviewPosition = reviewScroll ? [reviewScroll.scrollLeft,reviewScroll.scrollTop] : null;
+    const scroll = el.closest('.preview');
+    const position = scroll ? {selector:scroll.id ? '#' + scroll.id : '.review-scroll',left:scroll.scrollLeft,top:scroll.scrollTop} : null;
     if (action === 'decision') {
       if (!el.value) delete decisions[id];
       else decisions[id] = {excluded:el.value,reason:decisions[id]?.reason || ''};
     } else if (action === 'reason') decisions[id] = {excluded:decisions[id]?.excluded || record.excluded || '否',reason:el.value.trim()};
     else if (action === 'evidence') { if (el.value) matches[id] = el.value; else delete matches[id]; }
     refresh();
-    if (reviewPosition) $('review-list').querySelector('.review-scroll')?.scrollTo(...reviewPosition);
+    if (position) document.querySelector(position.selector)?.scrollTo(position.left,position.top);
     void cacheWork(() => Cache.saveState(settings()));
   });
   for (const id of ['filter-month','filter-category','filter-status','filter-excluded']) $(id).addEventListener('change',renderPreview);
