@@ -121,20 +121,25 @@
   function renderReview() {
     const records = new Map(result.records.map(r => [r.id,r]));
     const issues = result.issues || [];
-    const ids = new Set([...result.records.filter(r => r.related || r.excluded === '是').map(r => r.id), ...issues.flatMap(i => i.recordIds || []), ...Object.keys(decisions), ...Object.keys(matches)]);
+    const ids = new Set([...issues.flatMap(i => i.recordIds || []), ...result.records.filter(r => r.related || r.excluded === '是').map(r => r.id), ...Object.keys(decisions), ...Object.keys(matches)]);
     const content = issues.filter(i => !(i.recordIds || []).some(id => records.has(id))).map(i => '<p>' + esc(i.message) + '</p>');
+    const rows = [];
+    const issueLabels = {duplicate:'疑似重复',amount:'金额异常',evidence:'付款依据待核对',error:'读取异常'};
     for (const id of ids) {
       const record = records.get(id);
       if (!record) continue;
       const relevant = issues.filter(i => (i.recordIds || []).includes(id));
       const candidates = new Map(relevant.flatMap(i => i.candidates || []).map(c => [c.id,c.label]));
       if (matches[id] && !candidates.has(matches[id])) candidates.set(matches[id],'已确认的付款凭据');
-      const evidence = candidates.size ? '<label>付款凭据<select data-action="evidence" data-record-id="' + esc(id) + '"><option value="">暂不指定，按现有证据核对</option>' + [...candidates].map(([key,label]) => '<option value="' + esc(key) + '"' + (matches[id] === key ? ' selected' : '') + '>' + esc(label) + '</option>').join('') + '</select></label>' : '';
-      content.push('<article class="review-card"><p><strong>' + esc(record.supplier) + '</strong> · ' + esc(C.monthLabel(record)) + ' · ' + esc(money(record.cents)) + ' 元</p><p class="row-source">' + esc(sourceText(record)) + '</p>' + relevant.map(i => '<p>' + esc(i.message) + '</p>').join('') + '<div class="review-controls"><label>本笔处理<span>' + decisionControl(record) + '</span></label>' + evidence + '</div></article>');
+      const evidence = candidates.size ? '<select aria-label="' + esc(record.supplier + '：付款凭据') + '" data-action="evidence" data-record-id="' + esc(id) + '"><option value="">暂不指定，按现有证据核对</option>' + [...candidates].map(([key,label]) => '<option value="' + esc(key) + '"' + (matches[id] === key ? ' selected' : '') + '>' + esc(label) + '</option>').join('') + '</select>' : '—';
+      const notes = relevant.map(i => '<details><summary>' + esc(issueLabels[i.type] || '核对提示') + (i.blocking ? (i.resolved ? '（已处理）' : '（待处理）') : '') + '</summary><p>' + esc(i.message) + '</p></details>').join('') || (record.excluded === '是' ? '已剔除' : '已保留');
+      const values = [record.supplier,record.subject,C.monthLabel(record),record.category,record.cents == null ? '金额待核对' : money(record.cents),record.oa,record.status];
+      rows.push('<tr' + (record.excluded === '是' ? ' class="excluded"' : '') + ' data-record-id="' + esc(id) + '">' + values.map((v,i) => '<td' + (i === 4 ? ' class="detail-money"' : '') + '>' + esc(v) + '</td>').join('') + '<td class="review-source">' + esc(sourceText(record)) + '</td><td class="review-notes">' + notes + '</td><td class="row-action">' + decisionControl(record) + '</td><td class="row-action">' + evidence + '</td></tr>');
     }
+    if (rows.length) content.push('<div class="preview review-scroll" tabindex="0" role="region" aria-label="关联与付款核对表，可横向滚动"><table class="review-table" aria-label="关联与付款核对"><thead><tr>' + ['供应商','付款主体','付款月份','分类','金额','OA流程号','付款状态','来源','核对提示','核对处理','付款凭据'].map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>');
     $('review-list').innerHTML = content.join('');
     $('review-panel').hidden = !content.length;
-    $('review-count').textContent = '（' + [...ids].filter(id => records.has(id)).length + ' 条）';
+    $('review-count').textContent = '（' + rows.length + ' 条）';
   }
   function summaryTable(rows, classified, totals) {
     const headers = ['付款月份',...(classified ? ['分类'] : []),'申请总金额','已付款金额','剩余付款金额','备注'];
@@ -254,12 +259,16 @@
     if (!action || !id || !result || exporting) return;
     const record = result.records.find(r => r.id === id);
     if (!record) return;
+    const reviewScroll = el.closest('.review-scroll');
+    const reviewPosition = reviewScroll ? [reviewScroll.scrollLeft,reviewScroll.scrollTop] : null;
     if (action === 'decision') {
       if (!el.value) delete decisions[id];
       else decisions[id] = {excluded:el.value,reason:decisions[id]?.reason || ''};
     } else if (action === 'reason') decisions[id] = {excluded:decisions[id]?.excluded || record.excluded || '否',reason:el.value.trim()};
     else if (action === 'evidence') { if (el.value) matches[id] = el.value; else delete matches[id]; }
-    refresh(); void cacheWork(() => Cache.saveState(settings()));
+    refresh();
+    if (reviewPosition) $('review-list').querySelector('.review-scroll')?.scrollTo(...reviewPosition);
+    void cacheWork(() => Cache.saveState(settings()));
   });
   for (const id of ['filter-month','filter-category','filter-status','filter-excluded']) $(id).addEventListener('change',renderPreview);
   $('reset-filters').addEventListener('click',() => { for (const id of ['filter-month','filter-category','filter-status','filter-excluded']) $(id).value = ''; renderPreview(); });

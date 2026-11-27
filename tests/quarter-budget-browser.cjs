@@ -53,14 +53,61 @@ async function download(page) {
  const pending=page.waitForEvent('download');await page.locator('#download').click();const file=await pending,stream=await file.createReadStream(),chunks=[];
  for await(const chunk of stream)chunks.push(chunk);return {name:file.suggestedFilename(),book:X.read(Buffer.concat(chunks),{type:'buffer',cellNF:true})};
 }
+const reviewHeaders = ['供应商','付款主体','付款月份','分类','金额','OA流程号','付款状态','来源','核对提示','核对处理','付款凭据'];
+async function reviewRows(page) {
+ const table=page.locator('#review-list table');assert.equal(await table.count(),1,'核对区域使用一张表对齐展示');
+ assert.deepEqual(await table.locator('thead th').allTextContents(),reviewHeaders);
+ const rows=await table.locator('tbody tr[data-record-id]').evaluateAll(elements=>elements.map(el=>({id:el.dataset.recordId,cells:[...el.cells].map(cell=>cell.innerText)})));
+ for(const row of rows){
+  assert.equal(row.cells.length,reviewHeaders.length);
+  const preview=page.locator('#preview tr[data-record-id="'+row.id+'"]');assert.equal(await preview.count(),1);
+  const values=await preview.locator(':scope > td').allTextContents();
+  for(const [review,detail]of [[0,1],[1,2],[2,0],[3,8],[5,3],[6,6]])assert.equal(row.cells[review],values[detail],'核对表字段必须与同ID明细对齐');
+  if(values[5].trim())assert.equal(row.cells[4],values[5]);
+  assert.match(row.cells[7],/\.xlsx/);assert(row.cells[8].trim(),'核对提示不能丢失');
+  assert.equal(await table.locator('tr[data-record-id="'+row.id+'"] [data-action=decision]').count(),1);
+  assert.equal(await table.locator('tr[data-record-id="'+row.id+'"] [data-action=reason]').count(),1);
+ }
+ return rows;
+}
 async function resolveDuplicate(page) {
- const rows=page.locator('#preview tbody tr').filter({hasText:'供应商丙'});assert.equal(await rows.count(),2);
- for(const row of await rows.all()) {
-  const id=await row.getAttribute('data-record-id');
-  const manualSource=(await row.locator('.row-source').innerText()).includes('manualBudget.xlsx');
-  await page.locator('#preview tr[data-record-id="'+id+'"] [data-action=decision]').selectOption(manualSource?'是':'否');
+ const all=await reviewRows(page),rows=all.filter(row=>row.cells[0]==='供应商丙');assert.equal(rows.length,2);
+ const positions=rows.map(row=>all.findIndex(item=>item.id===row.id));assert.equal(positions[1],positions[0]+1,'关联记录连续排列便于对比');
+ for(let index=0;index<rows.length;index++){
+  const row=rows[index],value=row.cells[7].includes('manualBudget.xlsx')?'是':'否';
+  await page.locator('#review-list tr[data-record-id="'+row.id+'"] [data-action=decision]').selectOption(value);
+  assert.equal(await page.locator('#preview tr[data-record-id="'+row.id+'"] [data-action=decision]').inputValue(),value,'核对表处理同步付款明细');
+  assert.equal(await page.locator('#preview tr[data-record-id="'+row.id+'"] > td').nth(10).innerText(),value);
+  if(index===0)assert(await page.locator('#download').isDisabled(),'一组未全部确认前不能下载');
  }
  await ready(page);
+}
+async function reviewScreenshots(page) {
+ const scroll=page.locator('#review-list .review-scroll');
+ await page.setViewportSize({width:390,height:844});
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'手机核对表不能撑宽整页');
+ assert(await scroll.evaluate(el=>el.scrollWidth>el.clientWidth),'手机核对表可横向滚动');
+ const id=await page.locator('#review-list tbody tr[data-record-id]').first().getAttribute('data-record-id');
+ const decision=page.locator('#review-list tr[data-record-id="'+id+'"] [data-action=decision]');
+ await decision.scrollIntoViewIfNeeded();const before=await scroll.evaluate(el=>el.scrollLeft);assert(before>0);
+ await decision.selectOption('否');
+ await page.waitForFunction(({before})=>Math.abs(document.querySelector('#review-list .review-scroll').scrollLeft-before)<2,{before});
+ assert.equal(await page.locator('#preview tr[data-record-id="'+id+'"] [data-action=decision]').inputValue(),'否');
+ assert(await page.locator('#download').isDisabled(),'手机只确认一条时继续阻止下载');
+ await decision.selectOption('');
+ const note=page.locator('#review-list tr[data-record-id="'+id+'"] details').first();await note.locator('summary').click();
+ assert(await note.evaluate(el=>el.open));assert.match(await note.locator('p').innerText(),/重复/);
+ if(process.env.QA_OUT){
+  const dir=path.resolve(process.env.QA_OUT);assert(!dir.startsWith(root+path.sep)&&dir!==root);fs.mkdirSync(dir,{recursive:true});
+  await scroll.evaluate(el=>{el.scrollLeft=0;el.scrollTop=0;});await page.locator('#review-panel').screenshot({path:path.join(dir,'quarter-budget-review-mobile.png')});
+  await decision.scrollIntoViewIfNeeded();await page.locator('#review-panel').screenshot({path:path.join(dir,'quarter-budget-review-mobile-controls.png')});
+ }
+ await page.setViewportSize({width:1440,height:1000});await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+ if(process.env.QA_OUT){
+  const dir=path.resolve(process.env.QA_OUT);await scroll.evaluate(el=>{el.scrollLeft=0;el.scrollTop=0;});
+  await page.locator('#review-panel').screenshot({path:path.join(dir,'quarter-budget-review-desktop.png')});
+  await note.scrollIntoViewIfNeeded();await page.locator('#review-panel').screenshot({path:path.join(dir,'quarter-budget-review-desktop-details.png')});
+ }
 }
 async function context(browser,storageDisabled=false) {
  const ctx=await browser.newContext({acceptDownloads:true});
@@ -93,6 +140,7 @@ async function opened(ctx) { const page=await ctx.newPage();await page.goto(appU
   assert(await page.locator('#download').isDisabled());assert.match(await page.locator('#review-list').innerText(),/供应商丙/);
   assert.match(await page.locator('#preview').innerText(),/多家供应商/);assert.doesNotMatch(await page.locator('#preview').innerText(),/普通手工付款仅对比/);
   assert.equal(await page.locator('#comparison-preview img').count(),0);
+  await reviewRows(page);await reviewScreenshots(page);
   await resolveDuplicate(page);
   const totals=await page.locator('#comparison-totals tbody tr').innerText();assert.match(totals,/2,000,135\.00/);assert.match(totals,/0\.00/);
   assert.match(await page.locator('#comparison-preview').innerText(),/manualBudget.xlsx/);assert.match(await page.locator('#comparison-preview').innerText(),/2026年12月/);
@@ -126,10 +174,12 @@ async function opened(ctx) { const page=await ctx.newPage();await page.goto(appU
 
   await upload(page,'ledger',ledger(true),'missing-amount.xlsx');await page.locator('#result:not([hidden])').waitFor();
   assert.match(await page.locator('#reference-ledger').innerText(),/已读取/);assert(await page.locator('#download').isDisabled());
-  const missing=page.locator('#preview tbody tr').filter({hasText:'供应商乙'}),missingId=await missing.getAttribute('data-record-id');
+  const missingRows=await reviewRows(page),missingRow=missingRows.find(row=>row.cells[0]==='供应商乙');assert(missingRow);assert.notEqual(missingRow.cells[4],'0.00','空金额不能显示为零');
+  const missingId=missingRow.id,missing=page.locator('#review-list tr[data-record-id="'+missingId+'"]');
   await missing.locator('[data-action=decision]').selectOption('是');assert(await page.locator('#download').isDisabled(),'缺金额剔除必须说明原因');
-  await page.locator('#preview tr[data-record-id="'+missingId+'"] [data-action=reason]').fill('源表金额待补，本次明确不计');
-  await page.locator('#preview tr[data-record-id="'+missingId+'"] [data-action=reason]').dispatchEvent('change');await ready(page);
+  assert.equal(await page.locator('#preview tr[data-record-id="'+missingId+'"] [data-action=decision]').inputValue(),'是');
+  await missing.locator('[data-action=reason]').fill('源表金额待补，本次明确不计');await missing.locator('[data-action=reason]').dispatchEvent('change');await ready(page);
+  assert.equal(await page.locator('#preview tr[data-record-id="'+missingId+'"] [data-action=reason]').inputValue(),'源表金额待补，本次明确不计');
   await upload(page,'budget',Buffer.from('invalid excel content'),'broken.xlsx');
   await page.locator('#status').filter({hasText:'读取失败'}).waitFor();assert(await page.locator('#download').isDisabled());assert(await page.locator('#result').isHidden());
   await page.waitForFunction(async()=>{const c=await QuarterBudgetCache.load();return !c.files.budget&&Object.keys(c.settings.decisions).length===0;});
@@ -173,6 +223,6 @@ async function opened(ctx) { const page=await ctx.newPage();await page.goto(appU
   await home.reload();await home.locator('iframe[data-tool="quarter-budget"]').waitFor();frame=await(await home.locator('iframe[data-tool="quarter-budget"]').elementHandle()).contentFrame();await frame.waitForFunction(()=>window.QuarterBudgetToolReady);await ready(frame);assert.equal(await frame.locator('#record-count').innerText(),'5');
   const homeDownload=home.waitForEvent('download');await frame.locator('#download').click();assert.match((await homeDownload).suggestedFilename(),/_V1\.xlsx$/);
   await frame.locator('#clear-cache').click();await frame.locator('#cache-status').filter({hasText:'已清空'}).waitFor();assert.deepEqual(await home.evaluate(()=>PaymentCache.get('quarter-qa-sentinel')),{preserve:true});assert.deepEqual(homeErrors,[]);await homeContext.close();
-  console.log(JSON.stringify({status:'PASS',base:appURL,fourSlots:true,manualForecast:true,manualComparison:true,duplicateGate:true,missingAmountGate:true,crossYear:true,manualMonthPriority:true,cacheMigration:true,cacheRestore:true,replacement:true,lateRead:true,export:true,version:true,mobile:true,home:true,storageFallback:true,errors}));
+  console.log(JSON.stringify({status:'PASS',base:appURL,fourSlots:true,manualForecast:true,manualComparison:true,reviewTable:true,reviewControlsSync:true,reviewMobile:true,duplicateGate:true,missingAmountGate:true,crossYear:true,manualMonthPriority:true,cacheMigration:true,cacheRestore:true,replacement:true,lateRead:true,export:true,version:true,mobile:true,home:true,storageFallback:true,errors}));
  } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
