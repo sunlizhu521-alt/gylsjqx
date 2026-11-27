@@ -40,24 +40,31 @@
   function duplicateReviewGroups(result) {
     const records=new Map((result?.records || []).map(r=>[r.id,r])),groups=[];
     const known=value=>!!norm(value)&&!['待核对','待确认','未知','未匹配','无法区分','未提交OA','不支付','多家供应商','多个供应商','/','-','无'].includes(norm(value));
+    const validMonth=value=>/^(?:19\d{2}|[2-9]\d{3})-(?:0[1-9]|1[0-2])$/.test(value || '');
     for(const issue of result?.issues || []){
       if(issue.type!=='duplicate')continue;
-      const buckets=new Map();
-      for(const id of new Set(issue.recordIds || [])){
-        const r=records.get(id);if(!r)continue;
-        const key=JSON.stringify([norm(r.supplier),entity(r.subject),r.monthKey || '',r.cents ?? null]);
-        if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push(r);
+      const related=[...new Set(issue.recordIds || [])].map(id=>records.get(id)).filter(Boolean),buckets=new Map();
+      for(const r of related){
+        let monthKey=r.monthKey || '';
+        // Only the review grouping borrows a unique matching month; source records stay unchanged.
+        if(!monthKey&&known(r.supplier)&&known(r.subject)&&Number.isSafeInteger(r.cents)&&norm(r.summary)){
+          const months=new Set(related.filter(other=>other.source?.role!==r.source?.role&&norm(other.supplier)===norm(r.supplier)&&entity(other.subject)===entity(r.subject)&&other.cents===r.cents&&norm(other.summary)===norm(r.summary)&&validMonth(other.monthKey)).map(other=>other.monthKey));
+          if(months.size===1)monthKey=[...months][0];
+        }
+        const key=JSON.stringify([norm(r.supplier),entity(r.subject),monthKey,r.cents ?? null]);
+        if(!buckets.has(key))buckets.set(key,{records:[],monthKey,monthInferred:false});
+        const bucket=buckets.get(key);bucket.records.push(r);bucket.monthInferred ||= monthKey!==(r.monthKey || '');
       }
-      for(const items of buckets.values()){
+      for(const {records:items,monthKey,monthInferred} of buckets.values()){
         const first=items[0],cents=Number.isSafeInteger(first.cents)?first.cents:null;
         let restriction='';
         if(items.length<2)restriction='本金额仅一条记录，请确认不合并或逐笔核对';
         else if(cents===null)restriction='金额未确定，请逐笔核对';
-        else if(!known(first.supplier)||!known(first.subject)||!/^(?:19\d{2}|[2-9]\d{3})-(?:0[1-9]|1[0-2])$/.test(first.monthKey || ''))restriction='供应商、主体或付款月份未明确，请逐笔核对';
+        else if(!known(first.supplier)||!known(first.subject)||!validMonth(monthKey))restriction='供应商、主体或付款月份未明确，请逐笔核对';
         else if(new Set(items.map(r=>oaKey(r.oa)).filter(Boolean)).size>1)restriction='存在不同OA流程号，请逐笔核对';
         else if(items.some(r=>!ROLES.includes(r.source?.role)))restriction='来源类型未明确，请逐笔核对';
         else if(new Set(items.map(r=>r.source.role)).size!==items.length)restriction='同一来源含多笔记录或分期，请逐笔核对';
-        groups.push({id:JSON.stringify([issue.id,first.id]),records:items,cents,canMerge:!restriction,restriction});
+        groups.push({id:JSON.stringify([issue.id,first.id]),records:items,cents,monthKey,monthInferred,canMerge:!restriction,restriction});
       }
     }
     return groups;

@@ -232,3 +232,40 @@ test('快捷选择校验组与记录归属，错误输入不修改旧决策与�
  for(const choice of ['merge',null,{}])assert.throws(()=>C.applyDuplicateReviewDecision(result,old,groups[0].id,choice),/请选择/);
  assert.equal(JSON.stringify(result),beforeResult);assert.equal(JSON.stringify(old),beforeOld);assert.deepEqual(C.duplicateReviewGroups(null),[]);
 });
+test('同供应商三笔14892仅台账缺月时一行复核，快捷选择不回填任何来源月份',()=>{
+ const values={supplier:'衡水缦德莱医疗器械有限公司',subject:'迈德斯特',oa:'',summary:'2026.10月货款',amount:14892};
+ const i=inputs([],[row({...values,month:null,notes:'台账原备注'})],[row({...values,supplier:values.supplier+'\r',notes:'预估原备注'})],[row({...values,notes:'此款为预估',category:'正常付款-正常对账表'})]);
+ const originalInput=JSON.stringify(i),result=build(i),originalResult=JSON.stringify(result),groups=C.duplicateReviewGroups(result),group=groups[0];
+ assert.equal(result.issues.filter(i=>i.type==='duplicate').length,1);assert.equal(groups.length,1);assert.equal(group.records.length,3);assert.equal(group.records[0].monthKey,'');assert.equal(group.monthKey,'2026-12');assert.equal(group.monthInferred,true);assert.equal(group.canMerge,true);
+ assert.equal(group.id,JSON.stringify([result.issues.find(i=>i.type==='duplicate').id,group.records[0].id]));assert.equal(JSON.stringify(result),originalResult);
+ const months=result.records.map(r=>[r.id,r.month,r.monthKey,r.status,r.amount]);
+ for(const kept of group.records){
+  const decisions=C.applyDuplicateReviewDecision(result,{},group.id,'keep:'+kept.id),next=build(i,{decisions});
+  assert.equal(Object.keys(decisions).length,3);assert.equal(next.canExport,true);assert.equal(next.summary.totals.totalCents,1489200);assert.equal(next.records.filter(r=>r.excluded!=='是')[0].id,kept.id);
+  assert.deepEqual(next.records.map(r=>[r.id,r.month,r.monthKey,r.status,r.amount]),months);assert.equal(C.toRow(roleRows(next,'ledger')[0])[0],null);
+  if(kept.source.role==='budget')assert.equal(next.comparison.totals.differenceCents,0);
+  if(kept.source.role==='ledger')assert.equal(next.summary.monthly[0].monthKey,'');
+  const reset=C.applyDuplicateReviewDecision(next,decisions,group.id,'');assert.deepEqual(reset,{});assert.equal(build(i,{decisions:reset}).canExport,false);
+ }
+ assert.equal(JSON.stringify(i),originalInput);assert.equal(JSON.stringify(result),originalResult);
+});
+test('空月份存在两个匹配月份时不作桥接，明确不同月份仍分行',()=>{
+ const values={oa:'',amount:14892,summary:'同一完整摘要'};
+ const result=build(inputs([],[row({...values,month:null})],[row(values)],[row({...values,month:serial('2027-01-01'),category:'正常付款-预估付款'})])),groups=C.duplicateReviewGroups(result);
+ assert.equal(result.issues.filter(i=>i.type==='duplicate').length,1);assert.equal(groups.length,3);assert.deepEqual(groups.map(g=>g.monthKey),['','2026-12','2027-01']);assert(groups.every(g=>!g.monthInferred&&!g.canMerge));
+});
+test('缺月份记录仅能借同身份金额及完整非空摘要的其他来源有效月份',()=>{
+ const base=build(inputs([],[],[row({oa:'',subject:'迈德斯特',summary:'2026.10月货款'})])).records[0];
+ const missing={...base,id:'missing',month:null,monthKey:'',source:{...base.source,role:'ledger'}};
+ const cases=[{supplier:'另一供应商'},{subject:'国源'},{cents:base.cents+1},{summary:'另一笔2026.10月货款'},{summary:''},{source:{...base.source,role:'ledger'}},{monthKey:'2026-13'},{monthKey:''}];
+ for(const changed of cases){
+  const other={...base,id:'known',...changed},result={records:[missing,other],issues:[{id:'candidate',type:'duplicate',recordIds:['missing','known']}]},before=JSON.stringify(result),group=C.duplicateReviewGroups(result).find(g=>g.records.includes(missing));
+  assert.equal(group.monthKey,'',JSON.stringify(changed));assert.equal(group.monthInferred,false);assert.equal(group.canMerge,false);assert.equal(JSON.stringify(result),before);
+ }
+ for(const summary of ['','  ']){
+  const r={...missing,summary},result={records:[r,{...base,id:'known'}],issues:[{id:'empty-summary',type:'duplicate',recordIds:[r.id,'known']}]};
+  const group=C.duplicateReviewGroups(result).find(g=>g.records.includes(r));assert.equal(group.monthKey,'');assert.equal(group.monthInferred,false);
+ }
+ const explicit={...missing,monthKey:'2026-13'},invalidResult={records:[explicit,{...base,id:'known'}],issues:[{id:'invalid',type:'duplicate',recordIds:[explicit.id,'known']}]};
+ const invalid=C.duplicateReviewGroups(invalidResult).find(g=>g.records.includes(explicit));assert.equal(invalid.monthKey,'2026-13');assert.equal(invalid.monthInferred,false);assert.equal(invalid.canMerge,false);
+});

@@ -330,6 +330,35 @@ async function opened(ctx) { const page=await ctx.newPage();await page.goto(appU
   await groups.first().locator('[data-action=merge-group]').selectOption('');assert(await duplicates.locator('#download').isDisabled());
   await duplicateContext.close();assert.deepEqual(errors,[]);
 
+  const inferredContext=await context(browser),inferred=await opened(inferredContext);inferred.on('pageerror',error=>errors.push(error.message));
+  const inferredSupplier='测试三来源同款',inferredSummary='2026.10月货款';
+  await upload(inferred,'negotiated');
+  await upload(inferred,'ledger',write(book(people.map(person=>['对账明细-'+person,[ledgerHeaders,...(person==='李奇'?[[inferredSupplier,'迈德斯特','',inferredSummary,14892,'','否',0,'否','']]:[])]]))),'missing-month-ledger.xlsx');
+  await upload(inferred,'budget',write(book(people.slice(0,4).map(person=>[person,[budgetHeaders,...(person==='邢芳芳'?[[date('2026-12-10'),inferredSupplier+'\r','迈德斯特',inferredSummary,14892,'未支付','','']]:[])]]))),'missing-month-budget.xlsx');
+  await upload(inferred,'manualBudget',write(book([['Sheet1',[manualHeaders,['正常付款-预估付款','李奇',inferredSupplier,'迈德斯特','',inferredSummary,14892,date('2026-12-10'),'手工补充预估']]]])),'missing-month-manual.xlsx');
+  const inferredGroups=await duplicateRows(inferred);assert.equal(inferredGroups.length,1,'同款唯一明确月份包含缺月份来源，三条只显示一组');
+  assert.equal(inferredGroups[0].cells[0],inferredSupplier);assert.match(inferredGroups[0].cells[2],/2026年12月/);
+  assert.match(inferredGroups[0].cells.join('\n'),/含月份未填来源/);assert.match(inferredGroups[0].cells[4],/3条来源/);
+  const inferredRows=()=>inferred.locator('#preview tr[data-record-id]').evaluateAll((rows,supplier)=>rows.filter(row=>row.cells[1].innerText.trim()===supplier).map(row=>({id:row.dataset.recordId,month:row.cells[0].innerText,amount:row.cells[5].innerText,source:row.cells[7].innerText,excluded:row.cells[10].innerText})),inferredSupplier);
+  let triplet=await inferredRows();assert.equal(triplet.length,3);
+  const ledgerRow=triplet.find(row=>row.source.includes('missing-month-ledger.xlsx')),budgetRow=triplet.find(row=>row.source.includes('missing-month-budget.xlsx'));assert(ledgerRow&&budgetRow);
+  assert.equal(ledgerRow.month,'月份待核对','分组推定月份不能改写源记录月份');
+  const inferredSelect=inferred.locator('#duplicate-review [data-action=merge-group]');assert.equal(await inferredSelect.locator('option[value^="keep:"]').count(),3);
+  assert.match(await inferredSelect.locator('option').evaluateAll((options,id)=>options.find(option=>option.value==='keep:'+id)?.textContent,ledgerRow.id),/月份待核对/,'选择空月份来源时仍提示原月份未确认');
+  if(process.env.QA_OUT){await inferred.setViewportSize({width:1440,height:1000});await inferred.locator('#review-panel').screenshot({path:path.join(process.env.QA_OUT,'quarter-budget-duplicate-missing-month.png')});}
+  await inferredSelect.selectOption('keep:'+budgetRow.id);await ready(inferred);triplet=await inferredRows();
+  assert.equal(triplet.filter(row=>row.excluded==='否').reduce((sum,row)=>sum+Number(row.amount.replaceAll(',','')),0),14892,'合并三来源只计入指定预算一笔');
+  assert(triplet.every(row=>row.excluded===(row.id===budgetRow.id?'否':'是')));assert.equal(triplet.find(row=>row.id===ledgerRow.id).month,'月份待核对');
+  await inferred.waitForFunction(async()=>Object.keys((await QuarterBudgetCache.load()).settings.decisions).length===3);
+  await inferred.reload();await inferred.waitForFunction(()=>window.QuarterBudgetToolReady);await ready(inferred);
+  assert.equal((await duplicateRows(inferred)).length,1);assert.equal(await inferredSelect.inputValue(),'keep:'+budgetRow.id,'刷新恢复同组三来源的合并选择');
+  triplet=await inferredRows();assert.equal(triplet.length,3);assert(triplet.every(row=>row.excluded===(row.id===budgetRow.id?'否':'是')));assert.equal(triplet.find(row=>row.id===ledgerRow.id).month,'月份待核对');
+  await inferredSelect.selectOption('');assert(await inferred.locator('#download').isDisabled());
+  triplet=await inferredRows();assert(triplet.every(row=>row.excluded==='否'),'重置恢复全部三条原记录');
+  for(const row of triplet)assert.equal(await inferred.locator('#preview tr[data-record-id="'+row.id+'"] [data-action=decision]').inputValue(),'','重置清除三条逐笔确认');
+  await inferred.waitForFunction(async()=>Object.keys((await QuarterBudgetCache.load()).settings.decisions).length===0);
+  await inferredContext.close();assert.deepEqual(errors,[]);
+
   const migration=await context(browser),old=await opened(migration);
   await old.evaluate(async payload=>{
    const entries=[];for(const [role,bytes]of Object.entries(payload)){const buffer=new Uint8Array(bytes).buffer,digest=await crypto.subtle.digest('SHA-256',buffer);entries.push({kind:'file',role,value:{filename:role+'.xlsx',bytes:buffer,fingerprint:[...new Uint8Array(digest)].map(v=>v.toString(16).padStart(2,'0')).join(''),importedAt:'2026-11-01T00:00:00Z'}});}
@@ -354,6 +383,6 @@ async function opened(ctx) { const page=await ctx.newPage();await page.goto(appU
   await home.reload();await home.locator('iframe[data-tool="quarter-budget"]').waitFor();frame=await(await home.locator('iframe[data-tool="quarter-budget"]').elementHandle()).contentFrame();await frame.waitForFunction(()=>window.QuarterBudgetToolReady);await ready(frame);assert.equal(await frame.locator('#record-count').innerText(),'5');
   const homeDownload=home.waitForEvent('download');await frame.locator('#download').click();assert.match((await homeDownload).suggestedFilename(),/_V1\.xlsx$/);
   await frame.locator('#clear-cache').click();await frame.locator('#cache-status').filter({hasText:'已清空'}).waitFor();assert.deepEqual(await home.evaluate(()=>PaymentCache.get('quarter-qa-sentinel')),{preserve:true});assert.deepEqual(homeErrors,[]);await homeContext.close();
-  console.log(JSON.stringify({status:'PASS',base:appURL,fourSlots:true,manualForecast:true,manualComparison:true,combinedDetails:true,comparisonFilters:true,reviewTable:true,reviewControlsSync:true,reviewMobile:true,duplicateGroups:true,duplicateGate:true,missingAmountGate:true,crossYear:true,manualMonthPriority:true,cacheMigration:true,cacheRestore:true,replacement:true,lateRead:true,export:true,version:true,mobile:true,home:true,storageFallback:true,errors}));
+  console.log(JSON.stringify({status:'PASS',base:appURL,fourSlots:true,manualForecast:true,manualComparison:true,combinedDetails:true,comparisonFilters:true,reviewTable:true,reviewControlsSync:true,reviewMobile:true,duplicateGroups:true,inferredDuplicateMonth:true,duplicateGate:true,missingAmountGate:true,crossYear:true,manualMonthPriority:true,cacheMigration:true,cacheRestore:true,replacement:true,lateRead:true,export:true,version:true,mobile:true,home:true,storageFallback:true,errors}));
  } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
