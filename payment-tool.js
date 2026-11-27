@@ -136,7 +136,8 @@
       if (!/\.(xlsx|xls)$/i.test(file.name) || file.size > 30 * 1024 * 1024) throw new Error('请选择 30 MB 以内的 Excel 文件');
       const bytes = await file.arrayBuffer();
       if (load !== state.loads.detail) return;
-      state.workbook = XLSX.read(bytes, { type: 'array', cellDates: false, cellFormula: true, cellNF: true });
+      // sheet_to_json coerces date-formatted text when cellNF is enabled; cell.w already preserves identifier padding.
+      state.workbook = XLSX.read(bytes, { type: 'array', cellDates: false, cellFormula: true });
       state.sheet = state.workbook.SheetNames[0];
       if (!state.sheet) throw new Error('文件中没有工作表');
       state.pending.detail = false; state.times.detail = savedTime || now();

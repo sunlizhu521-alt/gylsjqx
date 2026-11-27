@@ -129,19 +129,52 @@ const docXml = async data => (await Zip.loadAsync(data)).file('word/document.xml
     assert.doesNotMatch(await docXml(matchedDoc),/OA付款金额|未操作者|合成办理甲|合成OA流程/);
     await assertNoOACache();
 
-    // Numeric OA cells must retain leading zeros supplied by the Excel number format.
+    // Date formats on text/money cells must not corrupt raw data or padded numeric OA IDs.
     const paddedBook = X.read(detailBytes([first,second]),{type:'buffer'});
+    const misleadingDateFormat = 'yyyy"年"m"月"d"日";@';
+    const paddedCell = (row,header) => X.utils.encode_cell({r:row,c:C.required.indexOf(header)});
+    for (const header of ['申请日期','付款主体','合同编号']) paddedBook.Sheets.付款明细[paddedCell(0,header)].z = misleadingDateFormat;
+    for (const [index,record] of [first,second].entries()) {
+      for (const header of ['供应商全称','付款主体']) paddedBook.Sheets.付款明细[paddedCell(index+1,header)].z = misleadingDateFormat;
+      paddedBook.Sheets.付款明细[paddedCell(index+1,'申请日期')] = {t:'n',v:(Date.UTC(2026,10,27)-Date.UTC(1899,11,30))/86400000,z:misleadingDateFormat};
+      paddedBook.Sheets.付款明细[paddedCell(index+1,'本次申请付款金额')] = {t:'n',v:Number(record.本次申请付款金额),z:misleadingDateFormat};
+    }
     const paddedAddress = X.utils.encode_cell({r:1,c:C.required.indexOf('合同编号')});
     paddedBook.Sheets.付款明细[paddedAddress] = {t:'n',v:123,z:'00000000'};
     await upload('detail',Buffer.from(X.write(paddedBook,{type:'buffer',bookType:'xlsx'})),'数字格式补零付款明细.xlsx');
     await upload('oa',oaBytes([oaRow({...first,合同编号:'00000123'}),oaRow(second)]),'补零编号OA.xlsx');
-    await table(true);
-    assert.equal(await rows().first().locator('.payment-budget-result').innerText(),'核对通过');
-    assert.match(await rows().first().locator('td').nth(1).innerText(),/OA号：00000123/);
-    assert.match(await rows().first().locator('.payment-oa-amount').innerText(),/流程编码：00000123/);
-    assert.equal(await page.locator('[data-budget-confirm]').count(),0);
+    async function assertFormattedInput() {
+      await table(true);
+      assert.doesNotMatch(await page.locator('.payment-tool').innerText(),/Invalid Date|缺少.*(?:申请日期|付款主体|合同编号)/);
+      assert.equal(await page.locator('[data-field="申请日期"]').first().inputValue(),'2026-11-27');
+      assert.equal(await rows().first().locator('.payment-budget-result').innerText(),'核对通过');
+      const applicant = await rows().first().locator('td').nth(1).innerText();
+      assert.match(applicant,/OA号：00000123/);
+      assert.match(applicant,/付款主体：合成甲公司/); assert.match(applicant,/合成供应商甲/);
+      assert.equal(await rows().first().locator('td').nth(2).innerText(),'￥100.00');
+      assert.equal(await rows().nth(1).locator('td').nth(2).innerText(),'￥200.00');
+      assert.match(await rows().first().locator('.payment-oa-amount').innerText(),/流程编码：00000123/);
+      assert.equal(await page.locator('[data-budget-confirm]').count(),0);
+    }
+    await assertFormattedInput();
     await generate();
-    assert.equal(await printedContract(await save('docx','numeric-oa-leading-zeros')),'00000123');
+    const paddedDoc = await save('docx','numeric-oa-leading-zeros');
+    assert.equal(await printedContract(paddedDoc),'00000123');
+    assert.doesNotMatch(await docXml(paddedDoc),/Invalid Date/);
+    const cacheWritesBeforeRefresh = await page.evaluate(() => window.__oaCacheWrites);
+    await page.reload(); await page.locator('button[data-tool="payment"]').click(); await page.locator('#paymentExcel:not([disabled])').waitFor();
+    await page.evaluate(previousWrites => {
+      window.__oaCacheWrites = previousWrites;
+      const put = PaymentCache.put;
+      PaymentCache.put = function (key,...args) { window.__oaCacheWrites.push(key); return put.call(this,key,...args); };
+    },cacheWritesBeforeRefresh);
+    assert.equal(await page.locator('#paymentExcel + span').innerText(),'数字格式补零付款明细.xlsx');
+    assert.match(await page.locator('.payment-tool').innerText(),/未进行OA核对/);
+    await upload('oa',oaBytes([oaRow({...first,合同编号:'00000123'}),oaRow(second)]),'补零编号OA.xlsx');
+    await assertFormattedInput(); await generate();
+    const restoredPaddedDoc = await save('docx','numeric-oa-leading-zeros-restored');
+    assert.equal(await printedContract(restoredPaddedDoc),'00000123');
+    assert.equal(await docXml(restoredPaddedDoc),await docXml(paddedDoc));
     await upload('detail',detailBytes([first,second]),'合成付款明细.xlsx');
     await upload('oa',oaBytes([oaRow(first),oaRow(second,'200.00','合成办理乙')]),'合成OA流程.xlsx');
 
