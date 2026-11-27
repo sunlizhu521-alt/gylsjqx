@@ -132,6 +132,104 @@
     result.conflict = !!original.trim() && original.trim() !== '/' && bankIdentity(original, name) !== bankIdentity(result.value, name);
     return result;
   }
+  const budgetFields = {
+    supplier: ['供应商', '供应商名称', '供应商全称'],
+    subject: ['付款主体'],
+    oa: ['对公付款0A流程号', '对公付款OA流程号', '对公付款OA号', '付款OA号', '流程编码', '流程编号', '合同编号', '合同号'],
+    amount: ['OA-申请付款金额', '申请付款金额', '本次申请付款金额'],
+  };
+  const budgetHeader = value => text(value).normalize('NFKC').replace(/\s/g, '').toUpperCase();
+  function budgetOA(value) {
+    const raw = text(value).normalize('NFKC').trim(), key = raw.replace(/\s/g, '').toUpperCase();
+    if (['', '/', '-', '未提交OA', '未申请OA', '未交OA', '未申请', '未提交'].includes(key)) return { key: '', invalid: false };
+    const invalid = !/^[A-Z0-9_-]+$/.test(key) || (key.match(/MDST-DGFK/g) || []).length > 1 || /[A-Z0-9_-]*\d[A-Z0-9_-]*\s+[A-Z]+[-_]?\d/i.test(raw);
+    return { key, invalid };
+  }
+  function budgetName(value) {
+    const name = text(value).trim();
+    return !!name && !['/', '-', '—', '--', '待定', '待核对', '未知', '未填写', '无', '暂无', '不详', '合计', '总计'].includes(name) && !/^[-+.\d]+$/.test(name) && !/多家供应商|多个供应商|各供应商|全部供应商|供应商合计|供应商汇总|[\r\n、;；/]/.test(name);
+  }
+  function parseBudget(book, filename, X, selectedSheet = '') {
+    const result = { sheetNames: [], sheetName: '', rows: [], errors: [] }, keys = Object.keys(budgetFields);
+    const aliases = new Map(Object.entries(budgetFields).flatMap(([key, names]) => names.map(name => [budgetHeader(name), key])));
+    const tables = new Map();
+    for (const name of book?.SheetNames || []) {
+      const sheet = book.Sheets?.[name], byRow = new Map();
+      let lastRow = 0;
+      for (const address of Object.keys(sheet || {})) {
+        if (!/^[A-Z]+\d+$/.test(address)) continue;
+        const cell = sheet[address];
+        if (!cell?.f && !text(cell?.v).trim()) continue;
+        const position = X.utils.decode_cell(address); lastRow = Math.max(lastRow, position.r);
+        if (position.r >= 100) continue;
+        const key = aliases.get(budgetHeader(cell?.v));
+        if (key) { if (!byRow.has(position.r)) byRow.set(position.r, {}); (byRow.get(position.r)[key] ||= []).push(position.c); }
+      }
+      const headers = [...byRow].sort((a, b) => a[0] - b[0]);
+      const complete = headers.find(([, map]) => keys.every(key => map[key]));
+      const best = complete || headers.sort((a, b) => Object.keys(b[1]).length - Object.keys(a[1]).length)[0];
+      tables.set(name, { sheet, header: best?.[0], map: best?.[1] || {}, lastRow });
+      if (complete) result.sheetNames.push(name);
+    }
+    result.sheetName = selectedSheet || (result.sheetNames.length === 1 ? result.sheetNames[0] : '');
+    if (!result.sheetName) {
+      result.errors.push(result.sheetNames.length > 1 ? '请选择预算工作表' : `${filename}：未找到预算表头，必须包含供应商、付款主体、对公付款OA流程号、OA-申请付款金额`);
+      return result;
+    }
+    const table = tables.get(result.sheetName), location = `${filename} / ${result.sheetName}`;
+    if (!table) { result.errors.push(`${location}：工作表不存在，请重新选择`); return result; }
+    const missing = keys.filter(key => !table.map[key]);
+    if (missing.length) { result.errors.push(`${location}：缺少预算表头 ${missing.map(key => budgetFields[key][0]).join('、')}`); return result; }
+    for (const key of keys) if (table.map[key].length !== 1) result.errors.push(`${location} 第 ${table.header + 1} 行：预算字段“${budgetFields[key][0]}”对应多个列，请保留唯一列`);
+    if (table.lastRow > 100000) result.errors.push(`${location}：预算数据超过100000行，请检查源表范围`);
+    if (result.errors.length) return result;
+    for (let r = table.header + 1; r <= table.lastRow; r++) {
+      const cells = Object.fromEntries(keys.map(key => [key, table.sheet[X.utils.encode_cell({ r, c: table.map[key][0] })]]));
+      if (keys.every(key => !cells[key]?.f && !text(cells[key]?.v).trim())) continue;
+      const values = {};
+      for (const key of keys) {
+        const cell = cells[key], address = X.utils.encode_cell({ r, c: table.map[key][0] }), label = `${location}!${address}（${budgetFields[key][0]}）`;
+        if (cell?.t === 'e' || cell?.f && (cell.v == null || cell.t === 'z' || cell.t === 'n' && typeof cell.v !== 'number')) result.errors.push(`${label}：公式错误或缺少有效计算结果，请在Excel/WPS重新计算并保存`);
+        if (typeof cell?.v === 'number' && !Number.isFinite(cell.v)) result.errors.push(`${label}：数值异常`);
+        values[key] = text(cell?.v).trim();
+        if (key === 'oa' && typeof cell?.v === 'number') {
+          if (!Number.isSafeInteger(cell.v) || Math.abs(cell.v) >= 1e15) result.errors.push(`${label}：OA编号保存为数字可能丢失精度，请改为文本并核实`);
+          else { const displayed = X.utils.format_cell({ ...cell }); values.oa = /^\d+$/.test(displayed) ? displayed : String(cell.v); }
+        }
+      }
+      let amount;
+      try { amount = cents(cells.amount?.v); }
+      catch (error) { result.errors.push(`${location}!${X.utils.encode_cell({ r, c: table.map.amount[0] })}（${budgetFields.amount[0]}）：${error.message}`); continue; }
+      result.rows.push({ supplier: values.supplier, subject: subjectName(values.subject), oa: values.oa, amount, amountText: money(amount), source: { filename, sheet: result.sheetName, row: r + 1 } });
+    }
+    if (result.errors.length) result.rows = [];
+    else if (!result.rows.length) result.errors.push(`${location}：没有预算明细`);
+    return result;
+  }
+  function matchBudget(record, budget) {
+    const result = { status: 'review', reason: '', method: '', candidates: [] };
+    if (!budget || budget.errors?.length) { result.reason = '月份预算表尚未有效读取，请检查预算文件'; return result; }
+    const supplier = text(record['供应商全称']).trim(), subject = subjectName(record['付款主体']), oa = budgetOA(record['合同编号']);
+    const rows = budget.rows || [], sameNames = rows.filter(row => row.supplier === supplier && row.subject === subject);
+    if (!budgetName(supplier) || !budgetName(subject)) { result.reason = '付款明细供应商或付款主体为空、待核对或包含多家，不能确认预算归属'; return result; }
+    if (oa.invalid) { result.reason = '付款明细OA号包含多个编号或格式异常，请核对单笔付款OA号'; result.candidates = sameNames; return result; }
+    let amount;
+    try { amount = cents(record['本次申请付款金额']); }
+    catch (error) { result.reason = `付款明细申请金额异常：${error.message}`; return result; }
+    if (oa.key) result.candidates = rows.filter(row => { const code = budgetOA(row.oa); return !code.invalid && code.key === oa.key; });
+    if (result.candidates.length) result.method = 'oa';
+    else { result.candidates = sameNames; result.method = 'supplier-subject'; }
+    if (!result.candidates.length) { result.reason = '预算表中未找到对应付款，请核实OA号、供应商及付款主体'; return result; }
+    if (result.candidates.length !== 1) { result.reason = `${result.method === 'oa' ? '同一OA号' : '同一供应商及付款主体'}对应多条预算，请核实具体明细，不按金额选择或合并预算`; return result; }
+    const candidate = result.candidates[0], candidateOA = budgetOA(candidate.oa);
+    if (!budgetName(candidate.supplier) || !budgetName(candidate.subject)) { result.reason = '预算记录供应商或付款主体为空、待核对或包含多家，不能分摊预算'; return result; }
+    if (candidateOA.invalid) { result.reason = '预算记录OA号包含多个编号或格式异常，请核对单笔预算OA号'; return result; }
+    if (supplier !== candidate.supplier || subject !== candidate.subject) { result.reason = `OA号相同，但供应商或付款主体不一致；预算为“${candidate.supplier}／${candidate.subject}”，请核实`; return result; }
+    if (result.method !== 'oa' && oa.key && candidateOA.key) { result.reason = `付款明细OA号“${oa.key}”与预算OA号“${candidateOA.key}”不一致，不能按名称回退匹配`; return result; }
+    if (amount !== candidate.amount) { result.reason = `申请金额 ${money(amount)} 与预算金额 ${candidate.amountText} 不一致，请核实分批申请或金额差异`; return result; }
+    result.status = 'matched'; result.reason = result.method === 'oa' ? 'OA号、供应商、付款主体及金额一致' : '一方缺OA号，供应商、付款主体唯一且金额一致';
+    return result;
+  }
   function date(v) {
     if (v === '' || v == null) return '';
     let s = text(v).trim().replace(/[年月/.]/g, '-').replace(/日$/, '');
@@ -194,7 +292,7 @@
     else if (!groups.size && !errors.length) errors.push('本次申请付款金额均为 0，没有需要生成的付款明细');
     return { errors, groups: [...groups.values()] };
   }
-  const api = { fields, required, infoFields, cents, money, upper, text, date, weekFriday, analyze, downloadName, printDownloadName, subjectName, bankSummary, buildDirectory, resolveBank };
+  const api = { fields, required, infoFields, cents, money, upper, text, date, weekFriday, analyze, downloadName, printDownloadName, subjectName, bankSummary, buildDirectory, resolveBank, parseBudget, matchBudget };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PaymentCore = api;
 })(typeof window === 'undefined' ? globalThis : window);

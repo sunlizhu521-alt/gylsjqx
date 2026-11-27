@@ -2,11 +2,12 @@
   'use strict';
   const C = PaymentCore, D = PaymentDocument;
   const state = { revision: 0, workbook: null, sheet: '', fileName: '', template: null, templateName: '内置付款申请模板', analysis: null, outputs: null, error: '', busy: false,
-    times: { detail: '', template: '', directory: '' }, loads: { detail: 0, template: 0, directory: 0 }, pending: {}, templateInitialized: false, restoring: false, cacheMessage: '',
+    times: { detail: '', template: '', directory: '', budget: '' }, loads: { detail: 0, template: 0, directory: 0, budget: 0 }, pending: {}, templateInitialized: false, restoring: false, cacheMessage: '',
+    budgetWorkbook: null, budgetFile: null, budgetName: '', budgetSheet: '', budget: null, budgetFailure: '', budgetConfirmed: new Set(),
     directoryWorkbook: null, directoryName: '', directorySheet: '', directoryHeaders: [], directoryRows: [], directoryErrors: [], directoryMap: { supplier: '', bank: '', unit: '' }, directoryFailure: '', bankPolicy: 'directory' };
   const now = () => new Date().toLocaleString('zh-CN', { hour12: false });
   const reference = kind => state.pending[kind] ? '正在读取…' : state.times[kind] || '未引用';
-  function beginLoad(kind) { invalidate(); state.pending[kind] = true; state.times[kind] = ''; return ++state.loads[kind]; }
+  function beginLoad(kind) { invalidate(); if (kind === 'detail' || kind === 'budget') state.budgetConfirmed.clear(); state.pending[kind] = true; state.times[kind] = ''; return ++state.loads[kind]; }
   const esc = s => C.text(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let root;
   function invalidate() {
@@ -24,10 +25,10 @@
     if (!response.ok) throw new Error('内置模板读取失败，请刷新或上传模板');
     return D.readTemplate(await response.arrayBuffer());
   }
-  async function cacheChange(kind, file, time, remove = false) {
+  async function cacheChange(kind, file, time, remove = false, extra = {}) {
     try {
       if (remove) await PaymentCache.remove(kind);
-      else await PaymentCache.put(kind, { blob: file, name: file?.name || '', time });
+      else await PaymentCache.put(kind, { blob: file, name: file?.name || '', time, ...extra });
     } catch (_) {
       state.cacheMessage = '浏览器未能保存文件缓存，本次仍可使用；下次打开需重新上传。';
       const note = root?.querySelector('#paymentCacheMessage'); if (note) note.textContent = state.cacheMessage;
@@ -36,9 +37,9 @@
   async function restoreFiles() {
     state.restoring = true; render();
     try {
-      for (const [kind, upload] of [['template', uploadTemplate], ['directory', uploadDirectory], ['detail', uploadExcel]]) {
+      for (const [kind, upload] of [['template', uploadTemplate], ['directory', uploadDirectory], ['budget', uploadBudget], ['detail', uploadExcel]]) {
         const saved = await PaymentCache.get(kind);
-        if (saved) await upload(saved.blob ? new File([saved.blob], saved.name) : null, saved.time);
+        if (saved) await upload(saved.blob ? new File([saved.blob], saved.name) : null, saved.time, saved.sheet);
         else if (kind === 'template') await uploadTemplate(null);
       }
     } catch (_) {
@@ -47,13 +48,15 @@
     } finally { state.restoring = false; render(); }
   }
   async function clearCachedFiles() {
-    for (const kind of ['detail', 'template', 'directory']) { state.loads[kind]++; state.pending[kind] = false; }
+    invalidate(); state.budgetConfirmed.clear();
+    for (const kind of ['detail', 'template', 'directory', 'budget']) { state.loads[kind]++; state.pending[kind] = false; }
     state.restoring = true; render();
     try { await PaymentCache.clear(); }
     catch (_) { state.restoring = false; state.cacheMessage = '缓存清除失败，请重试或在浏览器设置中清除此网站的数据。'; render(); return; }
-    for (const kind of ['detail', 'template', 'directory']) { state.loads[kind]++; state.pending[kind] = false; state.times[kind] = ''; }
+    for (const kind of ['detail', 'template', 'directory', 'budget']) { state.loads[kind]++; state.pending[kind] = false; state.times[kind] = ''; }
     invalidate(); state.workbook = null; state.analysis = null; state.fileName = ''; state.sheet = '';
     state.directoryWorkbook = null; state.directoryName = ''; state.directoryFailure = ''; state.directoryRows = []; state.directoryHeaders = []; state.directoryErrors = [];
+    state.budgetWorkbook = null; state.budgetFile = null; state.budgetName = ''; state.budgetSheet = ''; state.budget = null; state.budgetFailure = ''; state.budgetConfirmed.clear();
     state.cacheMessage = '已清除上传文件缓存。';
     await uploadTemplate(null);
     state.restoring = false; render();
@@ -77,15 +80,18 @@
         <label class="payment-upload">付款明细（Excel）<input id="paymentExcel" type="file" accept=".xlsx,.xls" /><span>${esc(state.fileName || '请选择付款明细文件')}</span><small data-reference="detail">引用时间：${esc(reference('detail'))}</small></label>
         <label class="payment-upload">付款申请模板（Word，可选）<input id="paymentTemplate" type="file" accept=".docx" /><span>${esc(state.templateName)}</span><small data-reference="template">引用时间：${esc(reference('template'))}</small></label>
         <label class="payment-upload">供应商名录（Excel，可选）<input id="paymentDirectory" type="file" accept=".xlsx,.xls" /><span>${esc(state.directoryName || '按供应商全称获取银行信息')}</span><small data-reference="directory">引用时间：${esc(reference('directory'))}</small></label>
+        <label class="payment-upload">月份预算表（Excel，可选）<input id="paymentBudget" type="file" accept=".xlsx,.xls" /><span>${esc(state.budgetName || '选择本次核对的月份预算文件')}</span><small data-reference="budget">引用时间：${esc(reference('budget'))}</small></label>
       </div>
       <div class="payment-toolbar"><span id="paymentCacheMessage">${esc(state.cacheMessage || (state.restoring ? '正在恢复本机缓存…' : '已启用本机文件缓存，下次打开自动恢复。文件不会上传服务器。'))}</span><button id="paymentClearCache" class="secondary-button">清除上传文件缓存</button></div>
       <div id="paymentDirectorySettings"></div>
+      <div id="paymentBudgetSettings"></div>
       <div class="payment-toolbar"><label>工作表 <select id="paymentSheet" ${state.workbook ? '' : 'disabled'}>${(state.workbook?.SheetNames || []).map(n => `<option ${n === state.sheet ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label><button id="paymentResetTemplate" class="secondary-button">恢复内置付款申请模板</button></div>
       <p class="payment-fixed">付款类型：<strong>采购货款</strong>　付款方式：<strong>对公转账</strong>（固定）</p>
       <p class="payment-hint">引用供应商名录时，“开户银行及账号”显示银行名称和卡号；未引用名录时整理原明细的单位和账号。账号空格保留，原始明细不改。</p>
       <p class="payment-hint">付款明细备注：付款分类-经办人-原明细备注，空白项略过。</p>
       <div id="paymentStatus" role="status" aria-live="polite"></div>
       <div id="paymentGroups"></div>
+      <div id="paymentBudgetChecks"></div>
       <div class="payment-actions"><button id="paymentGenerate" class="primary-button" ${state.busy ? 'disabled' : ''}>${state.busy ? '正在排版…' : '核对并生成预览'}</button><button id="paymentDownloadWord" class="secondary-button" ${state.busy ? 'disabled' : ''}>一键下载 Word</button><button class="secondary-button" data-payment-download="docx" disabled>下载 Word</button><button class="secondary-button" data-payment-download="pdf" disabled>下载 PDF 打印版</button></div>
       <p class="payment-hint">Word 和 PDF 均为 A4 横向，已留打印边距。打印请选择 A4、横向、“实际大小 / 100%”；明细字号最低 8 磅，放不下时自动分页。Word/WPS 字体替换可能影响分页，固定打印可用 PDF。</p>
       <div id="paymentPages"></div>
@@ -94,8 +100,9 @@
     root.querySelector('#paymentExcel').addEventListener('change', e => uploadExcel(e.target.files[0]));
     root.querySelector('#paymentTemplate').addEventListener('change', e => uploadTemplate(e.target.files[0]));
     root.querySelector('#paymentDirectory').addEventListener('change', e => uploadDirectory(e.target.files[0]));
+    root.querySelector('#paymentBudget').addEventListener('change', e => uploadBudget(e.target.files[0]));
     root.querySelector('#paymentResetTemplate').addEventListener('click', () => uploadTemplate(null));
-    root.querySelector('#paymentSheet').addEventListener('change', e => { invalidate(); state.sheet = e.target.value; analyzeSheet(); renderGroups(); });
+    root.querySelector('#paymentSheet').addEventListener('change', e => { invalidate(); state.budgetConfirmed.clear(); state.sheet = e.target.value; analyzeSheet(); renderGroups(); });
     root.querySelector('#paymentGenerate').addEventListener('click', generate);
     root.querySelector('#paymentDownloadWord').addEventListener('click', downloadAllWord);
     root.onclick = e => {
@@ -108,6 +115,7 @@
       catch (e) { status(e.message, true); }
     };
     renderDirectorySettings();
+    renderBudgetSettings();
     renderGroups();
     if (state.outputs) showOutputs();
     else if (state.error) status(state.error, true);
@@ -155,6 +163,86 @@
         if (old) { group.info = { ...old.info }; }
       }
     }
+  }
+  async function uploadBudget(file, savedTime, savedSheet = '') {
+    if (!file) return;
+    const load = beginLoad('budget');
+    if (!savedTime) void cacheChange('budget', null, '', true);
+    state.budgetName = file.name; state.budgetFile = null; state.budgetWorkbook = null;
+    state.budgetSheet = ''; state.budget = null; state.budgetFailure = '';
+    refreshPayments(); render();
+    try {
+      if (!/\.(xlsx|xls)$/i.test(file.name) || file.size > 30 * 1024 * 1024) throw new Error('请选择 30 MB 以内的月份预算 Excel 文件');
+      const bytes = await file.arrayBuffer();
+      if (load !== state.loads.budget) return;
+      const book = XLSX.read(bytes, { type: 'array', cellFormula: true, cellNF: true });
+      const budget = C.parseBudget(book, file.name, XLSX, savedSheet);
+      if (!budget.sheetNames.length) throw new Error(budget.errors.join('；'));
+      state.budgetWorkbook = book; state.budgetFile = file; state.budget = budget; state.budgetSheet = budget.sheetName;
+      state.pending.budget = false; state.times.budget = savedTime || now();
+      if (!savedTime) void cacheChange('budget', file, state.times.budget, false, { sheet: state.budgetSheet });
+      refreshPayments(); render();
+    } catch (e) {
+      if (load !== state.loads.budget) return;
+      state.pending.budget = false; state.budgetWorkbook = null; state.budget = null; state.budgetFile = null; state.budgetFailure = e.message;
+      refreshPayments(); render(); status(e.message, true);
+    }
+  }
+  function renderBudgetSettings() {
+    const host = root.querySelector('#paymentBudgetSettings');
+    if (!state.budgetName) { host.replaceChildren(); return; }
+    const budget = state.budget;
+    host.innerHTML = `<section class="payment-group"><h3>月份预算表</h3><p>${esc(state.budgetName)}</p>
+      ${budget ? `<label>预算工作表 <select id="paymentBudgetSheet"><option value="">请选择预算工作表</option>${budget.sheetNames.map(name => `<option value="${esc(name)}" ${name === state.budgetSheet ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>` : ''}
+      <button id="paymentClearBudget" class="secondary-button">移除月份预算表</button>
+      ${budget?.sheetName && !budget.errors.length ? `<p>已读取 ${budget.rows.length} 条预算，使用当前工作表全部记录核对。</p>` : ''}
+      <details><summary>查看预算核对规则</summary><p class="payment-hint">预算月份和文件名不固定，以本次所选工作表为准。有OA号时优先按编号核对供应商和付款主体；任一侧缺号时，名称和主体唯一对应才匹配。金额逐笔完全一致才通过，不累计、不扣减预算。编号冲突、多候选或金额差异须逐条确认后继续；确认不修改原数据。核对信息不写入打印单。</p></details>
+      </section>`;
+    host.querySelector('#paymentBudgetSheet')?.addEventListener('change', e => {
+      invalidate(); state.budgetConfirmed.clear();
+      state.budget = C.parseBudget(state.budgetWorkbook, state.budgetName, XLSX, e.target.value);
+      state.budgetSheet = state.budget.sheetName;
+      void cacheChange('budget', state.budgetFile, state.times.budget, false, { sheet: state.budgetSheet });
+      refreshPayments(); render();
+    });
+    host.querySelector('#paymentClearBudget').addEventListener('click', () => {
+      invalidate(); state.loads.budget++; state.pending.budget = false; state.times.budget = ''; state.budgetConfirmed.clear();
+      state.budgetWorkbook = null; state.budgetFile = null; state.budget = null; state.budgetName = ''; state.budgetSheet = ''; state.budgetFailure = '';
+      void cacheChange('budget', null, '', true); refreshPayments(); render();
+    });
+  }
+  function budgetProblems() {
+    if (!state.budgetName) return [];
+    if (state.budgetFailure) return [state.budgetFailure];
+    if (!state.budget) return ['月份预算表尚未成功读取'];
+    return state.budget.errors;
+  }
+  function renderBudgetChecks() {
+    const host = root.querySelector('#paymentBudgetChecks');
+    if (!state.budgetName) { host.innerHTML = '<p class="payment-hint">未进行预算核对（未上传月份预算表）。</p>'; return; }
+    if (state.pending.budget) { host.textContent = '正在读取月份预算表…'; return; }
+    const errors = budgetProblems();
+    if (errors.length) { host.innerHTML = `<div class="payment-error">${errors.map(esc).join('<br>')}<br>请修正或移除月份预算表后重新生成。</div>`; return; }
+    const rows = (state.analysis?.groups || []).flatMap(group => group.rows).filter(row => row._budgetCheck);
+    if (!rows.length) { host.innerHTML = '<p class="payment-hint">上传有效付款明细后逐笔核对预算。</p>'; return; }
+    const matched = rows.filter(row => row._budgetCheck.status === 'matched').length;
+    const source = value => `${value.filename} / ${value.sheet} 第 ${value.row} 行`;
+    host.innerHTML = `<section class="payment-group"><h3>月份预算核对 <small>预算内 ${matched} 笔，待核对 ${rows.length - matched} 笔</small></h3>
+      ${rows.map(row => {
+        const check = row._budgetCheck, passed = check.status === 'matched';
+        return `<details class="payment-budget-check" data-budget-row="${row._row}" ${passed ? '' : 'open'}>
+          <summary><span class="payment-budget-result">${passed ? '预算内' : '待核对'}</span> · 第 ${row._row} 行 ${esc(row['供应商全称'])} · ￥${esc(C.money(row._cents))}</summary>
+          <p>${esc(check.reason)}</p>
+          <p>申请来源：${esc(source({filename:state.fileName, sheet:state.sheet, row:row._row}))}<br>申请：OA号 ${esc(row['合同编号'] || '（空白）')}；供应商 ${esc(row['供应商全称'])}；付款主体 ${esc(row['付款主体'])}；金额 ${esc(C.money(row._cents))}</p>
+          ${check.candidates.length ? `<ul>${check.candidates.map(candidate => `<li>预算来源：${esc(source(candidate.source))}<br>预算：OA号 ${esc(candidate.oa || '（空白）')}；供应商 ${esc(candidate.supplier)}；付款主体 ${esc(candidate.subject)}；金额 ${esc(C.money(candidate.amount))}</li>`).join('')}</ul>` : ''}
+          ${passed ? '' : `<label><input type="checkbox" data-budget-confirm ${state.budgetConfirmed.has(String(row._row)) ? 'checked' : ''} />已核实，确认继续生成</label>`}
+          </details>`;
+      }).join('')}</section>`;
+    host.querySelectorAll('[data-budget-confirm]').forEach(input => input.addEventListener('change', () => {
+      const row = input.closest('[data-budget-row]').dataset.budgetRow;
+      if (input.checked) state.budgetConfirmed.add(row); else state.budgetConfirmed.delete(row);
+      invalidate(); status('预算核对确认已更新，请重新生成预览');
+    }));
   }
   async function uploadDirectory(file, savedTime) {
     if (!file) return;
@@ -286,10 +374,14 @@
         if (resolved.conflict) group.bankChecks.push(`第 ${row._row} 行 ${row['供应商全称']}：名录与明细的收款单位或账号不一致`);
       }
     }
+    if (!state.analysis.errors.length && state.budgetName && !budgetProblems().length) {
+      for (const group of state.analysis.groups) for (const row of group.rows) row._budgetCheck = C.matchBudget(row, state.budget);
+    }
     state.error = '';
   }
   function renderGroups() {
     const host = root.querySelector('#paymentGroups'), a = state.analysis;
+    renderBudgetChecks();
     if (!a) { host.replaceChildren(); return; }
     if (a.errors.length) { host.innerHTML = `<div class="payment-error"><strong>请先修正以下问题后重新上传：</strong><ul>${a.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>`; return; }
     host.innerHTML = a.groups.map((g, i) => `<section class="payment-group" data-group="${i}">
@@ -317,6 +409,10 @@
       const a = state.analysis;
       if (Object.values(state.pending).some(Boolean)) throw new Error('文件正在读取，请稍候再生成');
       if (!a || a.errors.length || !a.groups.length) throw new Error('请先上传并修正付款明细');
+      const budgetErrors = budgetProblems();
+      if (budgetErrors.length) throw new Error(budgetErrors.join('；'));
+      const unconfirmed = a.groups.flatMap(group => group.rows).filter(row => row._budgetCheck?.status === 'review' && !state.budgetConfirmed.has(String(row._row)));
+      if (unconfirmed.length) throw new Error(`请逐条确认预算核对：付款明细第 ${unconfirmed.map(row => row._row).join('、')} 行。`);
       if (!state.template) throw new Error('请先选择有效模板');
       for (const g of a.groups) {
         for (const f of C.infoFields) if (!g.info[f].trim()) throw new Error(`${g.subject}：请填写${f}，源数据冲突时需指定统一值`);
@@ -343,7 +439,7 @@
     } catch (e) { if (revision === state.revision) status(e.message, true); }
     finally {
       state.busy = false;
-      const button = root.querySelector('#paymentGenerate'); if (button) { button.disabled = false; button.textContent = '核对并生成预览'; }
+      const button = root.querySelector('#paymentGenerate'); if (button) { button.disabled = state.restoring; button.textContent = '核对并生成预览'; }
       const download = root.querySelector('#paymentDownloadWord'); if (download) download.disabled = state.restoring;
     }
   }

@@ -1,7 +1,8 @@
+#toolPanel { min-width:0; }
 .payment-tool { width:100%; min-width:0; }
 .payment-intro,.payment-hint { color:var(--muted); line-height:1.6; }
 .payment-upload-grid,.payment-info-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
-.payment-upload-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.payment-upload-grid { grid-template-columns:repeat(4,minmax(220px,1fr)); overflow-x:auto; }
 .payment-upload small { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
 .payment-info-grid select { width:100%; min-width:0; padding:8px; }
 #paymentBankPolicy { max-width:100%; margin:8px 12px 8px 0; }
@@ -20,6 +21,11 @@
 .payment-error { color:#b42318; white-space:pre-wrap; overflow-wrap:anywhere; }
 .payment-warning { padding:12px; margin:12px 0; color:var(--text); border:1px solid #d99d32; border-radius:6px; }
 .payment-warning label { display:block; margin-top:8px; }
+.payment-budget-check { border-top:1px solid var(--line-strong); padding:12px 0; overflow-wrap:anywhere; }
+.payment-budget-check summary { cursor:pointer; }
+.payment-budget-check p,.payment-budget-check li { line-height:1.6; }
+.payment-budget-check label { display:block; margin-top:10px; }
+#paymentBudgetSheet { max-width:100%; margin:8px 12px 8px 0; padding:8px; }
 .payment-detail-scroll { max-height:360px; overflow:auto; margin-top:12px; }
 .payment-detail-scroll table { border-collapse:collapse; min-width:1100px; width:100%; font-size:12px; }
 .payment-detail-scroll td,.payment-detail-scroll th { border:1px solid var(--line-strong); padding:8px; white-space:pre-wrap; vertical-align:top; }
@@ -29,4 +35,4 @@
 .payment-preview canvas { display:block; max-width:100%; height:auto; border:1px solid #ccc; background:white; }
 .payment-actions button:disabled { opacity:.45; cursor:not-allowed; }
 #paymentStatus { margin:12px 0; line-height:1.6; }
-@media(max-width:760px) { .payment-upload-grid,.payment-info-grid { grid-template-columns:1fr; } .payment-group { padding:12px; } .payment-toolbar select { max-width:150px; } }
+@media(max-width:760px) { .payment-info-grid { grid-template-columns:1fr; } .payment-group { padding:12px; } .payment-toolbar select { max-width:150px; } }
