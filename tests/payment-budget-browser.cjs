@@ -75,9 +75,25 @@ const budgetBytes = rows => bytes([['预算明细', [budgetHeaders, ...rows]]]);
       await file.saveAs(target);
       return fs.readFile(target);
     }
-    const checks = () => page.locator('#paymentBudgetChecks .payment-budget-check');
+    const checks = () => page.locator('#paymentBudgetChecks tbody > tr.payment-budget-check');
     const results = () => page.locator('#paymentBudgetChecks .payment-budget-result').allTextContents();
     const previewImages = () => page.locator('#paymentPages canvas').evaluateAll(canvases => canvases.map(canvas => canvas.toDataURL()));
+    async function assertBudgetTable(sourceRows) {
+      const tables = page.locator('#paymentBudgetChecks table');
+      assert.equal(await tables.count(), 1, 'budget checks use one semantic table');
+      const snapshot = await tables.evaluate(table => ({
+        headings: [...table.tHead.rows[0].cells].map(cell => ({tag:cell.tagName,text:cell.textContent.trim()})),
+        bodies: table.tBodies.length,
+        rows: [...table.tBodies[0].rows].map(row => ({tag:row.tagName,source:Number(row.dataset.budgetRow),cells:row.cells.length})),
+      }));
+      assert.equal(snapshot.headings.length, 6);
+      [/核对结果/,/付款申请/,/申请金额/,/预算信息/,/核对说明/,/确认/].forEach((label, index) => {
+        assert.equal(snapshot.headings[index].tag, 'TH'); assert.match(snapshot.headings[index].text, label);
+      });
+      assert.equal(snapshot.bodies, 1);
+      assert.deepEqual(snapshot.rows, sourceRows.map(source => ({tag:'TR',source,cells:6})), 'each application remains one six-column row');
+      assert.equal(await checks().count(), sourceRows.length);
+    }
     async function confirmAll() {
       for (const input of await page.locator('[data-budget-confirm]').all()) await input.check();
     }
@@ -93,7 +109,7 @@ const budgetBytes = rows => bytes([['预算明细', [budgetHeaders, ...rows]]]);
     // A later year's budget is still the selected budget; no implicit date filter.
     await upload('budget', budgetBytes([budgetRow(first)]), '2027年1月预算.xlsx');
     await blocked();
-    assert.equal(await checks().count(), 1);
+    await assertBudgetTable([2]);
     assert.deepEqual(await results(), ['预算内']);
     assert.equal(await page.locator('[data-budget-confirm]').count(), 0);
     assert.match(await page.locator('#paymentBudgetSettings').innerText(), /2027年1月预算.xlsx|预算明细/);
@@ -108,6 +124,7 @@ const budgetBytes = rows => bytes([['预算明细', [budgetHeaders, ...rows]]]);
     // Both missing budget and unequal amount need their own explicit confirmation.
     await upload('detail', detailBytes([first, second]), '合成付款明细.xlsx');
     await upload('budget', budgetBytes([budgetRow(first, '99.00')]), '合成月份预算.xlsx');
+    await assertBudgetTable([2,3]);
     assert.deepEqual(await results(), ['待核对', '待核对']);
     assert.equal(await page.locator('[data-budget-confirm]').count(), 2);
     assert.match(await checks().first().innerText(), /99\.00|99/);
@@ -136,6 +153,25 @@ const budgetBytes = rows => bytes([['预算明细', [budgetHeaders, ...rows]]]);
     await confirmAll();
     await upload('detail', detailBytes([first, second]), '合成付款明细.xlsx');
     assert.equal(await page.locator('[data-budget-confirm]:checked').count(), 0, 'new detail file resets budget confirmations');
+
+    // Multiple candidate budgets stay inside the same application row and need one confirmation.
+    await upload('budget', budgetBytes([budgetRow(first),budgetRow(first,'101.00'),budgetRow(second)]), '合成多候选预算.xlsx');
+    await assertBudgetTable([2,3]);
+    assert.deepEqual(await results(), ['待核对','预算内']);
+    const candidateCell = checks().first().locator('td').nth(3);
+    assert.equal(await candidateCell.locator('.payment-budget-candidate').count(), 2);
+    assert.equal(await checks().nth(1).locator('td').nth(3).locator('.payment-budget-candidate').count(), 1);
+    assert.match(await candidateCell.innerText(), /合成多候选预算.xlsx/);
+    assert.match(await candidateCell.innerText(), /预算明细.*第\s*2\s*行/);
+    assert.match(await candidateCell.innerText(), /预算明细.*第\s*3\s*行/);
+    assert.match(await candidateCell.innerText(), /100\.00/);
+    assert.match(await candidateCell.innerText(), /101\.00/);
+    assert.equal(await checks().first().locator('[data-budget-confirm]').count(), 1);
+    assert.equal(await checks().nth(1).locator('[data-budget-confirm]').count(), 0);
+    await blockedGeneration();
+    await checks().first().locator('[data-budget-confirm]').check();
+    await generate(); assert.match(await page.locator('#paymentStatus').innerText(), /已生成/);
+    await assertBudgetTable([2,3]);
 
     // Multiple valid sheets require a deliberate selection and switching clears approval.
     const multi = bytes([
@@ -216,7 +252,15 @@ const budgetBytes = rows => bytes([['预算明细', [budgetHeaders, ...rows]]]);
     const box = await page.locator('#paymentBudget').boundingBox();
     assert(box && box.width > 0 && box.x >= -1 && box.x + box.width <= 391, 'budget upload control remains usable on mobile');
     await page.screenshot({path:path.join(out,'budget-mobile.png'),fullPage:false});
+    const tableScroll = page.locator('.payment-budget-table-scroll');
+    await tableScroll.scrollIntoViewIfNeeded();
+    assert(await tableScroll.evaluate(el => el.scrollWidth > el.clientWidth), 'wide table scrolls inside the mobile page');
+    await page.screenshot({path:path.join(out,'budget-table-mobile.png'),fullPage:false});
+    await page.locator('[data-budget-confirm]').first().scrollIntoViewIfNeeded();
+    const confirmationBox = await page.locator('[data-budget-confirm]').first().boundingBox();
+    assert(confirmationBox && confirmationBox.x >= 0 && confirmationBox.x + confirmationBox.width <= 391, 'confirmation is reachable by horizontal scroll');
     await page.setViewportSize({width:1440,height:1000});
+    await tableScroll.evaluate(el => { el.scrollLeft = 0; });
     await page.locator('#paymentBudgetChecks').scrollIntoViewIfNeeded();
     await page.screenshot({path:path.join(out,'budget-review.png'),fullPage:false});
     // Clearing cache invalidates an in-flight generation before the database clear finishes.
@@ -262,6 +306,6 @@ const budgetBytes = rows => bytes([['预算明细', [budgetHeaders, ...rows]]]);
     assert.equal(await checks().count(), 0);
     await blocked();
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({status:'PASS',base,out,optionalBudget:true,exactMatch:true,individualReview:true,allDownloadGates:true,unchangedPrint:true,sameNameReplacement:true,detailReset:true,dynamicMonths:true,sheetSelection:true,latestBudgetWins:true,invalidRecovery:true,formulaGuard:true,cacheRestore:true,clearCache:true,clearDuringGeneration:true,mobile:true,errors}));
+    console.log(JSON.stringify({status:'PASS',base,out,optionalBudget:true,exactMatch:true,budgetTable:true,multipleCandidatesOneRow:true,individualReview:true,allDownloadGates:true,unchangedPrint:true,sameNameReplacement:true,detailReset:true,dynamicMonths:true,sheetSelection:true,latestBudgetWins:true,invalidRecovery:true,formulaGuard:true,cacheRestore:true,clearCache:true,clearDuringGeneration:true,mobile:true,errors}));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

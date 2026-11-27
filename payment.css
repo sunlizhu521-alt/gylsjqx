@@ -21,10 +21,25 @@
 .payment-error { color:#b42318; white-space:pre-wrap; overflow-wrap:anywhere; }
 .payment-warning { padding:12px; margin:12px 0; color:var(--text); border:1px solid #d99d32; border-radius:6px; }
 .payment-warning label { display:block; margin-top:8px; }
-.payment-budget-check { border-top:1px solid var(--line-strong); padding:12px 0; overflow-wrap:anywhere; }
-.payment-budget-check summary { cursor:pointer; }
-.payment-budget-check p,.payment-budget-check li { line-height:1.6; }
-.payment-budget-check label { display:block; margin-top:10px; }
+.payment-budget-table-scroll { max-height:560px; overflow:auto; margin-top:12px; }
+.payment-budget-table { width:100%; min-width:980px; table-layout:fixed; border-collapse:separate; border-spacing:0; font-size:13px; line-height:1.6; }
+.payment-budget-table th,.payment-budget-table td { padding:10px; border-right:1px solid var(--line-strong); border-bottom:1px solid var(--line-strong); vertical-align:top; text-align:left; }
+.payment-budget-table th { position:sticky; top:0; z-index:1; background:var(--surface-2); border-top:1px solid var(--line-strong); white-space:nowrap; }
+.payment-budget-table th:first-child,.payment-budget-table td:first-child { border-left:1px solid var(--line-strong); }
+.payment-budget-table td { background:var(--surface-solid); overflow-wrap:anywhere; }
+.payment-budget-table th:nth-child(1) { width:7%; }
+.payment-budget-table th:nth-child(2) { width:22%; }
+.payment-budget-table th:nth-child(3) { width:12%; }
+.payment-budget-table th:nth-child(4) { width:24%; }
+.payment-budget-table th:nth-child(5) { width:20%; }
+.payment-budget-table th:nth-child(6) { width:15%; }
+.payment-budget-result,.payment-budget-amount { white-space:nowrap; }
+.payment-budget-result { font-weight:600; }
+.payment-budget-result.is-matched { color:#167044; }
+.payment-budget-result.is-review { color:#9a5800; }
+.payment-budget-source { display:block; margin-top:6px; }
+.payment-budget-candidate + .payment-budget-candidate { border-top:1px solid var(--line-strong); margin-top:10px; padding-top:10px; }
+.payment-budget-check label { cursor:pointer; }
 #paymentBudgetSheet { max-width:100%; margin:8px 12px 8px 0; padding:8px; }
 .payment-detail-scroll { max-height:360px; overflow:auto; margin-top:12px; }
 .payment-detail-scroll table { border-collapse:collapse; min-width:1100px; width:100%; font-size:12px; }

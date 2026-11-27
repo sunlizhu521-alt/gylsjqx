@@ -228,16 +228,19 @@
     const matched = rows.filter(row => row._budgetCheck.status === 'matched').length;
     const source = value => `${value.filename} / ${value.sheet} 第 ${value.row} 行`;
     host.innerHTML = `<section class="payment-group"><h3>月份预算核对 <small>预算内 ${matched} 笔，待核对 ${rows.length - matched} 笔</small></h3>
+      <div class="payment-budget-table-scroll" tabindex="0" role="region" aria-label="月份预算核对表，可横向滚动"><table class="payment-budget-table" aria-label="月份预算核对">
+      <thead><tr>${['核对结果', '付款申请', '申请金额', '预算信息', '核对说明', '确认'].map(title => `<th scope="col">${title}</th>`).join('')}</tr></thead><tbody>
       ${rows.map(row => {
         const check = row._budgetCheck, passed = check.status === 'matched';
-        return `<details class="payment-budget-check" data-budget-row="${row._row}" ${passed ? '' : 'open'}>
-          <summary><span class="payment-budget-result">${passed ? '预算内' : '待核对'}</span> · 第 ${row._row} 行 ${esc(row['供应商全称'])} · ￥${esc(C.money(row._cents))}</summary>
-          <p>${esc(check.reason)}</p>
-          <p>申请来源：${esc(source({filename:state.fileName, sheet:state.sheet, row:row._row}))}<br>申请：OA号 ${esc(row['合同编号'] || '（空白）')}；供应商 ${esc(row['供应商全称'])}；付款主体 ${esc(row['付款主体'])}；金额 ${esc(C.money(row._cents))}</p>
-          ${check.candidates.length ? `<ul>${check.candidates.map(candidate => `<li>预算来源：${esc(source(candidate.source))}<br>预算：OA号 ${esc(candidate.oa || '（空白）')}；供应商 ${esc(candidate.supplier)}；付款主体 ${esc(candidate.subject)}；金额 ${esc(C.money(candidate.amount))}</li>`).join('')}</ul>` : ''}
-          ${passed ? '' : `<label><input type="checkbox" data-budget-confirm ${state.budgetConfirmed.has(String(row._row)) ? 'checked' : ''} />已核实，确认继续生成</label>`}
-          </details>`;
-      }).join('')}</section>`;
+        return `<tr class="payment-budget-check" data-budget-row="${row._row}">
+          <td><span class="payment-budget-result ${passed ? 'is-matched' : 'is-review'}">${passed ? '预算内' : '待核对'}</span></td>
+          <td><strong>${esc(row['供应商全称'] || '（供应商空白）')}</strong><br>付款主体：${esc(row['付款主体'] || '（空白）')}<br>OA号：${esc(row['合同编号'] || '（空白）')}<small class="payment-budget-source">申请来源：${esc(source({filename:state.fileName, sheet:state.sheet, row:row._row}))}</small></td>
+          <td class="payment-budget-amount">￥${esc(C.money(row._cents))}</td>
+          <td>${check.candidates.length ? check.candidates.map((candidate, index) => `<div class="payment-budget-candidate">${check.candidates.length > 1 ? `<strong>候选 ${index + 1}</strong><br>` : ''}供应商：${esc(candidate.supplier || '（空白）')}<br>付款主体：${esc(candidate.subject || '（空白）')}<br>OA号：${esc(candidate.oa || '（空白）')}<br>预算金额：<span class="payment-budget-amount">￥${esc(C.money(candidate.amount))}</span><small class="payment-budget-source">预算来源：${esc(source(candidate.source))}</small></div>`).join('') : '未找到对应预算'}</td>
+          <td>${esc(check.reason)}</td>
+          <td>${passed ? '无需确认' : `<label><input type="checkbox" data-budget-confirm ${state.budgetConfirmed.has(String(row._row)) ? 'checked' : ''} />已核实，确认继续生成</label>`}</td>
+          </tr>`;
+      }).join('')}</tbody></table></div></section>`;
     host.querySelectorAll('[data-budget-confirm]').forEach(input => input.addEventListener('change', () => {
       const row = input.closest('[data-budget-row]').dataset.budgetRow;
       if (input.checked) state.budgetConfirmed.add(row); else state.budgetConfirmed.delete(row);
