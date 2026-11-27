@@ -291,8 +291,7 @@
         const oaGroups = new Map();
         for (const candidate of oa?.candidates || []) {
           const key = JSON.stringify([candidate.amountText, candidate.unoperated]);
-          if (!oaGroups.has(key)) oaGroups.set(key, { ...candidate, sources: [] });
-          oaGroups.get(key).sources.push(candidate.source);
+          if (!oaGroups.has(key)) oaGroups.set(key, candidate);
         }
         const oaValues = [...oaGroups.values()];
         return `<tr class="payment-budget-check" data-budget-row="${row._row}">
@@ -300,7 +299,7 @@
           <td><strong>${esc(row['供应商全称'] || '（供应商空白）')}</strong><br>付款主体：${esc(row['付款主体'] || '（空白）')}<br>OA号：${esc(row['合同编号'] || '（空白）')}<small class="payment-budget-source">申请来源：${esc(source({filename:state.fileName, sheet:state.sheet, row:row._row}))}</small></td>
           <td class="payment-budget-amount">￥${esc(C.money(row._cents))}</td>
           <td>${check?.candidates.length ? check.candidates.map((candidate, index) => `<div class="payment-budget-candidate">${check.candidates.length > 1 ? `<strong>候选 ${index + 1}</strong><br>` : ''}供应商：${esc(candidate.supplier || '（空白）')}<br>付款主体：${esc(candidate.subject || '（空白）')}<br>OA号：${esc(candidate.oa || '（空白）')}<br>预算金额：<span class="payment-budget-amount">￥${esc(C.money(candidate.amount))}</span><small class="payment-budget-source">预算来源：${esc(source(candidate.source))}</small></div>`).join('') : check ? '未找到对应预算' : '未进行预算核对'}</td>
-          ${state.oaName ? `<td class="payment-oa-amount">${oaValues.length ? oaValues.map((candidate, index) => `<div class="payment-budget-candidate">${oaValues.length > 1 ? `记录 ${index + 1}：` : ''}<span class="payment-budget-amount">￥${esc(candidate.amountText)}</span><small class="payment-budget-source">流程编码：${esc(candidate.oa)}<br>OA来源：${candidate.sources.map(value => esc(source(value))).join('<br>')}</small></div>`).join('') : '未找到对应OA'}</td><td class="payment-oa-unoperated">${oaValues.length ? oaValues.map((candidate, index) => `${oaValues.length > 1 ? `记录 ${index + 1}：` : ''}${esc(candidate.unoperated || '（空白）')}`).join('<br>') : '—'}</td>` : ''}
+          ${state.oaName ? `<td class="payment-oa-amount">${oaValues.length ? oaValues.map((candidate, index) => `<div class="payment-budget-candidate">${oaValues.length > 1 ? `记录 ${index + 1}：` : ''}<span class="payment-budget-amount">￥${esc(candidate.amountText)}</span><small class="payment-budget-source">流程编码：${esc(candidate.oa)}</small></div>`).join('') : '未找到对应OA'}</td><td class="payment-oa-unoperated">${oaValues.length ? oaValues.map((candidate, index) => `${oaValues.length > 1 ? `记录 ${index + 1}：` : ''}${esc(candidate.unoperated || '（空白）')}`).join('<br>') : '—'}</td>` : ''}
           <td>${[check ? `${state.oaName ? '预算：' : ''}${check.reason}` : '', oa ? `OA：${oa.reason}` : ''].filter(Boolean).map(esc).join('<br>')}</td>
           <td>${passed ? '无需确认' : `<label><input type="checkbox" data-budget-confirm ${state.budgetConfirmed.has(String(row._row)) ? 'checked' : ''} />已核实，确认继续生成</label>`}</td>
           </tr>`;

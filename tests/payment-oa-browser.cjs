@@ -81,6 +81,9 @@ const docXml = async data => (await Zip.loadAsync(data)).file('word/document.xml
       else { assert(!headers.includes('OA付款金额')); assert(!headers.includes('未操作者')); }
       assert.deepEqual(await rows().evaluateAll(records => records.map(row => Number(row.dataset.budgetRow))),[2,3]);
       assert(await rows().evaluateAll((records, length) => records.every(row => row.cells.length === length),hasOA ? 8 : 6));
+      if (hasOA) for (const value of await page.locator('.payment-oa-amount').allTextContents()) {
+        assert.doesNotMatch(value, /OA来源|第[ ]*[0-9]+[ ]*行|[.]xlsx?/, 'OA amount cells omit source files and rows');
+      }
     }
     async function confirmAll() { for (const input of await page.locator('[data-budget-confirm]').all()) await input.check(); }
     async function save(kind, label) {
