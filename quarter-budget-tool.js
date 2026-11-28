@@ -109,14 +109,25 @@
   }
   function renderPreview() {
     if (!result) return;
-    const rows = result.records.filter(r => (!$('filter-month').value || (r.monthKey || '@undated') === $('filter-month').value) && (!$('filter-category').value || (r.category || '@empty') === $('filter-category').value) && (!$('filter-status').value || (r.status || '@empty') === $('filter-status').value) && (!$('filter-excluded').value || r.excluded === $('filter-excluded').value));
+    const merged = new Map(), folded = new Set();
+    for (const group of C.duplicateReviewGroups(result)) {
+      const choice = duplicateSelection(group);
+      if (!choice.startsWith('keep:')) continue;
+      const keptId = choice.slice(5);
+      merged.set(keptId,group.records);
+      for (const record of group.records) if (record.id !== keptId) folded.add(record.id);
+    }
+    const rows = result.records.filter(r => ($('filter-excluded').value === '是' || !folded.has(r.id)) && (!$('filter-month').value || (r.monthKey || '@undated') === $('filter-month').value) && (!$('filter-category').value || (r.category || '@empty') === $('filter-category').value) && (!$('filter-status').value || (r.status || '@empty') === $('filter-status').value) && (!$('filter-excluded').value || r.excluded === $('filter-excluded').value));
     const comparison = result.comparison;
     const extraHeaders = comparison ? ['系统预算金额','手工预算金额','差异金额','核对结果','系统来源','手工来源'] : [];
-    const detailRow = record => {
+    const comparisonCells = (group,span) => [...[group.systemCents,group.manualCents,group.differenceCents].map(v => v == null ? '金额待核对' : money(v)),group.status,...[group.systemSources,group.manualSources].map(list => (list || []).map(source => sourceText({source})).join('\n'))].map((v,i) => '<td rowspan="' + span + '" class="comparison-cell' + (i < 3 ? ' detail-money' : '') + '">' + esc(v) + '</td>').join('');
+    const detailRow = (record,group,span=1,covered=false) => {
       const values = C.toRow(record).slice();
       values[0] = C.monthLabel(record); values[5] = money(record.cents);
       const style = record.excluded === '是' ? 'excluded' : record.related ? 'related' : record.status === '已支付' ? 'paid' : '';
-      return '<tr class="' + style + '" data-record-id="' + esc(record.id) + '">' + values.map((v,i) => '<td' + (i === 5 ? ' class="detail-money"' : '') + '>' + esc(v?.v !== undefined ? v.v : v) + '</td>').join('') + '<td class="row-action">' + decisionControl(record) + '<p class="row-source">' + esc(sourceText(record)) + '</p></td>' + extraHeaders.map(() => '<td></td>').join('') + '</tr>';
+      const mergedRecords = merged.get(record.id);
+      const source = mergedRecords ? '<details class="merged-sources"><summary>已合并' + mergedRecords.length + '条来源</summary>' + mergedRecords.map(r => '<p class="row-source" data-source-record-id="' + esc(r.id) + '">' + esc([sourceText(r),ownerText(r),C.monthLabel(r),money(r.cents),r.id === record.id ? '本行保留' : '合并来源，不重复计入'].join('\n')) + '</p>').join('') + '</details>' : '<p class="row-source">' + esc(sourceText(record)) + '</p>';
+      return '<tr class="' + style + (group && group.status !== '一致' ? ' comparison-difference' : '') + '" data-record-id="' + esc(record.id) + '"' + (group ? ' data-comparison-key="' + esc(C.comparisonKey(group)) + '"' : '') + '>' + values.map((v,i) => '<td' + (i === 5 ? ' class="detail-money"' : '') + '>' + esc(v?.v !== undefined ? v.v : v) + '</td>').join('') + '<td class="row-action">' + decisionControl(record) + source + '</td>' + (group ? comparisonCells(group,span) : covered ? '' : extraHeaders.map(() => '<td></td>').join('')) + '</tr>';
     };
     const content = [], included = new Set(), groups = new Map();
     for (const record of rows) {
@@ -127,9 +138,12 @@
     for (const group of comparison?.rows || []) {
       const key = C.comparisonKey(group), details = groups.get(key) || [];
       if (!details.length && (($('filter-month').value && $('filter-month').value !== group.monthKey) || ($('filter-category').value && $('filter-category').value !== (group.category || '@empty')) || $('filter-status').value || $('filter-excluded').value)) continue;
-      const values = [C.monthLabel(group),group.supplier,group.subject,'','分组对比（显示' + details.length + '条明细）','','','',group.category,'','','',...[group.systemCents,group.manualCents,group.differenceCents].map(v => v == null ? '金额待核对' : money(v)),group.status,...[group.systemSources,group.manualSources].map(list => (list || []).map(source => sourceText({source})).join('\n'))];
-      content.push('<tr class="comparison-row' + (group.status !== '一致' ? ' comparison-difference' : '') + '" data-comparison-key="' + esc(key) + '">' + values.map((v,i) => '<td' + (i >= 12 && i <= 14 ? ' class="detail-money"' : '') + '>' + esc(v) + '</td>').join('') + '</tr>');
-      for (const record of details) { included.add(record.id); content.push(detailRow(record)); }
+      if (details.length) {
+        details.forEach((record,index) => { included.add(record.id); content.push(detailRow(record,index === 0 ? group : null,details.length,index > 0)); });
+      } else {
+        const values = [C.monthLabel(group),group.supplier,group.subject,'','仅手工预算，无对应付款明细','','','',group.category,'','',''];
+        content.push('<tr class="manual-only comparison-difference" data-comparison-key="' + esc(key) + '">' + values.map(v => '<td>' + esc(v) + '</td>').join('') + comparisonCells(group,1) + '</tr>');
+      }
     }
     for (const record of rows) if (!included.has(record.id)) content.push(detailRow(record));
     $('visible-count').textContent = rows.length;
@@ -171,6 +185,7 @@
       if (!record) continue;
       const relevant = issues.filter(i => i.type !== 'duplicate' && (i.recordIds || []).includes(id));
       if (grouped.has(id) && !relevant.length) continue;
+      if (record.excluded !== '是' && !decisions[id] && !matches[id] && !relevant.some(i => i.blocking && !i.resolved)) continue;
       const candidates = new Map(relevant.flatMap(i => i.candidates || []).map(c => [c.id,c.label]));
       if (matches[id] && !candidates.has(matches[id])) candidates.set(matches[id],'已确认的付款凭据');
       const evidence = candidates.size ? '<select aria-label="' + esc(record.supplier + '：付款凭据') + '" data-action="evidence" data-record-id="' + esc(id) + '"><option value="">暂不指定，按现有证据核对</option>' + [...candidates].map(([key,label]) => '<option value="' + esc(key) + '"' + (matches[id] === key ? ' selected' : '') + '>' + esc(label) + '</option>').join('') + '</select>' : '—';
