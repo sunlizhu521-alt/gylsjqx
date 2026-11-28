@@ -10,6 +10,7 @@
   const message = value => typeof value === 'string' ? value : value?.message || String(value ?? '');
   const month = key => key ? String(key).replace(/^(\d{4})-(\d{2})$/, '$1年$2月') : '月份待核对';
   const money = cents => cents === null || cents === undefined ? '' : C.formatMoney(cents);
+  const ownerText = record => String(record.owner ?? '').trim() || '未填写';
   const sourceText = record => {
     const s = record?.source || {};
     return [s.file, s.sheet, s.row != null ? '第' + s.row + '行' : '', s.part != null && s.part !== '' ? '分期' + s.part : ''].filter(Boolean).join(' / ');
@@ -157,10 +158,10 @@
         catch (_) { totalText = '金额超出可统计范围'; }
       }
       const status = !value ? '待确认' : value === 'custom' ? '逐笔处理，请查看明细' : (value === 'separate' ? '已确认不合并' : '已合并') + '\n计入：' + totalText;
-      const source = '<details><summary>' + esc(group.records.length + '条来源：' + [...new Set(group.records.map(r => labels[r.source.role] || r.source.role))].join('、')) + '</summary>' + group.records.map(r => '<p>' + esc([sourceText(r),'付款月份：' + C.monthLabel(r),r.summary,r.category,(r.cents == null ? '金额待核对' : money(r.cents)) + ' / ' + (r.status || '状态未填'),r.oa ? 'OA：' + r.oa : '无OA号'].filter(Boolean).join('\n')) + '</p>').join('') + '</details>';
-      return '<tr data-group-id="' + esc(group.id) + '">' + [first.supplier,first.subject,C.monthLabel(group),group.cents == null ? '金额待核对' : money(group.cents)].map((v,i) => '<td' + (i === 3 ? ' class="detail-money"' : '') + '>' + esc(v) + (i === 2 && group.monthInferred ? '<small>含月份未填来源</small>' : '') + '</td>').join('') + '<td class="group-source">' + source + '</td><td class="group-action">' + control + (group.restriction ? '<small>' + esc(group.restriction) + '</small>' : '') + '</td><td>' + esc(status) + '</td></tr>';
+      const source = '<details><summary>' + esc(group.records.length + '条来源：' + [...new Set(group.records.map(r => labels[r.source.role] || r.source.role))].join('、')) + '</summary>' + group.records.map(r => '<p>' + esc([sourceText(r),'跟单员：' + ownerText(r),'付款月份：' + C.monthLabel(r),r.summary,r.category,(r.cents == null ? '金额待核对' : money(r.cents)) + ' / ' + (r.status || '状态未填'),r.oa ? 'OA：' + r.oa : '无OA号'].filter(Boolean).join('\n')) + '</p>').join('') + '</details>';
+      return '<tr data-group-id="' + esc(group.id) + '">' + [first.supplier,[...new Set(group.records.map(ownerText))].join('、'),first.subject,C.monthLabel(group),group.cents == null ? '金额待核对' : money(group.cents)].map((v,i) => '<td' + (i === 4 ? ' class="detail-money"' : '') + '>' + esc(v) + (i === 3 && group.monthInferred ? '<small>含月份未填来源</small>' : '') + '</td>').join('') + '<td class="group-source">' + source + '</td><td class="group-action">' + control + (group.restriction ? '<small>' + esc(group.restriction) + '</small>' : '') + '</td><td>' + esc(status) + '</td></tr>';
     });
-    $('duplicate-review').innerHTML = groupRows.length ? '<div id="duplicate-scroll" class="preview review-scroll" tabindex="0" role="region" aria-label="疑似同款分组，可横向滚动"><table class="review-table duplicate-table"><thead><tr>' + ['供应商','付款主体','付款月份','金额','来源对照','是否合并','核对结果'].map(h => '<th scope="col">' + h + '</th>').join('') + '</tr></thead><tbody>' + groupRows.join('') + '</tbody></table></div>' : '';
+    $('duplicate-review').innerHTML = groupRows.length ? '<div id="duplicate-scroll" class="preview review-scroll" tabindex="0" role="region" aria-label="疑似同款分组，可横向滚动"><table class="review-table duplicate-table"><thead><tr>' + ['供应商','跟单员','付款主体','付款月份','金额','来源对照','是否合并','核对结果'].map(h => '<th scope="col">' + h + '</th>').join('') + '</tr></thead><tbody>' + groupRows.join('') + '</tbody></table></div>' : '';
     const ids = new Set([...issues.flatMap(i => i.recordIds || []), ...result.records.filter(r => r.related || r.excluded === '是').map(r => r.id), ...Object.keys(decisions), ...Object.keys(matches)]);
     const content = issues.filter(i => !(i.recordIds || []).some(id => records.has(id))).map(i => '<p>' + esc(i.message) + '</p>');
     const rows = [];
@@ -174,11 +175,11 @@
       if (matches[id] && !candidates.has(matches[id])) candidates.set(matches[id],'已确认的付款凭据');
       const evidence = candidates.size ? '<select aria-label="' + esc(record.supplier + '：付款凭据') + '" data-action="evidence" data-record-id="' + esc(id) + '"><option value="">暂不指定，按现有证据核对</option>' + [...candidates].map(([key,label]) => '<option value="' + esc(key) + '"' + (matches[id] === key ? ' selected' : '') + '>' + esc(label) + '</option>').join('') + '</select>' : '—';
       const notes = relevant.map(i => '<details><summary>' + esc(issueLabels[i.type] || '核对提示') + (i.blocking ? (i.resolved ? '（已处理）' : '（待处理）') : '') + '</summary><p>' + esc(i.message) + '</p></details>').join('') || (record.excluded === '是' ? '已剔除' : '已保留');
-      const values = [record.supplier,record.subject,C.monthLabel(record),record.category,record.cents == null ? '金额待核对' : money(record.cents),record.oa,record.status];
-      rows.push('<tr' + (record.excluded === '是' ? ' class="excluded"' : '') + ' data-record-id="' + esc(id) + '">' + values.map((v,i) => '<td' + (i === 4 ? ' class="detail-money"' : '') + '>' + esc(v) + '</td>').join('') + '<td class="review-source">' + esc(sourceText(record)) + '</td><td class="review-notes">' + notes + '</td><td class="row-action">' + decisionControl(record) + '</td><td class="row-action">' + evidence + '</td></tr>');
+      const values = [record.supplier,ownerText(record),record.subject,C.monthLabel(record),record.category,record.cents == null ? '金额待核对' : money(record.cents),record.oa,record.status];
+      rows.push('<tr' + (record.excluded === '是' ? ' class="excluded"' : '') + ' data-record-id="' + esc(id) + '">' + values.map((v,i) => '<td' + (i === 5 ? ' class="detail-money"' : '') + '>' + esc(v) + '</td>').join('') + '<td class="review-source">' + esc(sourceText(record)) + '</td><td class="review-notes">' + notes + '</td><td class="row-action">' + decisionControl(record) + '</td><td class="row-action">' + evidence + '</td></tr>');
     }
     const otherCount = rows.length + content.length;
-    if (rows.length) content.push('<div id="other-review-scroll" class="preview review-scroll" tabindex="0" role="region" aria-label="其他付款核对，可横向滚动"><table class="review-table" aria-label="其他付款核对"><thead><tr>' + ['供应商','付款主体','付款月份','分类','金额','OA流程号','付款状态','来源','核对提示','核对处理','付款凭据'].map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>');
+    if (rows.length) content.push('<div id="other-review-scroll" class="preview review-scroll" tabindex="0" role="region" aria-label="其他付款核对，可横向滚动"><table class="review-table" aria-label="其他付款核对"><thead><tr>' + ['供应商','跟单员','付款主体','付款月份','分类','金额','OA流程号','付款状态','来源','核对提示','核对处理','付款凭据'].map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>');
     $('review-list').innerHTML = content.join('');
     $('other-review').hidden = !content.length;
     $('review-panel').hidden = !content.length && !groups.length;
